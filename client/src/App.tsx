@@ -9,6 +9,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
+import PlanningPage from "@/pages/planning";
 import RoomsPage from "@/pages/rooms";
 import ReservationsPage from "@/pages/reservations";
 import GuestsPage from "@/pages/guests";
@@ -19,6 +20,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/planning" component={PlanningPage} />
       <Route path="/rooms" component={RoomsPage} />
       <Route path="/reservations" component={ReservationsPage} />
       <Route path="/reservations/new" component={ReservationsPage} />

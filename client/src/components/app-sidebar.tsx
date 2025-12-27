@@ -8,6 +8,7 @@ import {
   LogOut,
   Settings,
   Hotel,
+  CalendarDays,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,6 +28,11 @@ const mainMenuItems = [
     title: "Dashboard",
     url: "/",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Planning",
+    url: "/planning",
+    icon: CalendarDays,
   },
   {
     title: "Reservas",

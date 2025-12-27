@@ -13,6 +13,8 @@ import {
   type ReservationWithDetails,
   type RoomStatus,
   type ReservationStatus,
+  type PlanningData,
+  type PlanningCellStatus,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -64,6 +66,9 @@ export interface IStorage {
     totalGuests: number;
     pendingReservations: number;
   }>;
+
+  // Planning
+  getPlanningData(startDate: string, endDate: string): Promise<PlanningData>;
 }
 
 export class MemStorage implements IStorage {
@@ -94,21 +99,33 @@ export class MemStorage implements IStorage {
     ];
     roomTypes.forEach((rt) => this.roomTypes.set(rt.id, rt));
 
-    // Create rooms
-    const rooms: Room[] = [
-      { id: "r1", roomNumber: "101", roomTypeId: "rt1", floor: 1, status: "available", notes: null },
-      { id: "r2", roomNumber: "102", roomTypeId: "rt1", floor: 1, status: "available", notes: null },
-      { id: "r3", roomNumber: "103", roomTypeId: "rt2", floor: 1, status: "occupied", notes: null },
-      { id: "r4", roomNumber: "201", roomTypeId: "rt2", floor: 2, status: "available", notes: null },
-      { id: "r5", roomNumber: "202", roomTypeId: "rt2", floor: 2, status: "cleaning", notes: "Limpieza programada" },
-      { id: "r6", roomNumber: "203", roomTypeId: "rt3", floor: 2, status: "available", notes: null },
-      { id: "r7", roomNumber: "301", roomTypeId: "rt3", floor: 3, status: "occupied", notes: null },
-      { id: "r8", roomNumber: "302", roomTypeId: "rt4", floor: 3, status: "maintenance", notes: "Reparación de aire acondicionado" },
-      { id: "r9", roomNumber: "303", roomTypeId: "rt4", floor: 3, status: "available", notes: null },
-      { id: "r10", roomNumber: "401", roomTypeId: "rt3", floor: 4, status: "available", notes: null },
-      { id: "r11", roomNumber: "402", roomTypeId: "rt2", floor: 4, status: "available", notes: null },
-      { id: "r12", roomNumber: "403", roomTypeId: "rt1", floor: 4, status: "available", notes: null },
-    ];
+    // Create 66 rooms across 6 floors
+    const roomTypeDistribution = ["rt1", "rt2", "rt2", "rt3", "rt4", "rt2", "rt1", "rt2", "rt3", "rt4", "rt2"];
+    const rooms: Room[] = [];
+    let roomId = 1;
+    
+    for (let floor = 1; floor <= 6; floor++) {
+      const roomsPerFloor = floor <= 5 ? 11 : 11; // 11 rooms per floor = 66 total
+      for (let roomNum = 1; roomNum <= roomsPerFloor; roomNum++) {
+        const roomNumber = `${floor}${roomNum.toString().padStart(2, "0")}`;
+        const typeIndex = (roomNum - 1) % roomTypeDistribution.length;
+        const status: RoomStatus = 
+          roomId === 3 || roomId === 15 || roomId === 28 || roomId === 45 ? "occupied" :
+          roomId === 5 || roomId === 22 ? "cleaning" :
+          roomId === 8 || roomId === 33 ? "maintenance" : "available";
+        
+        rooms.push({
+          id: `r${roomId}`,
+          roomNumber,
+          roomTypeId: roomTypeDistribution[typeIndex],
+          floor,
+          status,
+          notes: status === "cleaning" ? "Limpieza programada" : 
+                 status === "maintenance" ? "Mantenimiento programado" : null,
+        });
+        roomId++;
+      }
+    }
     rooms.forEach((r) => this.rooms.set(r.id, r));
 
     // Create guests
@@ -118,20 +135,32 @@ export class MemStorage implements IStorage {
       { id: "g3", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", address: "123 Main St, New York" },
       { id: "g4", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", address: "Av. Santa Fe 890, CABA" },
       { id: "g5", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", address: "Callao 456, CABA" },
+      { id: "g6", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", address: "Av. Libertador 123, CABA" },
+      { id: "g7", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", address: "Av. Belgrano 456, CABA" },
+      { id: "g8", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", address: "15 Rue de Paris, Lyon" },
     ];
     guests.forEach((g) => this.guests.set(g.id, g));
 
-    // Create reservations
+    // Create reservations with varied dates
     const today = new Date().toISOString().split("T")[0];
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+    const dayAfter = new Date(Date.now() + 2 * 86400000).toISOString().split("T")[0];
+    const in3Days = new Date(Date.now() + 3 * 86400000).toISOString().split("T")[0];
+    const in5Days = new Date(Date.now() + 5 * 86400000).toISOString().split("T")[0];
     const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+    const in10Days = new Date(Date.now() + 10 * 86400000).toISOString().split("T")[0];
     
     const reservations: Reservation[] = [
       { id: "res1", guestId: "g1", roomId: "r3", checkInDate: today, checkOutDate: tomorrow, status: "checked_in", numberOfGuests: 2, totalAmount: "160.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res2", guestId: "g2", roomId: "r7", checkInDate: today, checkOutDate: nextWeek, status: "checked_in", numberOfGuests: 3, totalAmount: "1050.00", notes: "VIP - Aniversario", createdAt: new Date().toISOString() },
-      { id: "res3", guestId: "g3", roomId: "r6", checkInDate: today, checkOutDate: tomorrow, status: "confirmed", numberOfGuests: 2, totalAmount: "150.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res4", guestId: "g4", roomId: "r1", checkInDate: tomorrow, checkOutDate: nextWeek, status: "pending", numberOfGuests: 1, totalAmount: "300.00", notes: "Llegada tardía", createdAt: new Date().toISOString() },
-      { id: "res5", guestId: "g5", roomId: "r4", checkInDate: today, checkOutDate: tomorrow, status: "confirmed", numberOfGuests: 2, totalAmount: "80.00", notes: null, createdAt: new Date().toISOString() },
+      { id: "res2", guestId: "g2", roomId: "r15", checkInDate: today, checkOutDate: nextWeek, status: "checked_in", numberOfGuests: 3, totalAmount: "1050.00", notes: "VIP - Aniversario", createdAt: new Date().toISOString() },
+      { id: "res3", guestId: "g3", roomId: "r28", checkInDate: today, checkOutDate: in3Days, status: "checked_in", numberOfGuests: 2, totalAmount: "450.00", notes: null, createdAt: new Date().toISOString() },
+      { id: "res4", guestId: "g4", roomId: "r45", checkInDate: today, checkOutDate: dayAfter, status: "checked_in", numberOfGuests: 4, totalAmount: "240.00", notes: null, createdAt: new Date().toISOString() },
+      { id: "res5", guestId: "g5", roomId: "r6", checkInDate: today, checkOutDate: tomorrow, status: "confirmed", numberOfGuests: 2, totalAmount: "150.00", notes: null, createdAt: new Date().toISOString() },
+      { id: "res6", guestId: "g6", roomId: "r1", checkInDate: tomorrow, checkOutDate: in5Days, status: "pending", numberOfGuests: 1, totalAmount: "200.00", notes: "Llegada tardía", createdAt: new Date().toISOString() },
+      { id: "res7", guestId: "g7", roomId: "r10", checkInDate: dayAfter, checkOutDate: nextWeek, status: "confirmed", numberOfGuests: 2, totalAmount: "400.00", notes: null, createdAt: new Date().toISOString() },
+      { id: "res8", guestId: "g8", roomId: "r20", checkInDate: in3Days, checkOutDate: in10Days, status: "pending", numberOfGuests: 2, totalAmount: "560.00", notes: "Turista francés", createdAt: new Date().toISOString() },
+      { id: "res9", guestId: "g1", roomId: "r35", checkInDate: in5Days, checkOutDate: in10Days, status: "confirmed", numberOfGuests: 2, totalAmount: "400.00", notes: null, createdAt: new Date().toISOString() },
+      { id: "res10", guestId: "g2", roomId: "r50", checkInDate: tomorrow, checkOutDate: in3Days, status: "confirmed", numberOfGuests: 3, totalAmount: "240.00", notes: null, createdAt: new Date().toISOString() },
     ];
     reservations.forEach((r) => this.reservations.set(r.id, r));
   }
@@ -356,6 +385,93 @@ export class MemStorage implements IStorage {
       occupancyRate,
       totalGuests,
       pendingReservations,
+    };
+  }
+
+  // Planning
+  async getPlanningData(startDate: string, endDate: string): Promise<PlanningData> {
+    const rooms = await this.getRooms();
+    const allReservations = Array.from(this.reservations.values());
+    
+    // Generate array of days between start and end
+    const days: string[] = [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      days.push(d.toISOString().split("T")[0]);
+    }
+
+    // Build occupancy map and cell reservations
+    const occupancy: Record<string, PlanningCellStatus[]> = {};
+    const cellReservations: Record<string, Record<string, string>> = {};
+    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus }> = {};
+
+    // Filter active reservations (not cancelled or checked_out)
+    const activeReservations = allReservations.filter(r => 
+      r.status !== "cancelled" && r.status !== "checked_out"
+    );
+
+    // Build reservation info map
+    for (const res of activeReservations) {
+      const guest = this.guests.get(res.guestId);
+      if (guest) {
+        reservationsMap[res.id] = {
+          id: res.id,
+          guestName: `${guest.firstName} ${guest.lastName}`,
+          checkIn: res.checkInDate,
+          checkOut: res.checkOutDate,
+          status: res.status as ReservationStatus,
+        };
+      }
+    }
+
+    // Calculate occupancy for each room
+    for (const room of rooms) {
+      occupancy[room.id] = [];
+      cellReservations[room.id] = {};
+
+      for (const day of days) {
+        // Check room status first
+        if (room.status === "maintenance") {
+          occupancy[room.id].push("maintenance");
+          continue;
+        }
+        if (room.status === "cleaning") {
+          occupancy[room.id].push("cleaning");
+          continue;
+        }
+
+        // Find reservation for this room on this day
+        const reservation = activeReservations.find(r => {
+          if (r.roomId !== room.id) return false;
+          const checkIn = r.checkInDate;
+          const checkOut = r.checkOutDate;
+          return day >= checkIn && day < checkOut;
+        });
+
+        if (reservation) {
+          cellReservations[room.id][day] = reservation.id;
+          if (reservation.status === "checked_in") {
+            if (day === reservation.checkOutDate) {
+              occupancy[room.id].push("checkout_today");
+            } else {
+              occupancy[room.id].push("checked_in");
+            }
+          } else {
+            occupancy[room.id].push("booked");
+          }
+        } else {
+          occupancy[room.id].push("available");
+        }
+      }
+    }
+
+    return {
+      rooms,
+      days,
+      occupancy,
+      reservations: reservationsMap,
+      cellReservations,
     };
   }
 }
