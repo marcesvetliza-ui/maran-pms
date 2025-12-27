@@ -36,6 +36,7 @@ function StatCard({
   icon: Icon,
   trend,
   trendValue,
+  testId,
 }: {
   title: string;
   value: string | number;
