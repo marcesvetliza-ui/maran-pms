@@ -9,6 +9,7 @@ import {
   Settings,
   Hotel,
   CalendarDays,
+  DollarSign,
 } from "lucide-react";
 import {
   Sidebar,
@@ -48,6 +49,11 @@ const mainMenuItems = [
     title: "Huéspedes",
     url: "/guests",
     icon: Users,
+  },
+  {
+    title: "Tarifas",
+    url: "/rate-plans",
+    icon: DollarSign,
   },
 ];
 

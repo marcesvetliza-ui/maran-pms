@@ -57,7 +57,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { ReservationWithDetails, Guest, RoomWithType, InsertReservation, ReservationStatus } from "@shared/schema";
+import type { ReservationWithDetails, Guest, RoomWithType, RoomType, RatePlan, InsertReservation, ReservationStatus, DiscountType, ReservationSource, Charge } from "@shared/schema";
 
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -77,6 +77,7 @@ function ReservationFormDialog({
   reservation,
   guests,
   rooms,
+  roomTypes,
   open,
   onOpenChange,
   onSuccess,
@@ -84,6 +85,7 @@ function ReservationFormDialog({
   reservation?: ReservationWithDetails;
   guests: Guest[];
   rooms: RoomWithType[];
+  roomTypes: RoomType[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
@@ -94,24 +96,136 @@ function ReservationFormDialog({
   const today = new Date().toISOString().split("T")[0];
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
 
+  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || "");
+  
   const [formData, setFormData] = useState<Partial<InsertReservation>>({
+    reservationCode: reservation?.reservationCode || "",
     guestId: reservation?.guestId || "",
+    roomTypeId: reservation?.roomTypeId || "",
     roomId: reservation?.roomId || "",
+    ratePlanId: reservation?.ratePlanId || "",
     checkInDate: reservation?.checkInDate || today,
     checkOutDate: reservation?.checkOutDate || tomorrow,
+    nights: reservation?.nights || 1,
     numberOfGuests: reservation?.numberOfGuests || 1,
     status: reservation?.status || "pending",
+    source: reservation?.source || "directo",
+    discountType: reservation?.discountType || "none",
+    discountValue: reservation?.discountValue || "0",
+    baseRatePerNight: reservation?.baseRatePerNight || "",
+    finalRatePerNight: reservation?.finalRatePerNight || "",
+    totalRoomAmount: reservation?.totalRoomAmount || "",
     notes: reservation?.notes || "",
-    totalAmount: reservation?.totalAmount || "0",
     createdAt: reservation?.createdAt || new Date().toISOString(),
   });
+
+  const { data: ratePlans } = useQuery<RatePlan[]>({
+    queryKey: ["/api/rate-plans/by-room-type", selectedRoomTypeId],
+    queryFn: async () => {
+      if (!selectedRoomTypeId) return [];
+      const res = await fetch(`/api/rate-plans/by-room-type/${selectedRoomTypeId}`);
+      return res.json();
+    },
+    enabled: !!selectedRoomTypeId,
+  });
+
+  const { data: generatedCode } = useQuery<{ code: string }>({
+    queryKey: ["/api/reservations/generate-code"],
+    enabled: !isEditing && !formData.reservationCode,
+  });
+
+  const calculateNights = (checkIn: string, checkOut: string) => {
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
+    const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    return Math.max(1, diff);
+  };
+
+  const calculateTotals = (baseRate: string, discountType: DiscountType, discountValue: string, nights: number) => {
+    const base = parseFloat(baseRate) || 0;
+    const discount = parseFloat(discountValue) || 0;
+    
+    let finalRate = base;
+    if (discountType === "percent") {
+      finalRate = base - (base * discount / 100);
+    } else if (discountType === "fixed") {
+      finalRate = base - discount;
+    }
+    finalRate = Math.max(0, finalRate);
+    
+    return {
+      finalRatePerNight: finalRate.toFixed(2),
+      totalRoomAmount: (finalRate * nights).toFixed(2),
+    };
+  };
+
+  const handleRoomTypeChange = (roomTypeId: string) => {
+    setSelectedRoomTypeId(roomTypeId);
+    setFormData({ 
+      ...formData, 
+      roomTypeId, 
+      roomId: "", 
+      ratePlanId: "",
+      baseRatePerNight: "",
+      finalRatePerNight: "",
+      totalRoomAmount: "",
+    });
+  };
+
+  const handleRatePlanChange = (ratePlanId: string) => {
+    const plan = ratePlans?.find(p => p.id === ratePlanId);
+    if (plan) {
+      const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+      const totals = calculateTotals(plan.baseRate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
+      setFormData({ 
+        ...formData, 
+        ratePlanId, 
+        baseRatePerNight: plan.baseRate,
+        ...totals,
+      });
+    }
+  };
+
+  const handleDateChange = (field: "checkInDate" | "checkOutDate", value: string) => {
+    const newData = { ...formData, [field]: value };
+    const nights = calculateNights(
+      field === "checkInDate" ? value : formData.checkInDate || today,
+      field === "checkOutDate" ? value : formData.checkOutDate || tomorrow
+    );
+    const totals = calculateTotals(
+      formData.baseRatePerNight || "0", 
+      formData.discountType as DiscountType, 
+      formData.discountValue || "0", 
+      nights
+    );
+    setFormData({ ...newData, nights, ...totals });
+  };
+
+  const handleDiscountChange = (discountType?: DiscountType, discountValue?: string) => {
+    const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+    const totals = calculateTotals(
+      formData.baseRatePerNight || "0",
+      discountType || formData.discountType as DiscountType,
+      discountValue !== undefined ? discountValue : formData.discountValue || "0",
+      nights
+    );
+    setFormData({ 
+      ...formData, 
+      ...(discountType !== undefined && { discountType }),
+      ...(discountValue !== undefined && { discountValue }),
+      ...totals,
+    });
+  };
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertReservation>) => {
       if (isEditing) {
         return apiRequest("PATCH", `/api/reservations/${reservation.id}`, data);
       }
-      return apiRequest("POST", "/api/reservations", data);
+      return apiRequest("POST", "/api/reservations", {
+        ...data,
+        reservationCode: data.reservationCode || generatedCode?.code || `RES-${Date.now()}`,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -138,55 +252,126 @@ function ReservationFormDialog({
     mutation.mutate(formData);
   };
 
-  const availableRooms = rooms.filter((r) => r.status === "available" || r.id === reservation?.roomId);
+  const availableRooms = rooms.filter((r) => 
+    (r.status === "available" || r.id === reservation?.roomId) && 
+    r.roomTypeId === selectedRoomTypeId
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Reserva" : "Nueva Reserva"}</DialogTitle>
           <DialogDescription>
             {isEditing ? "Modifica los detalles de la reserva." : "Ingresa los datos para crear una nueva reserva."}
+            {!isEditing && generatedCode && (
+              <Badge variant="outline" className="ml-2">
+                Código: {generatedCode.code}
+              </Badge>
+            )}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="guest">Huésped</Label>
+                <Select
+                  value={formData.guestId}
+                  onValueChange={(value) => setFormData({ ...formData, guestId: value })}
+                >
+                  <SelectTrigger data-testid="select-guest">
+                    <SelectValue placeholder="Seleccionar huésped" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {guests.map((guest) => (
+                      <SelectItem key={guest.id} value={guest.id}>
+                        {guest.firstName} {guest.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="source">Origen</Label>
+                <Select
+                  value={formData.source}
+                  onValueChange={(value) => setFormData({ ...formData, source: value as ReservationSource })}
+                >
+                  <SelectTrigger data-testid="select-source">
+                    <SelectValue placeholder="Origen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="directo">Directo</SelectItem>
+                    <SelectItem value="web">Web</SelectItem>
+                    <SelectItem value="ota">OTA (Booking, etc.)</SelectItem>
+                    <SelectItem value="empresa">Empresa</SelectItem>
+                    <SelectItem value="telefono">Teléfono</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="roomType">Tipo de Habitación</Label>
+                <Select
+                  value={selectedRoomTypeId}
+                  onValueChange={handleRoomTypeChange}
+                >
+                  <SelectTrigger data-testid="select-room-type">
+                    <SelectValue placeholder="Seleccionar tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roomTypes.map((type) => (
+                      <SelectItem key={type.id} value={type.id}>
+                        {type.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="room">Habitación</Label>
+                <Select
+                  value={formData.roomId}
+                  onValueChange={(value) => setFormData({ ...formData, roomId: value })}
+                  disabled={!selectedRoomTypeId}
+                >
+                  <SelectTrigger data-testid="select-room">
+                    <SelectValue placeholder="Seleccionar habitación" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableRooms.map((room) => (
+                      <SelectItem key={room.id} value={room.id}>
+                        Hab. {room.roomNumber}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="grid gap-2">
-              <Label htmlFor="guest">Huésped</Label>
+              <Label htmlFor="ratePlan">Plan Tarifario</Label>
               <Select
-                value={formData.guestId}
-                onValueChange={(value) => setFormData({ ...formData, guestId: value })}
+                value={formData.ratePlanId || ""}
+                onValueChange={handleRatePlanChange}
+                disabled={!selectedRoomTypeId}
               >
-                <SelectTrigger data-testid="select-guest">
-                  <SelectValue placeholder="Seleccionar huésped" />
+                <SelectTrigger data-testid="select-rate-plan">
+                  <SelectValue placeholder="Seleccionar plan tarifario" />
                 </SelectTrigger>
                 <SelectContent>
-                  {guests.map((guest) => (
-                    <SelectItem key={guest.id} value={guest.id}>
-                      {guest.firstName} {guest.lastName}
+                  {ratePlans?.map((plan) => (
+                    <SelectItem key={plan.id} value={plan.id}>
+                      {plan.name} - ${plan.baseRate}/noche
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="room">Habitación</Label>
-              <Select
-                value={formData.roomId}
-                onValueChange={(value) => setFormData({ ...formData, roomId: value })}
-              >
-                <SelectTrigger data-testid="select-room">
-                  <SelectValue placeholder="Seleccionar habitación" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableRooms.map((room) => (
-                    <SelectItem key={room.id} value={room.id}>
-                      Hab. {room.roomNumber} - {room.roomType?.name} (${room.roomType?.basePrice}/noche)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="checkIn">Fecha Check-in</Label>
@@ -194,7 +379,7 @@ function ReservationFormDialog({
                   id="checkIn"
                   type="date"
                   value={formData.checkInDate}
-                  onChange={(e) => setFormData({ ...formData, checkInDate: e.target.value })}
+                  onChange={(e) => handleDateChange("checkInDate", e.target.value)}
                   required
                   data-testid="input-check-in"
                 />
@@ -205,15 +390,27 @@ function ReservationFormDialog({
                   id="checkOut"
                   type="date"
                   value={formData.checkOutDate}
-                  onChange={(e) => setFormData({ ...formData, checkOutDate: e.target.value })}
+                  onChange={(e) => handleDateChange("checkOutDate", e.target.value)}
                   required
                   data-testid="input-check-out"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+
+            <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="guests">Número de Huéspedes</Label>
+                <Label htmlFor="nights">Noches</Label>
+                <Input
+                  id="nights"
+                  type="number"
+                  value={formData.nights}
+                  readOnly
+                  className="bg-muted"
+                  data-testid="input-nights"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="guests">Huéspedes</Label>
                 <Input
                   id="guests"
                   type="number"
@@ -242,6 +439,63 @@ function ReservationFormDialog({
                 </Select>
               </div>
             </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="discountType">Tipo Descuento</Label>
+                <Select
+                  value={formData.discountType}
+                  onValueChange={(value) => handleDiscountChange(value as DiscountType, undefined)}
+                >
+                  <SelectTrigger data-testid="select-discount-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin descuento</SelectItem>
+                    <SelectItem value="percent">Porcentaje (%)</SelectItem>
+                    <SelectItem value="fixed">Monto Fijo ($)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="discountValue">Valor Descuento</Label>
+                <Input
+                  id="discountValue"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={formData.discountValue || ""}
+                  onChange={(e) => handleDiscountChange(undefined, e.target.value)}
+                  disabled={formData.discountType === "none"}
+                  data-testid="input-discount-value"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="baseRate">Tarifa Base/Noche</Label>
+                <Input
+                  id="baseRate"
+                  type="text"
+                  value={formData.baseRatePerNight ? `$${formData.baseRatePerNight}` : "-"}
+                  readOnly
+                  className="bg-muted"
+                  data-testid="input-base-rate"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 bg-muted rounded-lg">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-muted-foreground">Tarifa Final/Noche</p>
+                  <p className="text-lg font-semibold">${formData.finalRatePerNight || "0.00"}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-muted-foreground">Total Habitación</p>
+                  <p className="text-2xl font-bold text-primary">${formData.totalRoomAmount || "0.00"}</p>
+                </div>
+              </div>
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="notes">Notas</Label>
               <Textarea
@@ -276,68 +530,207 @@ function ReservationDetailDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { toast } = useToast();
+  const [showAddCharge, setShowAddCharge] = useState(false);
+  const [newCharge, setNewCharge] = useState({
+    description: "",
+    amount: "",
+    category: "otros" as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
+  });
+
+  const { data: charges, refetch: refetchCharges } = useQuery<Charge[]>({
+    queryKey: ["/api/reservations", reservation.id, "charges"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservation.id}/charges`);
+      return res.json();
+    },
+  });
+
+  const addChargeMutation = useMutation({
+    mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string }) => {
+      return apiRequest("POST", "/api/charges", chargeData);
+    },
+    onSuccess: () => {
+      refetchCharges();
+      setShowAddCharge(false);
+      setNewCharge({ description: "", amount: "", category: "otros" });
+      toast({ title: "Cargo agregado", description: "El cargo ha sido registrado en el folio." });
+    },
+  });
+
+  const deleteChargeMutation = useMutation({
+    mutationFn: async (chargeId: string) => {
+      return apiRequest("DELETE", `/api/charges/${chargeId}`, undefined);
+    },
+    onSuccess: () => {
+      refetchCharges();
+      toast({ title: "Cargo eliminado", description: "El cargo ha sido eliminado del folio." });
+    },
+  });
+
+  const handleAddCharge = () => {
+    if (!newCharge.description || !newCharge.amount) return;
+    addChargeMutation.mutate({
+      ...newCharge,
+      reservationId: reservation.id,
+      date: new Date().toISOString().split("T")[0],
+    });
+  };
+
+  const totalCharges = charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
+  const grandTotal = parseFloat(reservation.totalRoomAmount || "0") + totalCharges;
+
+  const categoryLabels: Record<string, string> = {
+    room: "Habitación",
+    restaurant: "Restaurante",
+    spa: "Spa",
+    minibar: "Minibar",
+    otros: "Otros",
+    adjustment: "Ajuste",
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Detalle de Reserva</DialogTitle>
-          <DialogDescription>Información completa de la reservación.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2">
+            Reserva {reservation.reservationCode}
+            <ReservationStatusBadge status={reservation.status} />
+          </DialogTitle>
+          <DialogDescription>Detalle de la reservación y folio de cargos.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-lg">
               {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
             </div>
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-lg">
                 {reservation.guest?.firstName} {reservation.guest?.lastName}
               </p>
               <p className="text-sm text-muted-foreground">{reservation.guest?.email}</p>
             </div>
+            <Badge variant="outline">{reservation.source}</Badge>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center gap-3 p-3 border rounded-lg">
-              <DoorOpen className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm text-muted-foreground">Habitación</p>
-                <p className="font-medium">{reservation.room?.roomNumber}</p>
-              </div>
+          <div className="grid grid-cols-4 gap-3 text-center">
+            <div className="p-3 border rounded-lg">
+              <DoorOpen className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Hab.</p>
+              <p className="font-semibold">{reservation.room?.roomNumber}</p>
             </div>
-            <div className="flex items-center gap-3 p-3 border rounded-lg">
-              <User className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm text-muted-foreground">Huéspedes</p>
-                <p className="font-medium">{reservation.numberOfGuests}</p>
-              </div>
+            <div className="p-3 border rounded-lg">
+              <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Check-in</p>
+              <p className="font-semibold text-sm">{reservation.checkInDate}</p>
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center gap-3 p-3 border rounded-lg">
-              <Calendar className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm text-muted-foreground">Check-in</p>
-                <p className="font-medium">{reservation.checkInDate}</p>
-              </div>
+            <div className="p-3 border rounded-lg">
+              <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Check-out</p>
+              <p className="font-semibold text-sm">{reservation.checkOutDate}</p>
             </div>
-            <div className="flex items-center gap-3 p-3 border rounded-lg">
-              <Calendar className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm text-muted-foreground">Check-out</p>
-                <p className="font-medium">{reservation.checkOutDate}</p>
-              </div>
+            <div className="p-3 border rounded-lg">
+              <User className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Noches</p>
+              <p className="font-semibold">{reservation.nights}</p>
             </div>
           </div>
 
-          <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-            <div>
-              <p className="text-sm text-muted-foreground">Estado</p>
-              <ReservationStatusBadge status={reservation.status} />
+          <div className="border rounded-lg">
+            <div className="flex items-center justify-between p-3 border-b bg-muted/50">
+              <h4 className="font-semibold">Folio de Cargos</h4>
+              <Button size="sm" variant="outline" onClick={() => setShowAddCharge(!showAddCharge)} data-testid="button-add-charge">
+                <Plus className="h-4 w-4 mr-1" />
+                Agregar Cargo
+              </Button>
             </div>
-            <div className="text-right">
-              <p className="text-sm text-muted-foreground">Total</p>
-              <p className="text-2xl font-bold">${reservation.totalAmount || 0}</p>
+
+            {showAddCharge && (
+              <div className="p-3 border-b bg-muted/30">
+                <div className="grid grid-cols-4 gap-2">
+                  <Input
+                    placeholder="Descripción"
+                    value={newCharge.description}
+                    onChange={(e) => setNewCharge({ ...newCharge, description: e.target.value })}
+                    className="col-span-2"
+                    data-testid="input-charge-description"
+                  />
+                  <Input
+                    type="number"
+                    placeholder="Monto"
+                    value={newCharge.amount}
+                    onChange={(e) => setNewCharge({ ...newCharge, amount: e.target.value })}
+                    data-testid="input-charge-amount"
+                  />
+                  <Select
+                    value={newCharge.category}
+                    onValueChange={(value) => setNewCharge({ ...newCharge, category: value as typeof newCharge.category })}
+                  >
+                    <SelectTrigger data-testid="select-charge-category">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="room">Habitación</SelectItem>
+                      <SelectItem value="restaurant">Restaurante</SelectItem>
+                      <SelectItem value="spa">Spa</SelectItem>
+                      <SelectItem value="minibar">Minibar</SelectItem>
+                      <SelectItem value="otros">Otros</SelectItem>
+                      <SelectItem value="adjustment">Ajuste</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2 mt-2">
+                  <Button size="sm" variant="ghost" onClick={() => setShowAddCharge(false)}>
+                    Cancelar
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    onClick={handleAddCharge} 
+                    disabled={addChargeMutation.isPending}
+                    data-testid="button-confirm-charge"
+                  >
+                    Confirmar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="divide-y max-h-[200px] overflow-y-auto">
+              <div className="flex items-center justify-between p-3 text-sm">
+                <span>Alojamiento ({reservation.nights} noches x ${reservation.finalRatePerNight || 0})</span>
+                <span className="font-medium">${reservation.totalRoomAmount || 0}</span>
+              </div>
+              {charges?.map((charge) => (
+                <div key={charge.id} className="flex items-center justify-between p-3 text-sm" data-testid={`charge-row-${charge.id}`}>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs">{categoryLabels[charge.category]}</Badge>
+                    <span>{charge.description}</span>
+                    <span className="text-muted-foreground text-xs">({charge.date})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">${charge.amount}</span>
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      className="h-6 w-6"
+                      onClick={() => deleteChargeMutation.mutate(charge.id)}
+                      data-testid={`button-delete-charge-${charge.id}`}
+                    >
+                      <Trash2 className="h-3 w-3 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {(!charges || charges.length === 0) && (
+                <div className="p-3 text-sm text-muted-foreground text-center">
+                  No hay cargos adicionales
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between p-3 border-t bg-primary/5 font-semibold">
+              <span>TOTAL A PAGAR</span>
+              <span className="text-xl text-primary">${grandTotal.toFixed(2)}</span>
             </div>
           </div>
 
@@ -377,6 +770,10 @@ export default function ReservationsPage() {
 
   const { data: rooms } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
+  });
+
+  const { data: roomTypes } = useQuery<RoomType[]>({
+    queryKey: ["/api/room-types"],
   });
 
   const updateStatusMutation = useMutation({
@@ -524,7 +921,7 @@ export default function ReservationsPage() {
                   <TableCell>
                     <ReservationStatusBadge status={reservation.status} />
                   </TableCell>
-                  <TableCell className="font-medium">${reservation.totalAmount || 0}</TableCell>
+                  <TableCell className="font-medium">${reservation.totalRoomAmount || 0}</TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -615,6 +1012,7 @@ export default function ReservationsPage() {
         reservation={selectedReservation}
         guests={guests || []}
         rooms={rooms || []}
+        roomTypes={roomTypes || []}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onSuccess={() => setSelectedReservation(undefined)}

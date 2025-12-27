@@ -15,6 +15,7 @@ import ReservationsPage from "@/pages/reservations";
 import GuestsPage from "@/pages/guests";
 import CheckInPage from "@/pages/check-in";
 import CheckOutPage from "@/pages/check-out";
+import RatePlansPage from "@/pages/rate-plans";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/guests" component={GuestsPage} />
       <Route path="/check-in" component={CheckInPage} />
       <Route path="/check-out" component={CheckOutPage} />
+      <Route path="/rate-plans" component={RatePlansPage} />
       <Route component={NotFound} />
     </Switch>
   );

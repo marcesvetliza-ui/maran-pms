@@ -50,7 +50,9 @@ import {
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Guest, InsertGuest } from "@shared/schema";
+import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus } from "@shared/schema";
+import { Badge } from "@/components/ui/badge";
+import { Calendar } from "lucide-react";
 
 function GuestFormDialog({
   guest,
@@ -230,6 +232,18 @@ function GuestFormDialog({
   );
 }
 
+function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
+  const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    pending: { label: "Pendiente", variant: "secondary" },
+    confirmed: { label: "Confirmada", variant: "default" },
+    checked_in: { label: "Hospedado", variant: "outline" },
+    checked_out: { label: "Finalizada", variant: "secondary" },
+    cancelled: { label: "Cancelada", variant: "destructive" },
+  };
+  const config = statusConfig[status];
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+}
+
 function GuestDetailDialog({
   guest,
   open,
@@ -239,19 +253,28 @@ function GuestDetailDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { data: allReservations } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/reservations"],
+  });
+
+  const guestReservations = allReservations?.filter(r => r.guestId === guest.id) || [];
+  const totalStays = guestReservations.filter(r => r.status === "checked_out").length;
+  const totalNights = guestReservations.reduce((sum, r) => sum + (r.nights || 0), 0);
+  const totalSpent = guestReservations.reduce((sum, r) => sum + parseFloat(r.totalRoomAmount || "0"), 0);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[450px]">
+      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Detalle del Huésped</DialogTitle>
-          <DialogDescription>Información completa del huésped registrado.</DialogDescription>
+          <DialogDescription>Información completa y historial de reservaciones.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xl">
               {guest.firstName?.[0]}{guest.lastName?.[0]}
             </div>
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-xl">
                 {guest.firstName} {guest.lastName}
               </p>
@@ -259,45 +282,95 @@ function GuestDetailDialog({
             </div>
           </div>
 
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="p-3 border rounded-lg">
+              <p className="text-2xl font-bold text-primary">{totalStays}</p>
+              <p className="text-sm text-muted-foreground">Estancias</p>
+            </div>
+            <div className="p-3 border rounded-lg">
+              <p className="text-2xl font-bold text-primary">{totalNights}</p>
+              <p className="text-sm text-muted-foreground">Noches</p>
+            </div>
+            <div className="p-3 border rounded-lg">
+              <p className="text-2xl font-bold text-primary">${totalSpent.toFixed(0)}</p>
+              <p className="text-sm text-muted-foreground">Gastado</p>
+            </div>
+          </div>
+
           <div className="space-y-3">
-            {guest.email && (
-              <div className="flex items-center gap-3 p-3 border rounded-lg">
-                <Mail className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Email</p>
-                  <p className="font-medium">{guest.email}</p>
+            <div className="grid grid-cols-2 gap-3">
+              {guest.email && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <Mail className="h-4 w-4 text-muted-foreground" />
+                  <div className="overflow-hidden">
+                    <p className="text-xs text-muted-foreground">Email</p>
+                    <p className="font-medium text-sm truncate">{guest.email}</p>
+                  </div>
                 </div>
-              </div>
-            )}
-            {guest.phone && (
-              <div className="flex items-center gap-3 p-3 border rounded-lg">
-                <Phone className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Teléfono</p>
-                  <p className="font-medium">{guest.phone}</p>
+              )}
+              {guest.phone && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <Phone className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Teléfono</p>
+                    <p className="font-medium text-sm">{guest.phone}</p>
+                  </div>
                 </div>
-              </div>
-            )}
-            {guest.documentNumber && (
-              <div className="flex items-center gap-3 p-3 border rounded-lg">
-                <FileText className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {guest.documentType?.toUpperCase() || "Documento"}
-                  </p>
-                  <p className="font-medium">{guest.documentNumber}</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {guest.documentNumber && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">
+                      {guest.documentType?.toUpperCase() || "Documento"}
+                    </p>
+                    <p className="font-medium text-sm">{guest.documentNumber}</p>
+                  </div>
                 </div>
-              </div>
-            )}
-            {guest.address && (
-              <div className="flex items-center gap-3 p-3 border rounded-lg">
-                <MapPin className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Dirección</p>
-                  <p className="font-medium">{guest.address}</p>
+              )}
+              {guest.address && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <MapPin className="h-4 w-4 text-muted-foreground" />
+                  <div className="overflow-hidden">
+                    <p className="text-xs text-muted-foreground">Dirección</p>
+                    <p className="font-medium text-sm truncate">{guest.address}</p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          </div>
+
+          <div className="border rounded-lg">
+            <div className="p-3 border-b bg-muted/50">
+              <h4 className="font-semibold">Historial de Reservaciones</h4>
+            </div>
+            <div className="divide-y max-h-[200px] overflow-y-auto">
+              {guestReservations.length > 0 ? (
+                guestReservations.map((reservation) => (
+                  <div key={reservation.id} className="flex items-center justify-between p-3 text-sm" data-testid={`guest-reservation-${reservation.id}`}>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="font-medium">Hab. {reservation.room?.roomNumber}</p>
+                        <p className="text-muted-foreground text-xs">
+                          {reservation.checkInDate} - {reservation.checkOutDate}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">${reservation.totalRoomAmount || 0}</span>
+                      <ReservationStatusBadge status={reservation.status} />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 text-center text-muted-foreground text-sm">
+                  No hay reservaciones registradas
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <DialogFooter>

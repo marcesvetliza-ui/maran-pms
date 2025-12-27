@@ -158,7 +158,7 @@ function RoomFormDialog({
                 <SelectContent>
                   {roomTypes.map((type) => (
                     <SelectItem key={type.id} value={type.id}>
-                      {type.name} - ${type.basePrice}/noche
+                      {type.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -442,7 +442,7 @@ export default function RoomsPage() {
                   <div className="flex flex-col gap-2">
                     <RoomStatusBadge status={room.status} />
                     <p className="text-sm text-muted-foreground">
-                      {room.roomType?.name || "Sin tipo"} - ${room.roomType?.basePrice || 0}/noche
+                      {room.roomType?.name || "Sin tipo"}
                     </p>
                     {room.notes && (
                       <p className="text-xs text-muted-foreground truncate">{room.notes}</p>
@@ -461,7 +461,6 @@ export default function RoomsPage() {
                   <TableHead>Tipo</TableHead>
                   <TableHead>Piso</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead>Precio/Noche</TableHead>
                   <TableHead>Notas</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
@@ -475,7 +474,6 @@ export default function RoomsPage() {
                     <TableCell>
                       <RoomStatusBadge status={room.status} />
                     </TableCell>
-                    <TableCell>${room.roomType?.basePrice || 0}</TableCell>
                     <TableCell className="max-w-[200px] truncate">{room.notes || "-"}</TableCell>
                     <TableCell>
                       <DropdownMenu>
