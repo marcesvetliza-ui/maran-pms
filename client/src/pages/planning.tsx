@@ -1,17 +1,35 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, Info, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { PlanningData, PlanningCellStatus } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType } from "@shared/schema";
 
 function formatDate(dateStr: string) {
   const date = new Date(dateStr + "T12:00:00");
@@ -22,6 +40,11 @@ function formatDate(dateStr: string) {
     isToday: dateStr === new Date().toISOString().split("T")[0],
     isWeekend: date.getDay() === 0 || date.getDay() === 6,
   };
+}
+
+function formatDateReadable(dateStr: string) {
+  const date = new Date(dateStr + "T12:00:00");
+  return date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
 }
 
 function getStatusColor(status: PlanningCellStatus): string {
@@ -80,7 +103,182 @@ function Legend() {
           <span className="text-xs text-muted-foreground">{label}</span>
         </div>
       ))}
+      <div className="flex items-center gap-1.5 ml-4 pl-4 border-l">
+        <Plus className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Clic en celda libre para crear reserva</span>
+      </div>
     </div>
+  );
+}
+
+type QuickReservationData = {
+  roomId: string;
+  roomNumber: string;
+  roomTypeName: string;
+  checkInDate: string;
+};
+
+function QuickReservationDialog({
+  open,
+  onOpenChange,
+  reservationData,
+  guests,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  reservationData: QuickReservationData | null;
+  guests: Guest[];
+}) {
+  const { toast } = useToast();
+  const [guestId, setGuestId] = useState("");
+  const [numberOfGuests, setNumberOfGuests] = useState(1);
+  const [checkOutDate, setCheckOutDate] = useState("");
+
+  useEffect(() => {
+    if (reservationData) {
+      const nextDay = new Date(reservationData.checkInDate + "T12:00:00");
+      nextDay.setDate(nextDay.getDate() + 1);
+      setCheckOutDate(nextDay.toISOString().split("T")[0]);
+    }
+  }, [reservationData]);
+
+  const mutation = useMutation({
+    mutationFn: async (data: {
+      guestId: string;
+      roomId: string;
+      checkInDate: string;
+      checkOutDate: string;
+      numberOfGuests: number;
+      status: string;
+      totalAmount: string;
+      createdAt: string;
+    }) => {
+      return apiRequest("POST", "/api/reservations", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({
+        title: "Reserva creada",
+        description: "La reserva ha sido creada exitosamente desde el planning.",
+      });
+      onOpenChange(false);
+      setGuestId("");
+      setCheckOutDate("");
+      setNumberOfGuests(1);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo crear la reserva. Intente nuevamente.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSubmit = () => {
+    if (!reservationData || !guestId || !checkOutDate) {
+      toast({
+        title: "Datos incompletos",
+        description: "Por favor complete todos los campos obligatorios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (checkOutDate <= reservationData.checkInDate) {
+      toast({
+        title: "Fechas inválidas",
+        description: "La fecha de check-out debe ser posterior al check-in.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    mutation.mutate({
+      guestId,
+      roomId: reservationData.roomId,
+      checkInDate: reservationData.checkInDate,
+      checkOutDate,
+      numberOfGuests,
+      status: "confirmed",
+      totalAmount: "0",
+      createdAt: new Date().toISOString(),
+    });
+  };
+
+  if (!reservationData) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Nueva Reserva Rápida</DialogTitle>
+          <DialogDescription>
+            Habitación {reservationData.roomNumber} ({reservationData.roomTypeName}) - Check-in: {formatDateReadable(reservationData.checkInDate)}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="guest">Huésped *</Label>
+            <Select value={guestId} onValueChange={setGuestId}>
+              <SelectTrigger data-testid="select-guest-quick">
+                <SelectValue placeholder="Seleccionar huésped" />
+              </SelectTrigger>
+              <SelectContent>
+                {guests.map((guest) => (
+                  <SelectItem key={guest.id} value={guest.id}>
+                    {guest.firstName} {guest.lastName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="checkIn">Check-in</Label>
+            <Input
+              id="checkIn"
+              type="date"
+              value={reservationData.checkInDate}
+              disabled
+              className="bg-muted"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="checkOut">Check-out *</Label>
+            <Input
+              id="checkOut"
+              type="date"
+              value={checkOutDate}
+              onChange={(e) => setCheckOutDate(e.target.value)}
+              min={reservationData.checkInDate}
+              data-testid="input-checkout-quick"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="guests">Cantidad de huéspedes</Label>
+            <Input
+              id="guests"
+              type="number"
+              min={1}
+              max={10}
+              value={numberOfGuests}
+              onChange={(e) => setNumberOfGuests(parseInt(e.target.value) || 1)}
+              data-testid="input-guests-quick"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel-quick">
+            Cancelar
+          </Button>
+          <Button onClick={handleSubmit} disabled={mutation.isPending} data-testid="button-create-quick">
+            {mutation.isPending ? "Creando..." : "Crear Reserva"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -90,18 +288,30 @@ export default function PlanningPage() {
     const start = new Date(today);
     start.setDate(start.getDate() - 1);
     const end = new Date(today);
-    end.setDate(end.getDate() + 13);
+    end.setDate(end.getDate() + 14);
     return {
       start: start.toISOString().split("T")[0],
       end: end.toISOString().split("T")[0],
     };
   });
 
+  const [quickReservationOpen, setQuickReservationOpen] = useState(false);
+  const [selectedCell, setSelectedCell] = useState<QuickReservationData | null>(null);
+
   const { data, isLoading } = useQuery<PlanningData>({
     queryKey: ["/api/planning", dateRange.start, dateRange.end],
     queryFn: async () => {
       const res = await fetch(`/api/planning?start=${dateRange.start}&end=${dateRange.end}`);
       if (!res.ok) throw new Error("Failed to fetch planning data");
+      return res.json();
+    },
+  });
+
+  const { data: guests = [] } = useQuery<Guest[]>({
+    queryKey: ["/api/guests"],
+    queryFn: async () => {
+      const res = await fetch("/api/guests");
+      if (!res.ok) throw new Error("Failed to fetch guests");
       return res.json();
     },
   });
@@ -123,11 +333,23 @@ export default function PlanningPage() {
     const start = new Date(today);
     start.setDate(start.getDate() - 1);
     const end = new Date(today);
-    end.setDate(end.getDate() + 13);
+    end.setDate(end.getDate() + 14);
     setDateRange({
       start: start.toISOString().split("T")[0],
       end: end.toISOString().split("T")[0],
     });
+  };
+
+  const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus) => {
+    if (status === "available") {
+      setSelectedCell({
+        roomId: room.id,
+        roomNumber: room.roomNumber,
+        roomTypeName: room.roomType.name,
+        checkInDate: day,
+      });
+      setQuickReservationOpen(true);
+    }
   };
 
   const groupedRooms = data?.rooms.reduce((acc, room) => {
@@ -146,7 +368,7 @@ export default function PlanningPage() {
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-planning-title">
             Planning de Ocupación
           </h1>
-          <p className="text-muted-foreground">Vista de disponibilidad por habitación y fecha</p>
+          <p className="text-muted-foreground">Vista de disponibilidad por habitación y fecha (15 días)</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -248,6 +470,7 @@ export default function PlanningPage() {
                               const reservationId = data.cellReservations[room.id]?.[day];
                               const reservation = reservationId ? data.reservations[reservationId] : null;
                               const info = formatDate(day);
+                              const isClickable = status === "available";
 
                               return (
                                 <td
@@ -257,30 +480,39 @@ export default function PlanningPage() {
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <div
-                                        className={`h-8 rounded border cursor-default flex items-center justify-center ${getStatusColor(status)}`}
+                                        onClick={() => handleCellClick(room, day, status)}
+                                        className={`h-8 rounded border flex items-center justify-center transition-all ${getStatusColor(status)} ${
+                                          isClickable 
+                                            ? "cursor-pointer hover:ring-2 hover:ring-primary/50 hover:scale-105" 
+                                            : "cursor-default"
+                                        }`}
                                         data-testid={`cell-${room.id}-${day}`}
                                       >
-                                        {reservation && (
+                                        {reservation ? (
                                           <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
                                             {reservation.guestName.split(" ")[0]}
                                           </span>
-                                        )}
+                                        ) : isClickable ? (
+                                          <Plus className="h-3 w-3 text-green-600 dark:text-green-400 opacity-0 group-hover:opacity-100" />
+                                        ) : null}
                                       </div>
                                     </TooltipTrigger>
                                     <TooltipContent side="top" className="max-w-[200px]">
                                       <div className="text-xs space-y-1">
                                         <div className="font-semibold">{room.roomNumber} - {room.roomType.name}</div>
                                         <div>Estado: {getStatusLabel(status)}</div>
-                                        {reservation && (
-                                          <>
-                                            <div className="border-t pt-1 mt-1">
-                                              <div className="font-medium">{reservation.guestName}</div>
-                                              <div className="text-muted-foreground">
-                                                {reservation.checkIn} → {reservation.checkOut}
-                                              </div>
+                                        {reservation ? (
+                                          <div className="border-t pt-1 mt-1">
+                                            <div className="font-medium">{reservation.guestName}</div>
+                                            <div className="text-muted-foreground">
+                                              {reservation.checkIn} → {reservation.checkOut}
                                             </div>
-                                          </>
-                                        )}
+                                          </div>
+                                        ) : isClickable ? (
+                                          <div className="border-t pt-1 mt-1 text-primary">
+                                            Clic para crear reserva
+                                          </div>
+                                        ) : null}
                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
@@ -299,6 +531,13 @@ export default function PlanningPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <QuickReservationDialog
+        open={quickReservationOpen}
+        onOpenChange={setQuickReservationOpen}
+        reservationData={selectedCell}
+        guests={guests}
+      />
     </div>
   );
 }
