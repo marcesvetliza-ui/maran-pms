@@ -52,6 +52,94 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/room-types/:id", async (req, res) => {
+    try {
+      const roomType = await storage.updateRoomType(req.params.id, req.body);
+      if (!roomType) {
+        return res.status(404).json({ error: "Room type not found" });
+      }
+      res.json(roomType);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating room type" });
+    }
+  });
+
+  app.delete("/api/room-types/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteRoomType(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Room type not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting room type" });
+    }
+  });
+
+  // Rate Plans
+  app.get("/api/rate-plans", async (req, res) => {
+    try {
+      const ratePlans = await storage.getRatePlans();
+      res.json(ratePlans);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching rate plans" });
+    }
+  });
+
+  app.get("/api/rate-plans/by-room-type/:roomTypeId", async (req, res) => {
+    try {
+      const ratePlans = await storage.getRatePlansByRoomType(req.params.roomTypeId);
+      res.json(ratePlans);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching rate plans by room type" });
+    }
+  });
+
+  app.get("/api/rate-plans/:id", async (req, res) => {
+    try {
+      const ratePlan = await storage.getRatePlan(req.params.id);
+      if (!ratePlan) {
+        return res.status(404).json({ error: "Rate plan not found" });
+      }
+      res.json(ratePlan);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching rate plan" });
+    }
+  });
+
+  app.post("/api/rate-plans", async (req, res) => {
+    try {
+      const ratePlan = await storage.createRatePlan(req.body);
+      res.status(201).json(ratePlan);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating rate plan" });
+    }
+  });
+
+  app.patch("/api/rate-plans/:id", async (req, res) => {
+    try {
+      const ratePlan = await storage.updateRatePlan(req.params.id, req.body);
+      if (!ratePlan) {
+        return res.status(404).json({ error: "Rate plan not found" });
+      }
+      res.json(ratePlan);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating rate plan" });
+    }
+  });
+
+  app.delete("/api/rate-plans/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteRatePlan(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Rate plan not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting rate plan" });
+    }
+  });
+
   // Rooms
   app.get("/api/rooms", async (req, res) => {
     try {
@@ -281,6 +369,78 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing check-out" });
+    }
+  });
+
+  // Generate reservation code
+  app.get("/api/reservations/generate-code", async (req, res) => {
+    try {
+      const code = storage.generateReservationCode();
+      res.json({ code });
+    } catch (error) {
+      res.status(500).json({ error: "Error generating reservation code" });
+    }
+  });
+
+  // Get reservations by guest
+  app.get("/api/guests/:guestId/reservations", async (req, res) => {
+    try {
+      const reservations = await storage.getReservationsByGuest(req.params.guestId);
+      res.json(reservations);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching guest reservations" });
+    }
+  });
+
+  // Charges
+  app.get("/api/reservations/:reservationId/charges", async (req, res) => {
+    try {
+      const charges = await storage.getCharges(req.params.reservationId);
+      res.json(charges);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching charges" });
+    }
+  });
+
+  app.get("/api/reservations/:reservationId/charges/total", async (req, res) => {
+    try {
+      const total = await storage.getChargesTotal(req.params.reservationId);
+      res.json({ total });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching charges total" });
+    }
+  });
+
+  app.post("/api/charges", async (req, res) => {
+    try {
+      const charge = await storage.createCharge(req.body);
+      res.status(201).json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating charge" });
+    }
+  });
+
+  app.patch("/api/charges/:id", async (req, res) => {
+    try {
+      const charge = await storage.updateCharge(req.params.id, req.body);
+      if (!charge) {
+        return res.status(404).json({ error: "Charge not found" });
+      }
+      res.json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating charge" });
+    }
+  });
+
+  app.delete("/api/charges/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteCharge(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Charge not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting charge" });
     }
   });
 

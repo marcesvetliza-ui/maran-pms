@@ -5,10 +5,15 @@ import {
   type InsertRoom,
   type RoomType,
   type InsertRoomType,
+  type RatePlan,
+  type InsertRatePlan,
+  type RatePlanWithRoomType,
   type Guest,
   type InsertGuest,
   type Reservation,
   type InsertReservation,
+  type Charge,
+  type InsertCharge,
   type RoomWithType,
   type ReservationWithDetails,
   type RoomStatus,
@@ -28,6 +33,16 @@ export interface IStorage {
   getRoomTypes(): Promise<RoomType[]>;
   getRoomType(id: string): Promise<RoomType | undefined>;
   createRoomType(roomType: InsertRoomType): Promise<RoomType>;
+  updateRoomType(id: string, roomType: Partial<InsertRoomType>): Promise<RoomType | undefined>;
+  deleteRoomType(id: string): Promise<boolean>;
+
+  // Rate Plans
+  getRatePlans(): Promise<RatePlanWithRoomType[]>;
+  getRatePlan(id: string): Promise<RatePlanWithRoomType | undefined>;
+  getRatePlansByRoomType(roomTypeId: string): Promise<RatePlan[]>;
+  createRatePlan(ratePlan: InsertRatePlan): Promise<RatePlan>;
+  updateRatePlan(id: string, ratePlan: Partial<InsertRatePlan>): Promise<RatePlan | undefined>;
+  deleteRatePlan(id: string): Promise<boolean>;
 
   // Rooms
   getRooms(): Promise<RoomWithType[]>;
@@ -46,12 +61,22 @@ export interface IStorage {
   // Reservations
   getReservations(): Promise<ReservationWithDetails[]>;
   getReservation(id: string): Promise<ReservationWithDetails | undefined>;
+  getReservationByCode(code: string): Promise<ReservationWithDetails | undefined>;
   getRecentReservations(limit: number): Promise<ReservationWithDetails[]>;
   getReservationsForCheckIn(): Promise<ReservationWithDetails[]>;
   getReservationsForCheckOut(): Promise<ReservationWithDetails[]>;
+  getReservationsByGuest(guestId: string): Promise<ReservationWithDetails[]>;
   createReservation(reservation: InsertReservation): Promise<Reservation>;
   updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined>;
   deleteReservation(id: string): Promise<boolean>;
+  generateReservationCode(): string;
+
+  // Charges
+  getCharges(reservationId: string): Promise<Charge[]>;
+  createCharge(charge: InsertCharge): Promise<Charge>;
+  updateCharge(id: string, charge: Partial<InsertCharge>): Promise<Charge | undefined>;
+  deleteCharge(id: string): Promise<boolean>;
+  getChargesTotal(reservationId: string): Promise<number>;
 
   // Dashboard
   getDashboardStats(): Promise<{
@@ -74,16 +99,22 @@ export interface IStorage {
 export class MemStorage implements IStorage {
   private users: Map<string, User>;
   private roomTypes: Map<string, RoomType>;
+  private ratePlans: Map<string, RatePlan>;
   private rooms: Map<string, Room>;
   private guests: Map<string, Guest>;
   private reservations: Map<string, Reservation>;
+  private charges: Map<string, Charge>;
+  private reservationCounter: number;
 
   constructor() {
     this.users = new Map();
     this.roomTypes = new Map();
+    this.ratePlans = new Map();
     this.rooms = new Map();
     this.guests = new Map();
     this.reservations = new Map();
+    this.charges = new Map();
+    this.reservationCounter = 1000;
 
     // Seed with demo data
     this.seedData();
@@ -92,12 +123,25 @@ export class MemStorage implements IStorage {
   private seedData() {
     // Create room types
     const roomTypes: RoomType[] = [
-      { id: "rt1", name: "Individual", description: "Habitación individual con cama simple", basePrice: "50.00", capacity: 1 },
-      { id: "rt2", name: "Doble", description: "Habitación doble con cama matrimonial", basePrice: "80.00", capacity: 2 },
-      { id: "rt3", name: "Suite", description: "Suite de lujo con sala y jacuzzi", basePrice: "150.00", capacity: 4 },
-      { id: "rt4", name: "Familiar", description: "Habitación familiar con dos camas dobles", basePrice: "120.00", capacity: 4 },
+      { id: "rt1", code: "STD", name: "Standard", description: "Habitación standard con cama simple", baseOccupancy: 1, maxOccupancy: 2 },
+      { id: "rt2", code: "DBL", name: "Doble", description: "Habitación doble con cama matrimonial", baseOccupancy: 2, maxOccupancy: 3 },
+      { id: "rt3", code: "SUITE", name: "Suite", description: "Suite de lujo con sala y jacuzzi", baseOccupancy: 2, maxOccupancy: 4 },
+      { id: "rt4", code: "FAM", name: "Familiar", description: "Habitación familiar con dos camas dobles", baseOccupancy: 4, maxOccupancy: 6 },
     ];
     roomTypes.forEach((rt) => this.roomTypes.set(rt.id, rt));
+
+    // Create rate plans
+    const ratePlans: RatePlan[] = [
+      { id: "rp1", name: "BAR (Mejor Tarifa)", roomTypeId: "rt1", baseRate: "50.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
+      { id: "rp2", name: "BAR (Mejor Tarifa)", roomTypeId: "rt2", baseRate: "80.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
+      { id: "rp3", name: "BAR (Mejor Tarifa)", roomTypeId: "rt3", baseRate: "150.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
+      { id: "rp4", name: "BAR (Mejor Tarifa)", roomTypeId: "rt4", baseRate: "120.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
+      { id: "rp5", name: "No Reembolsable", roomTypeId: "rt1", baseRate: "40.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelación" },
+      { id: "rp6", name: "No Reembolsable", roomTypeId: "rt2", baseRate: "65.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelación" },
+      { id: "rp7", name: "Corporativo", roomTypeId: "rt2", baseRate: "70.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturación a empresa" },
+      { id: "rp8", name: "Corporativo", roomTypeId: "rt3", baseRate: "130.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturación a empresa" },
+    ];
+    ratePlans.forEach((rp) => this.ratePlans.set(rp.id, rp));
 
     // Create 66 rooms across 6 floors
     const roomTypeDistribution = ["rt1", "rt2", "rt2", "rt3", "rt4", "rt2", "rt1", "rt2", "rt3", "rt4", "rt2"];
@@ -151,18 +195,31 @@ export class MemStorage implements IStorage {
     const in10Days = new Date(Date.now() + 10 * 86400000).toISOString().split("T")[0];
     
     const reservations: Reservation[] = [
-      { id: "res1", guestId: "g1", roomId: "r3", checkInDate: today, checkOutDate: tomorrow, status: "checked_in", numberOfGuests: 2, totalAmount: "160.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res2", guestId: "g2", roomId: "r15", checkInDate: today, checkOutDate: nextWeek, status: "checked_in", numberOfGuests: 3, totalAmount: "1050.00", notes: "VIP - Aniversario", createdAt: new Date().toISOString() },
-      { id: "res3", guestId: "g3", roomId: "r28", checkInDate: today, checkOutDate: in3Days, status: "checked_in", numberOfGuests: 2, totalAmount: "450.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res4", guestId: "g4", roomId: "r45", checkInDate: today, checkOutDate: dayAfter, status: "checked_in", numberOfGuests: 4, totalAmount: "240.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res5", guestId: "g5", roomId: "r6", checkInDate: today, checkOutDate: tomorrow, status: "confirmed", numberOfGuests: 2, totalAmount: "150.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res6", guestId: "g6", roomId: "r1", checkInDate: tomorrow, checkOutDate: in5Days, status: "pending", numberOfGuests: 1, totalAmount: "200.00", notes: "Llegada tardía", createdAt: new Date().toISOString() },
-      { id: "res7", guestId: "g7", roomId: "r10", checkInDate: dayAfter, checkOutDate: nextWeek, status: "confirmed", numberOfGuests: 2, totalAmount: "400.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res8", guestId: "g8", roomId: "r20", checkInDate: in3Days, checkOutDate: in10Days, status: "pending", numberOfGuests: 2, totalAmount: "560.00", notes: "Turista francés", createdAt: new Date().toISOString() },
-      { id: "res9", guestId: "g1", roomId: "r35", checkInDate: in5Days, checkOutDate: in10Days, status: "confirmed", numberOfGuests: 2, totalAmount: "400.00", notes: null, createdAt: new Date().toISOString() },
-      { id: "res10", guestId: "g2", roomId: "r50", checkInDate: tomorrow, checkOutDate: in3Days, status: "confirmed", numberOfGuests: 3, totalAmount: "240.00", notes: null, createdAt: new Date().toISOString() },
+      { id: "res1", reservationCode: "RES-1001", guestId: "g1", roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
+      { id: "res2", reservationCode: "RES-1002", guestId: "g2", roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString() },
+      { id: "res3", reservationCode: "RES-1003", guestId: "g3", roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "ota", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
+      { id: "res4", reservationCode: "RES-1004", guestId: "g4", roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", numberOfGuests: 4, notes: null, createdAt: new Date().toISOString() },
+      { id: "res5", reservationCode: "RES-1005", guestId: "g5", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
+      { id: "res6", reservationCode: "RES-1006", guestId: "g6", roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "pending", source: "telefono", numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString() },
+      { id: "res7", reservationCode: "RES-1007", guestId: "g7", roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
+      { id: "res8", reservationCode: "RES-1008", guestId: "g8", roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "web", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString() },
+      { id: "res9", reservationCode: "RES-1009", guestId: "g1", roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
+      { id: "res10", reservationCode: "RES-1010", guestId: "g2", roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "web", numberOfGuests: 3, notes: null, createdAt: new Date().toISOString() },
     ];
     reservations.forEach((r) => this.reservations.set(r.id, r));
+
+    // Create sample charges for checked-in reservations
+    const charges: Charge[] = [
+      { id: "ch1", reservationId: "res1", description: "Alojamiento - 1 noche", amount: "80.00", date: today, category: "room" },
+      { id: "ch2", reservationId: "res2", description: "Alojamiento - 7 noches", amount: "945.00", date: today, category: "room" },
+      { id: "ch2b", reservationId: "res2", description: "Minibar", amount: "25.00", date: today, category: "minibar" },
+      { id: "ch3", reservationId: "res3", description: "Alojamiento - 3 noches", amount: "450.00", date: today, category: "room" },
+      { id: "ch3b", reservationId: "res3", description: "Restaurante - Cena", amount: "85.00", date: today, category: "restaurant" },
+      { id: "ch4", reservationId: "res4", description: "Alojamiento - 2 noches", amount: "240.00", date: today, category: "room" },
+    ];
+    charges.forEach((c) => this.charges.set(c.id, c));
+
+    this.reservationCounter = 1010;
   }
 
   // Users
@@ -192,9 +249,77 @@ export class MemStorage implements IStorage {
 
   async createRoomType(roomType: InsertRoomType): Promise<RoomType> {
     const id = randomUUID();
-    const newRoomType: RoomType = { ...roomType, id };
+    const newRoomType: RoomType = { 
+      id,
+      code: roomType.code,
+      name: roomType.name,
+      description: roomType.description ?? null,
+      baseOccupancy: roomType.baseOccupancy ?? 2,
+      maxOccupancy: roomType.maxOccupancy ?? 4,
+    };
     this.roomTypes.set(id, newRoomType);
     return newRoomType;
+  }
+
+  async updateRoomType(id: string, updates: Partial<InsertRoomType>): Promise<RoomType | undefined> {
+    const roomType = this.roomTypes.get(id);
+    if (!roomType) return undefined;
+    const updatedRoomType: RoomType = { ...roomType, ...updates };
+    this.roomTypes.set(id, updatedRoomType);
+    return updatedRoomType;
+  }
+
+  async deleteRoomType(id: string): Promise<boolean> {
+    return this.roomTypes.delete(id);
+  }
+
+  // Rate Plans
+  async getRatePlans(): Promise<RatePlanWithRoomType[]> {
+    const ratePlans = Array.from(this.ratePlans.values());
+    return ratePlans.map((rp) => ({
+      ...rp,
+      roomType: this.roomTypes.get(rp.roomTypeId)!,
+    }));
+  }
+
+  async getRatePlan(id: string): Promise<RatePlanWithRoomType | undefined> {
+    const ratePlan = this.ratePlans.get(id);
+    if (!ratePlan) return undefined;
+    return {
+      ...ratePlan,
+      roomType: this.roomTypes.get(ratePlan.roomTypeId)!,
+    };
+  }
+
+  async getRatePlansByRoomType(roomTypeId: string): Promise<RatePlan[]> {
+    return Array.from(this.ratePlans.values()).filter((rp) => rp.roomTypeId === roomTypeId);
+  }
+
+  async createRatePlan(ratePlan: InsertRatePlan): Promise<RatePlan> {
+    const id = randomUUID();
+    const newRatePlan: RatePlan = {
+      id,
+      name: ratePlan.name,
+      roomTypeId: ratePlan.roomTypeId,
+      baseRate: ratePlan.baseRate,
+      currency: ratePlan.currency ?? "ARS",
+      refundable: ratePlan.refundable ?? "true",
+      cancellationPolicy: ratePlan.cancellationPolicy ?? null,
+    };
+    this.ratePlans.set(id, newRatePlan);
+    return newRatePlan;
+  }
+
+  async updateRatePlan(id: string, updates: Partial<InsertRatePlan>): Promise<RatePlan | undefined> {
+    const ratePlan = this.ratePlans.get(id);
+    if (!ratePlan) return undefined;
+    const updatedRatePlan: RatePlan = { ...ratePlan, ...updates };
+    this.ratePlans.set(id, updatedRatePlan);
+    return updatedRatePlan;
+  }
+
+  async deleteRatePlan(id: string): Promise<boolean> {
+    return this.ratePlans.delete(id);
   }
 
   // Rooms
@@ -222,7 +347,7 @@ export class MemStorage implements IStorage {
       roomNumber: insertRoom.roomNumber,
       roomTypeId: insertRoom.roomTypeId,
       floor: insertRoom.floor ?? 1,
-      status: insertRoom.status ?? "available",
+      status: (insertRoom.status ?? "available") as RoomStatus,
       notes: insertRoom.notes ?? null,
     };
     this.rooms.set(id, room);
@@ -232,7 +357,11 @@ export class MemStorage implements IStorage {
   async updateRoom(id: string, updates: Partial<InsertRoom>): Promise<Room | undefined> {
     const room = this.rooms.get(id);
     if (!room) return undefined;
-    const updatedRoom: Room = { ...room, ...updates };
+    const updatedRoom: Room = { 
+      ...room, 
+      ...updates,
+      status: (updates.status ?? room.status) as RoomStatus,
+    };
     this.rooms.set(id, updatedRoom);
     return updatedRoom;
   }
@@ -284,12 +413,21 @@ export class MemStorage implements IStorage {
     const guest = this.guests.get(reservation.guestId);
     const room = this.rooms.get(reservation.roomId);
     const roomType = room ? this.roomTypes.get(room.roomTypeId) : undefined;
+    const ratePlan = reservation.ratePlanId ? this.ratePlans.get(reservation.ratePlanId) : undefined;
+    const charges = Array.from(this.charges.values()).filter((c) => c.reservationId === reservation.id);
 
     return {
       ...reservation,
       guest: guest!,
       room: room ? { ...room, roomType } : undefined as any,
+      ratePlan,
+      charges,
     };
+  }
+
+  generateReservationCode(): string {
+    this.reservationCounter++;
+    return `RES-${this.reservationCounter}`;
   }
 
   async getReservations(): Promise<ReservationWithDetails[]> {
@@ -301,6 +439,12 @@ export class MemStorage implements IStorage {
 
   async getReservation(id: string): Promise<ReservationWithDetails | undefined> {
     const reservation = this.reservations.get(id);
+    if (!reservation) return undefined;
+    return this.enrichReservation(reservation);
+  }
+
+  async getReservationByCode(code: string): Promise<ReservationWithDetails | undefined> {
+    const reservation = Array.from(this.reservations.values()).find((r) => r.reservationCode === code);
     if (!reservation) return undefined;
     return this.enrichReservation(reservation);
   }
@@ -320,17 +464,31 @@ export class MemStorage implements IStorage {
     return reservations.filter((r) => r.status === "checked_in");
   }
 
+  async getReservationsByGuest(guestId: string): Promise<ReservationWithDetails[]> {
+    const reservations = await this.getReservations();
+    return reservations.filter((r) => r.guestId === guestId);
+  }
+
   async createReservation(insertReservation: InsertReservation): Promise<Reservation> {
     const id = randomUUID();
     const reservation: Reservation = { 
       id,
+      reservationCode: insertReservation.reservationCode,
       guestId: insertReservation.guestId,
+      roomTypeId: insertReservation.roomTypeId,
       roomId: insertReservation.roomId,
+      ratePlanId: insertReservation.ratePlanId ?? null,
       checkInDate: insertReservation.checkInDate,
       checkOutDate: insertReservation.checkOutDate,
-      status: insertReservation.status ?? "pending",
+      nights: insertReservation.nights ?? 1,
+      baseRatePerNight: insertReservation.baseRatePerNight ?? null,
+      discountType: (insertReservation.discountType ?? "none") as "none" | "percent" | "fixed",
+      discountValue: insertReservation.discountValue ?? "0",
+      finalRatePerNight: insertReservation.finalRatePerNight ?? null,
+      totalRoomAmount: insertReservation.totalRoomAmount ?? null,
+      status: (insertReservation.status ?? "pending") as ReservationStatus,
+      source: (insertReservation.source ?? "directo") as "directo" | "web" | "ota" | "empresa" | "telefono",
       numberOfGuests: insertReservation.numberOfGuests ?? 1,
-      totalAmount: insertReservation.totalAmount ?? null,
       notes: insertReservation.notes ?? null,
       createdAt: insertReservation.createdAt || new Date().toISOString(),
     };
@@ -341,13 +499,59 @@ export class MemStorage implements IStorage {
   async updateReservation(id: string, updates: Partial<InsertReservation>): Promise<Reservation | undefined> {
     const reservation = this.reservations.get(id);
     if (!reservation) return undefined;
-    const updatedReservation: Reservation = { ...reservation, ...updates };
+    const updatedReservation: Reservation = { 
+      ...reservation, 
+      ...updates,
+      status: (updates.status ?? reservation.status) as ReservationStatus,
+      discountType: (updates.discountType ?? reservation.discountType) as "none" | "percent" | "fixed",
+      source: (updates.source ?? reservation.source) as "directo" | "web" | "ota" | "empresa" | "telefono",
+    };
     this.reservations.set(id, updatedReservation);
     return updatedReservation;
   }
 
   async deleteReservation(id: string): Promise<boolean> {
     return this.reservations.delete(id);
+  }
+
+  // Charges
+  async getCharges(reservationId: string): Promise<Charge[]> {
+    return Array.from(this.charges.values()).filter((c) => c.reservationId === reservationId);
+  }
+
+  async createCharge(charge: InsertCharge): Promise<Charge> {
+    const id = randomUUID();
+    const newCharge: Charge = {
+      id,
+      reservationId: charge.reservationId,
+      description: charge.description,
+      amount: charge.amount,
+      date: charge.date,
+      category: (charge.category ?? "otros") as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
+    };
+    this.charges.set(id, newCharge);
+    return newCharge;
+  }
+
+  async updateCharge(id: string, updates: Partial<InsertCharge>): Promise<Charge | undefined> {
+    const charge = this.charges.get(id);
+    if (!charge) return undefined;
+    const updatedCharge: Charge = { 
+      ...charge, 
+      ...updates,
+      category: (updates.category ?? charge.category) as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
+    };
+    this.charges.set(id, updatedCharge);
+    return updatedCharge;
+  }
+
+  async deleteCharge(id: string): Promise<boolean> {
+    return this.charges.delete(id);
+  }
+
+  async getChargesTotal(reservationId: string): Promise<number> {
+    const charges = await this.getCharges(reservationId);
+    return charges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
   }
 
   // Dashboard Stats
