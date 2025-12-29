@@ -376,7 +376,12 @@ export async function registerRoutes(
 
   app.post("/api/reservations", async (req, res) => {
     try {
-      const reservation = await storage.createReservation(req.body);
+      const data = {
+        ...req.body,
+        reservationCode: req.body.reservationCode || storage.generateReservationCode(),
+        createdAt: req.body.createdAt || new Date().toISOString(),
+      };
+      const reservation = await storage.createReservation(data);
       res.status(201).json(reservation);
     } catch (error) {
       res.status(500).json({ error: "Error creating reservation" });

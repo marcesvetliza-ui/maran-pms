@@ -160,7 +160,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
             {debouncedQuery.length >= 2 && searchResults.length === 0 && !isLoading && (
               <p className="text-sm text-muted-foreground text-center py-4">
                 No se encontraron huespedes. 
-                <Button variant="link" className="p-0 ml-1" onClick={() => setMode("create")}>
+                <Button variant="ghost" className="p-0 ml-1 h-auto text-primary underline" onClick={() => setMode("create")}>
                   Crear nuevo
                 </Button>
               </p>
@@ -446,7 +446,7 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
             {debouncedQuery.length >= 2 && searchResults.length === 0 && !isLoading && (
               <p className="text-sm text-muted-foreground text-center py-4">
                 No se encontraron empresas. 
-                <Button variant="link" className="p-0 ml-1" onClick={() => setMode("create")}>
+                <Button variant="ghost" className="p-0 ml-1 h-auto text-primary underline" onClick={() => setMode("create")}>
                   Crear nueva
                 </Button>
               </p>
