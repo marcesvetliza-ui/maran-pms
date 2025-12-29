@@ -18,6 +18,8 @@ import CheckOutPage from "@/pages/check-out";
 import RatePlansPage from "@/pages/rate-plans";
 import OTAChannelsPage from "@/pages/ota-channels";
 import NewReservationPage from "@/pages/new-reservation";
+import GroupsPage from "@/pages/groups";
+import GroupDetailPage from "@/pages/group-detail";
 
 function Router() {
   return (
@@ -28,6 +30,8 @@ function Router() {
       <Route path="/reservations" component={ReservationsPage} />
       <Route path="/new-reservation" component={NewReservationPage} />
       <Route path="/guests" component={GuestsPage} />
+      <Route path="/groups" component={GroupsPage} />
+      <Route path="/groups/:id" component={GroupDetailPage} />
       <Route path="/check-in" component={CheckInPage} />
       <Route path="/check-out" component={CheckOutPage} />
       <Route path="/rate-plans" component={RatePlansPage} />

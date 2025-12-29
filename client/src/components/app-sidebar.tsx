@@ -12,6 +12,7 @@ import {
   DollarSign,
   Globe,
   CalendarPlus,
+  Users2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -61,6 +62,11 @@ const mainMenuItems = [
     title: "Canales OTA",
     url: "/ota-channels",
     icon: Globe,
+  },
+  {
+    title: "Grupos",
+    url: "/groups",
+    icon: Users2,
   },
 ];
 

@@ -30,6 +30,14 @@ import {
   type ReservationStatus,
   type PlanningData,
   type PlanningCellStatus,
+  type Group,
+  type InsertGroup,
+  type GroupRoomBlock,
+  type InsertGroupRoomBlock,
+  type GroupReservationLink,
+  type InsertGroupReservationLink,
+  type GroupWithDetails,
+  type GroupRoomBlockWithDetails,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -137,6 +145,25 @@ export interface IStorage {
   createOTAReservationLog(log: InsertOTAReservationLog): Promise<OTAReservationLog>;
   updateOTAReservationLog(id: string, log: Partial<InsertOTAReservationLog>): Promise<OTAReservationLog | undefined>;
   syncOTAReservation(logId: string): Promise<Reservation | undefined>;
+
+  // Groups
+  getGroups(): Promise<GroupWithDetails[]>;
+  getGroup(id: string): Promise<GroupWithDetails | undefined>;
+  createGroup(group: InsertGroup): Promise<Group>;
+  updateGroup(id: string, group: Partial<InsertGroup>): Promise<Group | undefined>;
+  deleteGroup(id: string): Promise<boolean>;
+  generateGroupCode(): string;
+
+  // Group Room Blocks
+  getGroupBlocks(groupId: string): Promise<GroupRoomBlockWithDetails[]>;
+  createGroupBlock(block: InsertGroupRoomBlock): Promise<GroupRoomBlock>;
+  updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>): Promise<GroupRoomBlock | undefined>;
+  deleteGroupBlock(id: string): Promise<boolean>;
+
+  // Group Reservation Links
+  getGroupReservationLinks(groupId: string): Promise<GroupReservationLink[]>;
+  createGroupReservationLink(link: InsertGroupReservationLink): Promise<GroupReservationLink>;
+  assignRoomToGroup(groupId: string, roomId: string, guestFirstName: string, guestLastName: string): Promise<Reservation | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -151,8 +178,12 @@ export class MemStorage implements IStorage {
   private cancelledReservationLogs: Map<string, CancelledReservationLog>;
   private otaChannels: Map<string, OTAChannel>;
   private otaReservationLogs: Map<string, OTAReservationLog>;
+  private groups: Map<string, Group>;
+  private groupRoomBlocks: Map<string, GroupRoomBlock>;
+  private groupReservationLinks: Map<string, GroupReservationLink>;
   private reservationCounter: number;
   private guestCounter: number;
+  private groupCounter: number;
 
   constructor() {
     this.users = new Map();
@@ -166,8 +197,12 @@ export class MemStorage implements IStorage {
     this.cancelledReservationLogs = new Map();
     this.otaChannels = new Map();
     this.otaReservationLogs = new Map();
+    this.groups = new Map();
+    this.groupRoomBlocks = new Map();
+    this.groupReservationLinks = new Map();
     this.reservationCounter = 1000;
     this.guestCounter = 0;
+    this.groupCounter = 0;
 
     // Seed with demo data
     this.seedData();
@@ -1093,6 +1128,208 @@ export class MemStorage implements IStorage {
       status: "synced",
       internalReservationId: reservation.id,
       syncedAt: new Date().toISOString(),
+    });
+
+    return reservation;
+  }
+
+  // Groups
+  generateGroupCode(): string {
+    this.groupCounter++;
+    return `GRP-${this.groupCounter.toString().padStart(4, "0")}`;
+  }
+
+  private async buildGroupWithDetails(group: Group): Promise<GroupWithDetails> {
+    const blocks = await this.getGroupBlocks(group.id);
+    const links = await this.getGroupReservationLinks(group.id);
+    const reservations: ReservationWithDetails[] = [];
+    
+    for (const link of links) {
+      const res = await this.getReservation(link.reservationId);
+      if (res) reservations.push(res);
+    }
+
+    const totalRooms = blocks.reduce((sum, b) => sum + b.quantity, 0);
+    const assignedRooms = reservations.length;
+
+    return {
+      ...group,
+      blocks,
+      reservations,
+      totalRooms,
+      assignedRooms,
+    };
+  }
+
+  async getGroups(): Promise<GroupWithDetails[]> {
+    const groups = Array.from(this.groups.values());
+    const result: GroupWithDetails[] = [];
+    for (const group of groups) {
+      result.push(await this.buildGroupWithDetails(group));
+    }
+    return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getGroup(id: string): Promise<GroupWithDetails | undefined> {
+    const group = this.groups.get(id);
+    if (!group) return undefined;
+    return this.buildGroupWithDetails(group);
+  }
+
+  async createGroup(group: InsertGroup): Promise<Group> {
+    const id = randomUUID();
+    const newGroup: Group = {
+      id,
+      groupCode: group.groupCode,
+      name: group.name,
+      contactName: group.contactName ?? null,
+      contactPhone: group.contactPhone ?? null,
+      contactEmail: group.contactEmail ?? null,
+      eventDate: group.eventDate ?? null,
+      checkInDate: group.checkInDate,
+      checkOutDate: group.checkOutDate,
+      status: (group.status ?? "tentative") as Group["status"],
+      releaseDate: group.releaseDate ?? null,
+      notes: group.notes ?? null,
+      createdAt: group.createdAt,
+      createdBy: group.createdBy ?? null,
+    };
+    this.groups.set(id, newGroup);
+    return newGroup;
+  }
+
+  async updateGroup(id: string, group: Partial<InsertGroup>): Promise<Group | undefined> {
+    const existing = this.groups.get(id);
+    if (!existing) return undefined;
+    const updated: Group = { ...existing, ...group } as Group;
+    this.groups.set(id, updated);
+    return updated;
+  }
+
+  async deleteGroup(id: string): Promise<boolean> {
+    // Delete all associated blocks and links
+    Array.from(this.groupRoomBlocks.values())
+      .filter(b => b.groupId === id)
+      .forEach(b => this.groupRoomBlocks.delete(b.id));
+    Array.from(this.groupReservationLinks.values())
+      .filter(l => l.groupId === id)
+      .forEach(l => this.groupReservationLinks.delete(l.id));
+    return this.groups.delete(id);
+  }
+
+  // Group Room Blocks
+  async getGroupBlocks(groupId: string): Promise<GroupRoomBlockWithDetails[]> {
+    const blocks = Array.from(this.groupRoomBlocks.values()).filter(b => b.groupId === groupId);
+    return blocks.map(block => {
+      const roomType = this.roomTypes.get(block.roomTypeId);
+      const ratePlan = block.ratePlanId ? this.ratePlans.get(block.ratePlanId) : undefined;
+      return {
+        ...block,
+        roomType: roomType!,
+        ratePlan,
+      };
+    });
+  }
+
+  async createGroupBlock(block: InsertGroupRoomBlock): Promise<GroupRoomBlock> {
+    const id = randomUUID();
+    const newBlock: GroupRoomBlock = {
+      id,
+      groupId: block.groupId,
+      roomTypeId: block.roomTypeId,
+      quantity: block.quantity,
+      ratePlanId: block.ratePlanId ?? null,
+      agreedRate: block.agreedRate ?? null,
+    };
+    this.groupRoomBlocks.set(id, newBlock);
+    return newBlock;
+  }
+
+  async updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>): Promise<GroupRoomBlock | undefined> {
+    const existing = this.groupRoomBlocks.get(id);
+    if (!existing) return undefined;
+    const updated: GroupRoomBlock = { ...existing, ...block } as GroupRoomBlock;
+    this.groupRoomBlocks.set(id, updated);
+    return updated;
+  }
+
+  async deleteGroupBlock(id: string): Promise<boolean> {
+    return this.groupRoomBlocks.delete(id);
+  }
+
+  // Group Reservation Links
+  async getGroupReservationLinks(groupId: string): Promise<GroupReservationLink[]> {
+    return Array.from(this.groupReservationLinks.values()).filter(l => l.groupId === groupId);
+  }
+
+  async createGroupReservationLink(link: InsertGroupReservationLink): Promise<GroupReservationLink> {
+    const id = randomUUID();
+    const newLink: GroupReservationLink = {
+      id,
+      groupId: link.groupId,
+      reservationId: link.reservationId,
+    };
+    this.groupReservationLinks.set(id, newLink);
+    return newLink;
+  }
+
+  async assignRoomToGroup(groupId: string, roomId: string, guestFirstName: string, guestLastName: string): Promise<Reservation | undefined> {
+    const group = this.groups.get(groupId);
+    if (!group) return undefined;
+
+    const room = this.rooms.get(roomId);
+    if (!room) return undefined;
+
+    // Create guest for this room assignment
+    const guest = await this.createGuest({
+      firstName: guestFirstName,
+      lastName: guestLastName,
+      email: null,
+      phone: null,
+      documentType: null,
+      documentNumber: null,
+      nationality: null,
+    });
+
+    // Calculate nights
+    const checkIn = new Date(group.checkInDate);
+    const checkOut = new Date(group.checkOutDate);
+    const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Find agreed rate from block if available
+    const blocks = await this.getGroupBlocks(groupId);
+    const matchingBlock = blocks.find(b => b.roomTypeId === room.roomTypeId);
+    const agreedRate = matchingBlock?.agreedRate || "0";
+
+    // Create reservation
+    const reservation = await this.createReservation({
+      reservationCode: `G${group.groupCode}-${room.roomNumber}`,
+      guestId: guest.id,
+      roomTypeId: room.roomTypeId,
+      roomId: room.id,
+      ratePlanId: matchingBlock?.ratePlanId || null,
+      checkInDate: group.checkInDate,
+      checkOutDate: group.checkOutDate,
+      nights,
+      baseRatePerNight: agreedRate,
+      discountType: "none",
+      discountValue: "0",
+      finalRatePerNight: agreedRate,
+      totalRoomAmount: (parseFloat(agreedRate) * nights).toFixed(2),
+      status: "confirmed",
+      source: "empresa",
+      otaChannelId: null,
+      externalReservationId: null,
+      numberOfGuests: 1,
+      notes: `Grupo: ${group.name}`,
+      createdAt: new Date().toISOString(),
+      lastModifiedBy: null,
+    });
+
+    // Create link
+    await this.createGroupReservationLink({
+      groupId,
+      reservationId: reservation.id,
     });
 
     return reservation;

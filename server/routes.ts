@@ -745,5 +745,172 @@ export async function registerRoutes(
     }
   });
 
+  // Groups
+  app.get("/api/groups", async (req, res) => {
+    try {
+      const groups = await storage.getGroups();
+      res.json(groups);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching groups" });
+    }
+  });
+
+  app.get("/api/groups/:id", async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.id);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+      res.json(group);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching group" });
+    }
+  });
+
+  app.post("/api/groups", async (req, res) => {
+    try {
+      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes } = req.body;
+      
+      if (!name || !checkInDate || !checkOutDate) {
+        return res.status(400).json({ error: "Name, checkInDate, and checkOutDate are required" });
+      }
+
+      const groupCode = storage.generateGroupCode();
+      const group = await storage.createGroup({
+        groupCode,
+        name,
+        contactName: contactName || null,
+        contactPhone: contactPhone || null,
+        contactEmail: contactEmail || null,
+        eventDate: eventDate || null,
+        checkInDate,
+        checkOutDate,
+        status: status || "tentative",
+        releaseDate: releaseDate || null,
+        notes: notes || null,
+        createdAt: new Date().toISOString(),
+        createdBy: null,
+      });
+      res.status(201).json(group);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating group" });
+    }
+  });
+
+  app.patch("/api/groups/:id", async (req, res) => {
+    try {
+      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes } = req.body;
+      const updateData: Record<string, unknown> = {};
+      
+      if (name !== undefined) updateData.name = name;
+      if (contactName !== undefined) updateData.contactName = contactName;
+      if (contactPhone !== undefined) updateData.contactPhone = contactPhone;
+      if (contactEmail !== undefined) updateData.contactEmail = contactEmail;
+      if (eventDate !== undefined) updateData.eventDate = eventDate;
+      if (checkInDate !== undefined) updateData.checkInDate = checkInDate;
+      if (checkOutDate !== undefined) updateData.checkOutDate = checkOutDate;
+      if (status !== undefined) updateData.status = status;
+      if (releaseDate !== undefined) updateData.releaseDate = releaseDate;
+      if (notes !== undefined) updateData.notes = notes;
+
+      const group = await storage.updateGroup(req.params.id, updateData);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+      res.json(group);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating group" });
+    }
+  });
+
+  app.delete("/api/groups/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteGroup(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting group" });
+    }
+  });
+
+  // Group Room Blocks
+  app.get("/api/groups/:groupId/blocks", async (req, res) => {
+    try {
+      const blocks = await storage.getGroupBlocks(req.params.groupId);
+      res.json(blocks);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching group blocks" });
+    }
+  });
+
+  app.post("/api/groups/:groupId/blocks", async (req, res) => {
+    try {
+      const { roomTypeId, quantity, ratePlanId, agreedRate } = req.body;
+      
+      if (!roomTypeId || quantity === undefined) {
+        return res.status(400).json({ error: "roomTypeId and quantity are required" });
+      }
+
+      const block = await storage.createGroupBlock({
+        groupId: req.params.groupId,
+        roomTypeId,
+        quantity: typeof quantity === 'number' ? quantity : parseInt(quantity, 10),
+        ratePlanId: ratePlanId || null,
+        agreedRate: agreedRate ? String(agreedRate) : null,
+      });
+      res.status(201).json(block);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating group block" });
+    }
+  });
+
+  app.patch("/api/group-blocks/:id", async (req, res) => {
+    try {
+      const block = await storage.updateGroupBlock(req.params.id, req.body);
+      if (!block) {
+        return res.status(404).json({ error: "Group block not found" });
+      }
+      res.json(block);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating group block" });
+    }
+  });
+
+  app.delete("/api/group-blocks/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteGroupBlock(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Group block not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting group block" });
+    }
+  });
+
+  // Group Room Assignment
+  app.post("/api/groups/:groupId/assign-room", async (req, res) => {
+    try {
+      const { roomId, guestFirstName, guestLastName } = req.body;
+      if (!roomId || !guestFirstName || !guestLastName) {
+        return res.status(400).json({ error: "Room ID, guest first name, and guest last name are required" });
+      }
+      const reservation = await storage.assignRoomToGroup(
+        req.params.groupId,
+        roomId,
+        guestFirstName,
+        guestLastName
+      );
+      if (!reservation) {
+        return res.status(400).json({ error: "Could not assign room to group" });
+      }
+      res.status(201).json(reservation);
+    } catch (error) {
+      res.status(500).json({ error: "Error assigning room to group" });
+    }
+  });
+
   return httpServer;
 }
