@@ -14,6 +14,8 @@ import {
   type InsertReservation,
   type Charge,
   type InsertCharge,
+  type CancelledReservationLog,
+  type InsertCancelledReservationLog,
   type RoomWithType,
   type ReservationWithDetails,
   type RoomStatus,
@@ -78,13 +80,22 @@ export interface IStorage {
   deleteCharge(id: string): Promise<boolean>;
   getChargesTotal(reservationId: string): Promise<number>;
 
+  // Cancelled Reservation Logs
+  getCancelledReservationLogs(): Promise<CancelledReservationLog[]>;
+  createCancelledReservationLog(log: InsertCancelledReservationLog): Promise<CancelledReservationLog>;
+
+  // Overbooking check
+  checkOverbooking(roomId: string, checkInDate: string, checkOutDate: string, excludeReservationId?: string): Promise<boolean>;
+
   // Dashboard
   getDashboardStats(): Promise<{
     totalRooms: number;
     availableRooms: number;
     occupiedRooms: number;
+    dirtyRooms: number;
     cleaningRooms: number;
     maintenanceRooms: number;
+    oosRooms: number;
     todayCheckIns: number;
     todayCheckOuts: number;
     occupancyRate: number;
@@ -104,6 +115,7 @@ export class MemStorage implements IStorage {
   private guests: Map<string, Guest>;
   private reservations: Map<string, Reservation>;
   private charges: Map<string, Charge>;
+  private cancelledReservationLogs: Map<string, CancelledReservationLog>;
   private reservationCounter: number;
 
   constructor() {
@@ -114,6 +126,7 @@ export class MemStorage implements IStorage {
     this.guests = new Map();
     this.reservations = new Map();
     this.charges = new Map();
+    this.cancelledReservationLogs = new Map();
     this.reservationCounter = 1000;
 
     // Seed with demo data
@@ -195,27 +208,27 @@ export class MemStorage implements IStorage {
     const in10Days = new Date(Date.now() + 10 * 86400000).toISOString().split("T")[0];
     
     const reservations: Reservation[] = [
-      { id: "res1", reservationCode: "RES-1001", guestId: "g1", roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
-      { id: "res2", reservationCode: "RES-1002", guestId: "g2", roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString() },
-      { id: "res3", reservationCode: "RES-1003", guestId: "g3", roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "ota", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
-      { id: "res4", reservationCode: "RES-1004", guestId: "g4", roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", numberOfGuests: 4, notes: null, createdAt: new Date().toISOString() },
-      { id: "res5", reservationCode: "RES-1005", guestId: "g5", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
-      { id: "res6", reservationCode: "RES-1006", guestId: "g6", roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "pending", source: "telefono", numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString() },
-      { id: "res7", reservationCode: "RES-1007", guestId: "g7", roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
-      { id: "res8", reservationCode: "RES-1008", guestId: "g8", roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "web", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString() },
-      { id: "res9", reservationCode: "RES-1009", guestId: "g1", roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString() },
-      { id: "res10", reservationCode: "RES-1010", guestId: "g2", roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "web", numberOfGuests: 3, notes: null, createdAt: new Date().toISOString() },
+      { id: "res1", reservationCode: "RES-1001", guestId: "g1", roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res2", reservationCode: "RES-1002", guestId: "g2", roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res3", reservationCode: "RES-1003", guestId: "g3", roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "ota", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res4", reservationCode: "RES-1004", guestId: "g4", roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", numberOfGuests: 4, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res5", reservationCode: "RES-1005", guestId: "g5", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res6", reservationCode: "RES-1006", guestId: "g6", roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "tentative", source: "telefono", numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res7", reservationCode: "RES-1007", guestId: "g7", roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res8", reservationCode: "RES-1008", guestId: "g8", roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "web", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res9", reservationCode: "RES-1009", guestId: "g1", roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res10", reservationCode: "RES-1010", guestId: "g2", roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "web", numberOfGuests: 3, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
     ];
     reservations.forEach((r) => this.reservations.set(r.id, r));
 
     // Create sample charges for checked-in reservations
     const charges: Charge[] = [
-      { id: "ch1", reservationId: "res1", description: "Alojamiento - 1 noche", amount: "80.00", date: today, category: "room" },
-      { id: "ch2", reservationId: "res2", description: "Alojamiento - 7 noches", amount: "945.00", date: today, category: "room" },
-      { id: "ch2b", reservationId: "res2", description: "Minibar", amount: "25.00", date: today, category: "minibar" },
-      { id: "ch3", reservationId: "res3", description: "Alojamiento - 3 noches", amount: "450.00", date: today, category: "room" },
-      { id: "ch3b", reservationId: "res3", description: "Restaurante - Cena", amount: "85.00", date: today, category: "restaurant" },
-      { id: "ch4", reservationId: "res4", description: "Alojamiento - 2 noches", amount: "240.00", date: today, category: "room" },
+      { id: "ch1", reservationId: "res1", description: "Alojamiento - 1 noche", amount: "80.00", date: today, category: "room", createdBy: null },
+      { id: "ch2", reservationId: "res2", description: "Alojamiento - 7 noches", amount: "945.00", date: today, category: "room", createdBy: null },
+      { id: "ch2b", reservationId: "res2", description: "Minibar", amount: "25.00", date: today, category: "minibar", createdBy: null },
+      { id: "ch3", reservationId: "res3", description: "Alojamiento - 3 noches", amount: "450.00", date: today, category: "room", createdBy: null },
+      { id: "ch3b", reservationId: "res3", description: "Restaurante - Cena", amount: "85.00", date: today, category: "restaurant", createdBy: null },
+      { id: "ch4", reservationId: "res4", description: "Alojamiento - 2 noches", amount: "240.00", date: today, category: "room", createdBy: null },
     ];
     charges.forEach((c) => this.charges.set(c.id, c));
 
@@ -233,7 +246,14 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
+    const user: User = { 
+      id,
+      username: insertUser.username,
+      password: insertUser.password,
+      firstName: insertUser.firstName ?? null,
+      lastName: insertUser.lastName ?? null,
+      role: (insertUser.role ?? "reception") as "reception" | "housekeeping" | "management" | "director" | "restaurant" | "spa" | "security",
+    };
     this.users.set(id, user);
     return user;
   }
@@ -491,6 +511,7 @@ export class MemStorage implements IStorage {
       numberOfGuests: insertReservation.numberOfGuests ?? 1,
       notes: insertReservation.notes ?? null,
       createdAt: insertReservation.createdAt || new Date().toISOString(),
+      lastModifiedBy: insertReservation.lastModifiedBy ?? null,
     };
     this.reservations.set(id, reservation);
     return reservation;
@@ -528,6 +549,7 @@ export class MemStorage implements IStorage {
       amount: charge.amount,
       date: charge.date,
       category: (charge.category ?? "otros") as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
+      createdBy: charge.createdBy ?? null,
     };
     this.charges.set(id, newCharge);
     return newCharge;
@@ -554,6 +576,49 @@ export class MemStorage implements IStorage {
     return charges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
   }
 
+  // Cancelled Reservation Logs
+  async getCancelledReservationLogs(): Promise<CancelledReservationLog[]> {
+    return Array.from(this.cancelledReservationLogs.values()).sort((a, b) => 
+      new Date(b.cancellationDate).getTime() - new Date(a.cancellationDate).getTime()
+    );
+  }
+
+  async createCancelledReservationLog(log: InsertCancelledReservationLog): Promise<CancelledReservationLog> {
+    const id = randomUUID();
+    const newLog: CancelledReservationLog = {
+      id,
+      reservationCode: log.reservationCode,
+      guestName: log.guestName,
+      roomNumber: log.roomNumber,
+      checkInDate: log.checkInDate,
+      checkOutDate: log.checkOutDate,
+      cancellationDate: log.cancellationDate,
+      cancelledBy: log.cancelledBy ?? null,
+      reason: log.reason ?? null,
+    };
+    this.cancelledReservationLogs.set(id, newLog);
+    return newLog;
+  }
+
+  // Overbooking check - returns true if there is a conflict
+  async checkOverbooking(roomId: string, checkInDate: string, checkOutDate: string, excludeReservationId?: string): Promise<boolean> {
+    const reservations = Array.from(this.reservations.values());
+    const activeStatuses: ReservationStatus[] = ["tentative", "pending", "confirmed", "checked_in"];
+    
+    for (const res of reservations) {
+      if (res.roomId !== roomId) continue;
+      if (excludeReservationId && res.id === excludeReservationId) continue;
+      if (!activeStatuses.includes(res.status)) continue;
+      
+      // Check for date overlap
+      // Reservation A conflicts with B if A.checkIn < B.checkOut AND A.checkOut > B.checkIn
+      if (checkInDate < res.checkOutDate && checkOutDate > res.checkInDate) {
+        return true; // Conflict found
+      }
+    }
+    return false; // No conflict
+  }
+
   // Dashboard Stats
   async getDashboardStats() {
     const rooms = Array.from(this.rooms.values());
@@ -564,11 +629,13 @@ export class MemStorage implements IStorage {
     const totalRooms = rooms.length;
     const availableRooms = rooms.filter((r) => r.status === "available").length;
     const occupiedRooms = rooms.filter((r) => r.status === "occupied").length;
+    const dirtyRooms = rooms.filter((r) => r.status === "dirty").length;
     const cleaningRooms = rooms.filter((r) => r.status === "cleaning").length;
     const maintenanceRooms = rooms.filter((r) => r.status === "maintenance").length;
+    const oosRooms = rooms.filter((r) => r.status === "oos").length;
 
     const todayCheckIns = reservations.filter(
-      (r) => r.checkInDate === today && (r.status === "confirmed" || r.status === "pending")
+      (r) => r.checkInDate === today && (r.status === "confirmed" || r.status === "pending" || r.status === "tentative")
     ).length;
     const todayCheckOuts = reservations.filter(
       (r) => r.checkOutDate === today && r.status === "checked_in"
@@ -576,14 +643,16 @@ export class MemStorage implements IStorage {
 
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
     const totalGuests = guests.length;
-    const pendingReservations = reservations.filter((r) => r.status === "pending").length;
+    const pendingReservations = reservations.filter((r) => r.status === "pending" || r.status === "tentative").length;
 
     return {
       totalRooms,
       availableRooms,
       occupiedRooms,
+      dirtyRooms,
       cleaningRooms,
       maintenanceRooms,
+      oosRooms,
       todayCheckIns,
       todayCheckOuts,
       occupancyRate,

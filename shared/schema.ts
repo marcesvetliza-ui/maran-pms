@@ -33,7 +33,7 @@ export type InsertRatePlan = z.infer<typeof insertRatePlanSchema>;
 export type RatePlan = typeof ratePlans.$inferSelect;
 
 // Rooms
-export type RoomStatus = "available" | "occupied" | "cleaning" | "maintenance";
+export type RoomStatus = "available" | "occupied" | "dirty" | "cleaning" | "maintenance" | "oos";
 
 export const rooms = pgTable("rooms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -66,7 +66,7 @@ export type InsertGuest = z.infer<typeof insertGuestSchema>;
 export type Guest = typeof guests.$inferSelect;
 
 // Reservations
-export type ReservationStatus = "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
+export type ReservationStatus = "tentative" | "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
 export type DiscountType = "none" | "percent" | "fixed";
 export type ReservationSource = "directo" | "web" | "ota" | "empresa" | "telefono";
 
@@ -90,6 +90,7 @@ export const reservations = pgTable("reservations", {
   numberOfGuests: integer("number_of_guests").notNull().default(1),
   notes: text("notes"),
   createdAt: text("created_at").notNull(),
+  lastModifiedBy: varchar("last_modified_by"),
 });
 
 export const insertReservationSchema = createInsertSchema(reservations).omit({ id: true });
@@ -106,11 +107,29 @@ export const charges = pgTable("charges", {
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   date: text("date").notNull(),
   category: text("category").$type<ChargeCategory>().notNull().default("otros"),
+  createdBy: varchar("created_by"),
 });
 
 export const insertChargeSchema = createInsertSchema(charges).omit({ id: true });
 export type InsertCharge = z.infer<typeof insertChargeSchema>;
 export type Charge = typeof charges.$inferSelect;
+
+// Cancelled Reservation Log (registro de cancelaciones)
+export const cancelledReservationLogs = pgTable("cancelled_reservation_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reservationCode: text("reservation_code").notNull(),
+  guestName: text("guest_name").notNull(),
+  roomNumber: text("room_number").notNull(),
+  checkInDate: text("check_in_date").notNull(),
+  checkOutDate: text("check_out_date").notNull(),
+  cancellationDate: text("cancellation_date").notNull(),
+  cancelledBy: varchar("cancelled_by"),
+  reason: text("reason"),
+});
+
+export const insertCancelledReservationLogSchema = createInsertSchema(cancelledReservationLogs).omit({ id: true });
+export type InsertCancelledReservationLog = z.infer<typeof insertCancelledReservationLogSchema>;
+export type CancelledReservationLog = typeof cancelledReservationLogs.$inferSelect;
 
 // Extended types for frontend with joined data
 export type RatePlanWithRoomType = RatePlan & {
@@ -140,16 +159,17 @@ export type PlanningData = {
 };
 
 // Users (for authentication)
+export type UserRole = "reception" | "housekeeping" | "management" | "director" | "restaurant" | "spa" | "security";
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  role: text("role").$type<UserRole>().notNull().default("reception"),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
-
+export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;

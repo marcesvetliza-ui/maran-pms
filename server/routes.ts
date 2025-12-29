@@ -363,12 +363,75 @@ export async function registerRoutes(
       // Update reservation status
       await storage.updateReservation(req.params.id, { status: "checked_out" });
       
-      // Update room status to cleaning
-      await storage.updateRoom(reservation.roomId, { status: "cleaning" });
+      // Update room status to dirty (housekeeping will clean it)
+      await storage.updateRoom(reservation.roomId, { status: "dirty" });
       
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing check-out" });
+    }
+  });
+
+  // Cancel reservation endpoint (logs to CancelledReservationLog)
+  app.post("/api/reservations/:id/cancel", async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) {
+        return res.status(404).json({ error: "Reservation not found" });
+      }
+      
+      // Log the cancellation
+      await storage.createCancelledReservationLog({
+        reservationCode: reservation.reservationCode,
+        guestName: `${reservation.guest?.firstName} ${reservation.guest?.lastName}`,
+        roomNumber: reservation.room?.roomNumber || "",
+        checkInDate: reservation.checkInDate,
+        checkOutDate: reservation.checkOutDate,
+        cancellationDate: new Date().toISOString(),
+        cancelledBy: req.body.cancelledBy || null,
+        reason: req.body.reason || null,
+      });
+      
+      // Update reservation status
+      await storage.updateReservation(req.params.id, { status: "cancelled" });
+      
+      // If room was occupied, set to dirty
+      if (reservation.room?.status === "occupied") {
+        await storage.updateRoom(reservation.roomId, { status: "dirty" });
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error cancelling reservation" });
+    }
+  });
+
+  // Check overbooking
+  app.get("/api/reservations/check-overbooking", async (req, res) => {
+    try {
+      const { roomId, checkInDate, checkOutDate, excludeReservationId } = req.query;
+      if (!roomId || !checkInDate || !checkOutDate) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+      const hasConflict = await storage.checkOverbooking(
+        roomId as string,
+        checkInDate as string,
+        checkOutDate as string,
+        excludeReservationId as string | undefined
+      );
+      res.json({ hasConflict });
+    } catch (error) {
+      res.status(500).json({ error: "Error checking overbooking" });
+    }
+  });
+
+  // Cancelled reservation logs
+  app.get("/api/cancelled-reservations", async (req, res) => {
+    try {
+      const logs = await storage.getCancelledReservationLogs();
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching cancelled reservation logs" });
     }
   });
 

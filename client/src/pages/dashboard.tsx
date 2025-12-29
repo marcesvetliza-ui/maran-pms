@@ -20,8 +20,10 @@ type DashboardStats = {
   totalRooms: number;
   availableRooms: number;
   occupiedRooms: number;
+  dirtyRooms: number;
   cleaningRooms: number;
   maintenanceRooms: number;
+  oosRooms: number;
   todayCheckIns: number;
   todayCheckOuts: number;
   occupancyRate: number;
@@ -122,6 +124,7 @@ function QuickActionCard({
 
 function ReservationStatusBadge({ status }: { status: string }) {
   const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    tentative: { label: "Tentativa", variant: "outline" },
     pending: { label: "Pendiente", variant: "secondary" },
     confirmed: { label: "Confirmada", variant: "default" },
     checked_in: { label: "Check-in", variant: "default" },

@@ -61,6 +61,7 @@ import type { ReservationWithDetails, Guest, RoomWithType, RoomType, RatePlan, I
 
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    tentative: { label: "Tentativa", variant: "outline" },
     pending: { label: "Pendiente", variant: "secondary" },
     confirmed: { label: "Confirmada", variant: "default" },
     checked_in: { label: "Check-in", variant: "default" },
