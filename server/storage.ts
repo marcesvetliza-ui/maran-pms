@@ -16,6 +16,12 @@ import {
   type InsertCharge,
   type CancelledReservationLog,
   type InsertCancelledReservationLog,
+  type OTAChannel,
+  type InsertOTAChannel,
+  type OTAChannelWithStats,
+  type OTAReservationLog,
+  type InsertOTAReservationLog,
+  type OTAReservationLogWithChannel,
   type RoomWithType,
   type ReservationWithDetails,
   type RoomStatus,
@@ -105,6 +111,20 @@ export interface IStorage {
 
   // Planning
   getPlanningData(startDate: string, endDate: string): Promise<PlanningData>;
+
+  // OTA Channels
+  getOTAChannels(): Promise<OTAChannelWithStats[]>;
+  getOTAChannel(id: string): Promise<OTAChannel | undefined>;
+  createOTAChannel(channel: InsertOTAChannel): Promise<OTAChannel>;
+  updateOTAChannel(id: string, channel: Partial<InsertOTAChannel>): Promise<OTAChannel | undefined>;
+  deleteOTAChannel(id: string): Promise<boolean>;
+
+  // OTA Reservation Logs
+  getOTAReservationLogs(channelId?: string): Promise<OTAReservationLogWithChannel[]>;
+  getOTAReservationLog(id: string): Promise<OTAReservationLogWithChannel | undefined>;
+  createOTAReservationLog(log: InsertOTAReservationLog): Promise<OTAReservationLog>;
+  updateOTAReservationLog(id: string, log: Partial<InsertOTAReservationLog>): Promise<OTAReservationLog | undefined>;
+  syncOTAReservation(logId: string): Promise<Reservation | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -116,6 +136,8 @@ export class MemStorage implements IStorage {
   private reservations: Map<string, Reservation>;
   private charges: Map<string, Charge>;
   private cancelledReservationLogs: Map<string, CancelledReservationLog>;
+  private otaChannels: Map<string, OTAChannel>;
+  private otaReservationLogs: Map<string, OTAReservationLog>;
   private reservationCounter: number;
 
   constructor() {
@@ -127,6 +149,8 @@ export class MemStorage implements IStorage {
     this.reservations = new Map();
     this.charges = new Map();
     this.cancelledReservationLogs = new Map();
+    this.otaChannels = new Map();
+    this.otaReservationLogs = new Map();
     this.reservationCounter = 1000;
 
     // Seed with demo data
@@ -208,16 +232,16 @@ export class MemStorage implements IStorage {
     const in10Days = new Date(Date.now() + 10 * 86400000).toISOString().split("T")[0];
     
     const reservations: Reservation[] = [
-      { id: "res1", reservationCode: "RES-1001", guestId: "g1", roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res2", reservationCode: "RES-1002", guestId: "g2", roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res3", reservationCode: "RES-1003", guestId: "g3", roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "ota", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res4", reservationCode: "RES-1004", guestId: "g4", roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", numberOfGuests: 4, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res5", reservationCode: "RES-1005", guestId: "g5", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res6", reservationCode: "RES-1006", guestId: "g6", roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "tentative", source: "telefono", numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res7", reservationCode: "RES-1007", guestId: "g7", roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res8", reservationCode: "RES-1008", guestId: "g8", roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "web", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res9", reservationCode: "RES-1009", guestId: "g1", roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res10", reservationCode: "RES-1010", guestId: "g2", roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "web", numberOfGuests: 3, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res1", reservationCode: "RES-1001", guestId: "g1", roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res2", reservationCode: "RES-1002", guestId: "g2", roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res3", reservationCode: "RES-1003", guestId: "g3", roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "booking", otaChannelId: null, externalReservationId: "BK-123456", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res4", reservationCode: "RES-1004", guestId: "g4", roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 4, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res5", reservationCode: "RES-1005", guestId: "g5", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res6", reservationCode: "RES-1006", guestId: "g6", roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "tentative", source: "telefono", otaChannelId: null, externalReservationId: null, numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res7", reservationCode: "RES-1007", guestId: "g7", roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res8", reservationCode: "RES-1008", guestId: "g8", roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "expedia", otaChannelId: null, externalReservationId: "EX-789012", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res9", reservationCode: "RES-1009", guestId: "g1", roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res10", reservationCode: "RES-1010", guestId: "g2", roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "airbnb", otaChannelId: null, externalReservationId: "AB-345678", numberOfGuests: 3, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
     ];
     reservations.forEach((r) => this.reservations.set(r.id, r));
 
@@ -507,7 +531,9 @@ export class MemStorage implements IStorage {
       finalRatePerNight: insertReservation.finalRatePerNight ?? null,
       totalRoomAmount: insertReservation.totalRoomAmount ?? null,
       status: (insertReservation.status ?? "pending") as ReservationStatus,
-      source: (insertReservation.source ?? "directo") as "directo" | "web" | "ota" | "empresa" | "telefono",
+      source: (insertReservation.source ?? "directo") as any,
+      otaChannelId: insertReservation.otaChannelId ?? null,
+      externalReservationId: insertReservation.externalReservationId ?? null,
       numberOfGuests: insertReservation.numberOfGuests ?? 1,
       notes: insertReservation.notes ?? null,
       createdAt: insertReservation.createdAt || new Date().toISOString(),
@@ -525,7 +551,9 @@ export class MemStorage implements IStorage {
       ...updates,
       status: (updates.status ?? reservation.status) as ReservationStatus,
       discountType: (updates.discountType ?? reservation.discountType) as "none" | "percent" | "fixed",
-      source: (updates.source ?? reservation.source) as "directo" | "web" | "ota" | "empresa" | "telefono",
+      source: (updates.source ?? reservation.source) as any,
+      otaChannelId: updates.otaChannelId !== undefined ? updates.otaChannelId : reservation.otaChannelId,
+      externalReservationId: updates.externalReservationId !== undefined ? updates.externalReservationId : reservation.externalReservationId,
     };
     this.reservations.set(id, updatedReservation);
     return updatedReservation;
@@ -746,6 +774,197 @@ export class MemStorage implements IStorage {
       reservations: reservationsMap,
       cellReservations,
     };
+  }
+
+  // OTA Channels
+  async getOTAChannels(): Promise<OTAChannelWithStats[]> {
+    const channels = Array.from(this.otaChannels.values());
+    return channels.map((channel) => {
+      const logs = Array.from(this.otaReservationLogs.values()).filter(
+        (log) => log.channelId === channel.id
+      );
+      const totalReservations = logs.length;
+      const pendingSync = logs.filter((log) => log.status === "pending").length;
+      const totalRevenue = logs.reduce((sum, log) => sum + parseFloat(log.totalAmount || "0"), 0);
+      const totalCommission = logs.reduce((sum, log) => sum + parseFloat(log.commission || "0"), 0);
+      return {
+        ...channel,
+        totalReservations,
+        pendingSync,
+        totalRevenue,
+        totalCommission,
+      };
+    });
+  }
+
+  async getOTAChannel(id: string): Promise<OTAChannel | undefined> {
+    return this.otaChannels.get(id);
+  }
+
+  async createOTAChannel(channel: InsertOTAChannel): Promise<OTAChannel> {
+    const id = randomUUID();
+    const newChannel: OTAChannel = {
+      id,
+      name: channel.name,
+      channelType: channel.channelType as "booking" | "expedia" | "airbnb" | "despegar" | "hotelbeds" | "agoda" | "trivago" | "manual",
+      status: (channel.status || "inactive") as "active" | "inactive" | "pending" | "error",
+      apiKey: channel.apiKey ?? null,
+      apiSecret: channel.apiSecret ?? null,
+      hotelCode: channel.hotelCode ?? null,
+      commissionPercent: channel.commissionPercent ?? "15.00",
+      syncEnabled: channel.syncEnabled ?? "false",
+      lastSyncAt: channel.lastSyncAt ?? null,
+      createdAt: channel.createdAt,
+    };
+    this.otaChannels.set(id, newChannel);
+    return newChannel;
+  }
+
+  async updateOTAChannel(id: string, channel: Partial<InsertOTAChannel>): Promise<OTAChannel | undefined> {
+    const existing = this.otaChannels.get(id);
+    if (!existing) return undefined;
+    const updated: OTAChannel = { ...existing, ...channel } as OTAChannel;
+    this.otaChannels.set(id, updated);
+    return updated;
+  }
+
+  async deleteOTAChannel(id: string): Promise<boolean> {
+    return this.otaChannels.delete(id);
+  }
+
+  // OTA Reservation Logs
+  async getOTAReservationLogs(channelId?: string): Promise<OTAReservationLogWithChannel[]> {
+    let logs = Array.from(this.otaReservationLogs.values());
+    if (channelId) {
+      logs = logs.filter((log) => log.channelId === channelId);
+    }
+    return logs.map((log) => ({
+      ...log,
+      channel: this.otaChannels.get(log.channelId)!,
+    })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getOTAReservationLog(id: string): Promise<OTAReservationLogWithChannel | undefined> {
+    const log = this.otaReservationLogs.get(id);
+    if (!log) return undefined;
+    return {
+      ...log,
+      channel: this.otaChannels.get(log.channelId)!,
+    };
+  }
+
+  async createOTAReservationLog(log: InsertOTAReservationLog): Promise<OTAReservationLog> {
+    const id = randomUUID();
+    const newLog: OTAReservationLog = {
+      id,
+      channelId: log.channelId,
+      externalReservationId: log.externalReservationId,
+      internalReservationId: log.internalReservationId ?? null,
+      guestName: log.guestName,
+      checkInDate: log.checkInDate,
+      checkOutDate: log.checkOutDate,
+      roomTypeName: log.roomTypeName ?? null,
+      totalAmount: log.totalAmount ?? null,
+      commission: log.commission ?? null,
+      netAmount: log.netAmount ?? null,
+      status: (log.status || "pending") as "pending" | "synced" | "failed" | "cancelled",
+      rawData: log.rawData ?? null,
+      syncedAt: log.syncedAt ?? null,
+      createdAt: log.createdAt,
+    };
+    this.otaReservationLogs.set(id, newLog);
+    return newLog;
+  }
+
+  async updateOTAReservationLog(id: string, log: Partial<InsertOTAReservationLog>): Promise<OTAReservationLog | undefined> {
+    const existing = this.otaReservationLogs.get(id);
+    if (!existing) return undefined;
+    const updated: OTAReservationLog = { ...existing, ...log } as OTAReservationLog;
+    this.otaReservationLogs.set(id, updated);
+    return updated;
+  }
+
+  async syncOTAReservation(logId: string): Promise<Reservation | undefined> {
+    const log = this.otaReservationLogs.get(logId);
+    if (!log || log.status === "synced") return undefined;
+
+    const channel = this.otaChannels.get(log.channelId);
+    if (!channel) return undefined;
+
+    // Parse guest name
+    const nameParts = log.guestName.split(" ");
+    const firstName = nameParts[0] || "OTA";
+    const lastName = nameParts.slice(1).join(" ") || "Guest";
+
+    // Create or find guest
+    let guest = Array.from(this.guests.values()).find(
+      (g) => g.firstName === firstName && g.lastName === lastName
+    );
+    if (!guest) {
+      guest = await this.createGuest({
+        firstName,
+        lastName,
+        email: null,
+        phone: null,
+        documentType: null,
+        documentNumber: null,
+        nationality: null,
+        address: null,
+      });
+    }
+
+    // Find room type by name or use first available
+    let roomType = Array.from(this.roomTypes.values()).find(
+      (rt) => rt.name === log.roomTypeName
+    );
+    if (!roomType) {
+      roomType = Array.from(this.roomTypes.values())[0];
+    }
+
+    // Find available room
+    const availableRoom = Array.from(this.rooms.values()).find(
+      (r) => r.roomTypeId === roomType!.id && r.status === "available"
+    );
+    if (!availableRoom) return undefined;
+
+    // Calculate nights
+    const checkIn = new Date(log.checkInDate);
+    const checkOut = new Date(log.checkOutDate);
+    const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Create reservation
+    const reservation = await this.createReservation({
+      reservationCode: this.generateReservationCode(),
+      guestId: guest.id,
+      roomTypeId: roomType!.id,
+      roomId: availableRoom.id,
+      ratePlanId: null,
+      checkInDate: log.checkInDate,
+      checkOutDate: log.checkOutDate,
+      nights,
+      baseRatePerNight: log.netAmount ? (parseFloat(log.netAmount) / nights).toFixed(2) : null,
+      discountType: "none",
+      discountValue: "0",
+      finalRatePerNight: log.netAmount ? (parseFloat(log.netAmount) / nights).toFixed(2) : null,
+      totalRoomAmount: log.netAmount,
+      status: "confirmed",
+      source: channel.channelType as any,
+      otaChannelId: channel.id,
+      externalReservationId: log.externalReservationId,
+      numberOfGuests: 1,
+      notes: `Reserva importada de ${channel.name}`,
+      createdAt: new Date().toISOString(),
+      lastModifiedBy: null,
+    });
+
+    // Update log
+    await this.updateOTAReservationLog(logId, {
+      status: "synced",
+      internalReservationId: reservation.id,
+      syncedAt: new Date().toISOString(),
+    });
+
+    return reservation;
   }
 }
 
