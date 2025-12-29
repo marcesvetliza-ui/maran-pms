@@ -1,6 +1,13 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import OpenAI from "openai";
 import { storage } from "./storage";
+import { insertGuestReviewSchema } from "@shared/schema";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
 
 export async function registerRoutes(
   httpServer: Server,
@@ -917,6 +924,214 @@ export async function registerRoutes(
       res.status(201).json(reservation);
     } catch (error) {
       res.status(500).json({ error: "Error assigning room to group" });
+    }
+  });
+
+  // Guest Reviews
+  app.get("/api/reviews", async (req, res) => {
+    try {
+      const reviews = await storage.getGuestReviews();
+      res.json(reviews);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching reviews" });
+    }
+  });
+
+  app.get("/api/reviews/analytics", async (req, res) => {
+    try {
+      const analytics = await storage.getReviewAnalyticsSummary();
+      res.json(analytics);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching review analytics" });
+    }
+  });
+
+  app.get("/api/reviews/:id", async (req, res) => {
+    try {
+      const review = await storage.getGuestReview(req.params.id);
+      if (!review) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      res.json(review);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching review" });
+    }
+  });
+
+  app.post("/api/reviews", async (req, res) => {
+    try {
+      const validationResult = insertGuestReviewSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid review data", 
+          details: validationResult.error.errors 
+        });
+      }
+      const review = await storage.createGuestReview(validationResult.data);
+      const enrichedReview = await storage.getGuestReview(review.id);
+      res.status(201).json(enrichedReview);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating review" });
+    }
+  });
+
+  app.patch("/api/reviews/:id", async (req, res) => {
+    try {
+      const partialSchema = insertGuestReviewSchema.partial();
+      const validationResult = partialSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid review data", 
+          details: validationResult.error.errors 
+        });
+      }
+      const review = await storage.updateGuestReview(req.params.id, validationResult.data);
+      if (!review) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      const enrichedReview = await storage.getGuestReview(review.id);
+      res.json(enrichedReview);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating review" });
+    }
+  });
+
+  app.delete("/api/reviews/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteGuestReview(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting review" });
+    }
+  });
+
+  // Sentiment Analysis Endpoint
+  app.post("/api/reviews/:id/analyze", async (req, res) => {
+    try {
+      if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+        return res.status(503).json({ error: "AI service not configured" });
+      }
+
+      const review = await storage.getGuestReview(req.params.id);
+      if (!review) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+
+      const prompt = `Analyze the following hotel guest review and provide sentiment analysis in JSON format.
+
+Review Title: ${review.title || "No title"}
+Review Content: ${review.content}
+Rating: ${review.rating}/5
+
+Respond with a JSON object containing:
+{
+  "sentiment": "positive" | "neutral" | "negative",
+  "sentimentScore": number between 0 and 1 (0 = very negative, 1 = very positive),
+  "categories": array of categories mentioned (from: "service", "cleanliness", "location", "amenities", "value", "food", "staff", "general"),
+  "keyPhrases": array of key phrases extracted from the review (max 5),
+  "improvementSuggestions": array of specific improvement suggestions based on any negative aspects (max 3, empty if positive)
+}
+
+Only respond with the JSON object, no additional text.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 500,
+        temperature: 0.3,
+      });
+
+      const analysisText = completion.choices[0]?.message?.content || "{}";
+      let analysis;
+      try {
+        analysis = JSON.parse(analysisText);
+      } catch {
+        analysis = {
+          sentiment: review.rating >= 4 ? "positive" : review.rating >= 3 ? "neutral" : "negative",
+          sentimentScore: review.rating / 5,
+          categories: ["general"],
+          keyPhrases: [],
+          improvementSuggestions: [],
+        };
+      }
+
+      const updatedReview = await storage.updateGuestReview(req.params.id, {
+        sentiment: analysis.sentiment,
+        sentimentScore: String(analysis.sentimentScore),
+        categories: analysis.categories,
+        keyPhrases: analysis.keyPhrases,
+        improvementSuggestions: analysis.improvementSuggestions,
+        analyzedAt: new Date().toISOString(),
+      });
+
+      res.json(updatedReview);
+    } catch (error) {
+      console.error("Sentiment analysis error:", error);
+      res.status(500).json({ error: "Error analyzing review sentiment" });
+    }
+  });
+
+  // Batch analyze all unanalyzed reviews
+  app.post("/api/reviews/analyze-all", async (req, res) => {
+    try {
+      if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+        return res.status(503).json({ error: "AI service not configured" });
+      }
+
+      const reviews = await storage.getGuestReviews();
+      const unanalyzed = reviews.filter(r => !r.analyzedAt);
+      
+      const results = { analyzed: 0, errors: 0 };
+      
+      for (const review of unanalyzed) {
+        try {
+          const prompt = `Analyze the following hotel guest review and provide sentiment analysis in JSON format.
+
+Review Title: ${review.title || "No title"}
+Review Content: ${review.content}
+Rating: ${review.rating}/5
+
+Respond with a JSON object containing:
+{
+  "sentiment": "positive" | "neutral" | "negative",
+  "sentimentScore": number between 0 and 1,
+  "categories": array of categories (from: "service", "cleanliness", "location", "amenities", "value", "food", "staff", "general"),
+  "keyPhrases": array of key phrases (max 5),
+  "improvementSuggestions": array of improvement suggestions (max 3)
+}
+
+Only respond with the JSON object.`;
+
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: 500,
+            temperature: 0.3,
+          });
+
+          const analysisText = completion.choices[0]?.message?.content || "{}";
+          const analysis = JSON.parse(analysisText);
+
+          await storage.updateGuestReview(review.id, {
+            sentiment: analysis.sentiment,
+            sentimentScore: String(analysis.sentimentScore),
+            categories: analysis.categories,
+            keyPhrases: analysis.keyPhrases,
+            improvementSuggestions: analysis.improvementSuggestions,
+            analyzedAt: new Date().toISOString(),
+          });
+          results.analyzed++;
+        } catch {
+          results.errors++;
+        }
+      }
+
+      res.json({ message: `Analyzed ${results.analyzed} reviews, ${results.errors} errors`, ...results });
+    } catch (error) {
+      res.status(500).json({ error: "Error batch analyzing reviews" });
     }
   });
 

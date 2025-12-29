@@ -348,3 +348,56 @@ export type GroupWithDetails = Group & {
   totalRooms: number;
   assignedRooms: number;
 };
+
+// Guest Reviews with Sentiment Analysis
+export type SentimentType = "positive" | "neutral" | "negative";
+export type ReviewCategory = "service" | "cleanliness" | "location" | "amenities" | "value" | "food" | "staff" | "general";
+
+export const guestReviews = pgTable("guest_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reservationId: varchar("reservation_id"),
+  guestId: varchar("guest_id").notNull(),
+  roomId: varchar("room_id"),
+  reviewDate: text("review_date").notNull(),
+  source: text("source").notNull().default("direct"),
+  rating: integer("rating").notNull(),
+  title: text("title"),
+  content: text("content").notNull(),
+  // Sentiment Analysis Results
+  sentiment: text("sentiment").$type<SentimentType>(),
+  sentimentScore: decimal("sentiment_score", { precision: 5, scale: 4 }),
+  categories: text("categories").array(),
+  categoryScores: text("category_scores"),
+  keyPhrases: text("key_phrases").array(),
+  improvementSuggestions: text("improvement_suggestions").array(),
+  analyzedAt: text("analyzed_at"),
+  isPublished: text("is_published").default("false"),
+  staffResponse: text("staff_response"),
+  respondedAt: text("responded_at"),
+  respondedBy: text("responded_by"),
+});
+
+export const insertGuestReviewSchema = createInsertSchema(guestReviews).omit({ id: true });
+export type InsertGuestReview = z.infer<typeof insertGuestReviewSchema>;
+export type GuestReview = typeof guestReviews.$inferSelect;
+
+export type GuestReviewWithDetails = GuestReview & {
+  guest: Guest;
+  room?: Room;
+  reservation?: Reservation;
+};
+
+// Conversations and Messages for Chat (AI Integrations)
+export const conversations = pgTable("conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  createdAt: text("created_at"),
+});
+
+export const messages = pgTable("messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull(),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  createdAt: text("created_at"),
+});

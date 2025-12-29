@@ -20,6 +20,7 @@ import OTAChannelsPage from "@/pages/ota-channels";
 import NewReservationPage from "@/pages/new-reservation";
 import GroupsPage from "@/pages/groups";
 import GroupDetailPage from "@/pages/group-detail";
+import ReviewsPage from "@/pages/reviews";
 
 function Router() {
   return (
@@ -36,6 +37,7 @@ function Router() {
       <Route path="/check-out" component={CheckOutPage} />
       <Route path="/rate-plans" component={RatePlansPage} />
       <Route path="/ota-channels" component={OTAChannelsPage} />
+      <Route path="/reviews" component={ReviewsPage} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -13,6 +13,7 @@ import {
   Globe,
   CalendarPlus,
   Users2,
+  MessageSquare,
 } from "lucide-react";
 import {
   Sidebar,
@@ -67,6 +68,11 @@ const mainMenuItems = [
     title: "Grupos",
     url: "/groups",
     icon: Users2,
+  },
+  {
+    title: "Resenas",
+    url: "/reviews",
+    icon: MessageSquare,
   },
 ];
 

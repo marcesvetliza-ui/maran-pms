@@ -38,6 +38,10 @@ import {
   type InsertGroupReservationLink,
   type GroupWithDetails,
   type GroupRoomBlockWithDetails,
+  type GuestReview,
+  type InsertGuestReview,
+  type GuestReviewWithDetails,
+  type SentimentType,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -175,6 +179,22 @@ export interface IStorage {
       ratePlanId?: string | null;
     }
   ): Promise<Reservation | undefined>;
+
+  // Guest Reviews
+  getGuestReviews(): Promise<GuestReviewWithDetails[]>;
+  getGuestReview(id: string): Promise<GuestReviewWithDetails | undefined>;
+  getGuestReviewsByGuest(guestId: string): Promise<GuestReviewWithDetails[]>;
+  createGuestReview(review: InsertGuestReview): Promise<GuestReview>;
+  updateGuestReview(id: string, review: Partial<InsertGuestReview>): Promise<GuestReview | undefined>;
+  deleteGuestReview(id: string): Promise<boolean>;
+  getReviewAnalyticsSummary(): Promise<{
+    totalReviews: number;
+    averageRating: number;
+    sentimentBreakdown: { positive: number; neutral: number; negative: number };
+    topCategories: { category: string; count: number; avgSentiment: number }[];
+    recentTrend: { date: string; avgRating: number; count: number }[];
+    improvementAreas: string[];
+  }>;
 }
 
 export class MemStorage implements IStorage {
@@ -192,6 +212,7 @@ export class MemStorage implements IStorage {
   private groups: Map<string, Group>;
   private groupRoomBlocks: Map<string, GroupRoomBlock>;
   private groupReservationLinks: Map<string, GroupReservationLink>;
+  private guestReviews: Map<string, GuestReview>;
   private reservationCounter: number;
   private guestCounter: number;
   private groupCounter: number;
@@ -211,6 +232,7 @@ export class MemStorage implements IStorage {
     this.groups = new Map();
     this.groupRoomBlocks = new Map();
     this.groupReservationLinks = new Map();
+    this.guestReviews = new Map();
     this.reservationCounter = 1000;
     this.guestCounter = 0;
     this.groupCounter = 0;
@@ -1362,6 +1384,159 @@ export class MemStorage implements IStorage {
     });
 
     return reservation;
+  }
+
+  // Guest Reviews
+  private enrichReview(review: GuestReview): GuestReviewWithDetails {
+    const guest = this.guests.get(review.guestId);
+    const room = review.roomId ? this.rooms.get(review.roomId) : undefined;
+    const reservation = review.reservationId ? this.reservations.get(review.reservationId) : undefined;
+    return {
+      ...review,
+      guest: guest!,
+      room,
+      reservation,
+    };
+  }
+
+  async getGuestReviews(): Promise<GuestReviewWithDetails[]> {
+    return Array.from(this.guestReviews.values())
+      .map(r => this.enrichReview(r))
+      .sort((a, b) => new Date(b.reviewDate).getTime() - new Date(a.reviewDate).getTime());
+  }
+
+  async getGuestReview(id: string): Promise<GuestReviewWithDetails | undefined> {
+    const review = this.guestReviews.get(id);
+    return review ? this.enrichReview(review) : undefined;
+  }
+
+  async getGuestReviewsByGuest(guestId: string): Promise<GuestReviewWithDetails[]> {
+    return Array.from(this.guestReviews.values())
+      .filter(r => r.guestId === guestId)
+      .map(r => this.enrichReview(r))
+      .sort((a, b) => new Date(b.reviewDate).getTime() - new Date(a.reviewDate).getTime());
+  }
+
+  async createGuestReview(review: InsertGuestReview): Promise<GuestReview> {
+    const id = randomUUID();
+    const newReview: GuestReview = {
+      id,
+      reservationId: review.reservationId || null,
+      guestId: review.guestId,
+      roomId: review.roomId || null,
+      reviewDate: review.reviewDate,
+      source: review.source || "direct",
+      rating: review.rating,
+      title: review.title || null,
+      content: review.content,
+      sentiment: (review.sentiment as SentimentType) || null,
+      sentimentScore: review.sentimentScore || null,
+      categories: review.categories || null,
+      categoryScores: review.categoryScores || null,
+      keyPhrases: review.keyPhrases || null,
+      improvementSuggestions: review.improvementSuggestions || null,
+      analyzedAt: review.analyzedAt || null,
+      isPublished: review.isPublished || "false",
+      staffResponse: review.staffResponse || null,
+      respondedAt: review.respondedAt || null,
+      respondedBy: review.respondedBy || null,
+    };
+    this.guestReviews.set(id, newReview);
+    return newReview;
+  }
+
+  async updateGuestReview(id: string, review: Partial<InsertGuestReview>): Promise<GuestReview | undefined> {
+    const existing = this.guestReviews.get(id);
+    if (!existing) return undefined;
+    const updated: GuestReview = { 
+      ...existing, 
+      ...review,
+      sentiment: review.sentiment !== undefined ? (review.sentiment as SentimentType) : existing.sentiment,
+    };
+    this.guestReviews.set(id, updated);
+    return updated;
+  }
+
+  async deleteGuestReview(id: string): Promise<boolean> {
+    return this.guestReviews.delete(id);
+  }
+
+  async getReviewAnalyticsSummary(): Promise<{
+    totalReviews: number;
+    averageRating: number;
+    sentimentBreakdown: { positive: number; neutral: number; negative: number };
+    topCategories: { category: string; count: number; avgSentiment: number }[];
+    recentTrend: { date: string; avgRating: number; count: number }[];
+    improvementAreas: string[];
+  }> {
+    const reviews = Array.from(this.guestReviews.values());
+    const totalReviews = reviews.length;
+    const averageRating = totalReviews > 0 
+      ? reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews 
+      : 0;
+
+    const sentimentBreakdown = {
+      positive: reviews.filter(r => r.sentiment === "positive").length,
+      neutral: reviews.filter(r => r.sentiment === "neutral").length,
+      negative: reviews.filter(r => r.sentiment === "negative").length,
+    };
+
+    // Count categories
+    const categoryMap = new Map<string, { count: number; totalScore: number }>();
+    reviews.forEach(r => {
+      if (r.categories) {
+        r.categories.forEach(cat => {
+          const existing = categoryMap.get(cat) || { count: 0, totalScore: 0 };
+          const score = r.sentimentScore ? parseFloat(r.sentimentScore) : 0.5;
+          categoryMap.set(cat, { count: existing.count + 1, totalScore: existing.totalScore + score });
+        });
+      }
+    });
+
+    const topCategories = Array.from(categoryMap.entries())
+      .map(([category, data]) => ({
+        category,
+        count: data.count,
+        avgSentiment: data.totalScore / data.count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    // Recent trend (last 7 days)
+    const dateMap = new Map<string, { total: number; count: number }>();
+    reviews.forEach(r => {
+      const date = r.reviewDate.split("T")[0];
+      const existing = dateMap.get(date) || { total: 0, count: 0 };
+      dateMap.set(date, { total: existing.total + r.rating, count: existing.count + 1 });
+    });
+
+    const recentTrend = Array.from(dateMap.entries())
+      .map(([date, data]) => ({
+        date,
+        avgRating: data.total / data.count,
+        count: data.count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-7);
+
+    // Collect improvement suggestions from negative reviews
+    const improvementAreas: string[] = [];
+    reviews
+      .filter(r => r.sentiment === "negative" && r.improvementSuggestions)
+      .forEach(r => {
+        if (r.improvementSuggestions) {
+          improvementAreas.push(...r.improvementSuggestions);
+        }
+      });
+
+    return {
+      totalReviews,
+      averageRating: Math.round(averageRating * 10) / 10,
+      sentimentBreakdown,
+      topCategories,
+      recentTrend,
+      improvementAreas: Array.from(new Set(improvementAreas)).slice(0, 10),
+    };
   }
 }
 
