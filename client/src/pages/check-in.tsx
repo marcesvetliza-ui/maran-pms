@@ -38,11 +38,10 @@ import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, Ra
 
 export default function CheckInPage() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"reservations" | "walkin" | "directo" | "history">("reservations");
+  const [activeTab, setActiveTab] = useState<"reservations" | "walkin" | "history">("reservations");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [directoConfirmDialogOpen, setDirectoConfirmDialogOpen] = useState(false);
 
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -219,61 +218,6 @@ export default function CheckInPage() {
     },
   });
 
-  const directoMutation = useMutation({
-    mutationFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const checkOutDate = new Date(Date.now() + nights * 86400000).toISOString().split("T")[0];
-      
-      const res = await apiRequest("POST", "/api/reservations", {
-        reservationCode: "", 
-        guestId: selectedGuest!.id,
-        companyId: selectedCompany?.id || null,
-        roomTypeId: selectedRoomTypeId,
-        roomId: selectedRoomId,
-        ratePlanId: selectedRatePlanId || null,
-        checkInDate: today,
-        checkOutDate,
-        nights,
-        baseRatePerNight: selectedRatePlan?.baseRate || "0",
-        discountType: "none",
-        discountValue: "0",
-        finalRatePerNight: selectedRatePlan?.baseRate || "0",
-        totalRoomAmount: totalAmount,
-        status: "confirmed",
-        source: selectedCompany ? "empresa" : "directo",
-        numberOfGuests,
-        notes: walkInNotes ? `Check-in Directo: ${walkInNotes}` : "Check-in Directo",
-      });
-      const reservation = await res.json();
-
-      await apiRequest("POST", `/api/reservations/${reservation.id}/check-in`, undefined);
-      return reservation;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-in"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-ins-by-date"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({
-        title: "Check-in Directo exitoso",
-        description: `${selectedGuest?.firstName} ${selectedGuest?.lastName} ha sido registrado en la habitacion.`,
-      });
-      resetWalkInForm();
-      setDirectoConfirmDialogOpen(false);
-      setActiveTab("reservations");
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "No se pudo completar el check-in directo. Intente nuevamente.",
-        variant: "destructive",
-      });
-      setDirectoConfirmDialogOpen(false);
-    },
-  });
-
   const resetWalkInForm = () => {
     setSelectedGuest(null);
     setSelectedCompany(null);
@@ -283,14 +227,6 @@ export default function CheckInPage() {
     setNights(1);
     setNumberOfGuests(1);
     setWalkInNotes("");
-  };
-
-  const handleDirectoCheckIn = () => {
-    setDirectoConfirmDialogOpen(true);
-  };
-
-  const confirmDirectoCheckIn = () => {
-    directoMutation.mutate();
   };
 
   const filteredReservations = reservations?.filter((res) => {
@@ -337,8 +273,8 @@ export default function CheckInPage() {
         <p className="text-muted-foreground capitalize">{today}</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "reservations" | "walkin" | "directo" | "history")}>
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "reservations" | "walkin" | "history")}>
+        <TabsList className="grid w-full max-w-2xl grid-cols-3">
           <TabsTrigger value="reservations" data-testid="tab-reservations">
             <LogIn className="h-4 w-4 mr-2" />
             Reservas
@@ -346,10 +282,6 @@ export default function CheckInPage() {
           <TabsTrigger value="walkin" data-testid="tab-walkin">
             <UserPlus className="h-4 w-4 mr-2" />
             Walk-in
-          </TabsTrigger>
-          <TabsTrigger value="directo" data-testid="tab-directo">
-            <Check className="h-4 w-4 mr-2" />
-            Check-in Directo
           </TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">
             <CalendarDays className="h-4 w-4 mr-2" />
@@ -779,211 +711,6 @@ export default function CheckInPage() {
             </Card>
           )}
         </TabsContent>
-
-        <TabsContent value="directo" className="space-y-6 mt-6">
-          <Card className="bg-green-500/10 border-green-500/20">
-            <CardContent className="flex items-center gap-4 p-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
-                <Check className="h-6 w-6 text-green-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold">Check-in Directo</h3>
-                <p className="text-sm text-muted-foreground">
-                  Registrar huesped e inmediatamente hacer check-in sin crear reserva previa
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="space-y-6">
-              <GuestSelector
-                selectedGuest={selectedGuest}
-                onSelect={setSelectedGuest}
-                onCreateNew={(guest) => createGuestMutation.mutate(guest)}
-                onClear={() => setSelectedGuest(null)}
-              />
-
-              <CompanySelector
-                selectedCompany={selectedCompany}
-                onSelect={setSelectedCompany}
-                onCreateNew={(company) => createCompanyMutation.mutate(company)}
-                onClear={() => setSelectedCompany(null)}
-              />
-            </div>
-
-            <div className="space-y-6">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <DoorOpen className="h-4 w-4" />
-                    Habitacion
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Tipo de Habitacion</Label>
-                    <Select
-                      value={selectedRoomTypeId}
-                      onValueChange={(v) => {
-                        setSelectedRoomTypeId(v);
-                        setSelectedRoomId("");
-                        setSelectedRatePlanId("");
-                      }}
-                    >
-                      <SelectTrigger data-testid="select-room-type-directo">
-                        <SelectValue placeholder="Seleccionar tipo..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {roomTypes?.map((rt) => (
-                          <SelectItem key={rt.id} value={rt.id}>
-                            {rt.name} - {rt.maxOccupancy} pax
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {selectedRoomTypeId && (
-                    <div className="space-y-2">
-                      <Label>Habitacion Disponible</Label>
-                      <Select value={selectedRoomId} onValueChange={setSelectedRoomId}>
-                        <SelectTrigger data-testid="select-room-directo">
-                          <SelectValue placeholder="Seleccionar habitacion..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableRooms?.map((room) => (
-                            <SelectItem key={room.id} value={room.id}>
-                              Hab. {room.roomNumber} - Piso {room.floor}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {availableRooms?.length === 0 && (
-                        <p className="text-sm text-destructive">
-                          No hay habitaciones disponibles de este tipo
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {selectedRoomTypeId && applicableRatePlans && applicableRatePlans.length > 0 && (
-                    <div className="space-y-2">
-                      <Label>Plan de Tarifa</Label>
-                      <Select value={selectedRatePlanId} onValueChange={setSelectedRatePlanId}>
-                        <SelectTrigger data-testid="select-rate-plan-directo">
-                          <SelectValue placeholder="Seleccionar tarifa..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {applicableRatePlans.map((rp) => (
-                            <SelectItem key={rp.id} value={rp.id}>
-                              {rp.name} - ${rp.baseRate}/noche
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="nights-directo">Noches</Label>
-                      <Input
-                        id="nights-directo"
-                        type="number"
-                        min={1}
-                        value={nights}
-                        onChange={(e) => setNights(parseInt(e.target.value) || 1)}
-                        data-testid="input-nights-directo"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="numGuests-directo">Huespedes</Label>
-                      <Input
-                        id="numGuests-directo"
-                        type="number"
-                        min={1}
-                        value={numberOfGuests}
-                        onChange={(e) => setNumberOfGuests(parseInt(e.target.value) || 1)}
-                        data-testid="input-num-guests-directo"
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Resumen</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Huesped:</span>
-                    <span className="font-medium">
-                      {selectedGuest ? `${selectedGuest.firstName} ${selectedGuest.lastName}` : "-"}
-                    </span>
-                  </div>
-                  {selectedCompany && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Empresa:</span>
-                      <span className="font-medium">{selectedCompany.nombreFantasia || selectedCompany.razonSocial}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Habitacion:</span>
-                    <span className="font-medium">
-                      {selectedRoomId ? rooms?.find((r) => r.id === selectedRoomId)?.roomNumber : "-"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Noches:</span>
-                    <span className="font-medium">{nights}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tarifa:</span>
-                    <span className="font-medium">
-                      {selectedRatePlan ? `$${selectedRatePlan.baseRate}/noche` : "-"}
-                    </span>
-                  </div>
-                  <div className="border-t pt-3 mt-3">
-                    <div className="flex justify-between">
-                      <span className="font-semibold">Total:</span>
-                      <span className="font-bold text-lg">${totalAmount}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 mt-4">
-                    <Label htmlFor="directoNotes">Comentarios / Notas</Label>
-                    <Textarea
-                      id="directoNotes"
-                      placeholder="Agregar comentarios para recepción..."
-                      value={walkInNotes}
-                      onChange={(e) => setWalkInNotes(e.target.value)}
-                      className="min-h-[60px]"
-                      data-testid="input-directo-notes"
-                    />
-                  </div>
-
-                  <Button
-                    className="w-full mt-4 bg-green-600 hover:bg-green-700"
-                    onClick={handleDirectoCheckIn}
-                    disabled={!canSubmitWalkIn || directoMutation.isPending}
-                    data-testid="button-complete-directo"
-                  >
-                    {directoMutation.isPending ? (
-                      "Procesando..."
-                    ) : (
-                      <>
-                        <Check className="h-4 w-4 mr-2" />
-                        Check-in Directo
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </TabsContent>
       </Tabs>
 
       <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
@@ -1027,40 +754,6 @@ export default function CheckInPage() {
               data-testid="button-confirm-checkin"
             >
               {checkInMutation.isPending ? "Procesando..." : "Confirmar Check-in"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={directoConfirmDialogOpen} onOpenChange={setDirectoConfirmDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar Check-in Directo</AlertDialogTitle>
-            <AlertDialogDescription>
-              {selectedGuest && selectedRoomId && (
-                <>
-                  Esta seguro de hacer check-in directo?
-                  <br /><br />
-                  Se registrara la llegada de{" "}
-                  <strong>
-                    {selectedGuest.firstName} {selectedGuest.lastName}
-                  </strong>{" "}
-                  a la habitacion <strong>{rooms?.find((r) => r.id === selectedRoomId)?.roomNumber}</strong> por <strong>{nights}</strong> noche(s).
-                  <br /><br />
-                  Esto creara una reserva y marcara la habitacion como ocupada inmediatamente.
-                </>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel data-testid="button-cancel-directo">Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDirectoCheckIn}
-              disabled={directoMutation.isPending}
-              className="bg-green-600 hover:bg-green-700"
-              data-testid="button-confirm-directo"
-            >
-              {directoMutation.isPending ? "Procesando..." : "Confirmar Check-in Directo"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
