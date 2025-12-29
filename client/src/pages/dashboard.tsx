@@ -237,7 +237,7 @@ export default function Dashboard() {
             title="Nueva Reserva"
             description="Crear una nueva reservación"
             icon={CalendarCheck}
-            href="/reservations/new"
+            href="/new-reservation"
             variant="primary"
             testId="action-new-reservation"
           />
