@@ -1251,6 +1251,8 @@ export class MemStorage implements IStorage {
       quantity: block.quantity,
       ratePlanId: block.ratePlanId ?? null,
       agreedRate: block.agreedRate ?? null,
+      blockCheckInDate: block.blockCheckInDate ?? null,
+      blockCheckOutDate: block.blockCheckOutDate ?? null,
     };
     this.groupRoomBlocks.set(id, newBlock);
     return newBlock;
