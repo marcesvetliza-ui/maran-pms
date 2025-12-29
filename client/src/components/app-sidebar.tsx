@@ -10,6 +10,7 @@ import {
   Hotel,
   CalendarDays,
   DollarSign,
+  Globe,
 } from "lucide-react";
 import {
   Sidebar,
@@ -54,6 +55,11 @@ const mainMenuItems = [
     title: "Tarifas",
     url: "/rate-plans",
     icon: DollarSign,
+  },
+  {
+    title: "Canales OTA",
+    url: "/ota-channels",
+    icon: Globe,
   },
 ];
 

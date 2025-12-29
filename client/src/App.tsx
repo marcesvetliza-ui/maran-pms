@@ -16,6 +16,7 @@ import GuestsPage from "@/pages/guests";
 import CheckInPage from "@/pages/check-in";
 import CheckOutPage from "@/pages/check-out";
 import RatePlansPage from "@/pages/rate-plans";
+import OTAChannelsPage from "@/pages/ota-channels";
 
 function Router() {
   return (
@@ -29,6 +30,7 @@ function Router() {
       <Route path="/check-in" component={CheckInPage} />
       <Route path="/check-out" component={CheckOutPage} />
       <Route path="/rate-plans" component={RatePlansPage} />
+      <Route path="/ota-channels" component={OTAChannelsPage} />
       <Route component={NotFound} />
     </Switch>
   );
