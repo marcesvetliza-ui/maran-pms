@@ -11,7 +11,16 @@ import {
   Wrench,
   Sparkles,
   CheckCircle,
+  Accessibility,
+  Fence,
+  BedDouble,
+  Sofa,
+  ShowerHead,
+  BedSingle,
+  Users,
+  Home,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +76,59 @@ function RoomStatusBadge({ status }: { status: RoomStatus }) {
   const config = statusConfig[status];
 
   return <Badge className={config.className}>{config.label}</Badge>;
+}
+
+const featureConfig: Record<string, { icon: typeof Accessibility; label: string }> = {
+  accessible: { icon: Accessibility, label: "Accesible" },
+  balcony: { icon: Fence, label: "Balcon" },
+  separable_bed: { icon: BedDouble, label: "Cama separable" },
+  sofa_bed: { icon: Sofa, label: "Sofa cama" },
+  shower_only: { icon: ShowerHead, label: "Solo ducha" },
+  extra_bed: { icon: BedSingle, label: "Cama extra" },
+  twin_config: { icon: BedSingle, label: "Config. Twin" },
+  living_room: { icon: Home, label: "Living" },
+};
+
+function RoomFeatures({ features, maxOccupancy }: { features?: string[] | null; maxOccupancy?: number | null }) {
+  if (!features || features.length === 0) {
+    return maxOccupancy ? (
+      <div className="flex items-center gap-1 text-muted-foreground">
+        <Users className="h-3 w-3" />
+        <span className="text-xs">{maxOccupancy}</span>
+      </div>
+    ) : null;
+  }
+
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      {maxOccupancy && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-0.5 text-muted-foreground">
+              <Users className="h-3 w-3" />
+              <span className="text-xs">{maxOccupancy}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>Max. {maxOccupancy} pax</TooltipContent>
+        </Tooltip>
+      )}
+      {features.map((feature) => {
+        const config = featureConfig[feature];
+        if (!config) return null;
+        const Icon = config.icon;
+        return (
+          <Tooltip key={feature}>
+            <TooltipTrigger asChild>
+              <div className="text-muted-foreground">
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{config.label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
 }
 
 function RoomFormDialog({
@@ -446,13 +508,13 @@ export default function RoomsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-col gap-2">
-                    <RoomStatusBadge status={room.status} />
-                    <p className="text-sm text-muted-foreground">
-                      {room.roomType?.name || "Sin tipo"}
-                    </p>
-                    {room.notes && (
-                      <p className="text-xs text-muted-foreground truncate">{room.notes}</p>
-                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <RoomStatusBadge status={room.status} />
+                      <span className="text-sm text-muted-foreground">
+                        {room.roomType?.name || "Sin tipo"}
+                      </span>
+                    </div>
+                    <RoomFeatures features={room.features} maxOccupancy={room.maxOccupancy} />
                   </div>
                 </CardContent>
               </Card>
@@ -463,11 +525,12 @@ export default function RoomsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Número</TableHead>
+                  <TableHead>Numero</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Piso</TableHead>
+                  <TableHead>Pax</TableHead>
+                  <TableHead>Caracteristicas</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead>Notas</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -477,10 +540,13 @@ export default function RoomsPage() {
                     <TableCell className="font-medium">{room.roomNumber}</TableCell>
                     <TableCell>{room.roomType?.name || "Sin tipo"}</TableCell>
                     <TableCell>{room.floor}</TableCell>
+                    <TableCell>{room.maxOccupancy || 2}</TableCell>
+                    <TableCell>
+                      <RoomFeatures features={room.features} />
+                    </TableCell>
                     <TableCell>
                       <RoomStatusBadge status={room.status} />
                     </TableCell>
-                    <TableCell className="max-w-[200px] truncate">{room.notes || "-"}</TableCell>
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

@@ -242,55 +242,71 @@ export class MemStorage implements IStorage {
   }
 
   private seedData() {
-    // Create room types
+    // Create room types - Real hotel categories
     const roomTypes: RoomType[] = [
-      { id: "rt1", code: "STD", name: "Standard", description: "Habitación standard con cama simple", baseOccupancy: 1, maxOccupancy: 2 },
-      { id: "rt2", code: "DBL", name: "Doble", description: "Habitación doble con cama matrimonial", baseOccupancy: 2, maxOccupancy: 3 },
-      { id: "rt3", code: "SUITE", name: "Suite", description: "Suite de lujo con sala y jacuzzi", baseOccupancy: 2, maxOccupancy: 4 },
-      { id: "rt4", code: "FAM", name: "Familiar", description: "Habitación familiar con dos camas dobles", baseOccupancy: 4, maxOccupancy: 6 },
+      { id: "rt1", code: "EJEC", name: "Ejecutiva", description: "Habitacion ejecutiva, ideal para viajeros de negocios", baseOccupancy: 2, maxOccupancy: 2 },
+      { id: "rt2", code: "PREM", name: "Premium", description: "Habitacion premium con amenities superiores", baseOccupancy: 2, maxOccupancy: 3 },
+      { id: "rt3", code: "SPAN", name: "Suite Panoramica", description: "Suite con vistas panoramicas y living separado", baseOccupancy: 2, maxOccupancy: 4 },
+      { id: "rt4", code: "SPRES", name: "Suite Presidencial", description: "La suite mas exclusiva del hotel", baseOccupancy: 2, maxOccupancy: 4 },
     ];
     roomTypes.forEach((rt) => this.roomTypes.set(rt.id, rt));
 
     // Create rate plans
     const ratePlans: RatePlan[] = [
-      { id: "rp1", name: "BAR (Mejor Tarifa)", roomTypeId: "rt1", baseRate: "50.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
-      { id: "rp2", name: "BAR (Mejor Tarifa)", roomTypeId: "rt2", baseRate: "80.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
-      { id: "rp3", name: "BAR (Mejor Tarifa)", roomTypeId: "rt3", baseRate: "150.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
-      { id: "rp4", name: "BAR (Mejor Tarifa)", roomTypeId: "rt4", baseRate: "120.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelación gratuita hasta 24h antes" },
-      { id: "rp5", name: "No Reembolsable", roomTypeId: "rt1", baseRate: "40.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelación" },
-      { id: "rp6", name: "No Reembolsable", roomTypeId: "rt2", baseRate: "65.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelación" },
-      { id: "rp7", name: "Corporativo", roomTypeId: "rt2", baseRate: "70.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturación a empresa" },
-      { id: "rp8", name: "Corporativo", roomTypeId: "rt3", baseRate: "130.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturación a empresa" },
+      { id: "rp1", name: "BAR (Mejor Tarifa)", roomTypeId: "rt1", baseRate: "85.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+      { id: "rp2", name: "BAR (Mejor Tarifa)", roomTypeId: "rt2", baseRate: "120.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+      { id: "rp3", name: "BAR (Mejor Tarifa)", roomTypeId: "rt3", baseRate: "180.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+      { id: "rp4", name: "BAR (Mejor Tarifa)", roomTypeId: "rt4", baseRate: "350.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+      { id: "rp5", name: "No Reembolsable", roomTypeId: "rt1", baseRate: "70.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelacion" },
+      { id: "rp6", name: "No Reembolsable", roomTypeId: "rt2", baseRate: "100.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelacion" },
+      { id: "rp7", name: "Corporativo", roomTypeId: "rt1", baseRate: "75.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
+      { id: "rp8", name: "Corporativo", roomTypeId: "rt2", baseRate: "105.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
+      { id: "rp9", name: "Corporativo", roomTypeId: "rt3", baseRate: "160.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
     ];
     ratePlans.forEach((rp) => this.ratePlans.set(rp.id, rp));
 
-    // Create 66 rooms across 6 floors
-    const roomTypeDistribution = ["rt1", "rt2", "rt2", "rt3", "rt4", "rt2", "rt1", "rt2", "rt3", "rt4", "rt2"];
-    const rooms: Room[] = [];
-    let roomId = 1;
-    
-    for (let floor = 1; floor <= 6; floor++) {
-      const roomsPerFloor = floor <= 5 ? 11 : 11; // 11 rooms per floor = 66 total
-      for (let roomNum = 1; roomNum <= roomsPerFloor; roomNum++) {
-        const roomNumber = `${floor}${roomNum.toString().padStart(2, "0")}`;
-        const typeIndex = (roomNum - 1) % roomTypeDistribution.length;
-        const status: RoomStatus = 
-          roomId === 3 || roomId === 15 || roomId === 28 || roomId === 45 ? "occupied" :
-          roomId === 5 || roomId === 22 ? "cleaning" :
-          roomId === 8 || roomId === 33 ? "maintenance" : "available";
-        
-        rooms.push({
-          id: `r${roomId}`,
-          roomNumber,
-          roomTypeId: roomTypeDistribution[typeIndex],
-          floor,
-          status,
-          notes: status === "cleaning" ? "Limpieza programada" : 
-                 status === "maintenance" ? "Mantenimiento programado" : null,
-        });
-        roomId++;
-      }
-    }
+    // Create actual hotel rooms based on document
+    const rooms: Room[] = [
+      // Floor 2
+      { id: "r201", roomNumber: "201", roomTypeId: "rt2", floor: 2, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["accessible", "separable_bed"], maxOccupancy: 3, notes: null },
+      { id: "r202", roomNumber: "202", roomTypeId: "rt1", floor: 2, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r204", roomNumber: "204", roomTypeId: "rt2", floor: 2, status: "available", bedConfig: "MAT_CC", features: ["accessible", "separable_bed", "sofa_bed", "living_room"], maxOccupancy: 4, notes: null },
+      { id: "r205", roomNumber: "205", roomTypeId: "rt3", floor: 2, status: "available", bedConfig: "MAT_EXTRA", features: ["balcony", "living_room"], maxOccupancy: 4, notes: null },
+      { id: "r206", roomNumber: "206", roomTypeId: "rt3", floor: 2, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room"], maxOccupancy: 4, notes: null },
+      { id: "r207", roomNumber: "207", roomTypeId: "rt2", floor: 2, status: "available", bedConfig: "MAT", features: [], maxOccupancy: 2, notes: null },
+      // Floor 3
+      { id: "r301", roomNumber: "301", roomTypeId: "rt2", floor: 3, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
+      { id: "r302", roomNumber: "302", roomTypeId: "rt1", floor: 3, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r303", roomNumber: "303", roomTypeId: "rt1", floor: 3, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r304", roomNumber: "304", roomTypeId: "rt1", floor: 3, status: "available", bedConfig: "MAT", features: ["shower_only"], maxOccupancy: 2, notes: null },
+      { id: "r305", roomNumber: "305", roomTypeId: "rt3", floor: 3, status: "available", bedConfig: "MAT_EXTRA", features: ["extra_bed", "living_room", "balcony"], maxOccupancy: 5, notes: null },
+      { id: "r306", roomNumber: "306", roomTypeId: "rt3", floor: 3, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room", "balcony"], maxOccupancy: 4, notes: null },
+      { id: "r307", roomNumber: "307", roomTypeId: "rt2", floor: 3, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
+      // Floor 4
+      { id: "r401", roomNumber: "401", roomTypeId: "rt2", floor: 4, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
+      { id: "r402", roomNumber: "402", roomTypeId: "rt1", floor: 4, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r403", roomNumber: "403", roomTypeId: "rt1", floor: 4, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r404", roomNumber: "404", roomTypeId: "rt1", floor: 4, status: "available", bedConfig: "MAT", features: ["shower_only"], maxOccupancy: 2, notes: null },
+      { id: "r405", roomNumber: "405", roomTypeId: "rt3", floor: 4, status: "available", bedConfig: "MAT_EXTRA", features: ["living_room", "balcony"], maxOccupancy: 4, notes: null },
+      { id: "r406", roomNumber: "406", roomTypeId: "rt3", floor: 4, status: "available", bedConfig: "MAT_EXTRA", features: ["extra_bed", "living_room", "balcony"], maxOccupancy: 5, notes: null },
+      { id: "r407", roomNumber: "407", roomTypeId: "rt2", floor: 4, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
+      // Floor 5
+      { id: "r501", roomNumber: "501", roomTypeId: "rt2", floor: 5, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
+      { id: "r502", roomNumber: "502", roomTypeId: "rt1", floor: 5, status: "available", bedConfig: "MAT_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r503", roomNumber: "503", roomTypeId: "rt1", floor: 5, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r504", roomNumber: "504", roomTypeId: "rt1", floor: 5, status: "available", bedConfig: "MAT", features: ["shower_only"], maxOccupancy: 2, notes: null },
+      { id: "r505", roomNumber: "505", roomTypeId: "rt3", floor: 5, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room", "balcony"], maxOccupancy: 4, notes: null },
+      { id: "r506", roomNumber: "506", roomTypeId: "rt3", floor: 5, status: "available", bedConfig: "MAT_EXTRA", features: ["extra_bed", "living_room", "balcony"], maxOccupancy: 5, notes: null },
+      { id: "r507", roomNumber: "507", roomTypeId: "rt2", floor: 5, status: "available", bedConfig: "MAT_CC", features: [], maxOccupancy: 2, notes: null },
+      // Floor 6
+      { id: "r601", roomNumber: "601", roomTypeId: "rt2", floor: 6, status: "available", bedConfig: "TWIN_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
+      { id: "r602", roomNumber: "602", roomTypeId: "rt1", floor: 6, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r603", roomNumber: "603", roomTypeId: "rt1", floor: 6, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
+      { id: "r604", roomNumber: "604", roomTypeId: "rt1", floor: 6, status: "available", bedConfig: "MAT", features: [], maxOccupancy: 2, notes: null },
+      { id: "r605", roomNumber: "605", roomTypeId: "rt3", floor: 6, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room", "balcony", "extra_bed"], maxOccupancy: 4, notes: null },
+      { id: "r606", roomNumber: "606", roomTypeId: "rt3", floor: 6, status: "available", bedConfig: "MAT_EXTRA", features: ["living_room", "balcony"], maxOccupancy: 4, notes: null },
+      { id: "r607", roomNumber: "607", roomTypeId: "rt2", floor: 6, status: "available", bedConfig: "MAT", features: [], maxOccupancy: 2, notes: null },
+    ];
     rooms.forEach((r) => this.rooms.set(r.id, r));
 
     // Create companies
@@ -317,7 +333,7 @@ export class MemStorage implements IStorage {
     guests.forEach((g) => this.guests.set(g.id, g));
     this.guestCounter = 8;
 
-    // Create reservations with varied dates
+    // Create reservations with varied dates using real room IDs
     const today = new Date().toISOString().split("T")[0];
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
     const dayAfter = new Date(Date.now() + 2 * 86400000).toISOString().split("T")[0];
@@ -327,31 +343,39 @@ export class MemStorage implements IStorage {
     const in10Days = new Date(Date.now() + 10 * 86400000).toISOString().split("T")[0];
     
     const reservations: Reservation[] = [
-      { id: "res1", reservationCode: "RES-1001", guestId: "g1", companyId: null, roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res2", reservationCode: "RES-1002", guestId: "g2", companyId: null, roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res3", reservationCode: "RES-1003", guestId: "g3", companyId: null, roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "booking", otaChannelId: null, externalReservationId: "BK-123456", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res4", reservationCode: "RES-1004", guestId: "g4", companyId: null, roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 4, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res5", reservationCode: "RES-1005", guestId: "g5", companyId: "comp1", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res6", reservationCode: "RES-1006", guestId: "g6", companyId: null, roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "tentative", source: "telefono", otaChannelId: null, externalReservationId: null, numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res7", reservationCode: "RES-1007", guestId: "g7", companyId: null, roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res8", reservationCode: "RES-1008", guestId: "g8", companyId: null, roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "expedia", otaChannelId: null, externalReservationId: "EX-789012", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res9", reservationCode: "RES-1009", guestId: "g1", companyId: null, roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res10", reservationCode: "RES-1010", guestId: "g2", companyId: null, roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "airbnb", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res1", reservationCode: "RES-1001", guestId: "g1", companyId: null, roomTypeId: "rt2", roomId: "r201", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "120.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res2", reservationCode: "RES-1002", guestId: "g2", companyId: null, roomTypeId: "rt3", roomId: "r305", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "180.00", discountType: "percent", discountValue: "10", finalRatePerNight: "162.00", totalRoomAmount: "1134.00", status: "checked_in", source: "web", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res3", reservationCode: "RES-1003", guestId: "g3", companyId: null, roomTypeId: "rt3", roomId: "r505", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "180.00", discountType: "none", discountValue: "0", finalRatePerNight: "180.00", totalRoomAmount: "540.00", status: "checked_in", source: "booking", otaChannelId: null, externalReservationId: "BK-123456", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res4", reservationCode: "RES-1004", guestId: "g4", companyId: null, roomTypeId: "rt2", roomId: "r401", ratePlanId: "rp2", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res5", reservationCode: "RES-1005", guestId: "g5", companyId: "comp1", roomTypeId: "rt1", roomId: "r302", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "75.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "65.00", totalRoomAmount: "65.00", status: "confirmed", source: "empresa", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res6", reservationCode: "RES-1006", guestId: "g6", companyId: null, roomTypeId: "rt1", roomId: "r202", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "85.00", discountType: "none", discountValue: "0", finalRatePerNight: "85.00", totalRoomAmount: "340.00", status: "tentative", source: "telefono", otaChannelId: null, externalReservationId: null, numberOfGuests: 1, notes: "Llegada tardia", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res7", reservationCode: "RES-1007", guestId: "g7", companyId: null, roomTypeId: "rt2", roomId: "r307", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "600.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res8", reservationCode: "RES-1008", guestId: "g8", companyId: null, roomTypeId: "rt3", roomId: "r405", ratePlanId: "rp3", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "180.00", discountType: "none", discountValue: "0", finalRatePerNight: "180.00", totalRoomAmount: "1260.00", status: "pending", source: "expedia", otaChannelId: null, externalReservationId: "EX-789012", numberOfGuests: 2, notes: "Turista frances", createdAt: new Date().toISOString(), lastModifiedBy: null },
     ];
     reservations.forEach((r) => this.reservations.set(r.id, r));
+    
+    // Update room statuses for checked-in reservations
+    const room201 = this.rooms.get("r201");
+    if (room201) this.rooms.set("r201", { ...room201, status: "occupied" });
+    const room305 = this.rooms.get("r305");
+    if (room305) this.rooms.set("r305", { ...room305, status: "occupied" });
+    const room505 = this.rooms.get("r505");
+    if (room505) this.rooms.set("r505", { ...room505, status: "occupied" });
+    const room401 = this.rooms.get("r401");
+    if (room401) this.rooms.set("r401", { ...room401, status: "occupied" });
 
     // Create sample charges for checked-in reservations
     const charges: Charge[] = [
-      { id: "ch1", reservationId: "res1", description: "Alojamiento - 1 noche", amount: "80.00", date: today, category: "room", createdBy: null },
-      { id: "ch2", reservationId: "res2", description: "Alojamiento - 7 noches", amount: "945.00", date: today, category: "room", createdBy: null },
+      { id: "ch1", reservationId: "res1", description: "Alojamiento - 1 noche", amount: "120.00", date: today, category: "room", createdBy: null },
+      { id: "ch2", reservationId: "res2", description: "Alojamiento - 7 noches", amount: "1134.00", date: today, category: "room", createdBy: null },
       { id: "ch2b", reservationId: "res2", description: "Minibar", amount: "25.00", date: today, category: "minibar", createdBy: null },
-      { id: "ch3", reservationId: "res3", description: "Alojamiento - 3 noches", amount: "450.00", date: today, category: "room", createdBy: null },
+      { id: "ch3", reservationId: "res3", description: "Alojamiento - 3 noches", amount: "540.00", date: today, category: "room", createdBy: null },
       { id: "ch3b", reservationId: "res3", description: "Restaurante - Cena", amount: "85.00", date: today, category: "restaurant", createdBy: null },
       { id: "ch4", reservationId: "res4", description: "Alojamiento - 2 noches", amount: "240.00", date: today, category: "room", createdBy: null },
     ];
     charges.forEach((c) => this.charges.set(c.id, c));
 
-    this.reservationCounter = 1010;
+    this.reservationCounter = 1008;
   }
 
   // Users
@@ -487,6 +511,9 @@ export class MemStorage implements IStorage {
       roomTypeId: insertRoom.roomTypeId,
       floor: insertRoom.floor ?? 1,
       status: (insertRoom.status ?? "available") as RoomStatus,
+      bedConfig: insertRoom.bedConfig ?? null,
+      features: insertRoom.features ?? null,
+      maxOccupancy: insertRoom.maxOccupancy ?? 2,
       notes: insertRoom.notes ?? null,
     };
     this.rooms.set(id, room);

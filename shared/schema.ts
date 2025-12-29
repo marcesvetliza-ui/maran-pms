@@ -34,6 +34,8 @@ export type RatePlan = typeof ratePlans.$inferSelect;
 
 // Rooms
 export type RoomStatus = "available" | "occupied" | "dirty" | "cleaning" | "maintenance" | "oos";
+export type RoomFeature = "accessible" | "balcony" | "separable_bed" | "sofa_bed" | "shower_only" | "extra_bed" | "twin_config" | "living_room";
+export type BedConfig = "MAT" | "TWIN" | "MAT_CC" | "TWIN_CC" | "MAT_EXTRA" | "MAT_CC_EXTRA";
 
 export const rooms = pgTable("rooms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -41,6 +43,9 @@ export const rooms = pgTable("rooms", {
   roomTypeId: varchar("room_type_id").notNull(),
   floor: integer("floor").notNull().default(1),
   status: text("status").$type<RoomStatus>().notNull().default("available"),
+  bedConfig: text("bed_config"),
+  features: text("features").array(),
+  maxOccupancy: integer("max_occupancy").default(2),
   notes: text("notes"),
 });
 
