@@ -847,7 +847,7 @@ export async function registerRoutes(
 
   app.post("/api/groups/:groupId/blocks", async (req, res) => {
     try {
-      const { roomTypeId, quantity, ratePlanId, agreedRate } = req.body;
+      const { roomTypeId, quantity, ratePlanId, agreedRate, blockCheckInDate, blockCheckOutDate } = req.body;
       
       if (!roomTypeId || quantity === undefined) {
         return res.status(400).json({ error: "roomTypeId and quantity are required" });
@@ -859,6 +859,8 @@ export async function registerRoutes(
         quantity: typeof quantity === 'number' ? quantity : parseInt(quantity, 10),
         ratePlanId: ratePlanId || null,
         agreedRate: agreedRate ? String(agreedRate) : null,
+        blockCheckInDate: blockCheckInDate || null,
+        blockCheckOutDate: blockCheckOutDate || null,
       });
       res.status(201).json(block);
     } catch (error) {
@@ -893,7 +895,7 @@ export async function registerRoutes(
   // Group Room Assignment
   app.post("/api/groups/:groupId/assign-room", async (req, res) => {
     try {
-      const { roomId, guestFirstName, guestLastName } = req.body;
+      const { roomId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId } = req.body;
       if (!roomId || !guestFirstName || !guestLastName) {
         return res.status(400).json({ error: "Room ID, guest first name, and guest last name are required" });
       }
@@ -901,7 +903,13 @@ export async function registerRoutes(
         req.params.groupId,
         roomId,
         guestFirstName,
-        guestLastName
+        guestLastName,
+        {
+          checkInDate: checkInDate || undefined,
+          checkOutDate: checkOutDate || undefined,
+          agreedRate: agreedRate ? String(agreedRate) : undefined,
+          ratePlanId: ratePlanId !== undefined ? ratePlanId : undefined,
+        }
       );
       if (!reservation) {
         return res.status(400).json({ error: "Could not assign room to group" });

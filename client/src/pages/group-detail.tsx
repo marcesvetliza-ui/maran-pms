@@ -71,11 +71,13 @@ function GroupStatusBadge({ status }: { status: GroupStatus }) {
 
 function AddBlockDialog({
   groupId,
+  group,
   open,
   onOpenChange,
   onSuccess,
 }: {
   groupId: string;
+  group: GroupWithDetails;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
@@ -85,6 +87,9 @@ function AddBlockDialog({
   const [quantity, setQuantity] = useState(1);
   const [ratePlanId, setRatePlanId] = useState("");
   const [agreedRate, setAgreedRate] = useState("");
+  const [useCustomDates, setUseCustomDates] = useState(false);
+  const [blockCheckInDate, setBlockCheckInDate] = useState(group.checkInDate);
+  const [blockCheckOutDate, setBlockCheckOutDate] = useState(group.checkOutDate);
 
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
@@ -107,6 +112,8 @@ function AddBlockDialog({
         quantity: Number(quantity),
         ratePlanId: ratePlanId || null,
         agreedRate: agreedRate ? parseFloat(agreedRate).toFixed(2) : null,
+        blockCheckInDate: useCustomDates ? blockCheckInDate : null,
+        blockCheckOutDate: useCustomDates ? blockCheckOutDate : null,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
@@ -117,6 +124,9 @@ function AddBlockDialog({
       setQuantity(1);
       setRatePlanId("");
       setAgreedRate("");
+      setUseCustomDates(false);
+      setBlockCheckInDate(group.checkInDate);
+      setBlockCheckOutDate(group.checkOutDate);
     },
     onError: () => {
       toast({ title: "Error al agregar bloque", variant: "destructive" });
@@ -133,68 +143,113 @@ function AddBlockDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Agregar Bloque de Habitaciones</DialogTitle>
           <DialogDescription>
-            Defina el tipo y cantidad de habitaciones para el grupo
+            Defina el tipo, cantidad y tarifa para este bloque
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div>
-            <Label>Tipo de Habitación *</Label>
-            <Select value={roomTypeId} onValueChange={setRoomTypeId}>
-              <SelectTrigger data-testid="select-block-room-type">
-                <SelectValue placeholder="Seleccionar tipo" />
-              </SelectTrigger>
-              <SelectContent>
-                {roomTypes?.map((rt) => (
-                  <SelectItem key={rt.id} value={rt.id}>
-                    {rt.name} ({rt.code})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Tipo de Habitación *</Label>
+              <Select value={roomTypeId} onValueChange={setRoomTypeId}>
+                <SelectTrigger data-testid="select-block-room-type">
+                  <SelectValue placeholder="Seleccionar tipo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {roomTypes?.map((rt) => (
+                    <SelectItem key={rt.id} value={rt.id}>
+                      {rt.name} ({rt.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Cantidad *</Label>
+              <Input
+                type="number"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                data-testid="input-block-quantity"
+              />
+            </div>
           </div>
 
-          <div>
-            <Label>Cantidad *</Label>
-            <Input
-              type="number"
-              min={1}
-              value={quantity}
-              onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-              data-testid="input-block-quantity"
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Plan Tarifario</Label>
+              <Select value={ratePlanId} onValueChange={handleRatePlanChange} disabled={!roomTypeId}>
+                <SelectTrigger data-testid="select-block-rate-plan">
+                  <SelectValue placeholder="Seleccionar plan" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ratePlans?.map((rp) => (
+                    <SelectItem key={rp.id} value={rp.id}>
+                      {rp.name} - ${rp.baseRate}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Tarifa Acordada</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={agreedRate}
+                onChange={(e) => setAgreedRate(e.target.value)}
+                placeholder="0.00"
+                data-testid="input-block-agreed-rate"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pt-2">
+            <input
+              type="checkbox"
+              id="useCustomDates"
+              checked={useCustomDates}
+              onChange={(e) => setUseCustomDates(e.target.checked)}
+              className="h-4 w-4"
+              data-testid="checkbox-custom-dates"
             />
+            <Label htmlFor="useCustomDates" className="font-normal">
+              Usar fechas diferentes al grupo
+            </Label>
           </div>
 
-          <div>
-            <Label>Plan Tarifario</Label>
-            <Select value={ratePlanId} onValueChange={handleRatePlanChange} disabled={!roomTypeId}>
-              <SelectTrigger data-testid="select-block-rate-plan">
-                <SelectValue placeholder="Seleccionar plan" />
-              </SelectTrigger>
-              <SelectContent>
-                {ratePlans?.map((rp) => (
-                  <SelectItem key={rp.id} value={rp.id}>
-                    {rp.name} - ${rp.baseRate}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {useCustomDates && (
+            <div className="grid grid-cols-2 gap-4 rounded-md border p-3 bg-muted/30">
+              <div>
+                <Label>Check-in Bloque</Label>
+                <Input
+                  type="date"
+                  value={blockCheckInDate}
+                  onChange={(e) => setBlockCheckInDate(e.target.value)}
+                  data-testid="input-block-checkin"
+                />
+              </div>
+              <div>
+                <Label>Check-out Bloque</Label>
+                <Input
+                  type="date"
+                  value={blockCheckOutDate}
+                  onChange={(e) => setBlockCheckOutDate(e.target.value)}
+                  data-testid="input-block-checkout"
+                />
+              </div>
+            </div>
+          )}
 
-          <div>
-            <Label>Tarifa Acordada</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min={0}
-              value={agreedRate}
-              onChange={(e) => setAgreedRate(e.target.value)}
-              placeholder="0.00"
-              data-testid="input-block-agreed-rate"
-            />
+          <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+            <p>Fechas del grupo: {new Date(group.checkInDate).toLocaleDateString("es-AR")} - {new Date(group.checkOutDate).toLocaleDateString("es-AR")}</p>
           </div>
         </div>
 
@@ -232,6 +287,17 @@ function AssignRoomDialog({
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [guestFirstName, setGuestFirstName] = useState("Grupo");
   const [guestLastName, setGuestLastName] = useState("");
+  
+  // Get default dates from block or group
+  const defaultCheckIn = block.blockCheckInDate || group.checkInDate;
+  const defaultCheckOut = block.blockCheckOutDate || group.checkOutDate;
+  const defaultRate = block.agreedRate || "";
+  
+  const [useCustomDates, setUseCustomDates] = useState(false);
+  const [checkInDate, setCheckInDate] = useState(defaultCheckIn);
+  const [checkOutDate, setCheckOutDate] = useState(defaultCheckOut);
+  const [useCustomRate, setUseCustomRate] = useState(false);
+  const [agreedRate, setAgreedRate] = useState(defaultRate);
 
   const { data: rooms } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
@@ -247,6 +313,10 @@ function AssignRoomDialog({
         roomId: selectedRoomId,
         guestFirstName,
         guestLastName,
+        checkInDate: useCustomDates ? checkInDate : undefined,
+        checkOutDate: useCustomDates ? checkOutDate : undefined,
+        agreedRate: useCustomRate ? agreedRate : undefined,
+        ratePlanId: block.ratePlanId,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", group.id] });
@@ -257,6 +327,8 @@ function AssignRoomDialog({
       setSelectedRoomId("");
       setGuestFirstName("Grupo");
       setGuestLastName("");
+      setUseCustomDates(false);
+      setUseCustomRate(false);
     },
     onError: () => {
       toast({ title: "Error al asignar habitación", variant: "destructive" });
@@ -265,7 +337,7 @@ function AssignRoomDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Asignar Habitación</DialogTitle>
           <DialogDescription>
@@ -316,9 +388,75 @@ function AssignRoomDialog({
             </div>
           </div>
 
-          <div className="rounded-md bg-muted p-3 text-sm">
-            <p>Fechas: {new Date(group.checkInDate).toLocaleDateString("es-AR")} - {new Date(group.checkOutDate).toLocaleDateString("es-AR")}</p>
-            {block.agreedRate && <p>Tarifa acordada: ${block.agreedRate}/noche</p>}
+          <div className="flex items-center gap-2 pt-2">
+            <input
+              type="checkbox"
+              id="useCustomDatesAssign"
+              checked={useCustomDates}
+              onChange={(e) => setUseCustomDates(e.target.checked)}
+              className="h-4 w-4"
+              data-testid="checkbox-assign-custom-dates"
+            />
+            <Label htmlFor="useCustomDatesAssign" className="font-normal">
+              Usar fechas personalizadas
+            </Label>
+          </div>
+
+          {useCustomDates && (
+            <div className="grid grid-cols-2 gap-4 rounded-md border p-3 bg-muted/30">
+              <div>
+                <Label>Check-in</Label>
+                <Input
+                  type="date"
+                  value={checkInDate}
+                  onChange={(e) => setCheckInDate(e.target.value)}
+                  data-testid="input-assign-checkin"
+                />
+              </div>
+              <div>
+                <Label>Check-out</Label>
+                <Input
+                  type="date"
+                  value={checkOutDate}
+                  onChange={(e) => setCheckOutDate(e.target.value)}
+                  data-testid="input-assign-checkout"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="useCustomRateAssign"
+              checked={useCustomRate}
+              onChange={(e) => setUseCustomRate(e.target.checked)}
+              className="h-4 w-4"
+              data-testid="checkbox-assign-custom-rate"
+            />
+            <Label htmlFor="useCustomRateAssign" className="font-normal">
+              Usar tarifa personalizada
+            </Label>
+          </div>
+
+          {useCustomRate && (
+            <div className="rounded-md border p-3 bg-muted/30">
+              <Label>Tarifa por Noche</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={agreedRate}
+                onChange={(e) => setAgreedRate(e.target.value)}
+                placeholder="0.00"
+                data-testid="input-assign-rate"
+              />
+            </div>
+          )}
+
+          <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+            <p>Fechas predeterminadas: {new Date(defaultCheckIn).toLocaleDateString("es-AR")} - {new Date(defaultCheckOut).toLocaleDateString("es-AR")}</p>
+            {defaultRate && <p>Tarifa del bloque: ${defaultRate}/noche</p>}
           </div>
         </div>
 
@@ -622,12 +760,15 @@ export default function GroupDetailPage() {
         </TabsContent>
       </Tabs>
 
-      <AddBlockDialog
-        groupId={groupId}
-        open={showAddBlockDialog}
-        onOpenChange={setShowAddBlockDialog}
-        onSuccess={() => {}}
-      />
+      {group && (
+        <AddBlockDialog
+          groupId={groupId}
+          group={group}
+          open={showAddBlockDialog}
+          onOpenChange={setShowAddBlockDialog}
+          onSuccess={() => {}}
+        />
+      )}
 
       {assigningBlock && (
         <AssignRoomDialog

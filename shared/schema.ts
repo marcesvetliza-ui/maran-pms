@@ -316,6 +316,9 @@ export const groupRoomBlocks = pgTable("group_room_blocks", {
   quantity: integer("quantity").notNull(),
   ratePlanId: varchar("rate_plan_id"),
   agreedRate: decimal("agreed_rate", { precision: 12, scale: 2 }),
+  // Block-specific dates (can differ from group master dates)
+  blockCheckInDate: text("block_check_in_date"),
+  blockCheckOutDate: text("block_check_out_date"),
 });
 
 export const insertGroupRoomBlockSchema = createInsertSchema(groupRoomBlocks).omit({ id: true });

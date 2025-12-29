@@ -163,7 +163,18 @@ export interface IStorage {
   // Group Reservation Links
   getGroupReservationLinks(groupId: string): Promise<GroupReservationLink[]>;
   createGroupReservationLink(link: InsertGroupReservationLink): Promise<GroupReservationLink>;
-  assignRoomToGroup(groupId: string, roomId: string, guestFirstName: string, guestLastName: string): Promise<Reservation | undefined>;
+  assignRoomToGroup(
+    groupId: string, 
+    roomId: string, 
+    guestFirstName: string, 
+    guestLastName: string,
+    options?: {
+      checkInDate?: string;
+      checkOutDate?: string;
+      agreedRate?: string;
+      ratePlanId?: string | null;
+    }
+  ): Promise<Reservation | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -1273,7 +1284,18 @@ export class MemStorage implements IStorage {
     return newLink;
   }
 
-  async assignRoomToGroup(groupId: string, roomId: string, guestFirstName: string, guestLastName: string): Promise<Reservation | undefined> {
+  async assignRoomToGroup(
+    groupId: string, 
+    roomId: string, 
+    guestFirstName: string, 
+    guestLastName: string,
+    options?: {
+      checkInDate?: string;
+      checkOutDate?: string;
+      agreedRate?: string;
+      ratePlanId?: string | null;
+    }
+  ): Promise<Reservation | undefined> {
     const group = this.groups.get(groupId);
     if (!group) return undefined;
 
@@ -1291,15 +1313,20 @@ export class MemStorage implements IStorage {
       nationality: null,
     });
 
-    // Calculate nights
-    const checkIn = new Date(group.checkInDate);
-    const checkOut = new Date(group.checkOutDate);
-    const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
-
-    // Find agreed rate from block if available
+    // Find matching block for defaults
     const blocks = await this.getGroupBlocks(groupId);
     const matchingBlock = blocks.find(b => b.roomTypeId === room.roomTypeId);
-    const agreedRate = matchingBlock?.agreedRate || "0";
+
+    // Use provided values or fall back to block values or group values
+    const checkInDate = options?.checkInDate || matchingBlock?.blockCheckInDate || group.checkInDate;
+    const checkOutDate = options?.checkOutDate || matchingBlock?.blockCheckOutDate || group.checkOutDate;
+    const agreedRate = options?.agreedRate || matchingBlock?.agreedRate || "0";
+    const ratePlanId = options?.ratePlanId !== undefined ? options.ratePlanId : (matchingBlock?.ratePlanId || null);
+
+    // Calculate nights
+    const checkIn = new Date(checkInDate);
+    const checkOut = new Date(checkOutDate);
+    const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
 
     // Create reservation
     const reservation = await this.createReservation({
@@ -1307,9 +1334,9 @@ export class MemStorage implements IStorage {
       guestId: guest.id,
       roomTypeId: room.roomTypeId,
       roomId: room.id,
-      ratePlanId: matchingBlock?.ratePlanId || null,
-      checkInDate: group.checkInDate,
-      checkOutDate: group.checkOutDate,
+      ratePlanId,
+      checkInDate,
+      checkOutDate,
       nights,
       baseRatePerNight: agreedRate,
       discountType: "none",
