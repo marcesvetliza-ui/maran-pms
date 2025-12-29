@@ -283,3 +283,65 @@ export type OTAChannelWithStats = OTAChannel & {
 export type OTAReservationLogWithChannel = OTAReservationLog & {
   channel: OTAChannel;
 };
+
+// Groups (Grupos de reservas)
+export type GroupStatus = "tentative" | "blocked" | "confirmed" | "inhouse" | "finished" | "cancelled";
+
+export const groups = pgTable("groups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupCode: text("group_code").notNull().unique(),
+  name: text("name").notNull(),
+  contactName: text("contact_name"),
+  contactPhone: text("contact_phone"),
+  contactEmail: text("contact_email"),
+  eventDate: text("event_date"),
+  checkInDate: text("check_in_date").notNull(),
+  checkOutDate: text("check_out_date").notNull(),
+  status: text("status").$type<GroupStatus>().notNull().default("tentative"),
+  releaseDate: text("release_date"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+  createdBy: varchar("created_by"),
+});
+
+export const insertGroupSchema = createInsertSchema(groups).omit({ id: true });
+export type InsertGroup = z.infer<typeof insertGroupSchema>;
+export type Group = typeof groups.$inferSelect;
+
+// Group Room Blocks (Bloqueos de habitaciones para grupos)
+export const groupRoomBlocks = pgTable("group_room_blocks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupId: varchar("group_id").notNull(),
+  roomTypeId: varchar("room_type_id").notNull(),
+  quantity: integer("quantity").notNull(),
+  ratePlanId: varchar("rate_plan_id"),
+  agreedRate: decimal("agreed_rate", { precision: 12, scale: 2 }),
+});
+
+export const insertGroupRoomBlockSchema = createInsertSchema(groupRoomBlocks).omit({ id: true });
+export type InsertGroupRoomBlock = z.infer<typeof insertGroupRoomBlockSchema>;
+export type GroupRoomBlock = typeof groupRoomBlocks.$inferSelect;
+
+// Group Reservation Links (Vinculación de reservas a grupos)
+export const groupReservationLinks = pgTable("group_reservation_links", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupId: varchar("group_id").notNull(),
+  reservationId: varchar("reservation_id").notNull(),
+});
+
+export const insertGroupReservationLinkSchema = createInsertSchema(groupReservationLinks).omit({ id: true });
+export type InsertGroupReservationLink = z.infer<typeof insertGroupReservationLinkSchema>;
+export type GroupReservationLink = typeof groupReservationLinks.$inferSelect;
+
+// Extended Group types
+export type GroupRoomBlockWithDetails = GroupRoomBlock & {
+  roomType: RoomType;
+  ratePlan?: RatePlan;
+};
+
+export type GroupWithDetails = Group & {
+  blocks: GroupRoomBlockWithDetails[];
+  reservations: ReservationWithDetails[];
+  totalRooms: number;
+  assignedRooms: number;
+};
