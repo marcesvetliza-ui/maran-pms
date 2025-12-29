@@ -353,6 +353,19 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/reservations/check-ins-by-date", async (req, res) => {
+    try {
+      const { date } = req.query;
+      if (!date || typeof date !== "string") {
+        return res.status(400).json({ error: "Date parameter required" });
+      }
+      const reservations = await storage.getCheckInsByDate(date);
+      res.json(reservations);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching check-ins by date" });
+    }
+  });
+
   app.get("/api/reservations/check-out", async (req, res) => {
     try {
       const reservations = await storage.getReservationsForCheckOut();

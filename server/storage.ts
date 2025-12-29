@@ -84,6 +84,7 @@ export interface IStorage {
   getRecentReservations(limit: number): Promise<ReservationWithDetails[]>;
   getReservationsForCheckIn(): Promise<ReservationWithDetails[]>;
   getReservationsForCheckOut(): Promise<ReservationWithDetails[]>;
+  getCheckInsByDate(date: string): Promise<ReservationWithDetails[]>;
   getReservationsByGuest(guestId: string): Promise<ReservationWithDetails[]>;
   createReservation(reservation: InsertReservation): Promise<Reservation>;
   updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined>;
@@ -599,6 +600,11 @@ export class MemStorage implements IStorage {
   async getReservationsForCheckOut(): Promise<ReservationWithDetails[]> {
     const reservations = await this.getReservations();
     return reservations.filter((r) => r.status === "checked_in");
+  }
+
+  async getCheckInsByDate(date: string): Promise<ReservationWithDetails[]> {
+    const reservations = await this.getReservations();
+    return reservations.filter((r) => r.checkInDate === date && r.status === "checked_in");
   }
 
   async getReservationsByGuest(guestId: string): Promise<ReservationWithDetails[]> {

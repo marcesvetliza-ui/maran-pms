@@ -10,6 +10,7 @@ import {
   Clock,
   Plus,
   UserPlus,
+  CalendarDays,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,7 @@ import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, Ra
 
 export default function CheckInPage() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"reservations" | "walkin">("reservations");
+  const [activeTab, setActiveTab] = useState<"reservations" | "walkin" | "history">("reservations");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
@@ -48,9 +49,22 @@ export default function CheckInPage() {
   const [selectedRatePlanId, setSelectedRatePlanId] = useState<string>("");
   const [nights, setNights] = useState<number>(1);
   const [numberOfGuests, setNumberOfGuests] = useState<number>(1);
+  
+  const [historyDate, setHistoryDate] = useState<string>(() => {
+    return new Date().toISOString().split("T")[0];
+  });
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations/check-in"],
+  });
+
+  const { data: checkInsByDate, isLoading: isLoadingHistory } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/reservations/check-ins-by-date", historyDate],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/reservations/check-ins-by-date?date=${historyDate}`, undefined);
+      return res.json();
+    },
+    enabled: activeTab === "history",
   });
 
   const { data: roomTypes } = useQuery<RoomType[]>({
@@ -84,6 +98,7 @@ export default function CheckInPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-in"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-ins-by-date"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
@@ -180,6 +195,7 @@ export default function CheckInPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-in"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-ins-by-date"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
@@ -240,8 +256,8 @@ export default function CheckInPage() {
         <p className="text-muted-foreground capitalize">{today}</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "reservations" | "walkin")}>
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "reservations" | "walkin" | "history")}>
+        <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="reservations" data-testid="tab-reservations">
             <LogIn className="h-4 w-4 mr-2" />
             Reservas Pendientes
@@ -249,6 +265,10 @@ export default function CheckInPage() {
           <TabsTrigger value="walkin" data-testid="tab-walkin">
             <UserPlus className="h-4 w-4 mr-2" />
             Walk-in
+          </TabsTrigger>
+          <TabsTrigger value="history" data-testid="tab-history">
+            <CalendarDays className="h-4 w-4 mr-2" />
+            Check-ins del Dia
           </TabsTrigger>
         </TabsList>
 
@@ -560,6 +580,107 @@ export default function CheckInPage() {
               </Card>
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="history" className="space-y-6 mt-6">
+          <Card className="bg-accent/30 border-accent">
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent">
+                <CalendarDays className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold">Check-ins por Fecha</h3>
+                <p className="text-sm text-muted-foreground">
+                  Ver huespedes que hicieron check-in en una fecha especifica
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Fecha:</Label>
+                <Input
+                  type="date"
+                  value={historyDate}
+                  onChange={(e) => setHistoryDate(e.target.value)}
+                  className="w-auto"
+                  data-testid="input-history-date"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {isLoadingHistory ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {[...Array(3)].map((_, i) => (
+                <Skeleton key={i} className="h-40" />
+              ))}
+            </div>
+          ) : checkInsByDate && checkInsByDate.length > 0 ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-sm">
+                  {checkInsByDate.length} check-in(s) registrado(s)
+                </Badge>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {checkInsByDate.map((reservation) => (
+                  <Card key={reservation.id} data-testid={`history-card-${reservation.id}`}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10 text-green-600 font-semibold">
+                            {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                          </div>
+                          <div>
+                            <CardTitle className="text-lg">
+                              {reservation.guest?.firstName} {reservation.guest?.lastName}
+                            </CardTitle>
+                            <CardDescription>{reservation.reservationCode}</CardDescription>
+                          </div>
+                        </div>
+                        <Badge variant="default" className="bg-green-500">Check-in</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex items-center gap-2 text-sm">
+                          <DoorOpen className="h-4 w-4 text-muted-foreground" />
+                          <span>Hab. {reservation.room?.roomNumber}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span>{reservation.numberOfGuests} huesped(es)</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Calendar className="h-4 w-4 text-muted-foreground" />
+                          <span>Entrada: {reservation.checkInDate}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <Clock className="h-4 w-4 text-muted-foreground" />
+                          <span>Salida: {reservation.checkOutDate}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <CalendarDays className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No hay check-ins para esta fecha</h3>
+                <p className="text-muted-foreground">
+                  No se encontraron registros de check-in para el {new Date(historyDate + "T12:00:00").toLocaleDateString("es-ES", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric"
+                  })}.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
 

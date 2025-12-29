@@ -17,6 +17,7 @@ import CheckInPage from "@/pages/check-in";
 import CheckOutPage from "@/pages/check-out";
 import RatePlansPage from "@/pages/rate-plans";
 import OTAChannelsPage from "@/pages/ota-channels";
+import NewReservationPage from "@/pages/new-reservation";
 
 function Router() {
   return (
@@ -25,7 +26,7 @@ function Router() {
       <Route path="/planning" component={PlanningPage} />
       <Route path="/rooms" component={RoomsPage} />
       <Route path="/reservations" component={ReservationsPage} />
-      <Route path="/reservations/new" component={ReservationsPage} />
+      <Route path="/new-reservation" component={NewReservationPage} />
       <Route path="/guests" component={GuestsPage} />
       <Route path="/check-in" component={CheckInPage} />
       <Route path="/check-out" component={CheckOutPage} />

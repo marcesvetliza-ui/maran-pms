@@ -11,6 +11,7 @@ import {
   CalendarDays,
   DollarSign,
   Globe,
+  CalendarPlus,
 } from "lucide-react";
 import {
   Sidebar,
@@ -64,6 +65,11 @@ const mainMenuItems = [
 ];
 
 const operationsMenuItems = [
+  {
+    title: "Nueva Reserva",
+    url: "/new-reservation",
+    icon: CalendarPlus,
+  },
   {
     title: "Check-in",
     url: "/check-in",
