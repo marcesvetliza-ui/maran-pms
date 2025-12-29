@@ -48,6 +48,31 @@ export const insertRoomSchema = createInsertSchema(rooms).omit({ id: true });
 export type InsertRoom = z.infer<typeof insertRoomSchema>;
 export type Room = typeof rooms.$inferSelect;
 
+// Companies (Empresas)
+export const companies = pgTable("companies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessName: text("business_name").notNull(),
+  tradeName: text("trade_name"),
+  taxId: text("tax_id").notNull(),
+  taxType: text("tax_type").default("CUIT"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  city: text("city"),
+  country: text("country").default("Argentina"),
+  contactName: text("contact_name"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  creditLimit: decimal("credit_limit", { precision: 12, scale: 2 }).default("0"),
+  paymentTermDays: integer("payment_term_days").default(30),
+  notes: text("notes"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type Company = typeof companies.$inferSelect;
+
 // Guests
 export const guests = pgTable("guests", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -59,6 +84,7 @@ export const guests = pgTable("guests", {
   documentNumber: text("document_number"),
   nationality: text("nationality"),
   address: text("address"),
+  companyId: varchar("company_id"),
 });
 
 export const insertGuestSchema = createInsertSchema(guests).omit({ id: true });
@@ -74,6 +100,7 @@ export const reservations = pgTable("reservations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   reservationCode: text("reservation_code").notNull(),
   guestId: varchar("guest_id").notNull(),
+  companyId: varchar("company_id"),
   roomTypeId: varchar("room_type_id").notNull(),
   roomId: varchar("room_id").notNull(),
   ratePlanId: varchar("rate_plan_id"),
@@ -138,8 +165,13 @@ export type RatePlanWithRoomType = RatePlan & {
   roomType: RoomType;
 };
 
+export type GuestWithCompany = Guest & {
+  company?: Company;
+};
+
 export type ReservationWithDetails = Reservation & {
   guest: Guest;
+  company?: Company;
   room: Room & { roomType?: RoomType };
   ratePlan?: RatePlan;
   charges?: Charge[];
