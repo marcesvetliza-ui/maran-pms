@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { ChevronLeft, ChevronRight, Info, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -283,6 +284,7 @@ function QuickReservationDialog({
 }
 
 export default function PlanningPage() {
+  const [, navigate] = useLocation();
   const [dateRange, setDateRange] = useState(() => {
     const today = new Date();
     const start = new Date(today);
@@ -340,7 +342,7 @@ export default function PlanningPage() {
     });
   };
 
-  const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus) => {
+  const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
     if (status === "available") {
       setSelectedCell({
         roomId: room.id,
@@ -349,6 +351,8 @@ export default function PlanningPage() {
         checkInDate: day,
       });
       setQuickReservationOpen(true);
+    } else if (reservationId) {
+      navigate(`/reservations?view=${reservationId}`);
     }
   };
 
@@ -480,9 +484,9 @@ export default function PlanningPage() {
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <div
-                                        onClick={() => handleCellClick(room, day, status)}
+                                        onClick={() => handleCellClick(room, day, status, reservationId)}
                                         className={`h-8 rounded border flex items-center justify-center transition-all ${getStatusColor(status)} ${
-                                          isClickable 
+                                          isClickable || reservationId
                                             ? "cursor-pointer hover:ring-2 hover:ring-primary/50 hover:scale-105" 
                                             : "cursor-default"
                                         }`}
@@ -506,6 +510,9 @@ export default function PlanningPage() {
                                             <div className="font-medium">{reservation.guestName}</div>
                                             <div className="text-muted-foreground">
                                               {reservation.checkIn} → {reservation.checkOut}
+                                            </div>
+                                            <div className="border-t pt-1 mt-1 text-primary">
+                                              Clic para ver detalle
                                             </div>
                                           </div>
                                         ) : isClickable ? (

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import {
   CalendarCheck,
   Plus,
@@ -892,6 +892,7 @@ function CancelReservationDialog({
 export default function ReservationsPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const searchParams = useSearch();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -902,6 +903,19 @@ export default function ReservationsPage() {
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations"],
   });
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    const viewId = params.get("view");
+    if (viewId && reservations) {
+      const reservation = reservations.find(r => r.id === viewId);
+      if (reservation) {
+        setSelectedReservation(reservation);
+        setDetailDialogOpen(true);
+        navigate("/reservations", { replace: true });
+      }
+    }
+  }, [searchParams, reservations, navigate]);
 
   const { data: guests } = useQuery<Guest[]>({
     queryKey: ["/api/guests"],
@@ -1044,7 +1058,12 @@ export default function ReservationsPage() {
             </TableHeader>
             <TableBody>
               {filteredReservations.map((reservation) => (
-                <TableRow key={reservation.id} data-testid={`reservation-row-${reservation.id}`}>
+                <TableRow 
+                  key={reservation.id} 
+                  data-testid={`reservation-row-${reservation.id}`}
+                  className="cursor-pointer hover-elevate"
+                  onClick={() => handleViewReservation(reservation)}
+                >
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-sm">
@@ -1066,7 +1085,7 @@ export default function ReservationsPage() {
                     <ReservationStatusBadge status={reservation.status} />
                   </TableCell>
                   <TableCell className="font-medium">${reservation.totalRoomAmount || 0}</TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">
