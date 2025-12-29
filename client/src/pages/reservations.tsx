@@ -526,10 +526,12 @@ function ReservationDetailDialog({
   reservation,
   open,
   onOpenChange,
+  onCancel,
 }: {
   reservation: ReservationWithDetails;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
 }) {
   const { toast } = useToast();
   const [showAddCharge, setShowAddCharge] = useState(false);
@@ -742,7 +744,22 @@ function ReservationDetailDialog({
             </div>
           )}
         </div>
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:justify-between">
+          <div>
+            {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
+              <Button 
+                variant="destructive" 
+                onClick={() => {
+                  onOpenChange(false);
+                  onCancel();
+                }}
+                data-testid="button-cancel-from-detail"
+              >
+                <X className="mr-2 h-4 w-4" />
+                Anular Reserva
+              </Button>
+            )}
+          </div>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cerrar
           </Button>
@@ -1187,6 +1204,7 @@ export default function ReservationsPage() {
           reservation={selectedReservation}
           open={detailDialogOpen}
           onOpenChange={setDetailDialogOpen}
+          onCancel={() => setCancelDialogOpen(true)}
         />
       )}
 
