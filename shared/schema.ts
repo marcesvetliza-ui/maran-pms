@@ -49,17 +49,24 @@ export type InsertRoom = z.infer<typeof insertRoomSchema>;
 export type Room = typeof rooms.$inferSelect;
 
 // Companies (Empresas)
+export type IvaCondition = "responsable_inscripto" | "monotributo" | "exento" | "consumidor_final" | "no_responsable";
+
 export const companies = pgTable("companies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  businessName: text("business_name").notNull(),
-  tradeName: text("trade_name"),
-  taxId: text("tax_id").notNull(),
-  taxType: text("tax_type").default("CUIT"),
+  razonSocial: text("razon_social").notNull(),
+  nombreFantasia: text("nombre_fantasia"),
+  direccion: text("direccion"),
+  pais: text("pais").default("Argentina"),
+  codigoPostal: text("codigo_postal"),
+  localidad: text("localidad"),
+  provincia: text("provincia"),
+  telefono: text("telefono"),
   email: text("email"),
-  phone: text("phone"),
-  address: text("address"),
-  city: text("city"),
-  country: text("country").default("Argentina"),
+  cuilCuit: text("cuil_cuit").notNull(),
+  numeroFiscal: text("numero_fiscal"),
+  condicionIva: text("condicion_iva").$type<IvaCondition>().default("responsable_inscripto"),
+  inscripcionNacional: text("inscripcion_nacional"),
+  inscripcionProvincial: text("inscripcion_provincial"),
   contactName: text("contact_name"),
   contactEmail: text("contact_email"),
   contactPhone: text("contact_phone"),
@@ -67,6 +74,7 @@ export const companies = pgTable("companies", {
   paymentTermDays: integer("payment_term_days").default(30),
   notes: text("notes"),
   isActive: text("is_active").default("true"),
+  createdAt: text("created_at"),
 });
 
 export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
@@ -74,8 +82,11 @@ export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type Company = typeof companies.$inferSelect;
 
 // Guests
+export type GuestSex = "masculino" | "femenino" | "otro" | "no_especifica";
+
 export const guests = pgTable("guests", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  codigo: text("codigo").unique(),
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   email: text("email"),
@@ -83,11 +94,17 @@ export const guests = pgTable("guests", {
   documentType: text("document_type"),
   documentNumber: text("document_number"),
   nationality: text("nationality"),
-  address: text("address"),
+  direccion: text("direccion"),
+  localidad: text("localidad"),
+  codigoPostal: text("codigo_postal"),
+  fechaNacimiento: text("fecha_nacimiento"),
+  sexo: text("sexo").$type<GuestSex>().default("no_especifica"),
+  cuilCuit: text("cuil_cuit"),
   companyId: varchar("company_id"),
+  fechaAlta: text("fecha_alta"),
 });
 
-export const insertGuestSchema = createInsertSchema(guests).omit({ id: true });
+export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, codigo: true, fechaAlta: true });
 export type InsertGuest = z.infer<typeof insertGuestSchema>;
 export type Guest = typeof guests.$inferSelect;
 

@@ -152,6 +152,7 @@ export class MemStorage implements IStorage {
   private otaChannels: Map<string, OTAChannel>;
   private otaReservationLogs: Map<string, OTAReservationLog>;
   private reservationCounter: number;
+  private guestCounter: number;
 
   constructor() {
     this.users = new Map();
@@ -166,6 +167,7 @@ export class MemStorage implements IStorage {
     this.otaChannels = new Map();
     this.otaReservationLogs = new Map();
     this.reservationCounter = 1000;
+    this.guestCounter = 0;
 
     // Seed with demo data
     this.seedData();
@@ -224,25 +226,28 @@ export class MemStorage implements IStorage {
     rooms.forEach((r) => this.rooms.set(r.id, r));
 
     // Create companies
+    const seedDate = new Date().toISOString().split("T")[0];
     const companies: Company[] = [
-      { id: "comp1", businessName: "TechCorp Argentina S.A.", tradeName: "TechCorp", taxId: "30-71234567-8", taxType: "CUIT", email: "reservas@techcorp.com.ar", phone: "+54 11 4000-1234", address: "Av. del Libertador 1000", city: "CABA", country: "Argentina", contactName: "Pablo Mendez", contactEmail: "pablo.mendez@techcorp.com.ar", contactPhone: "+54 11 4000-1235", creditLimit: "50000.00", paymentTermDays: 30, notes: "Cliente corporativo frecuente", isActive: "true" },
-      { id: "comp2", businessName: "Consultoría Global S.R.L.", tradeName: "ConsultGlobal", taxId: "30-70987654-3", taxType: "CUIT", email: "viajes@consultglobal.com", phone: "+54 11 5000-5678", address: "Callao 500", city: "CABA", country: "Argentina", contactName: "Lucia Torres", contactEmail: "lucia.t@consultglobal.com", contactPhone: "+54 11 5000-5679", creditLimit: "25000.00", paymentTermDays: 15, notes: null, isActive: "true" },
-      { id: "comp3", businessName: "Exportadora del Sur S.A.", tradeName: "ExportSur", taxId: "30-65432198-7", taxType: "CUIT", email: "admin@exportsur.com.ar", phone: "+54 341 456-7890", address: "Bv. Oroño 2000", city: "Rosario", country: "Argentina", contactName: "Martin Gomez", contactEmail: "martin@exportsur.com.ar", contactPhone: "+54 341 456-7891", creditLimit: "30000.00", paymentTermDays: 30, notes: "Empresa de Rosario", isActive: "true" },
+      { id: "comp1", razonSocial: "TechCorp Argentina S.A.", nombreFantasia: "TechCorp", direccion: "Av. del Libertador 1000", pais: "Argentina", codigoPostal: "1001", localidad: "CABA", provincia: "Buenos Aires", telefono: "+54 11 4000-1234", email: "reservas@techcorp.com.ar", cuilCuit: "30-71234567-8", numeroFiscal: "30714567", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Pablo Mendez", contactEmail: "pablo.mendez@techcorp.com.ar", contactPhone: "+54 11 4000-1235", creditLimit: "50000.00", paymentTermDays: 30, notes: "Cliente corporativo frecuente", isActive: "true", createdAt: seedDate },
+      { id: "comp2", razonSocial: "Consultoría Global S.R.L.", nombreFantasia: "ConsultGlobal", direccion: "Callao 500", pais: "Argentina", codigoPostal: "1002", localidad: "CABA", provincia: "Buenos Aires", telefono: "+54 11 5000-5678", email: "viajes@consultglobal.com", cuilCuit: "30-70987654-3", numeroFiscal: "30709876", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Lucia Torres", contactEmail: "lucia.t@consultglobal.com", contactPhone: "+54 11 5000-5679", creditLimit: "25000.00", paymentTermDays: 15, notes: null, isActive: "true", createdAt: seedDate },
+      { id: "comp3", razonSocial: "Exportadora del Sur S.A.", nombreFantasia: "ExportSur", direccion: "Bv. Oroño 2000", pais: "Argentina", codigoPostal: "2000", localidad: "Rosario", provincia: "Santa Fe", telefono: "+54 341 456-7890", email: "admin@exportsur.com.ar", cuilCuit: "30-65432198-7", numeroFiscal: "30654321", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Martin Gomez", contactEmail: "martin@exportsur.com.ar", contactPhone: "+54 341 456-7891", creditLimit: "30000.00", paymentTermDays: 30, notes: "Empresa de Rosario", isActive: "true", createdAt: seedDate },
     ];
     companies.forEach((c) => this.companies.set(c.id, c));
 
     // Create guests
+    const guestSeedDate = new Date().toISOString().split("T")[0];
     const guests: Guest[] = [
-      { id: "g1", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", address: "Av. Corrientes 1234, CABA", companyId: null },
-      { id: "g2", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", address: "Calle Florida 567, CABA", companyId: null },
-      { id: "g3", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", address: "123 Main St, New York", companyId: null },
-      { id: "g4", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", address: "Av. Santa Fe 890, CABA", companyId: null },
-      { id: "g5", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", address: "Callao 456, CABA", companyId: "comp1" },
-      { id: "g6", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", address: "Av. Libertador 123, CABA", companyId: null },
-      { id: "g7", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", address: "Av. Belgrano 456, CABA", companyId: null },
-      { id: "g8", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", address: "15 Rue de Paris, Lyon", companyId: null },
+      { id: "g1", codigo: "H-2025-0001", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", direccion: "Av. Corrientes 1234", localidad: "CABA", codigoPostal: "1043", fechaNacimiento: "1985-03-15", sexo: "masculino", cuilCuit: "20-30456789-3", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g2", codigo: "H-2025-0002", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", direccion: "Calle Florida 567", localidad: "CABA", codigoPostal: "1005", fechaNacimiento: "1990-07-22", sexo: "femenino", cuilCuit: "27-28765432-4", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g3", codigo: "H-2025-0003", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", direccion: "123 Main St", localidad: "New York", codigoPostal: "10001", fechaNacimiento: "1978-11-30", sexo: "masculino", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
+      { id: "g4", codigo: "H-2025-0004", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", direccion: "Av. Santa Fe 890", localidad: "CABA", codigoPostal: "1059", fechaNacimiento: "1995-01-10", sexo: "femenino", cuilCuit: "27-35678901-9", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g5", codigo: "H-2025-0005", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", direccion: "Callao 456", localidad: "CABA", codigoPostal: "1022", fechaNacimiento: "1982-05-20", sexo: "masculino", cuilCuit: "20-32109876-5", companyId: "comp1", fechaAlta: guestSeedDate },
+      { id: "g6", codigo: "H-2025-0006", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", direccion: "Av. Libertador 123", localidad: "CABA", codigoPostal: "1426", fechaNacimiento: "1988-09-08", sexo: "femenino", cuilCuit: "27-29876543-2", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g7", codigo: "H-2025-0007", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", direccion: "Av. Belgrano 456", localidad: "CABA", codigoPostal: "1092", fechaNacimiento: "1992-12-25", sexo: "masculino", cuilCuit: "20-31234567-8", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g8", codigo: "H-2025-0008", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", direccion: "15 Rue de Paris", localidad: "Lyon", codigoPostal: "69001", fechaNacimiento: "1987-04-18", sexo: "femenino", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
     ];
     guests.forEach((g) => this.guests.set(g.id, g));
+    this.guestCounter = 8;
 
     // Create reservations with varied dates
     const today = new Date().toISOString().split("T")[0];
@@ -449,9 +454,9 @@ export class MemStorage implements IStorage {
     const lowerQuery = query.toLowerCase();
     return Array.from(this.companies.values()).filter((c) => 
       c.isActive === "true" && (
-        c.businessName.toLowerCase().includes(lowerQuery) ||
-        c.tradeName?.toLowerCase().includes(lowerQuery) ||
-        c.taxId.toLowerCase().includes(lowerQuery)
+        c.razonSocial.toLowerCase().includes(lowerQuery) ||
+        c.nombreFantasia?.toLowerCase().includes(lowerQuery) ||
+        c.cuilCuit.toLowerCase().includes(lowerQuery)
       )
     );
   }
@@ -460,15 +465,20 @@ export class MemStorage implements IStorage {
     const id = randomUUID();
     const company: Company = {
       id,
-      businessName: insertCompany.businessName,
-      tradeName: insertCompany.tradeName ?? null,
-      taxId: insertCompany.taxId,
-      taxType: insertCompany.taxType ?? "CUIT",
+      razonSocial: insertCompany.razonSocial,
+      nombreFantasia: insertCompany.nombreFantasia ?? null,
+      direccion: insertCompany.direccion ?? null,
+      pais: insertCompany.pais ?? "Argentina",
+      codigoPostal: insertCompany.codigoPostal ?? null,
+      localidad: insertCompany.localidad ?? null,
+      provincia: insertCompany.provincia ?? null,
+      telefono: insertCompany.telefono ?? null,
       email: insertCompany.email ?? null,
-      phone: insertCompany.phone ?? null,
-      address: insertCompany.address ?? null,
-      city: insertCompany.city ?? null,
-      country: insertCompany.country ?? "Argentina",
+      cuilCuit: insertCompany.cuilCuit,
+      numeroFiscal: insertCompany.numeroFiscal ?? null,
+      condicionIva: (insertCompany.condicionIva ?? "responsable_inscripto") as "responsable_inscripto" | "monotributo" | "exento" | "consumidor_final" | "no_responsable",
+      inscripcionNacional: insertCompany.inscripcionNacional ?? null,
+      inscripcionProvincial: insertCompany.inscripcionProvincial ?? null,
       contactName: insertCompany.contactName ?? null,
       contactEmail: insertCompany.contactEmail ?? null,
       contactPhone: insertCompany.contactPhone ?? null,
@@ -476,6 +486,7 @@ export class MemStorage implements IStorage {
       paymentTermDays: insertCompany.paymentTermDays ?? 30,
       notes: insertCompany.notes ?? null,
       isActive: insertCompany.isActive ?? "true",
+      createdAt: new Date().toISOString().split("T")[0],
     };
     this.companies.set(id, company);
     return company;
@@ -484,7 +495,11 @@ export class MemStorage implements IStorage {
   async updateCompany(id: string, updates: Partial<InsertCompany>): Promise<Company | undefined> {
     const company = this.companies.get(id);
     if (!company) return undefined;
-    const updatedCompany: Company = { ...company, ...updates };
+    const updatedCompany: Company = { 
+      ...company, 
+      ...updates,
+      condicionIva: (updates.condicionIva ?? company.condicionIva) as "responsable_inscripto" | "monotributo" | "exento" | "consumidor_final" | "no_responsable",
+    };
     this.companies.set(id, updatedCompany);
     return updatedCompany;
   }
@@ -516,10 +531,17 @@ export class MemStorage implements IStorage {
     );
   }
 
+  private generateGuestCode(): string {
+    this.guestCounter++;
+    const year = new Date().getFullYear();
+    return `H-${year}-${this.guestCounter.toString().padStart(4, "0")}`;
+  }
+
   async createGuest(insertGuest: InsertGuest): Promise<Guest> {
     const id = randomUUID();
     const guest: Guest = { 
       id,
+      codigo: this.generateGuestCode(),
       firstName: insertGuest.firstName,
       lastName: insertGuest.lastName,
       email: insertGuest.email ?? null,
@@ -527,8 +549,14 @@ export class MemStorage implements IStorage {
       documentType: insertGuest.documentType ?? null,
       documentNumber: insertGuest.documentNumber ?? null,
       nationality: insertGuest.nationality ?? null,
-      address: insertGuest.address ?? null,
+      direccion: insertGuest.direccion ?? null,
+      localidad: insertGuest.localidad ?? null,
+      codigoPostal: insertGuest.codigoPostal ?? null,
+      fechaNacimiento: insertGuest.fechaNacimiento ?? null,
+      sexo: (insertGuest.sexo ?? "no_especifica") as "masculino" | "femenino" | "otro" | "no_especifica",
+      cuilCuit: insertGuest.cuilCuit ?? null,
       companyId: insertGuest.companyId ?? null,
+      fechaAlta: new Date().toISOString().split("T")[0],
     };
     this.guests.set(id, guest);
     return guest;
@@ -537,7 +565,11 @@ export class MemStorage implements IStorage {
   async updateGuest(id: string, updates: Partial<InsertGuest>): Promise<Guest | undefined> {
     const guest = this.guests.get(id);
     if (!guest) return undefined;
-    const updatedGuest: Guest = { ...guest, ...updates };
+    const updatedGuest: Guest = { 
+      ...guest, 
+      ...updates,
+      sexo: (updates.sexo ?? guest.sexo) as "masculino" | "femenino" | "otro" | "no_especifica",
+    };
     this.guests.set(id, updatedGuest);
     return updatedGuest;
   }
@@ -1009,7 +1041,6 @@ export class MemStorage implements IStorage {
         documentType: null,
         documentNumber: null,
         nationality: null,
-        address: null,
       });
     }
 
