@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
-import type { Guest, Company, RoomType, RoomWithType, RatePlan } from "@shared/schema";
+import type { Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany } from "@shared/schema";
 
 export default function NewReservationPage() {
   const { toast } = useToast();
@@ -90,7 +90,7 @@ export default function NewReservationPage() {
   const totalAmount = (finalRate * nights).toFixed(2);
 
   const createGuestMutation = useMutation({
-    mutationFn: async (guest: Omit<Guest, "id">): Promise<Guest> => {
+    mutationFn: async (guest: InsertGuest): Promise<Guest> => {
       const res = await apiRequest("POST", "/api/guests", guest);
       return res.json();
     },
@@ -112,7 +112,7 @@ export default function NewReservationPage() {
   });
 
   const createCompanyMutation = useMutation({
-    mutationFn: async (company: Omit<Company, "id">): Promise<Company> => {
+    mutationFn: async (company: InsertCompany): Promise<Company> => {
       const res = await apiRequest("POST", "/api/companies", company);
       return res.json();
     },
@@ -121,7 +121,7 @@ export default function NewReservationPage() {
       setSelectedCompany(newCompany);
       toast({
         title: "Empresa creada",
-        description: `${newCompany.businessName} ha sido registrada.`,
+        description: `${newCompany.razonSocial} ha sido registrada.`,
       });
     },
     onError: () => {
