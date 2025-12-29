@@ -752,6 +752,143 @@ function ReservationDetailDialog({
   );
 }
 
+function CancelReservationDialog({
+  reservation,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  reservation: ReservationWithDetails;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [reason, setReason] = useState("");
+  const [cancelledBy, setCancelledBy] = useState("");
+
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/reservations/${reservation.id}/cancel`, {
+        reason,
+        cancelledBy: cancelledBy || "Usuario del Sistema",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cancelled-reservations"], exact: false });
+      toast({
+        title: "Reserva anulada",
+        description: "La reserva ha sido anulada y registrada en el log de cancelaciones.",
+      });
+      setReason("");
+      setCancelledBy("");
+      onOpenChange(false);
+      onSuccess();
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo anular la reserva.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCancel = () => {
+    if (!reason.trim()) {
+      toast({
+        title: "Motivo requerido",
+        description: "Por favor, ingrese el motivo de la anulación.",
+        variant: "destructive",
+      });
+      return;
+    }
+    cancelMutation.mutate();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <X className="h-5 w-5" />
+            Anular Reserva
+          </DialogTitle>
+          <DialogDescription>
+            Esta acción anulará la reserva y quedará registrada. Por favor indique el motivo.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <div className="p-3 bg-muted rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Código:</span>
+              <span className="font-medium">{reservation.reservationCode}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Huésped:</span>
+              <span className="font-medium">
+                {reservation.guest?.firstName} {reservation.guest?.lastName}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Habitación:</span>
+              <span className="font-medium">{reservation.room?.roomNumber}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Fechas:</span>
+              <span className="font-medium">
+                {reservation.checkInDate} - {reservation.checkOutDate}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="cancelledBy">Anulado por</Label>
+            <Input
+              id="cancelledBy"
+              placeholder="Nombre del usuario que anula"
+              value={cancelledBy}
+              onChange={(e) => setCancelledBy(e.target.value)}
+              data-testid="input-cancelled-by"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="reason">Motivo de anulación *</Label>
+            <Textarea
+              id="reason"
+              placeholder="Ingrese el motivo de la anulación..."
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              data-testid="input-cancel-reason"
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Volver
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={handleCancel}
+            disabled={cancelMutation.isPending}
+            data-testid="button-confirm-cancel"
+          >
+            {cancelMutation.isPending ? "Anulando..." : "Confirmar Anulación"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ReservationsPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
@@ -759,6 +896,7 @@ export default function ReservationsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | undefined>();
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
@@ -824,6 +962,11 @@ export default function ReservationsPage() {
   const handleNewReservation = () => {
     setSelectedReservation(undefined);
     setDialogOpen(true);
+  };
+
+  const handleCancelReservation = (reservation: ReservationWithDetails) => {
+    setSelectedReservation(reservation);
+    setCancelDialogOpen(true);
   };
 
   return (
@@ -966,10 +1109,10 @@ export default function ReservationsPage() {
                         )}
                         {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
                           <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "cancelled" })}
+                            onClick={() => handleCancelReservation(reservation)}
                           >
                             <X className="mr-2 h-4 w-4 text-red-600" />
-                            Cancelar
+                            Anular Reserva
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
@@ -1025,6 +1168,16 @@ export default function ReservationsPage() {
           reservation={selectedReservation}
           open={detailDialogOpen}
           onOpenChange={setDetailDialogOpen}
+        />
+      )}
+
+      {/* Cancel Reservation Dialog */}
+      {selectedReservation && (
+        <CancelReservationDialog
+          reservation={selectedReservation}
+          open={cancelDialogOpen}
+          onOpenChange={setCancelDialogOpen}
+          onSuccess={() => setSelectedReservation(undefined)}
         />
       )}
     </div>
