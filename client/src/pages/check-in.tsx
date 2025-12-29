@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,6 +51,8 @@ export default function CheckInPage() {
   const [selectedRatePlanId, setSelectedRatePlanId] = useState<string>("");
   const [nights, setNights] = useState<number>(1);
   const [numberOfGuests, setNumberOfGuests] = useState<number>(1);
+  const [walkInNotes, setWalkInNotes] = useState<string>("");
+  const [checkInNotes, setCheckInNotes] = useState<string>("");
   
   const [historyDate, setHistoryDate] = useState<string>(() => {
     return new Date().toISOString().split("T")[0];
@@ -186,7 +189,7 @@ export default function CheckInPage() {
         status: "confirmed",
         source: selectedCompany ? "empresa" : "directo",
         numberOfGuests,
-        notes: "Walk-in",
+        notes: walkInNotes ? `Walk-in: ${walkInNotes}` : "Walk-in",
       });
       const reservation = await res.json();
 
@@ -239,7 +242,7 @@ export default function CheckInPage() {
         status: "confirmed",
         source: selectedCompany ? "empresa" : "directo",
         numberOfGuests,
-        notes: "Check-in Directo",
+        notes: walkInNotes ? `Check-in Directo: ${walkInNotes}` : "Check-in Directo",
       });
       const reservation = await res.json();
 
@@ -279,6 +282,7 @@ export default function CheckInPage() {
     setSelectedRatePlanId("");
     setNights(1);
     setNumberOfGuests(1);
+    setWalkInNotes("");
   };
 
   const handleDirectoCheckIn = () => {
@@ -299,7 +303,20 @@ export default function CheckInPage() {
 
   const handleCheckIn = (reservation: ReservationWithDetails) => {
     setSelectedReservation(reservation);
+    setCheckInNotes(reservation.notes || "");
     setConfirmDialogOpen(true);
+  };
+
+  const performCheckIn = async () => {
+    if (!selectedReservation) return;
+    
+    if (checkInNotes !== (selectedReservation.notes || "")) {
+      await apiRequest("PATCH", `/api/reservations/${selectedReservation.id}`, {
+        notes: checkInNotes,
+      });
+    }
+    
+    checkInMutation.mutate(selectedReservation.id);
   };
 
   const canSubmitWalkIn = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0;
@@ -629,6 +646,18 @@ export default function CheckInPage() {
                     </div>
                   </div>
 
+                  <div className="space-y-2 mt-4">
+                    <Label htmlFor="walkInNotes">Comentarios / Notas</Label>
+                    <Textarea
+                      id="walkInNotes"
+                      placeholder="Agregar comentarios para recepción..."
+                      value={walkInNotes}
+                      onChange={(e) => setWalkInNotes(e.target.value)}
+                      className="min-h-[60px]"
+                      data-testid="input-walkin-notes"
+                    />
+                  </div>
+
                   <Button
                     className="w-full mt-4"
                     onClick={() => walkInMutation.mutate()}
@@ -923,6 +952,18 @@ export default function CheckInPage() {
                     </div>
                   </div>
 
+                  <div className="space-y-2 mt-4">
+                    <Label htmlFor="directoNotes">Comentarios / Notas</Label>
+                    <Textarea
+                      id="directoNotes"
+                      placeholder="Agregar comentarios para recepción..."
+                      value={walkInNotes}
+                      onChange={(e) => setWalkInNotes(e.target.value)}
+                      className="min-h-[60px]"
+                      data-testid="input-directo-notes"
+                    />
+                  </div>
+
                   <Button
                     className="w-full mt-4 bg-green-600 hover:bg-green-700"
                     onClick={handleDirectoCheckIn}
@@ -949,24 +990,39 @@ export default function CheckInPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar Check-in</AlertDialogTitle>
-            <AlertDialogDescription>
-              {selectedReservation && (
-                <>
-                  Vas a registrar la llegada de{" "}
-                  <strong>
-                    {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName}
-                  </strong>{" "}
-                  a la habitacion <strong>{selectedReservation.room?.roomNumber}</strong>.
-                  <br /><br />
-                  Esto marcara la habitacion como ocupada.
-                </>
-              )}
+            <AlertDialogDescription asChild>
+              <div>
+                {selectedReservation && (
+                  <>
+                    <p className="mb-2">
+                      Vas a registrar la llegada de{" "}
+                      <strong>
+                        {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName}
+                      </strong>{" "}
+                      a la habitacion <strong>{selectedReservation.room?.roomNumber}</strong>.
+                    </p>
+                    <p className="mb-4 text-muted-foreground">Esto marcara la habitacion como ocupada.</p>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="checkInNotes" className="text-foreground">Comentarios / Notas</Label>
+                      <Textarea
+                        id="checkInNotes"
+                        placeholder="Agregar comentarios para recepción..."
+                        value={checkInNotes}
+                        onChange={(e) => setCheckInNotes(e.target.value)}
+                        className="min-h-[60px]"
+                        data-testid="input-checkin-notes"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
             <AlertDialogCancel data-testid="button-cancel-checkin">Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => selectedReservation && checkInMutation.mutate(selectedReservation.id)}
+              onClick={performCheckIn}
               disabled={checkInMutation.isPending}
               data-testid="button-confirm-checkin"
             >
