@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,11 +8,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, User, Building2, Plus, X, Check } from "lucide-react";
-import type { Guest, Company } from "@shared/schema";
+import type { Guest, Company, InsertGuest, InsertCompany } from "@shared/schema";
 
 interface GuestSelectorProps {
   onSelect: (guest: Guest) => void;
-  onCreateNew: (guest: Omit<Guest, "id">) => void;
+  onCreateNew: (guest: InsertGuest) => void;
   selectedGuest?: Guest | null;
   onClear?: () => void;
 }
@@ -30,7 +30,12 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
     documentType: "dni" as "dni" | "passport" | "cedula" | "other" | null,
     documentNumber: "",
     nationality: "Argentina",
-    address: "",
+    direccion: "",
+    localidad: "",
+    codigoPostal: "",
+    fechaNacimiento: "",
+    sexo: "no_especifica" as "masculino" | "femenino" | "otro" | "no_especifica",
+    cuilCuit: "",
   });
 
   useEffect(() => {
@@ -51,7 +56,19 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
   const handleCreateGuest = () => {
     if (!newGuest.firstName || !newGuest.lastName) return;
     onCreateNew({
-      ...newGuest,
+      firstName: newGuest.firstName,
+      lastName: newGuest.lastName,
+      email: newGuest.email || null,
+      phone: newGuest.phone || null,
+      documentType: newGuest.documentType,
+      documentNumber: newGuest.documentNumber || null,
+      nationality: newGuest.nationality || null,
+      direccion: newGuest.direccion || null,
+      localidad: newGuest.localidad || null,
+      codigoPostal: newGuest.codigoPostal || null,
+      fechaNacimiento: newGuest.fechaNacimiento || null,
+      sexo: newGuest.sexo,
+      cuilCuit: newGuest.cuilCuit || null,
       companyId: null,
     });
     setNewGuest({
@@ -62,7 +79,12 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       documentType: "dni",
       documentNumber: "",
       nationality: "Argentina",
-      address: "",
+      direccion: "",
+      localidad: "",
+      codigoPostal: "",
+      fechaNacimiento: "",
+      sexo: "no_especifica",
+      cuilCuit: "",
     });
     setMode("search");
   };
@@ -72,11 +94,16 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       <Card className="bg-accent/30">
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <User className="h-4 w-4 text-muted-foreground" />
               <span className="font-medium">
                 {selectedGuest.firstName} {selectedGuest.lastName}
               </span>
+              {selectedGuest.codigo && (
+                <Badge variant="secondary" className="text-xs">
+                  {selectedGuest.codigo}
+                </Badge>
+              )}
               <Badge variant="outline" className="text-xs">
                 {selectedGuest.documentType?.toUpperCase()} {selectedGuest.documentNumber}
               </Badge>
@@ -145,6 +172,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                       <div>
                         <p className="font-medium">
                           {guest.firstName} {guest.lastName}
+                          {guest.codigo && <span className="text-muted-foreground ml-2 text-sm">({guest.codigo})</span>}
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {guest.documentType?.toUpperCase()} {guest.documentNumber}
@@ -245,15 +273,91 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="nationality">Nacionalidad</Label>
+                <Input
+                  id="nationality"
+                  value={newGuest.nationality}
+                  onChange={(e) => setNewGuest({ ...newGuest, nationality: e.target.value })}
+                  placeholder="Argentina"
+                  data-testid="input-guest-nationality"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sexo">Sexo</Label>
+                <Select
+                  value={newGuest.sexo}
+                  onValueChange={(v) => setNewGuest({ ...newGuest, sexo: v as any })}
+                >
+                  <SelectTrigger data-testid="select-guest-sexo">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="masculino">Masculino</SelectItem>
+                    <SelectItem value="femenino">Femenino</SelectItem>
+                    <SelectItem value="otro">Otro</SelectItem>
+                    <SelectItem value="no_especifica">No especifica</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="fechaNacimiento">Fecha Nacimiento</Label>
+                <Input
+                  id="fechaNacimiento"
+                  type="date"
+                  value={newGuest.fechaNacimiento}
+                  onChange={(e) => setNewGuest({ ...newGuest, fechaNacimiento: e.target.value })}
+                  data-testid="input-guest-fechanacimiento"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cuilCuit">CUIL/CUIT</Label>
+                <Input
+                  id="cuilCuit"
+                  value={newGuest.cuilCuit}
+                  onChange={(e) => setNewGuest({ ...newGuest, cuilCuit: e.target.value })}
+                  placeholder="20-12345678-9"
+                  data-testid="input-guest-cuilcuit"
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
-              <Label htmlFor="nationality">Nacionalidad</Label>
+              <Label htmlFor="direccion">Direccion</Label>
               <Input
-                id="nationality"
-                value={newGuest.nationality}
-                onChange={(e) => setNewGuest({ ...newGuest, nationality: e.target.value })}
-                placeholder="Argentina"
-                data-testid="input-guest-nationality"
+                id="direccion"
+                value={newGuest.direccion}
+                onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })}
+                placeholder="Av. Corrientes 1234"
+                data-testid="input-guest-direccion"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="localidad">Localidad</Label>
+                <Input
+                  id="localidad"
+                  value={newGuest.localidad}
+                  onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })}
+                  placeholder="CABA"
+                  data-testid="input-guest-localidad"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="codigoPostal">Codigo Postal</Label>
+                <Input
+                  id="codigoPostal"
+                  value={newGuest.codigoPostal}
+                  onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })}
+                  placeholder="1000"
+                  data-testid="input-guest-codigopostal"
+                />
+              </div>
             </div>
 
             <Button
@@ -274,7 +378,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
 
 interface CompanySelectorProps {
   onSelect: (company: Company) => void;
-  onCreateNew: (company: Omit<Company, "id">) => void;
+  onCreateNew: (company: InsertCompany) => void;
   selectedCompany?: Company | null;
   onClear?: () => void;
 }
@@ -285,22 +389,26 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
   const [newCompany, setNewCompany] = useState({
-    businessName: "",
-    tradeName: "",
-    taxId: "",
-    taxType: "CUIT",
+    razonSocial: "",
+    nombreFantasia: "",
+    cuilCuit: "",
+    condicionIva: "responsable_inscripto" as "responsable_inscripto" | "monotributo" | "exento" | "consumidor_final" | "no_responsable",
+    direccion: "",
+    localidad: "",
+    provincia: "",
+    codigoPostal: "",
+    pais: "Argentina",
+    telefono: "",
     email: "",
-    phone: "",
-    address: "",
-    city: "",
-    country: "Argentina",
+    numeroFiscal: "",
+    inscripcionNacional: "",
+    inscripcionProvincial: "",
     contactName: "",
     contactEmail: "",
     contactPhone: "",
     creditLimit: "0",
     paymentTermDays: 30,
     notes: "",
-    isActive: "true" as const,
   });
 
   useEffect(() => {
@@ -319,36 +427,51 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
   });
 
   const handleCreateCompany = () => {
-    if (!newCompany.businessName || !newCompany.taxId) return;
+    if (!newCompany.razonSocial || !newCompany.cuilCuit) return;
     onCreateNew({
-      ...newCompany,
-      tradeName: newCompany.tradeName || null,
+      razonSocial: newCompany.razonSocial,
+      cuilCuit: newCompany.cuilCuit,
+      nombreFantasia: newCompany.nombreFantasia || null,
+      condicionIva: newCompany.condicionIva,
+      direccion: newCompany.direccion || null,
+      localidad: newCompany.localidad || null,
+      provincia: newCompany.provincia || null,
+      codigoPostal: newCompany.codigoPostal || null,
+      pais: newCompany.pais || "Argentina",
+      telefono: newCompany.telefono || null,
       email: newCompany.email || null,
-      phone: newCompany.phone || null,
-      address: newCompany.address || null,
-      city: newCompany.city || null,
+      numeroFiscal: newCompany.numeroFiscal || null,
+      inscripcionNacional: newCompany.inscripcionNacional || null,
+      inscripcionProvincial: newCompany.inscripcionProvincial || null,
       contactName: newCompany.contactName || null,
       contactEmail: newCompany.contactEmail || null,
       contactPhone: newCompany.contactPhone || null,
+      creditLimit: newCompany.creditLimit || "0",
+      paymentTermDays: newCompany.paymentTermDays || 30,
       notes: newCompany.notes || null,
+      isActive: "true",
     });
     setNewCompany({
-      businessName: "",
-      tradeName: "",
-      taxId: "",
-      taxType: "CUIT",
+      razonSocial: "",
+      nombreFantasia: "",
+      cuilCuit: "",
+      condicionIva: "responsable_inscripto",
+      direccion: "",
+      localidad: "",
+      provincia: "",
+      codigoPostal: "",
+      pais: "Argentina",
+      telefono: "",
       email: "",
-      phone: "",
-      address: "",
-      city: "",
-      country: "Argentina",
+      numeroFiscal: "",
+      inscripcionNacional: "",
+      inscripcionProvincial: "",
       contactName: "",
       contactEmail: "",
       contactPhone: "",
       creditLimit: "0",
       paymentTermDays: 30,
       notes: "",
-      isActive: "true",
     });
     setMode("search");
   };
@@ -358,13 +481,13 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
       <Card className="bg-accent/30">
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Building2 className="h-4 w-4 text-muted-foreground" />
               <span className="font-medium">
-                {selectedCompany.tradeName || selectedCompany.businessName}
+                {selectedCompany.nombreFantasia || selectedCompany.razonSocial}
               </span>
               <Badge variant="outline" className="text-xs">
-                {selectedCompany.taxType} {selectedCompany.taxId}
+                CUIT {selectedCompany.cuilCuit}
               </Badge>
             </div>
             {onClear && (
@@ -430,10 +553,10 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="font-medium">
-                          {company.tradeName || company.businessName}
+                          {company.nombreFantasia || company.razonSocial}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {company.taxType} {company.taxId}
+                          CUIT {company.cuilCuit}
                         </p>
                       </div>
                       <Check className="h-4 w-4 text-muted-foreground invisible group-hover:visible" />
@@ -456,54 +579,98 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
           <TabsContent value="create" className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="businessName">Razon Social *</Label>
+                <Label htmlFor="razonSocial">Razon Social *</Label>
                 <Input
-                  id="businessName"
-                  value={newCompany.businessName}
-                  onChange={(e) => setNewCompany({ ...newCompany, businessName: e.target.value })}
+                  id="razonSocial"
+                  value={newCompany.razonSocial}
+                  onChange={(e) => setNewCompany({ ...newCompany, razonSocial: e.target.value })}
                   placeholder="Empresa S.A."
-                  data-testid="input-company-businessname"
+                  data-testid="input-company-razonsocial"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="tradeName">Nombre Comercial</Label>
+                <Label htmlFor="nombreFantasia">Nombre Fantasia</Label>
                 <Input
-                  id="tradeName"
-                  value={newCompany.tradeName}
-                  onChange={(e) => setNewCompany({ ...newCompany, tradeName: e.target.value })}
-                  placeholder="Nombre Fantasia"
-                  data-testid="input-company-tradename"
+                  id="nombreFantasia"
+                  value={newCompany.nombreFantasia}
+                  onChange={(e) => setNewCompany({ ...newCompany, nombreFantasia: e.target.value })}
+                  placeholder="Nombre Comercial"
+                  data-testid="input-company-nombrefantasia"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="taxType">Tipo ID Fiscal</Label>
+                <Label htmlFor="cuilCuit">CUIT *</Label>
+                <Input
+                  id="cuilCuit"
+                  value={newCompany.cuilCuit}
+                  onChange={(e) => setNewCompany({ ...newCompany, cuilCuit: e.target.value })}
+                  placeholder="30-12345678-9"
+                  data-testid="input-company-cuilcuit"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="condicionIva">Condicion IVA</Label>
                 <Select
-                  value={newCompany.taxType}
-                  onValueChange={(v) => setNewCompany({ ...newCompany, taxType: v })}
+                  value={newCompany.condicionIva}
+                  onValueChange={(v) => setNewCompany({ ...newCompany, condicionIva: v as any })}
                 >
-                  <SelectTrigger data-testid="select-tax-type">
+                  <SelectTrigger data-testid="select-condicion-iva">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="CUIT">CUIT</SelectItem>
-                    <SelectItem value="CUIL">CUIL</SelectItem>
-                    <SelectItem value="RUT">RUT</SelectItem>
-                    <SelectItem value="RFC">RFC</SelectItem>
-                    <SelectItem value="OTHER">Otro</SelectItem>
+                    <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
+                    <SelectItem value="monotributo">Monotributo</SelectItem>
+                    <SelectItem value="exento">Exento</SelectItem>
+                    <SelectItem value="consumidor_final">Consumidor Final</SelectItem>
+                    <SelectItem value="no_responsable">No Responsable</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="direccion">Direccion</Label>
+              <Input
+                id="direccion"
+                value={newCompany.direccion}
+                onChange={(e) => setNewCompany({ ...newCompany, direccion: e.target.value })}
+                placeholder="Av. del Libertador 1000"
+                data-testid="input-company-direccion"
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="taxId">Numero ID Fiscal *</Label>
+                <Label htmlFor="localidad">Localidad</Label>
                 <Input
-                  id="taxId"
-                  value={newCompany.taxId}
-                  onChange={(e) => setNewCompany({ ...newCompany, taxId: e.target.value })}
-                  placeholder="30-12345678-9"
-                  data-testid="input-company-taxid"
+                  id="localidad"
+                  value={newCompany.localidad}
+                  onChange={(e) => setNewCompany({ ...newCompany, localidad: e.target.value })}
+                  placeholder="CABA"
+                  data-testid="input-company-localidad"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="provincia">Provincia</Label>
+                <Input
+                  id="provincia"
+                  value={newCompany.provincia}
+                  onChange={(e) => setNewCompany({ ...newCompany, provincia: e.target.value })}
+                  placeholder="Buenos Aires"
+                  data-testid="input-company-provincia"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="codigoPostal">CP</Label>
+                <Input
+                  id="codigoPostal"
+                  value={newCompany.codigoPostal}
+                  onChange={(e) => setNewCompany({ ...newCompany, codigoPostal: e.target.value })}
+                  placeholder="1000"
+                  data-testid="input-company-codigopostal"
                 />
               </div>
             </div>
@@ -524,10 +691,10 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
                 <Label htmlFor="companyPhone">Telefono</Label>
                 <Input
                   id="companyPhone"
-                  value={newCompany.phone}
-                  onChange={(e) => setNewCompany({ ...newCompany, phone: e.target.value })}
+                  value={newCompany.telefono}
+                  onChange={(e) => setNewCompany({ ...newCompany, telefono: e.target.value })}
                   placeholder="+54 11 4000-1234"
-                  data-testid="input-company-phone"
+                  data-testid="input-company-telefono"
                 />
               </div>
             </div>
@@ -545,7 +712,7 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
 
             <Button
               onClick={handleCreateCompany}
-              disabled={!newCompany.businessName || !newCompany.taxId}
+              disabled={!newCompany.razonSocial || !newCompany.cuilCuit}
               className="w-full"
               data-testid="button-create-company"
             >
