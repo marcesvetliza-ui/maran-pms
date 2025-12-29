@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails, Guest, RoomWithType, RoomType, RatePlan, InsertReservation, ReservationStatus, DiscountType, ReservationSource, Charge } from "@shared/schema";
@@ -590,160 +591,297 @@ function ReservationDetailDialog({
     minibar: "Minibar",
     otros: "Otros",
     adjustment: "Ajuste",
+    payment: "Pago/Anticipo",
   };
+
+  const consumptionCharges = charges?.filter((c) => c.category !== "payment") || [];
+  const paymentCharges = charges?.filter((c) => c.category === "payment") || [];
+  const totalConsumptions = consumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+  const totalPayments = paymentCharges.reduce((sum, c) => sum + Math.abs(parseFloat(c.amount)), 0);
+  const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0");
+  const totalToPay = subtotalRoom + totalConsumptions;
+  const balance = totalToPay - totalPayments;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Reserva {reservation.reservationCode}
             <ReservationStatusBadge status={reservation.status} />
           </DialogTitle>
-          <DialogDescription>Detalle de la reservación y folio de cargos.</DialogDescription>
+          <DialogDescription>Detalle de la reservación</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-lg">
-              {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
-            </div>
-            <div className="flex-1">
-              <p className="font-semibold text-lg">
-                {reservation.guest?.firstName} {reservation.guest?.lastName}
-              </p>
-              <p className="text-sm text-muted-foreground">{reservation.guest?.email}</p>
-            </div>
-            <Badge variant="outline">{reservation.source}</Badge>
-          </div>
 
-          <div className="grid grid-cols-4 gap-3 text-center">
-            <div className="p-3 border rounded-lg">
-              <DoorOpen className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Hab.</p>
-              <p className="font-semibold">{reservation.room?.roomNumber}</p>
-            </div>
-            <div className="p-3 border rounded-lg">
-              <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Check-in</p>
-              <p className="font-semibold text-sm">{reservation.checkInDate}</p>
-            </div>
-            <div className="p-3 border rounded-lg">
-              <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Check-out</p>
-              <p className="font-semibold text-sm">{reservation.checkOutDate}</p>
-            </div>
-            <div className="p-3 border rounded-lg">
-              <User className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Noches</p>
-              <p className="font-semibold">{reservation.nights}</p>
-            </div>
-          </div>
+        <Tabs defaultValue="datos" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
+            <TabsTrigger value="folio" data-testid="tab-folio">Folio</TabsTrigger>
+          </TabsList>
 
-          <div className="border rounded-lg">
-            <div className="flex items-center justify-between p-3 border-b bg-muted/50">
-              <h4 className="font-semibold">Folio de Cargos</h4>
-              <Button size="sm" variant="outline" onClick={() => setShowAddCharge(!showAddCharge)} data-testid="button-add-charge">
-                <Plus className="h-4 w-4 mr-1" />
-                Agregar Cargo
-              </Button>
+          <TabsContent value="datos" className="space-y-4 mt-4">
+            <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-lg">
+                {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold text-lg" data-testid="text-guest-name">
+                  {reservation.guest?.firstName} {reservation.guest?.lastName}
+                </p>
+                <p className="text-sm text-muted-foreground">{reservation.guest?.email}</p>
+                {reservation.guest?.phone && (
+                  <p className="text-sm text-muted-foreground">{reservation.guest?.phone}</p>
+                )}
+              </div>
+              <Badge variant="outline">{reservation.source}</Badge>
             </div>
 
-            {showAddCharge && (
-              <div className="p-3 border-b bg-muted/30">
-                <div className="grid grid-cols-4 gap-2">
-                  <Input
-                    placeholder="Descripción"
-                    value={newCharge.description}
-                    onChange={(e) => setNewCharge({ ...newCharge, description: e.target.value })}
-                    className="col-span-2"
-                    data-testid="input-charge-description"
-                  />
-                  <Input
-                    type="number"
-                    placeholder="Monto"
-                    value={newCharge.amount}
-                    onChange={(e) => setNewCharge({ ...newCharge, amount: e.target.value })}
-                    data-testid="input-charge-amount"
-                  />
-                  <Select
-                    value={newCharge.category}
-                    onValueChange={(value) => setNewCharge({ ...newCharge, category: value as typeof newCharge.category })}
-                  >
-                    <SelectTrigger data-testid="select-charge-category">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="room">Habitación</SelectItem>
-                      <SelectItem value="restaurant">Restaurante</SelectItem>
-                      <SelectItem value="spa">Spa</SelectItem>
-                      <SelectItem value="minibar">Minibar</SelectItem>
-                      <SelectItem value="otros">Otros</SelectItem>
-                      <SelectItem value="adjustment">Ajuste</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex justify-end gap-2 mt-2">
-                  <Button size="sm" variant="ghost" onClick={() => setShowAddCharge(false)}>
-                    Cancelar
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    onClick={handleAddCharge} 
-                    disabled={addChargeMutation.isPending}
-                    data-testid="button-confirm-charge"
-                  >
-                    Confirmar
-                  </Button>
-                </div>
+            {reservation.guest?.direccion && (
+              <div className="p-3 border rounded-lg">
+                <p className="text-sm text-muted-foreground mb-1">Dirección</p>
+                <p className="text-sm">
+                  {reservation.guest.direccion}
+                  {reservation.guest.localidad && `, ${reservation.guest.localidad}`}
+                  {reservation.guest.codigoPostal && ` (${reservation.guest.codigoPostal})`}
+                </p>
               </div>
             )}
 
-            <div className="divide-y max-h-[200px] overflow-y-auto">
-              <div className="flex items-center justify-between p-3 text-sm">
-                <span>Alojamiento ({reservation.nights} noches x ${reservation.finalRatePerNight || 0})</span>
-                <span className="font-medium">${reservation.totalRoomAmount || 0}</span>
+            <div className="grid grid-cols-4 gap-3 text-center">
+              <div className="p-3 border rounded-lg">
+                <DoorOpen className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Hab.</p>
+                <p className="font-semibold" data-testid="text-room-number">{reservation.room?.roomNumber}</p>
               </div>
-              {charges?.map((charge) => (
-                <div key={charge.id} className="flex items-center justify-between p-3 text-sm" data-testid={`charge-row-${charge.id}`}>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs">{categoryLabels[charge.category]}</Badge>
-                    <span>{charge.description}</span>
-                    <span className="text-muted-foreground text-xs">({charge.date})</span>
+              <div className="p-3 border rounded-lg">
+                <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Check-in</p>
+                <p className="font-semibold text-sm" data-testid="text-checkin">{reservation.checkInDate}</p>
+              </div>
+              <div className="p-3 border rounded-lg">
+                <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Check-out</p>
+                <p className="font-semibold text-sm" data-testid="text-checkout">{reservation.checkOutDate}</p>
+              </div>
+              <div className="p-3 border rounded-lg">
+                <User className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Noches</p>
+                <p className="font-semibold" data-testid="text-nights">{reservation.nights}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 border rounded-lg">
+                <p className="text-sm text-muted-foreground mb-1">Tipo de Habitación</p>
+                <p className="font-medium">{reservation.room?.roomType?.name || "—"}</p>
+              </div>
+              <div className="p-3 border rounded-lg">
+                <p className="text-sm text-muted-foreground mb-1">Huéspedes</p>
+                <p className="font-medium">{reservation.numberOfGuests} persona(s)</p>
+              </div>
+            </div>
+
+            {reservation.notes && (
+              <div className="p-3 border rounded-lg">
+                <p className="text-sm text-muted-foreground mb-1">Notas</p>
+                <p className="text-sm">{reservation.notes}</p>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="folio" className="space-y-4 mt-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 border rounded-lg">
+                <p className="text-sm text-muted-foreground mb-1">Plan Tarifario</p>
+                <p className="font-medium">{reservation.ratePlan?.name || "Tarifa Base"}</p>
+              </div>
+              <div className="p-3 border rounded-lg">
+                <p className="text-sm text-muted-foreground mb-1">Estado</p>
+                <ReservationStatusBadge status={reservation.status} />
+              </div>
+            </div>
+
+            <div className="border rounded-lg">
+              <div className="p-3 border-b bg-muted/50">
+                <h4 className="font-semibold">Resumen de Alojamiento</h4>
+              </div>
+              <div className="p-3">
+                <div className="flex justify-between text-sm mb-2">
+                  <span>Tarifa por noche</span>
+                  <span>${reservation.finalRatePerNight || 0}</span>
+                </div>
+                {reservation.discountType !== "none" && (
+                  <div className="flex justify-between text-sm mb-2 text-muted-foreground">
+                    <span>Descuento aplicado ({reservation.discountType === "percent" ? `${reservation.discountValue}%` : `$${reservation.discountValue}`})</span>
+                    <span>—</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">${charge.amount}</span>
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className="h-6 w-6"
-                      onClick={() => deleteChargeMutation.mutate(charge.id)}
-                      data-testid={`button-delete-charge-${charge.id}`}
+                )}
+                <div className="flex justify-between text-sm mb-2">
+                  <span>Cantidad de noches</span>
+                  <span>x {reservation.nights}</span>
+                </div>
+                <div className="flex justify-between font-semibold pt-2 border-t">
+                  <span>Subtotal Alojamiento</span>
+                  <span data-testid="text-subtotal-room">${subtotalRoom.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="border rounded-lg">
+              <div className="flex items-center justify-between p-3 border-b bg-muted/50">
+                <h4 className="font-semibold">Consumos / Cargos Adicionales</h4>
+                <Button size="sm" variant="outline" onClick={() => setShowAddCharge(!showAddCharge)} data-testid="button-add-charge">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Agregar
+                </Button>
+              </div>
+
+              {showAddCharge && (
+                <div className="p-3 border-b bg-muted/30">
+                  <div className="grid grid-cols-4 gap-2">
+                    <Input
+                      placeholder="Descripción"
+                      value={newCharge.description}
+                      onChange={(e) => setNewCharge({ ...newCharge, description: e.target.value })}
+                      className="col-span-2"
+                      data-testid="input-charge-description"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Monto"
+                      value={newCharge.amount}
+                      onChange={(e) => setNewCharge({ ...newCharge, amount: e.target.value })}
+                      data-testid="input-charge-amount"
+                    />
+                    <Select
+                      value={newCharge.category}
+                      onValueChange={(value) => setNewCharge({ ...newCharge, category: value as typeof newCharge.category })}
                     >
-                      <Trash2 className="h-3 w-3 text-destructive" />
+                      <SelectTrigger data-testid="select-charge-category">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="restaurant">Restaurante</SelectItem>
+                        <SelectItem value="spa">Spa</SelectItem>
+                        <SelectItem value="minibar">Minibar</SelectItem>
+                        <SelectItem value="otros">Otros</SelectItem>
+                        <SelectItem value="adjustment">Ajuste</SelectItem>
+                        <SelectItem value="payment">Pago/Anticipo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-2">
+                    <Button size="sm" variant="ghost" onClick={() => setShowAddCharge(false)}>
+                      Cancelar
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      onClick={handleAddCharge} 
+                      disabled={addChargeMutation.isPending}
+                      data-testid="button-confirm-charge"
+                    >
+                      Confirmar
                     </Button>
                   </div>
                 </div>
-              ))}
-              {(!charges || charges.length === 0) && (
-                <div className="p-3 text-sm text-muted-foreground text-center">
-                  No hay cargos adicionales
-                </div>
               )}
+
+              <div className="divide-y max-h-[150px] overflow-y-auto">
+                {consumptionCharges.map((charge) => (
+                  <div key={charge.id} className="flex items-center justify-between p-3 text-sm" data-testid={`charge-row-${charge.id}`}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant="outline" className="text-xs">{categoryLabels[charge.category]}</Badge>
+                      <span>{charge.description}</span>
+                      <span className="text-muted-foreground text-xs">({charge.date})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">${charge.amount}</span>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-6 w-6"
+                        onClick={() => deleteChargeMutation.mutate(charge.id)}
+                        data-testid={`button-delete-charge-${charge.id}`}
+                      >
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {consumptionCharges.length === 0 && (
+                  <div className="p-3 text-sm text-muted-foreground text-center">
+                    Sin consumos adicionales
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-between p-3 border-t text-sm font-medium">
+                <span>Total Consumos</span>
+                <span data-testid="text-total-consumptions">${totalConsumptions.toFixed(2)}</span>
+              </div>
             </div>
 
-            <div className="flex items-center justify-between p-3 border-t bg-primary/5 font-semibold">
-              <span>TOTAL A PAGAR</span>
-              <span className="text-xl text-primary">${grandTotal.toFixed(2)}</span>
+            <div className="border rounded-lg">
+              <div className="p-3 border-b bg-muted/50">
+                <h4 className="font-semibold">Pagos / Anticipos</h4>
+              </div>
+              <div className="divide-y max-h-[100px] overflow-y-auto">
+                {paymentCharges.map((charge) => (
+                  <div key={charge.id} className="flex items-center justify-between p-3 text-sm" data-testid={`payment-row-${charge.id}`}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>{charge.description}</span>
+                      <span className="text-muted-foreground text-xs">({charge.date})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-green-600">-${Math.abs(parseFloat(charge.amount)).toFixed(2)}</span>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-6 w-6"
+                        onClick={() => deleteChargeMutation.mutate(charge.id)}
+                        data-testid={`button-delete-payment-${charge.id}`}
+                      >
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {paymentCharges.length === 0 && (
+                  <div className="p-3 text-sm text-muted-foreground text-center">
+                    Sin pagos registrados
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-between p-3 border-t text-sm font-medium">
+                <span>Total Pagado</span>
+                <span className="text-green-600" data-testid="text-total-payments">${totalPayments.toFixed(2)}</span>
+              </div>
             </div>
-          </div>
 
-          {reservation.notes && (
-            <div className="p-3 border rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Notas</p>
-              <p className="text-sm">{reservation.notes}</p>
+            <div className="border rounded-lg bg-primary/5">
+              <div className="p-4">
+                <div className="flex justify-between text-sm mb-1">
+                  <span>Subtotal Alojamiento</span>
+                  <span>${subtotalRoom.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span>+ Consumos</span>
+                  <span>${totalConsumptions.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm mb-2 border-b pb-2">
+                  <span>- Pagos/Anticipos</span>
+                  <span className="text-green-600">-${totalPayments.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-lg">
+                  <span>SALDO PENDIENTE</span>
+                  <span className={balance > 0 ? "text-destructive" : "text-green-600"} data-testid="text-balance">
+                    ${balance.toFixed(2)}
+                  </span>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+          </TabsContent>
+        </Tabs>
+
         <DialogFooter className="gap-2 sm:justify-between">
           <div>
             {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
