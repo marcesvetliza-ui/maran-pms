@@ -8,6 +8,8 @@ import {
   type RatePlan,
   type InsertRatePlan,
   type RatePlanWithRoomType,
+  type Company,
+  type InsertCompany,
   type Guest,
   type InsertGuest,
   type Reservation,
@@ -59,9 +61,18 @@ export interface IStorage {
   updateRoom(id: string, room: Partial<InsertRoom>): Promise<Room | undefined>;
   deleteRoom(id: string): Promise<boolean>;
 
+  // Companies
+  getCompanies(): Promise<Company[]>;
+  getCompany(id: string): Promise<Company | undefined>;
+  searchCompanies(query: string): Promise<Company[]>;
+  createCompany(company: InsertCompany): Promise<Company>;
+  updateCompany(id: string, company: Partial<InsertCompany>): Promise<Company | undefined>;
+  deleteCompany(id: string): Promise<boolean>;
+
   // Guests
   getGuests(): Promise<Guest[]>;
   getGuest(id: string): Promise<Guest | undefined>;
+  searchGuests(query: string): Promise<Guest[]>;
   createGuest(guest: InsertGuest): Promise<Guest>;
   updateGuest(id: string, guest: Partial<InsertGuest>): Promise<Guest | undefined>;
   deleteGuest(id: string): Promise<boolean>;
@@ -132,6 +143,7 @@ export class MemStorage implements IStorage {
   private roomTypes: Map<string, RoomType>;
   private ratePlans: Map<string, RatePlan>;
   private rooms: Map<string, Room>;
+  private companies: Map<string, Company>;
   private guests: Map<string, Guest>;
   private reservations: Map<string, Reservation>;
   private charges: Map<string, Charge>;
@@ -145,6 +157,7 @@ export class MemStorage implements IStorage {
     this.roomTypes = new Map();
     this.ratePlans = new Map();
     this.rooms = new Map();
+    this.companies = new Map();
     this.guests = new Map();
     this.reservations = new Map();
     this.charges = new Map();
@@ -209,16 +222,24 @@ export class MemStorage implements IStorage {
     }
     rooms.forEach((r) => this.rooms.set(r.id, r));
 
+    // Create companies
+    const companies: Company[] = [
+      { id: "comp1", businessName: "TechCorp Argentina S.A.", tradeName: "TechCorp", taxId: "30-71234567-8", taxType: "CUIT", email: "reservas@techcorp.com.ar", phone: "+54 11 4000-1234", address: "Av. del Libertador 1000", city: "CABA", country: "Argentina", contactName: "Pablo Mendez", contactEmail: "pablo.mendez@techcorp.com.ar", contactPhone: "+54 11 4000-1235", creditLimit: "50000.00", paymentTermDays: 30, notes: "Cliente corporativo frecuente", isActive: "true" },
+      { id: "comp2", businessName: "Consultoría Global S.R.L.", tradeName: "ConsultGlobal", taxId: "30-70987654-3", taxType: "CUIT", email: "viajes@consultglobal.com", phone: "+54 11 5000-5678", address: "Callao 500", city: "CABA", country: "Argentina", contactName: "Lucia Torres", contactEmail: "lucia.t@consultglobal.com", contactPhone: "+54 11 5000-5679", creditLimit: "25000.00", paymentTermDays: 15, notes: null, isActive: "true" },
+      { id: "comp3", businessName: "Exportadora del Sur S.A.", tradeName: "ExportSur", taxId: "30-65432198-7", taxType: "CUIT", email: "admin@exportsur.com.ar", phone: "+54 341 456-7890", address: "Bv. Oroño 2000", city: "Rosario", country: "Argentina", contactName: "Martin Gomez", contactEmail: "martin@exportsur.com.ar", contactPhone: "+54 341 456-7891", creditLimit: "30000.00", paymentTermDays: 30, notes: "Empresa de Rosario", isActive: "true" },
+    ];
+    companies.forEach((c) => this.companies.set(c.id, c));
+
     // Create guests
     const guests: Guest[] = [
-      { id: "g1", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", address: "Av. Corrientes 1234, CABA" },
-      { id: "g2", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", address: "Calle Florida 567, CABA" },
-      { id: "g3", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", address: "123 Main St, New York" },
-      { id: "g4", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", address: "Av. Santa Fe 890, CABA" },
-      { id: "g5", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", address: "Callao 456, CABA" },
-      { id: "g6", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", address: "Av. Libertador 123, CABA" },
-      { id: "g7", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", address: "Av. Belgrano 456, CABA" },
-      { id: "g8", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", address: "15 Rue de Paris, Lyon" },
+      { id: "g1", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", address: "Av. Corrientes 1234, CABA", companyId: null },
+      { id: "g2", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", address: "Calle Florida 567, CABA", companyId: null },
+      { id: "g3", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", address: "123 Main St, New York", companyId: null },
+      { id: "g4", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", address: "Av. Santa Fe 890, CABA", companyId: null },
+      { id: "g5", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", address: "Callao 456, CABA", companyId: "comp1" },
+      { id: "g6", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", address: "Av. Libertador 123, CABA", companyId: null },
+      { id: "g7", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", address: "Av. Belgrano 456, CABA", companyId: null },
+      { id: "g8", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", address: "15 Rue de Paris, Lyon", companyId: null },
     ];
     guests.forEach((g) => this.guests.set(g.id, g));
 
@@ -232,16 +253,16 @@ export class MemStorage implements IStorage {
     const in10Days = new Date(Date.now() + 10 * 86400000).toISOString().split("T")[0];
     
     const reservations: Reservation[] = [
-      { id: "res1", reservationCode: "RES-1001", guestId: "g1", roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res2", reservationCode: "RES-1002", guestId: "g2", roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res3", reservationCode: "RES-1003", guestId: "g3", roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "booking", otaChannelId: null, externalReservationId: "BK-123456", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res4", reservationCode: "RES-1004", guestId: "g4", roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 4, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res5", reservationCode: "RES-1005", guestId: "g5", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res6", reservationCode: "RES-1006", guestId: "g6", roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "tentative", source: "telefono", otaChannelId: null, externalReservationId: null, numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res7", reservationCode: "RES-1007", guestId: "g7", roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res8", reservationCode: "RES-1008", guestId: "g8", roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "expedia", otaChannelId: null, externalReservationId: "EX-789012", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res9", reservationCode: "RES-1009", guestId: "g1", roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res10", reservationCode: "RES-1010", guestId: "g2", roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "airbnb", otaChannelId: null, externalReservationId: "AB-345678", numberOfGuests: 3, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res1", reservationCode: "RES-1001", guestId: "g1", companyId: null, roomTypeId: "rt2", roomId: "r3", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "80.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res2", reservationCode: "RES-1002", guestId: "g2", companyId: null, roomTypeId: "rt3", roomId: "r15", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "150.00", discountType: "percent", discountValue: "10", finalRatePerNight: "135.00", totalRoomAmount: "945.00", status: "checked_in", source: "web", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res3", reservationCode: "RES-1003", guestId: "g3", companyId: null, roomTypeId: "rt3", roomId: "r28", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "150.00", discountType: "none", discountValue: "0", finalRatePerNight: "150.00", totalRoomAmount: "450.00", status: "checked_in", source: "booking", otaChannelId: null, externalReservationId: "BK-123456", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res4", reservationCode: "RES-1004", guestId: "g4", companyId: null, roomTypeId: "rt4", roomId: "r45", ratePlanId: "rp4", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 4, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res5", reservationCode: "RES-1005", guestId: "g5", companyId: "comp1", roomTypeId: "rt2", roomId: "r6", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "70.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "60.00", totalRoomAmount: "60.00", status: "confirmed", source: "empresa", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res6", reservationCode: "RES-1006", guestId: "g6", companyId: null, roomTypeId: "rt1", roomId: "r1", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "50.00", discountType: "none", discountValue: "0", finalRatePerNight: "50.00", totalRoomAmount: "200.00", status: "tentative", source: "telefono", otaChannelId: null, externalReservationId: null, numberOfGuests: 1, notes: "Llegada tardía", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res7", reservationCode: "RES-1007", guestId: "g7", companyId: null, roomTypeId: "rt2", roomId: "r10", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res8", reservationCode: "RES-1008", guestId: "g8", companyId: null, roomTypeId: "rt2", roomId: "r20", ratePlanId: "rp2", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "560.00", status: "pending", source: "expedia", otaChannelId: null, externalReservationId: "EX-789012", numberOfGuests: 2, notes: "Turista francés", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res9", reservationCode: "RES-1009", guestId: "g1", companyId: null, roomTypeId: "rt2", roomId: "r35", ratePlanId: "rp2", checkInDate: in5Days, checkOutDate: in10Days, nights: 5, baseRatePerNight: "80.00", discountType: "none", discountValue: "0", finalRatePerNight: "80.00", totalRoomAmount: "400.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res10", reservationCode: "RES-1010", guestId: "g2", companyId: null, roomTypeId: "rt2", roomId: "r50", ratePlanId: "rp6", checkInDate: tomorrow, checkOutDate: in3Days, nights: 2, baseRatePerNight: "65.00", discountType: "percent", discountValue: "5", finalRatePerNight: "61.75", totalRoomAmount: "123.50", status: "confirmed", source: "airbnb", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
     ];
     reservations.forEach((r) => this.reservations.set(r.id, r));
 
@@ -414,6 +435,67 @@ export class MemStorage implements IStorage {
     return this.rooms.delete(id);
   }
 
+  // Companies
+  async getCompanies(): Promise<Company[]> {
+    return Array.from(this.companies.values()).filter((c) => c.isActive === "true");
+  }
+
+  async getCompany(id: string): Promise<Company | undefined> {
+    return this.companies.get(id);
+  }
+
+  async searchCompanies(query: string): Promise<Company[]> {
+    const lowerQuery = query.toLowerCase();
+    return Array.from(this.companies.values()).filter((c) => 
+      c.isActive === "true" && (
+        c.businessName.toLowerCase().includes(lowerQuery) ||
+        c.tradeName?.toLowerCase().includes(lowerQuery) ||
+        c.taxId.toLowerCase().includes(lowerQuery)
+      )
+    );
+  }
+
+  async createCompany(insertCompany: InsertCompany): Promise<Company> {
+    const id = randomUUID();
+    const company: Company = {
+      id,
+      businessName: insertCompany.businessName,
+      tradeName: insertCompany.tradeName ?? null,
+      taxId: insertCompany.taxId,
+      taxType: insertCompany.taxType ?? "CUIT",
+      email: insertCompany.email ?? null,
+      phone: insertCompany.phone ?? null,
+      address: insertCompany.address ?? null,
+      city: insertCompany.city ?? null,
+      country: insertCompany.country ?? "Argentina",
+      contactName: insertCompany.contactName ?? null,
+      contactEmail: insertCompany.contactEmail ?? null,
+      contactPhone: insertCompany.contactPhone ?? null,
+      creditLimit: insertCompany.creditLimit ?? "0",
+      paymentTermDays: insertCompany.paymentTermDays ?? 30,
+      notes: insertCompany.notes ?? null,
+      isActive: insertCompany.isActive ?? "true",
+    };
+    this.companies.set(id, company);
+    return company;
+  }
+
+  async updateCompany(id: string, updates: Partial<InsertCompany>): Promise<Company | undefined> {
+    const company = this.companies.get(id);
+    if (!company) return undefined;
+    const updatedCompany: Company = { ...company, ...updates };
+    this.companies.set(id, updatedCompany);
+    return updatedCompany;
+  }
+
+  async deleteCompany(id: string): Promise<boolean> {
+    const company = this.companies.get(id);
+    if (!company) return false;
+    company.isActive = "false";
+    this.companies.set(id, company);
+    return true;
+  }
+
   // Guests
   async getGuests(): Promise<Guest[]> {
     return Array.from(this.guests.values());
@@ -421,6 +503,16 @@ export class MemStorage implements IStorage {
 
   async getGuest(id: string): Promise<Guest | undefined> {
     return this.guests.get(id);
+  }
+
+  async searchGuests(query: string): Promise<Guest[]> {
+    const lowerQuery = query.toLowerCase();
+    return Array.from(this.guests.values()).filter((g) =>
+      g.firstName.toLowerCase().includes(lowerQuery) ||
+      g.lastName.toLowerCase().includes(lowerQuery) ||
+      g.email?.toLowerCase().includes(lowerQuery) ||
+      g.documentNumber?.toLowerCase().includes(lowerQuery)
+    );
   }
 
   async createGuest(insertGuest: InsertGuest): Promise<Guest> {
@@ -435,6 +527,7 @@ export class MemStorage implements IStorage {
       documentNumber: insertGuest.documentNumber ?? null,
       nationality: insertGuest.nationality ?? null,
       address: insertGuest.address ?? null,
+      companyId: insertGuest.companyId ?? null,
     };
     this.guests.set(id, guest);
     return guest;
@@ -519,6 +612,7 @@ export class MemStorage implements IStorage {
       id,
       reservationCode: insertReservation.reservationCode,
       guestId: insertReservation.guestId,
+      companyId: insertReservation.companyId ?? null,
       roomTypeId: insertReservation.roomTypeId,
       roomId: insertReservation.roomId,
       ratePlanId: insertReservation.ratePlanId ?? null,

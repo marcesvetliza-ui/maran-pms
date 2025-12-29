@@ -195,6 +195,71 @@ export async function registerRoutes(
     }
   });
 
+  // Companies
+  app.get("/api/companies", async (req, res) => {
+    try {
+      const companies = await storage.getCompanies();
+      res.json(companies);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching companies" });
+    }
+  });
+
+  app.get("/api/companies/search", async (req, res) => {
+    try {
+      const query = req.query.q as string || "";
+      const companies = await storage.searchCompanies(query);
+      res.json(companies);
+    } catch (error) {
+      res.status(500).json({ error: "Error searching companies" });
+    }
+  });
+
+  app.get("/api/companies/:id", async (req, res) => {
+    try {
+      const company = await storage.getCompany(req.params.id);
+      if (!company) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      res.json(company);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching company" });
+    }
+  });
+
+  app.post("/api/companies", async (req, res) => {
+    try {
+      const company = await storage.createCompany(req.body);
+      res.status(201).json(company);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating company" });
+    }
+  });
+
+  app.patch("/api/companies/:id", async (req, res) => {
+    try {
+      const company = await storage.updateCompany(req.params.id, req.body);
+      if (!company) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      res.json(company);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating company" });
+    }
+  });
+
+  app.delete("/api/companies/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteCompany(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting company" });
+    }
+  });
+
   // Guests
   app.get("/api/guests", async (req, res) => {
     try {
@@ -202,6 +267,16 @@ export async function registerRoutes(
       res.json(guests);
     } catch (error) {
       res.status(500).json({ error: "Error fetching guests" });
+    }
+  });
+
+  app.get("/api/guests/search", async (req, res) => {
+    try {
+      const query = req.query.q as string || "";
+      const guests = await storage.searchGuests(query);
+      res.json(guests);
+    } catch (error) {
+      res.status(500).json({ error: "Error searching guests" });
     }
   });
 
