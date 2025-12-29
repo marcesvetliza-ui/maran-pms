@@ -68,7 +68,7 @@ export type Guest = typeof guests.$inferSelect;
 // Reservations
 export type ReservationStatus = "tentative" | "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
 export type DiscountType = "none" | "percent" | "fixed";
-export type ReservationSource = "directo" | "web" | "ota" | "empresa" | "telefono";
+export type ReservationSource = "directo" | "web" | "booking" | "expedia" | "airbnb" | "despegar" | "hotelbeds" | "agoda" | "ota" | "empresa" | "telefono";
 
 export const reservations = pgTable("reservations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -87,6 +87,8 @@ export const reservations = pgTable("reservations", {
   totalRoomAmount: decimal("total_room_amount", { precision: 10, scale: 2 }),
   status: text("status").$type<ReservationStatus>().notNull().default("pending"),
   source: text("source").$type<ReservationSource>().notNull().default("directo"),
+  otaChannelId: varchar("ota_channel_id"),
+  externalReservationId: text("external_reservation_id"),
   numberOfGuests: integer("number_of_guests").notNull().default(1),
   notes: text("notes"),
   createdAt: text("created_at").notNull(),
@@ -173,3 +175,62 @@ export const users = pgTable("users", {
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+// OTA Channels (Canales de distribución)
+export type OTAChannelType = "booking" | "expedia" | "airbnb" | "despegar" | "hotelbeds" | "agoda" | "trivago" | "manual";
+export type OTAChannelStatus = "active" | "inactive" | "pending" | "error";
+
+export const otaChannels = pgTable("ota_channels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  channelType: text("channel_type").$type<OTAChannelType>().notNull(),
+  status: text("status").$type<OTAChannelStatus>().notNull().default("inactive"),
+  apiKey: text("api_key"),
+  apiSecret: text("api_secret"),
+  hotelCode: text("hotel_code"),
+  commissionPercent: decimal("commission_percent", { precision: 5, scale: 2 }).default("15.00"),
+  syncEnabled: text("sync_enabled").notNull().default("false"),
+  lastSyncAt: text("last_sync_at"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertOTAChannelSchema = createInsertSchema(otaChannels).omit({ id: true });
+export type InsertOTAChannel = z.infer<typeof insertOTAChannelSchema>;
+export type OTAChannel = typeof otaChannels.$inferSelect;
+
+// OTA Reservation Sync Log (registro de sincronización)
+export type OTASyncStatus = "pending" | "synced" | "failed" | "cancelled";
+
+export const otaReservationLogs = pgTable("ota_reservation_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  channelId: varchar("channel_id").notNull(),
+  externalReservationId: text("external_reservation_id").notNull(),
+  internalReservationId: varchar("internal_reservation_id"),
+  guestName: text("guest_name").notNull(),
+  checkInDate: text("check_in_date").notNull(),
+  checkOutDate: text("check_out_date").notNull(),
+  roomTypeName: text("room_type_name"),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
+  commission: decimal("commission", { precision: 10, scale: 2 }),
+  netAmount: decimal("net_amount", { precision: 10, scale: 2 }),
+  status: text("status").$type<OTASyncStatus>().notNull().default("pending"),
+  rawData: text("raw_data"),
+  syncedAt: text("synced_at"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertOTAReservationLogSchema = createInsertSchema(otaReservationLogs).omit({ id: true });
+export type InsertOTAReservationLog = z.infer<typeof insertOTAReservationLogSchema>;
+export type OTAReservationLog = typeof otaReservationLogs.$inferSelect;
+
+// Extended OTA types
+export type OTAChannelWithStats = OTAChannel & {
+  totalReservations: number;
+  pendingSync: number;
+  totalRevenue: number;
+  totalCommission: number;
+};
+
+export type OTAReservationLogWithChannel = OTAReservationLog & {
+  channel: OTAChannel;
+};
