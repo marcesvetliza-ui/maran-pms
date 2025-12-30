@@ -2170,15 +2170,20 @@ Only respond with the JSON object.`;
       });
 
       const treatment = await storage.getSpaTreatment(treatmentId);
+      if (!treatment) {
+        return res.status(400).json({ error: "Treatment not found" });
+      }
+      
       const fullName = guestLastName ? `${guestName} ${guestLastName}` : guestName;
+      const treatmentPrice = treatment.price || "0";
       
       const account = await storage.createSpaAccount({
         appointmentId: appointment.id,
         guestName: fullName,
         reservationId: reservationId || null,
         status: "open",
-        subtotal: treatment?.price || "0",
-        total: treatment?.price || "0",
+        subtotal: treatmentPrice,
+        total: treatmentPrice,
         notes: null,
         openedAt: new Date().toISOString(),
         closedAt: null,
@@ -2186,18 +2191,16 @@ Only respond with the JSON object.`;
         chargedTo: null,
       });
 
-      if (treatment) {
-        await storage.createSpaAccountItem({
-          accountId: account.id,
-          description: treatment.name,
-          quantity: 1,
-          unitPrice: treatment.price,
-          subtotal: treatment.price,
-          itemType: "treatment",
-          notes: null,
-          createdAt: new Date().toISOString(),
-        });
-      }
+      await storage.createSpaAccountItem({
+        accountId: account.id,
+        description: treatment.name,
+        quantity: 1,
+        unitPrice: treatmentPrice,
+        subtotal: treatmentPrice,
+        itemType: "treatment",
+        notes: null,
+        createdAt: new Date().toISOString(),
+      });
 
       res.status(201).json(appointment);
     } catch (error) {

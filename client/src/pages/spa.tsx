@@ -183,7 +183,7 @@ export default function SpaPage() {
     },
   });
 
-  const { data: selectedAccount, refetch: refetchAccount } = useQuery<SpaAccount>({
+  const { data: selectedAccount } = useQuery<SpaAccount>({
     queryKey: ["/api/spa/accounts/by-appointment", selectedAppointment?.id],
     queryFn: async () => {
       if (!selectedAppointment) throw new Error("No appointment selected");
@@ -192,6 +192,7 @@ export default function SpaPage() {
       return response.json();
     },
     enabled: !!selectedAppointment,
+    staleTime: 0,
   });
 
   const activeCabins = cabins.filter((c) => c.isActive === "true");
