@@ -1731,6 +1731,62 @@ Only respond with the JSON object.`;
     }
   });
 
+  // Table Reservations
+  app.get("/api/restaurant/table-reservations", async (req, res) => {
+    try {
+      const { date } = req.query;
+      if (date && typeof date === "string") {
+        const reservations = await storage.getTableReservationsByDate(date);
+        return res.json(reservations);
+      }
+      const reservations = await storage.getTableReservations();
+      res.json(reservations);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching table reservations" });
+    }
+  });
+
+  app.get("/api/restaurant/table-reservations/:id", async (req, res) => {
+    try {
+      const reservation = await storage.getTableReservation(req.params.id);
+      if (!reservation) return res.status(404).json({ error: "Reservation not found" });
+      res.json(reservation);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching table reservation" });
+    }
+  });
+
+  app.post("/api/restaurant/table-reservations", async (req, res) => {
+    try {
+      const reservation = await storage.createTableReservation({
+        ...req.body,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(reservation);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating table reservation" });
+    }
+  });
+
+  app.patch("/api/restaurant/table-reservations/:id", async (req, res) => {
+    try {
+      const reservation = await storage.updateTableReservation(req.params.id, req.body);
+      if (!reservation) return res.status(404).json({ error: "Reservation not found" });
+      res.json(reservation);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating table reservation" });
+    }
+  });
+
+  app.delete("/api/restaurant/table-reservations/:id", async (req, res) => {
+    try {
+      await storage.deleteTableReservation(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting table reservation" });
+    }
+  });
+
   // ==================== INVENTORY MODULE ====================
   
   // Item Categories
