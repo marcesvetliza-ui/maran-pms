@@ -36,13 +36,6 @@ type SpaCabin = {
   isActive: string | null;
 };
 
-type SpaTreatmentCategory = {
-  id: string;
-  name: string;
-  description: string | null;
-  sortOrder: number | null;
-};
-
 type SpaTreatment = {
   id: string;
   categoryId: string | null;
@@ -90,7 +83,12 @@ const appointmentStatusLabels: Record<string, string> = {
   no_show: "No Show",
 };
 
-const HOURS = Array.from({ length: 15 }, (_, i) => i + 8);
+const TIME_SLOTS: string[] = [];
+for (let h = 8; h < 22; h++) {
+  TIME_SLOTS.push(`${h.toString().padStart(2, "0")}:00`);
+  TIME_SLOTS.push(`${h.toString().padStart(2, "0")}:30`);
+}
+TIME_SLOTS.push("22:00");
 
 const appointmentFormSchema = z.object({
   cabinId: z.string().min(1, "Seleccione un gabinete"),
@@ -106,24 +104,16 @@ const appointmentFormSchema = z.object({
 
 type AppointmentFormValues = z.infer<typeof appointmentFormSchema>;
 
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
 export default function SpaPage() {
-  const [startDate, setStartDate] = useState(startOfDay(new Date()));
+  const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
-  const [preselectedDate, setPreselectedDate] = useState<string | null>(null);
-  const [preselectedTime, setPreselectedTime] = useState<string | null>(null);
-  const [preselectedCabin, setPreselectedCabin] = useState<string | null>(null);
   const { toast } = useToast();
-
-  const endDate = addDays(startDate, 14);
-
-  const dates = useMemo(() => {
-    const result = [];
-    for (let i = 0; i < 15; i++) {
-      result.push(addDays(startDate, i));
-    }
-    return result;
-  }, [startDate]);
 
   const { data: cabins = [], isLoading: cabinsLoading } = useQuery<SpaCabin[]>({
     queryKey: ["/api/spa/cabins"],
@@ -133,11 +123,12 @@ export default function SpaPage() {
     queryKey: ["/api/spa/treatments"],
   });
 
+  const dateStr = format(selectedDate, "yyyy-MM-dd");
   const { data: appointments = [], isLoading: appointmentsLoading } = useQuery<SpaAppointment[]>({
-    queryKey: ["/api/spa/appointments", format(startDate, "yyyy-MM-dd"), format(endDate, "yyyy-MM-dd")],
+    queryKey: ["/api/spa/appointments", dateStr, dateStr],
     queryFn: async () => {
       const response = await fetch(
-        `/api/spa/appointments?startDate=${format(startDate, "yyyy-MM-dd")}&endDate=${format(endDate, "yyyy-MM-dd")}`
+        `/api/spa/appointments?startDate=${dateStr}&endDate=${dateStr}`
       );
       if (!response.ok) throw new Error("Error fetching appointments");
       return response.json();
@@ -155,7 +146,7 @@ export default function SpaPage() {
       guestLastName: "",
       guestPhone: "",
       guestEmail: "",
-      appointmentDate: "",
+      appointmentDate: dateStr,
       startTime: "",
       notes: "",
     },
@@ -166,10 +157,11 @@ export default function SpaPage() {
       const treatment = treatments.find((t) => t.id === data.treatmentId);
       const durationMinutes = treatment?.durationMinutes ?? 60;
       
-      const [hours, minutes] = data.startTime.split(":").map(Number);
-      const endHours = hours + Math.floor((minutes + durationMinutes) / 60);
-      const endMinutes = (minutes + durationMinutes) % 60;
-      const endTime = `${endHours.toString().padStart(2, "0")}:${endMinutes.toString().padStart(2, "0")}`;
+      const startMinutes = timeToMinutes(data.startTime);
+      const endMinutes = startMinutes + durationMinutes;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      const endTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
 
       return apiRequest("POST", "/api/spa/appointments", {
         ...data,
@@ -181,7 +173,17 @@ export default function SpaPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
       toast({ title: "Turno creado correctamente" });
       setIsNewDialogOpen(false);
-      form.reset();
+      form.reset({
+        cabinId: "",
+        treatmentId: "",
+        guestName: "",
+        guestLastName: "",
+        guestPhone: "",
+        guestEmail: "",
+        appointmentDate: dateStr,
+        startTime: "",
+        notes: "",
+      });
     },
     onError: () => {
       toast({ title: "Error al crear el turno", variant: "destructive" });
@@ -202,22 +204,19 @@ export default function SpaPage() {
     },
   });
 
-  const handlePreviousWeek = () => {
-    setStartDate(addDays(startDate, -7));
+  const handlePreviousDay = () => {
+    setSelectedDate(addDays(selectedDate, -1));
   };
 
-  const handleNextWeek = () => {
-    setStartDate(addDays(startDate, 7));
+  const handleNextDay = () => {
+    setSelectedDate(addDays(selectedDate, 1));
   };
 
   const handleToday = () => {
-    setStartDate(startOfDay(new Date()));
+    setSelectedDate(startOfDay(new Date()));
   };
 
-  const handleCellClick = (date: Date, hour: number, cabinId: string) => {
-    setPreselectedDate(format(date, "yyyy-MM-dd"));
-    setPreselectedTime(`${hour.toString().padStart(2, "0")}:00`);
-    setPreselectedCabin(cabinId);
+  const handleCellClick = (cabinId: string, time: string) => {
     form.reset({
       cabinId,
       treatmentId: "",
@@ -225,29 +224,43 @@ export default function SpaPage() {
       guestLastName: "",
       guestPhone: "",
       guestEmail: "",
-      appointmentDate: format(date, "yyyy-MM-dd"),
-      startTime: `${hour.toString().padStart(2, "0")}:00`,
+      appointmentDate: dateStr,
+      startTime: time,
       notes: "",
     });
     setIsNewDialogOpen(true);
   };
 
-  const getAppointmentsForSlot = (date: Date, hour: number, cabinId: string) => {
-    return appointments.filter((apt) => {
-      if (apt.cabinId !== cabinId) return false;
+  const getAppointmentForSlot = (cabinId: string, slotTime: string): SpaAppointment | null => {
+    const slotMinutes = timeToMinutes(slotTime);
+    
+    for (const apt of appointments) {
+      if (apt.cabinId !== cabinId) continue;
       const aptDate = parseISO(apt.appointmentDate);
-      if (!isSameDay(aptDate, date)) return false;
-      const [aptHour] = apt.startTime.split(":").map(Number);
-      return aptHour === hour;
-    });
+      if (!isSameDay(aptDate, selectedDate)) continue;
+      
+      const startMinutes = timeToMinutes(apt.startTime);
+      const endMinutes = timeToMinutes(apt.endTime);
+      
+      if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
+        return apt;
+      }
+    }
+    return null;
   };
 
-  const getAppointmentSpan = (appointment: SpaAppointment) => {
-    const [startHour, startMin] = appointment.startTime.split(":").map(Number);
-    const [endHour, endMin] = appointment.endTime.split(":").map(Number);
-    const startMinutes = startHour * 60 + startMin;
-    const endMinutes = endHour * 60 + endMin;
-    return Math.ceil((endMinutes - startMinutes) / 60);
+  const isSlotStart = (cabinId: string, slotTime: string): boolean => {
+    return appointments.some(apt => 
+      apt.cabinId === cabinId && 
+      apt.startTime === slotTime &&
+      isSameDay(parseISO(apt.appointmentDate), selectedDate)
+    );
+  };
+
+  const getAppointmentColSpan = (appointment: SpaAppointment): number => {
+    const startMinutes = timeToMinutes(appointment.startTime);
+    const endMinutes = timeToMinutes(appointment.endTime);
+    return Math.ceil((endMinutes - startMinutes) / 30);
   };
 
   const onSubmit = (data: AppointmentFormValues) => {
@@ -277,24 +290,31 @@ export default function SpaPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={handlePreviousWeek} data-testid="button-prev-week">
+          <Button variant="outline" size="icon" onClick={handlePreviousDay} data-testid="button-prev-day">
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button variant="outline" onClick={handleToday} data-testid="button-today">
             Hoy
           </Button>
-          <Button variant="outline" size="icon" onClick={handleNextWeek} data-testid="button-next-week">
+          <Button variant="outline" size="icon" onClick={handleNextDay} data-testid="button-next-day">
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <span className="text-sm text-muted-foreground ml-2">
-            {format(startDate, "d MMM", { locale: es })} - {format(endDate, "d MMM yyyy", { locale: es })}
+          <span className="text-sm font-medium ml-2">
+            {format(selectedDate, "EEEE d 'de' MMMM yyyy", { locale: es })}
           </span>
         </div>
         <Button onClick={() => {
-          form.reset();
-          setPreselectedDate(null);
-          setPreselectedTime(null);
-          setPreselectedCabin(null);
+          form.reset({
+            cabinId: "",
+            treatmentId: "",
+            guestName: "",
+            guestLastName: "",
+            guestPhone: "",
+            guestEmail: "",
+            appointmentDate: dateStr,
+            startTime: "",
+            notes: "",
+          });
           setIsNewDialogOpen(true);
         }} data-testid="button-new-appointment">
           <Plus className="h-4 w-4 mr-2" />
@@ -304,89 +324,98 @@ export default function SpaPage() {
 
       <Card className="flex-1 flex flex-col overflow-hidden">
         <CardHeader className="py-3 px-4">
-          <CardTitle className="text-base">Planning de Turnos - 15 dias</CardTitle>
+          <CardTitle className="text-base">Planning del Dia - Gabinetes</CardTitle>
         </CardHeader>
         <CardContent className="flex-1 p-0 overflow-hidden">
           <ScrollArea className="h-full">
-            <div className="min-w-[2000px]">
-              <table className="w-full border-collapse">
+            <div className="min-w-[1800px]">
+              <table className="w-full border-collapse table-fixed">
                 <thead className="sticky top-0 z-10 bg-background">
                   <tr>
-                    <th className="border-b border-r p-2 text-left text-xs font-medium text-muted-foreground w-24 sticky left-0 bg-background z-20">
-                      Hora
+                    <th className="border-b border-r p-2 text-left text-xs font-medium text-muted-foreground w-40 sticky left-0 bg-background z-20">
+                      Gabinete
                     </th>
-                    {dates.map((date, i) => {
-                      const isToday = isSameDay(date, new Date());
-                      return (
-                        <th
-                          key={i}
-                          className={`border-b border-r p-2 text-center text-xs font-medium ${
-                            isToday ? "bg-primary/10 text-primary" : "text-muted-foreground"
-                          }`}
-                          style={{ minWidth: `${100 / 15}%` }}
-                        >
-                          <div>{format(date, "EEE", { locale: es })}</div>
-                          <div className="font-bold">{format(date, "d")}</div>
-                        </th>
-                      );
-                    })}
+                    {TIME_SLOTS.map((time, i) => (
+                      <th
+                        key={time}
+                        className="border-b border-r p-1 text-center text-[10px] font-medium text-muted-foreground"
+                        style={{ width: "50px", minWidth: "50px" }}
+                      >
+                        {time}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {HOURS.map((hour) => (
-                    activeCabins.map((cabin, cabinIdx) => (
-                      <tr key={`${hour}-${cabin.id}`}>
-                        <td className="border-b border-r p-1 text-xs text-muted-foreground sticky left-0 bg-background z-10">
-                          {cabinIdx === 0 && (
-                            <div className="font-medium">{`${hour.toString().padStart(2, "0")}:00`}</div>
-                          )}
-                          <div className="text-[10px] truncate" title={cabin.name}>
-                            {cabin.name.replace("Cabina ", "").substring(0, 15)}
+                  {activeCabins.map((cabin) => {
+                    const skipSlots = new Set<number>();
+                    
+                    return (
+                      <tr key={cabin.id} className="h-14">
+                        <td className="border-b border-r p-2 text-sm font-medium sticky left-0 bg-background z-10">
+                          <div className="truncate" title={cabin.name}>
+                            {cabin.name}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground truncate">
+                            {cabin.description}
                           </div>
                         </td>
-                        {dates.map((date, dateIdx) => {
-                          const cellAppointments = getAppointmentsForSlot(date, hour, cabin.id);
-                          const isToday = isSameDay(date, new Date());
+                        {TIME_SLOTS.map((time, slotIdx) => {
+                          if (skipSlots.has(slotIdx)) {
+                            return null;
+                          }
+
+                          const appointment = getAppointmentForSlot(cabin.id, time);
+                          const isStart = isSlotStart(cabin.id, time);
+                          
+                          if (appointment && isStart) {
+                            const colSpan = getAppointmentColSpan(appointment);
+                            for (let i = 1; i < colSpan; i++) {
+                              skipSlots.add(slotIdx + i);
+                            }
+                            
+                            return (
+                              <td
+                                key={slotIdx}
+                                colSpan={colSpan}
+                                className="border-b border-r p-0.5 h-14"
+                              >
+                                <div
+                                  className={`h-full rounded px-2 py-1 cursor-pointer flex flex-col justify-center ${appointmentStatusColors[appointment.status]}`}
+                                  onClick={() => setSelectedAppointment(appointment)}
+                                  title={`${appointment.guestName} ${appointment.guestLastName || ""} - ${treatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
+                                  data-testid={`appointment-${appointment.id}`}
+                                >
+                                  <div className="text-xs font-medium truncate">
+                                    {appointment.guestName} {appointment.guestLastName || ""}
+                                  </div>
+                                  <div className="text-[10px] truncate opacity-75">
+                                    {treatments.find(t => t.id === appointment.treatmentId)?.name}
+                                  </div>
+                                  <div className="text-[10px] opacity-60">
+                                    {appointment.startTime} - {appointment.endTime}
+                                  </div>
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          if (appointment && !isStart) {
+                            return null;
+                          }
 
                           return (
                             <td
-                              key={dateIdx}
-                              className={`border-b border-r p-0.5 h-10 align-top cursor-pointer hover-elevate ${
-                                isToday ? "bg-primary/5" : ""
-                              }`}
-                              onClick={() => {
-                                if (cellAppointments.length === 0) {
-                                  handleCellClick(date, hour, cabin.id);
-                                }
-                              }}
-                              data-testid={`cell-${format(date, "yyyy-MM-dd")}-${hour}-${cabin.id}`}
-                            >
-                              {cellAppointments.map((apt) => (
-                                <div
-                                  key={apt.id}
-                                  className={`rounded px-1 py-0.5 text-[10px] cursor-pointer truncate ${appointmentStatusColors[apt.status]}`}
-                                  style={{
-                                    height: `${getAppointmentSpan(apt) * 40 - 4}px`,
-                                  }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedAppointment(apt);
-                                  }}
-                                  title={`${apt.guestName} ${apt.guestLastName || ""} - ${treatments.find(t => t.id === apt.treatmentId)?.name || ""}`}
-                                  data-testid={`appointment-${apt.id}`}
-                                >
-                                  <div className="font-medium truncate">{apt.guestName}</div>
-                                  <div className="truncate opacity-75">
-                                    {treatments.find(t => t.id === apt.treatmentId)?.name}
-                                  </div>
-                                </div>
-                              ))}
-                            </td>
+                              key={slotIdx}
+                              className="border-b border-r p-0.5 h-14 cursor-pointer hover-elevate"
+                              onClick={() => handleCellClick(cabin.id, time)}
+                              data-testid={`cell-${cabin.id}-${time}`}
+                            />
                           );
                         })}
                       </tr>
-                    ))
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -402,16 +431,41 @@ export default function SpaPage() {
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="appointmentDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fecha</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} data-testid="input-appointment-date" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
-                  name="appointmentDate"
+                  name="cabinId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Fecha</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} data-testid="input-appointment-date" />
-                      </FormControl>
+                      <FormLabel>Gabinete</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-cabin">
+                            <SelectValue placeholder="Seleccionar" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {activeCabins.map((cabin) => (
+                            <SelectItem key={cabin.id} value={cabin.id}>
+                              {cabin.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -429,9 +483,9 @@ export default function SpaPage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {HOURS.map((h) => (
-                            <SelectItem key={h} value={`${h.toString().padStart(2, "0")}:00`}>
-                              {`${h.toString().padStart(2, "0")}:00`}
+                          {TIME_SLOTS.slice(0, -1).map((time) => (
+                            <SelectItem key={time} value={time}>
+                              {time}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -441,31 +495,6 @@ export default function SpaPage() {
                   )}
                 />
               </div>
-
-              <FormField
-                control={form.control}
-                name="cabinId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Gabinete</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-cabin">
-                          <SelectValue placeholder="Seleccionar gabinete" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {activeCabins.map((cabin) => (
-                          <SelectItem key={cabin.id} value={cabin.id}>
-                            {cabin.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               <FormField
                 control={form.control}
