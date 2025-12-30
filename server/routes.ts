@@ -1961,5 +1961,377 @@ Only respond with the JSON object.`;
     }
   });
 
+  // ==================== SPA ====================
+  
+  // SPA Cabins
+  app.get("/api/spa/cabins", async (req, res) => {
+    try {
+      const cabins = await storage.getSpaCabins();
+      res.json(cabins);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa cabins" });
+    }
+  });
+
+  app.get("/api/spa/cabins/:id", async (req, res) => {
+    try {
+      const cabin = await storage.getSpaCabin(req.params.id);
+      if (!cabin) return res.status(404).json({ error: "Cabin not found" });
+      res.json(cabin);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa cabin" });
+    }
+  });
+
+  app.post("/api/spa/cabins", async (req, res) => {
+    try {
+      const cabin = await storage.createSpaCabin(req.body);
+      res.status(201).json(cabin);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating spa cabin" });
+    }
+  });
+
+  app.patch("/api/spa/cabins/:id", async (req, res) => {
+    try {
+      const cabin = await storage.updateSpaCabin(req.params.id, req.body);
+      if (!cabin) return res.status(404).json({ error: "Cabin not found" });
+      res.json(cabin);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating spa cabin" });
+    }
+  });
+
+  app.delete("/api/spa/cabins/:id", async (req, res) => {
+    try {
+      await storage.deleteSpaCabin(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting spa cabin" });
+    }
+  });
+
+  // SPA Treatment Categories
+  app.get("/api/spa/treatment-categories", async (req, res) => {
+    try {
+      const categories = await storage.getSpaTreatmentCategories();
+      res.json(categories);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching treatment categories" });
+    }
+  });
+
+  app.get("/api/spa/treatment-categories/:id", async (req, res) => {
+    try {
+      const category = await storage.getSpaTreatmentCategory(req.params.id);
+      if (!category) return res.status(404).json({ error: "Category not found" });
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching treatment category" });
+    }
+  });
+
+  app.post("/api/spa/treatment-categories", async (req, res) => {
+    try {
+      const category = await storage.createSpaTreatmentCategory(req.body);
+      res.status(201).json(category);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating treatment category" });
+    }
+  });
+
+  app.patch("/api/spa/treatment-categories/:id", async (req, res) => {
+    try {
+      const category = await storage.updateSpaTreatmentCategory(req.params.id, req.body);
+      if (!category) return res.status(404).json({ error: "Category not found" });
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating treatment category" });
+    }
+  });
+
+  app.delete("/api/spa/treatment-categories/:id", async (req, res) => {
+    try {
+      await storage.deleteSpaTreatmentCategory(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting treatment category" });
+    }
+  });
+
+  // SPA Treatments
+  app.get("/api/spa/treatments", async (req, res) => {
+    try {
+      const treatments = await storage.getSpaTreatments();
+      res.json(treatments);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching treatments" });
+    }
+  });
+
+  app.get("/api/spa/treatments/:id", async (req, res) => {
+    try {
+      const treatment = await storage.getSpaTreatment(req.params.id);
+      if (!treatment) return res.status(404).json({ error: "Treatment not found" });
+      res.json(treatment);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching treatment" });
+    }
+  });
+
+  app.get("/api/spa/treatments/by-category/:categoryId", async (req, res) => {
+    try {
+      const treatments = await storage.getSpaTreatmentsByCategory(req.params.categoryId);
+      res.json(treatments);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching treatments by category" });
+    }
+  });
+
+  app.post("/api/spa/treatments", async (req, res) => {
+    try {
+      const treatment = await storage.createSpaTreatment(req.body);
+      res.status(201).json(treatment);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating treatment" });
+    }
+  });
+
+  app.patch("/api/spa/treatments/:id", async (req, res) => {
+    try {
+      const treatment = await storage.updateSpaTreatment(req.params.id, req.body);
+      if (!treatment) return res.status(404).json({ error: "Treatment not found" });
+      res.json(treatment);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating treatment" });
+    }
+  });
+
+  app.delete("/api/spa/treatments/:id", async (req, res) => {
+    try {
+      await storage.deleteSpaTreatment(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting treatment" });
+    }
+  });
+
+  // SPA Appointments
+  app.get("/api/spa/appointments", async (req, res) => {
+    try {
+      const date = req.query.date as string | undefined;
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      
+      if (startDate && endDate) {
+        const appointments = await storage.getSpaAppointmentsByDateRange(startDate, endDate);
+        return res.json(appointments);
+      }
+      
+      const appointments = await storage.getSpaAppointments(date);
+      res.json(appointments);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching appointments" });
+    }
+  });
+
+  app.get("/api/spa/appointments/:id", async (req, res) => {
+    try {
+      const appointment = await storage.getSpaAppointment(req.params.id);
+      if (!appointment) return res.status(404).json({ error: "Appointment not found" });
+      res.json(appointment);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching appointment" });
+    }
+  });
+
+  app.post("/api/spa/appointments", async (req, res) => {
+    try {
+      const { cabinId, treatmentId, guestName, guestLastName, guestPhone, guestEmail, reservationId, appointmentDate, startTime, endTime, status, notes } = req.body;
+      
+      if (!cabinId || !treatmentId || !guestName || !appointmentDate || !startTime || !endTime) {
+        return res.status(400).json({ error: "cabinId, treatmentId, guestName, appointmentDate, startTime, and endTime are required" });
+      }
+
+      const appointment = await storage.createSpaAppointment({
+        cabinId,
+        treatmentId,
+        guestName,
+        guestLastName: guestLastName || null,
+        guestPhone: guestPhone || null,
+        guestEmail: guestEmail || null,
+        reservationId: reservationId || null,
+        appointmentDate,
+        startTime,
+        endTime,
+        status: status || "pending",
+        notes: notes || null,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(appointment);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating appointment" });
+    }
+  });
+
+  app.patch("/api/spa/appointments/:id", async (req, res) => {
+    try {
+      const appointment = await storage.updateSpaAppointment(req.params.id, req.body);
+      if (!appointment) return res.status(404).json({ error: "Appointment not found" });
+      res.json(appointment);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating appointment" });
+    }
+  });
+
+  app.delete("/api/spa/appointments/:id", async (req, res) => {
+    try {
+      await storage.deleteSpaAppointment(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting appointment" });
+    }
+  });
+
+  // SPA Accounts
+  app.get("/api/spa/accounts", async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const accounts = await storage.getSpaAccounts(status as "open" | "closed" | "cancelled" | undefined);
+      res.json(accounts);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa accounts" });
+    }
+  });
+
+  app.get("/api/spa/accounts/:id", async (req, res) => {
+    try {
+      const account = await storage.getSpaAccount(req.params.id);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      res.json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa account" });
+    }
+  });
+
+  app.get("/api/spa/accounts/by-appointment/:appointmentId", async (req, res) => {
+    try {
+      const account = await storage.getSpaAccountByAppointment(req.params.appointmentId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      res.json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa account" });
+    }
+  });
+
+  app.post("/api/spa/accounts", async (req, res) => {
+    try {
+      const { appointmentId, guestName, reservationId, notes } = req.body;
+      
+      if (!appointmentId || !guestName) {
+        return res.status(400).json({ error: "appointmentId and guestName are required" });
+      }
+
+      const account = await storage.createSpaAccount({
+        appointmentId,
+        guestName,
+        reservationId: reservationId || null,
+        status: "open",
+        subtotal: "0",
+        total: "0",
+        notes: notes || null,
+        openedAt: new Date().toISOString(),
+        closedAt: null,
+        closedBy: null,
+        chargedTo: null,
+      });
+      res.status(201).json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating spa account" });
+    }
+  });
+
+  app.patch("/api/spa/accounts/:id", async (req, res) => {
+    try {
+      const account = await storage.updateSpaAccount(req.params.id, req.body);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      res.json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating spa account" });
+    }
+  });
+
+  app.post("/api/spa/accounts/:id/close", async (req, res) => {
+    try {
+      const { chargedTo } = req.body;
+      
+      if (!chargedTo) {
+        return res.status(400).json({ error: "chargedTo is required (e.g., 'room:reservationId' or 'invoice')" });
+      }
+
+      const account = await storage.closeSpaAccount(req.params.id, chargedTo);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      res.json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Error closing spa account" });
+    }
+  });
+
+  // SPA Account Items
+  app.get("/api/spa/accounts/:accountId/items", async (req, res) => {
+    try {
+      const items = await storage.getSpaAccountItems(req.params.accountId);
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching account items" });
+    }
+  });
+
+  app.post("/api/spa/accounts/:accountId/items", async (req, res) => {
+    try {
+      const { description, quantity, unitPrice, itemType, notes } = req.body;
+      
+      if (!description || !unitPrice) {
+        return res.status(400).json({ error: "description and unitPrice are required" });
+      }
+
+      const qty = quantity || 1;
+      const subtotal = (parseFloat(unitPrice) * qty).toFixed(2);
+
+      const item = await storage.createSpaAccountItem({
+        accountId: req.params.accountId,
+        description,
+        quantity: qty,
+        unitPrice,
+        subtotal,
+        itemType: itemType || "treatment",
+        notes: notes || null,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating account item" });
+    }
+  });
+
+  app.patch("/api/spa/account-items/:id", async (req, res) => {
+    try {
+      const item = await storage.updateSpaAccountItem(req.params.id, req.body);
+      if (!item) return res.status(404).json({ error: "Item not found" });
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating account item" });
+    }
+  });
+
+  app.delete("/api/spa/account-items/:id", async (req, res) => {
+    try {
+      await storage.deleteSpaAccountItem(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting account item" });
+    }
+  });
+
   return httpServer;
 }
