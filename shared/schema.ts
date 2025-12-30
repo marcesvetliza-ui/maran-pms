@@ -724,3 +724,119 @@ export type PurchaseOrderWithDetails = PurchaseOrder & {
   supplier: Supplier;
   items: (PurchaseOrderItem & { item: InventoryItem })[];
 };
+
+// =====================
+// SPA MODULE
+// =====================
+
+// SPA Cabins (Gabinetes)
+export const spaCabins = pgTable("spa_cabins", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertSpaCabinSchema = createInsertSchema(spaCabins).omit({ id: true });
+export type InsertSpaCabin = z.infer<typeof insertSpaCabinSchema>;
+export type SpaCabin = typeof spaCabins.$inferSelect;
+
+// SPA Treatment Categories
+export const spaTreatmentCategories = pgTable("spa_treatment_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").default(0),
+});
+
+export const insertSpaTreatmentCategorySchema = createInsertSchema(spaTreatmentCategories).omit({ id: true });
+export type InsertSpaTreatmentCategory = z.infer<typeof insertSpaTreatmentCategorySchema>;
+export type SpaTreatmentCategory = typeof spaTreatmentCategories.$inferSelect;
+
+// SPA Treatments
+export const spaTreatments = pgTable("spa_treatments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryId: varchar("category_id"),
+  name: text("name").notNull(),
+  description: text("description"),
+  durationMinutes: integer("duration_minutes").notNull().default(60),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull().default("0"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertSpaTreatmentSchema = createInsertSchema(spaTreatments).omit({ id: true });
+export type InsertSpaTreatment = z.infer<typeof insertSpaTreatmentSchema>;
+export type SpaTreatment = typeof spaTreatments.$inferSelect;
+
+// SPA Appointments (Turnos)
+export type SpaAppointmentStatus = "pending" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show";
+
+export const spaAppointments = pgTable("spa_appointments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  cabinId: varchar("cabin_id").notNull(),
+  treatmentId: varchar("treatment_id").notNull(),
+  guestName: text("guest_name").notNull(),
+  guestLastName: text("guest_last_name"),
+  guestPhone: text("guest_phone"),
+  guestEmail: text("guest_email"),
+  reservationId: varchar("reservation_id"),
+  appointmentDate: text("appointment_date").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  status: text("status").$type<SpaAppointmentStatus>().notNull().default("pending"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertSpaAppointmentSchema = createInsertSchema(spaAppointments).omit({ id: true });
+export type InsertSpaAppointment = z.infer<typeof insertSpaAppointmentSchema>;
+export type SpaAppointment = typeof spaAppointments.$inferSelect;
+
+export type SpaAppointmentWithDetails = SpaAppointment & {
+  cabin: SpaCabin;
+  treatment: SpaTreatment;
+};
+
+// SPA Account (Cuenta SPA - similar to restaurant orders)
+export type SpaAccountStatus = "open" | "closed" | "cancelled";
+
+export const spaAccounts = pgTable("spa_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  appointmentId: varchar("appointment_id").notNull(),
+  guestName: text("guest_name").notNull(),
+  reservationId: varchar("reservation_id"),
+  status: text("status").$type<SpaAccountStatus>().notNull().default("open"),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0"),
+  total: decimal("total", { precision: 10, scale: 2 }).default("0"),
+  notes: text("notes"),
+  openedAt: text("opened_at").notNull(),
+  closedAt: text("closed_at"),
+  closedBy: text("closed_by"),
+  chargedTo: text("charged_to"),
+});
+
+export const insertSpaAccountSchema = createInsertSchema(spaAccounts).omit({ id: true });
+export type InsertSpaAccount = z.infer<typeof insertSpaAccountSchema>;
+export type SpaAccount = typeof spaAccounts.$inferSelect;
+
+// SPA Account Items (Cargos en cuenta SPA)
+export const spaAccountItems = pgTable("spa_account_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  description: text("description").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  itemType: text("item_type").notNull().default("treatment"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertSpaAccountItemSchema = createInsertSchema(spaAccountItems).omit({ id: true });
+export type InsertSpaAccountItem = z.infer<typeof insertSpaAccountItemSchema>;
+export type SpaAccountItem = typeof spaAccountItems.$inferSelect;
+
+export type SpaAccountWithItems = SpaAccount & {
+  items: SpaAccountItem[];
+  appointment?: SpaAppointmentWithDetails;
+};
