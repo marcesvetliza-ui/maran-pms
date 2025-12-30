@@ -82,6 +82,23 @@ import {
   type PurchaseOrderItem,
   type InsertPurchaseOrderItem,
   type PurchaseOrderWithDetails,
+  // SPA
+  type SpaCabin,
+  type InsertSpaCabin,
+  type SpaTreatmentCategory,
+  type InsertSpaTreatmentCategory,
+  type SpaTreatment,
+  type InsertSpaTreatment,
+  type SpaAppointment,
+  type InsertSpaAppointment,
+  type SpaAppointmentWithDetails,
+  type SpaAppointmentStatus,
+  type SpaAccount,
+  type InsertSpaAccount,
+  type SpaAccountStatus,
+  type SpaAccountItem,
+  type InsertSpaAccountItem,
+  type SpaAccountWithItems,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -326,6 +343,52 @@ export interface IStorage {
   // Stock Movements
   getStockMovements(itemId?: string): Promise<StockMovementWithItem[]>;
   createStockMovement(movement: InsertStockMovement): Promise<StockMovement>;
+
+  // ==================== SPA ====================
+  // SPA Cabins
+  getSpaCabins(): Promise<SpaCabin[]>;
+  getSpaCabin(id: string): Promise<SpaCabin | undefined>;
+  createSpaCabin(cabin: InsertSpaCabin): Promise<SpaCabin>;
+  updateSpaCabin(id: string, cabin: Partial<InsertSpaCabin>): Promise<SpaCabin | undefined>;
+  deleteSpaCabin(id: string): Promise<boolean>;
+
+  // SPA Treatment Categories
+  getSpaTreatmentCategories(): Promise<SpaTreatmentCategory[]>;
+  getSpaTreatmentCategory(id: string): Promise<SpaTreatmentCategory | undefined>;
+  createSpaTreatmentCategory(category: InsertSpaTreatmentCategory): Promise<SpaTreatmentCategory>;
+  updateSpaTreatmentCategory(id: string, category: Partial<InsertSpaTreatmentCategory>): Promise<SpaTreatmentCategory | undefined>;
+  deleteSpaTreatmentCategory(id: string): Promise<boolean>;
+
+  // SPA Treatments
+  getSpaTreatments(): Promise<SpaTreatment[]>;
+  getSpaTreatment(id: string): Promise<SpaTreatment | undefined>;
+  getSpaTreatmentsByCategory(categoryId: string): Promise<SpaTreatment[]>;
+  createSpaTreatment(treatment: InsertSpaTreatment): Promise<SpaTreatment>;
+  updateSpaTreatment(id: string, treatment: Partial<InsertSpaTreatment>): Promise<SpaTreatment | undefined>;
+  deleteSpaTreatment(id: string): Promise<boolean>;
+
+  // SPA Appointments
+  getSpaAppointments(date?: string): Promise<SpaAppointmentWithDetails[]>;
+  getSpaAppointment(id: string): Promise<SpaAppointmentWithDetails | undefined>;
+  getSpaAppointmentsByCabin(cabinId: string, date: string): Promise<SpaAppointment[]>;
+  getSpaAppointmentsByDateRange(startDate: string, endDate: string): Promise<SpaAppointmentWithDetails[]>;
+  createSpaAppointment(appointment: InsertSpaAppointment): Promise<SpaAppointment>;
+  updateSpaAppointment(id: string, appointment: Partial<InsertSpaAppointment>): Promise<SpaAppointment | undefined>;
+  deleteSpaAppointment(id: string): Promise<boolean>;
+
+  // SPA Accounts
+  getSpaAccounts(status?: SpaAccountStatus): Promise<SpaAccountWithItems[]>;
+  getSpaAccount(id: string): Promise<SpaAccountWithItems | undefined>;
+  getSpaAccountByAppointment(appointmentId: string): Promise<SpaAccountWithItems | undefined>;
+  createSpaAccount(account: InsertSpaAccount): Promise<SpaAccount>;
+  updateSpaAccount(id: string, account: Partial<InsertSpaAccount>): Promise<SpaAccount | undefined>;
+  closeSpaAccount(id: string, chargedTo: string): Promise<SpaAccount | undefined>;
+
+  // SPA Account Items
+  getSpaAccountItems(accountId: string): Promise<SpaAccountItem[]>;
+  createSpaAccountItem(item: InsertSpaAccountItem): Promise<SpaAccountItem>;
+  updateSpaAccountItem(id: string, item: Partial<InsertSpaAccountItem>): Promise<SpaAccountItem | undefined>;
+  deleteSpaAccountItem(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -358,6 +421,13 @@ export class MemStorage implements IStorage {
   private suppliers: Map<string, Supplier>;
   private inventoryItems: Map<string, InventoryItem>;
   private stockMovements: Map<string, StockMovement>;
+  // SPA
+  private spaCabins: Map<string, SpaCabin>;
+  private spaTreatmentCategories: Map<string, SpaTreatmentCategory>;
+  private spaTreatments: Map<string, SpaTreatment>;
+  private spaAppointments: Map<string, SpaAppointment>;
+  private spaAccounts: Map<string, SpaAccount>;
+  private spaAccountItems: Map<string, SpaAccountItem>;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
@@ -394,6 +464,13 @@ export class MemStorage implements IStorage {
     this.suppliers = new Map();
     this.inventoryItems = new Map();
     this.stockMovements = new Map();
+    // SPA
+    this.spaCabins = new Map();
+    this.spaTreatmentCategories = new Map();
+    this.spaTreatments = new Map();
+    this.spaAppointments = new Map();
+    this.spaAccounts = new Map();
+    this.spaAccountItems = new Map();
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
@@ -2513,6 +2590,377 @@ export class MemStorage implements IStorage {
     }
     
     return newMovement;
+  }
+
+  // ==================== SPA METHODS ====================
+
+  async getSpaCabins(): Promise<SpaCabin[]> {
+    return Array.from(this.spaCabins.values()).filter(c => c.isActive === "true");
+  }
+
+  async getSpaCabin(id: string): Promise<SpaCabin | undefined> {
+    return this.spaCabins.get(id);
+  }
+
+  async createSpaCabin(cabin: InsertSpaCabin): Promise<SpaCabin> {
+    const id = randomUUID();
+    const newCabin: SpaCabin = {
+      id,
+      name: cabin.name,
+      description: cabin.description ?? null,
+      isActive: cabin.isActive ?? "true",
+    };
+    this.spaCabins.set(id, newCabin);
+    return newCabin;
+  }
+
+  async updateSpaCabin(id: string, cabin: Partial<InsertSpaCabin>): Promise<SpaCabin | undefined> {
+    const existing = this.spaCabins.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...cabin };
+    this.spaCabins.set(id, updated);
+    return updated;
+  }
+
+  async deleteSpaCabin(id: string): Promise<boolean> {
+    return this.spaCabins.delete(id);
+  }
+
+  async getSpaTreatmentCategories(): Promise<SpaTreatmentCategory[]> {
+    return Array.from(this.spaTreatmentCategories.values()).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }
+
+  async getSpaTreatmentCategory(id: string): Promise<SpaTreatmentCategory | undefined> {
+    return this.spaTreatmentCategories.get(id);
+  }
+
+  async createSpaTreatmentCategory(category: InsertSpaTreatmentCategory): Promise<SpaTreatmentCategory> {
+    const id = randomUUID();
+    const newCategory: SpaTreatmentCategory = {
+      id,
+      name: category.name,
+      description: category.description ?? null,
+      sortOrder: category.sortOrder ?? 0,
+    };
+    this.spaTreatmentCategories.set(id, newCategory);
+    return newCategory;
+  }
+
+  async updateSpaTreatmentCategory(id: string, category: Partial<InsertSpaTreatmentCategory>): Promise<SpaTreatmentCategory | undefined> {
+    const existing = this.spaTreatmentCategories.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...category };
+    this.spaTreatmentCategories.set(id, updated);
+    return updated;
+  }
+
+  async deleteSpaTreatmentCategory(id: string): Promise<boolean> {
+    return this.spaTreatmentCategories.delete(id);
+  }
+
+  async getSpaTreatments(): Promise<SpaTreatment[]> {
+    return Array.from(this.spaTreatments.values()).filter(t => t.isActive === "true");
+  }
+
+  async getSpaTreatment(id: string): Promise<SpaTreatment | undefined> {
+    return this.spaTreatments.get(id);
+  }
+
+  async getSpaTreatmentsByCategory(categoryId: string): Promise<SpaTreatment[]> {
+    return Array.from(this.spaTreatments.values()).filter(t => t.categoryId === categoryId && t.isActive === "true");
+  }
+
+  async createSpaTreatment(treatment: InsertSpaTreatment): Promise<SpaTreatment> {
+    const id = randomUUID();
+    const newTreatment: SpaTreatment = {
+      id,
+      categoryId: treatment.categoryId ?? null,
+      name: treatment.name,
+      description: treatment.description ?? null,
+      durationMinutes: treatment.durationMinutes ?? 60,
+      price: treatment.price ?? "0",
+      isActive: treatment.isActive ?? "true",
+    };
+    this.spaTreatments.set(id, newTreatment);
+    return newTreatment;
+  }
+
+  async updateSpaTreatment(id: string, treatment: Partial<InsertSpaTreatment>): Promise<SpaTreatment | undefined> {
+    const existing = this.spaTreatments.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...treatment };
+    this.spaTreatments.set(id, updated);
+    return updated;
+  }
+
+  async deleteSpaTreatment(id: string): Promise<boolean> {
+    return this.spaTreatments.delete(id);
+  }
+
+  async getSpaAppointments(date?: string): Promise<SpaAppointmentWithDetails[]> {
+    let appointments = Array.from(this.spaAppointments.values());
+    if (date) {
+      appointments = appointments.filter(a => a.appointmentDate === date);
+    }
+    return appointments.map(a => ({
+      ...a,
+      cabin: this.spaCabins.get(a.cabinId)!,
+      treatment: this.spaTreatments.get(a.treatmentId)!,
+    })).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  async getSpaAppointment(id: string): Promise<SpaAppointmentWithDetails | undefined> {
+    const appointment = this.spaAppointments.get(id);
+    if (!appointment) return undefined;
+    return {
+      ...appointment,
+      cabin: this.spaCabins.get(appointment.cabinId)!,
+      treatment: this.spaTreatments.get(appointment.treatmentId)!,
+    };
+  }
+
+  async getSpaAppointmentsByCabin(cabinId: string, date: string): Promise<SpaAppointment[]> {
+    return Array.from(this.spaAppointments.values())
+      .filter(a => a.cabinId === cabinId && a.appointmentDate === date);
+  }
+
+  async getSpaAppointmentsByDateRange(startDate: string, endDate: string): Promise<SpaAppointmentWithDetails[]> {
+    return Array.from(this.spaAppointments.values())
+      .filter(a => a.appointmentDate >= startDate && a.appointmentDate <= endDate)
+      .map(a => ({
+        ...a,
+        cabin: this.spaCabins.get(a.cabinId)!,
+        treatment: this.spaTreatments.get(a.treatmentId)!,
+      }))
+      .sort((a, b) => {
+        if (a.appointmentDate !== b.appointmentDate) {
+          return a.appointmentDate.localeCompare(b.appointmentDate);
+        }
+        return a.startTime.localeCompare(b.startTime);
+      });
+  }
+
+  async createSpaAppointment(appointment: InsertSpaAppointment): Promise<SpaAppointment> {
+    const id = randomUUID();
+    const newAppointment: SpaAppointment = {
+      id,
+      cabinId: appointment.cabinId,
+      treatmentId: appointment.treatmentId,
+      guestName: appointment.guestName,
+      guestLastName: appointment.guestLastName ?? null,
+      guestPhone: appointment.guestPhone ?? null,
+      guestEmail: appointment.guestEmail ?? null,
+      reservationId: appointment.reservationId ?? null,
+      appointmentDate: appointment.appointmentDate,
+      startTime: appointment.startTime,
+      endTime: appointment.endTime,
+      status: (appointment.status ?? "pending") as SpaAppointmentStatus,
+      notes: appointment.notes ?? null,
+      createdAt: appointment.createdAt,
+    };
+    this.spaAppointments.set(id, newAppointment);
+    return newAppointment;
+  }
+
+  async updateSpaAppointment(id: string, appointment: Partial<InsertSpaAppointment>): Promise<SpaAppointment | undefined> {
+    const existing = this.spaAppointments.get(id);
+    if (!existing) return undefined;
+    const updated: SpaAppointment = {
+      ...existing,
+      ...appointment,
+      status: (appointment.status ?? existing.status) as SpaAppointmentStatus,
+    };
+    this.spaAppointments.set(id, updated);
+    return updated;
+  }
+
+  async deleteSpaAppointment(id: string): Promise<boolean> {
+    return this.spaAppointments.delete(id);
+  }
+
+  async getSpaAccounts(status?: SpaAccountStatus): Promise<SpaAccountWithItems[]> {
+    let accounts = Array.from(this.spaAccounts.values());
+    if (status) {
+      accounts = accounts.filter(a => a.status === status);
+    }
+    return accounts.map(account => {
+      const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === account.id);
+      const appointment = this.spaAppointments.get(account.appointmentId);
+      return {
+        ...account,
+        items,
+        appointment: appointment ? {
+          ...appointment,
+          cabin: this.spaCabins.get(appointment.cabinId)!,
+          treatment: this.spaTreatments.get(appointment.treatmentId)!,
+        } : undefined,
+      };
+    });
+  }
+
+  async getSpaAccount(id: string): Promise<SpaAccountWithItems | undefined> {
+    const account = this.spaAccounts.get(id);
+    if (!account) return undefined;
+    const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === id);
+    const appointment = this.spaAppointments.get(account.appointmentId);
+    return {
+      ...account,
+      items,
+      appointment: appointment ? {
+        ...appointment,
+        cabin: this.spaCabins.get(appointment.cabinId)!,
+        treatment: this.spaTreatments.get(appointment.treatmentId)!,
+      } : undefined,
+    };
+  }
+
+  async getSpaAccountByAppointment(appointmentId: string): Promise<SpaAccountWithItems | undefined> {
+    const account = Array.from(this.spaAccounts.values()).find(a => a.appointmentId === appointmentId);
+    if (!account) return undefined;
+    return this.getSpaAccount(account.id);
+  }
+
+  async createSpaAccount(account: InsertSpaAccount): Promise<SpaAccount> {
+    const id = randomUUID();
+    const newAccount: SpaAccount = {
+      id,
+      appointmentId: account.appointmentId,
+      guestName: account.guestName,
+      reservationId: account.reservationId ?? null,
+      status: (account.status ?? "open") as SpaAccountStatus,
+      subtotal: account.subtotal ?? "0",
+      total: account.total ?? "0",
+      notes: account.notes ?? null,
+      openedAt: account.openedAt,
+      closedAt: account.closedAt ?? null,
+      closedBy: account.closedBy ?? null,
+      chargedTo: account.chargedTo ?? null,
+    };
+    this.spaAccounts.set(id, newAccount);
+    return newAccount;
+  }
+
+  async updateSpaAccount(id: string, account: Partial<InsertSpaAccount>): Promise<SpaAccount | undefined> {
+    const existing = this.spaAccounts.get(id);
+    if (!existing) return undefined;
+    const updated: SpaAccount = {
+      ...existing,
+      ...account,
+      status: (account.status ?? existing.status) as SpaAccountStatus,
+    };
+    this.spaAccounts.set(id, updated);
+    return updated;
+  }
+
+  async closeSpaAccount(id: string, chargedTo: string): Promise<SpaAccount | undefined> {
+    const account = this.spaAccounts.get(id);
+    if (!account) return undefined;
+    const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === id);
+    const total = items.reduce((sum, item) => sum + parseFloat(item.subtotal), 0);
+    
+    const updated: SpaAccount = {
+      ...account,
+      status: "closed",
+      subtotal: total.toFixed(2),
+      total: total.toFixed(2),
+      closedAt: new Date().toISOString(),
+      chargedTo,
+    };
+    this.spaAccounts.set(id, updated);
+
+    // If charged to room, create a charge on the reservation
+    if (chargedTo.startsWith("room:")) {
+      const reservationId = chargedTo.replace("room:", "");
+      const reservation = this.reservations.get(reservationId);
+      if (reservation) {
+        const chargeId = randomUUID();
+        const charge: Charge = {
+          id: chargeId,
+          reservationId,
+          category: "spa",
+          description: "Servicios SPA",
+          amount: total.toFixed(2),
+          date: new Date().toISOString().split("T")[0],
+          status: "pending",
+          notes: null,
+        };
+        this.charges.set(chargeId, charge);
+      }
+    }
+
+    return updated;
+  }
+
+  async getSpaAccountItems(accountId: string): Promise<SpaAccountItem[]> {
+    return Array.from(this.spaAccountItems.values()).filter(i => i.accountId === accountId);
+  }
+
+  async createSpaAccountItem(item: InsertSpaAccountItem): Promise<SpaAccountItem> {
+    const id = randomUUID();
+    const newItem: SpaAccountItem = {
+      id,
+      accountId: item.accountId,
+      description: item.description,
+      quantity: item.quantity ?? 1,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal,
+      itemType: item.itemType ?? "treatment",
+      notes: item.notes ?? null,
+      createdAt: item.createdAt,
+    };
+    this.spaAccountItems.set(id, newItem);
+
+    // Update account totals
+    const account = this.spaAccounts.get(item.accountId);
+    if (account) {
+      const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === item.accountId);
+      const total = items.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
+      account.subtotal = total.toFixed(2);
+      account.total = total.toFixed(2);
+      this.spaAccounts.set(item.accountId, account);
+    }
+
+    return newItem;
+  }
+
+  async updateSpaAccountItem(id: string, item: Partial<InsertSpaAccountItem>): Promise<SpaAccountItem | undefined> {
+    const existing = this.spaAccountItems.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...item };
+    this.spaAccountItems.set(id, updated);
+
+    // Update account totals
+    const account = this.spaAccounts.get(existing.accountId);
+    if (account) {
+      const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === existing.accountId);
+      const total = items.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
+      account.subtotal = total.toFixed(2);
+      account.total = total.toFixed(2);
+      this.spaAccounts.set(existing.accountId, account);
+    }
+
+    return updated;
+  }
+
+  async deleteSpaAccountItem(id: string): Promise<boolean> {
+    const item = this.spaAccountItems.get(id);
+    if (!item) return false;
+    const accountId = item.accountId;
+    const deleted = this.spaAccountItems.delete(id);
+
+    // Update account totals
+    if (deleted) {
+      const account = this.spaAccounts.get(accountId);
+      if (account) {
+        const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === accountId);
+        const total = items.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
+        account.subtotal = total.toFixed(2);
+        account.total = total.toFixed(2);
+        this.spaAccounts.set(accountId, account);
+      }
+    }
+
+    return deleted;
   }
 }
 
