@@ -535,20 +535,42 @@ export class MemStorage implements IStorage {
     ];
     restaurantAreas.forEach((a) => this.restaurantAreas.set(a.id, a));
 
-    // Restaurant Tables
+    // Restaurant Tables - Based on floor plan "Plano Justo"
     const restaurantTables: RestaurantTable[] = [
-      { id: "t1", tableNumber: "1", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t2", tableNumber: "2", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t3", tableNumber: "3", areaId: "area1", capacity: 2, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t4", tableNumber: "4", areaId: "area1", capacity: 6, shape: "rectangular", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t5", tableNumber: "5", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t6", tableNumber: "6", areaId: "area1", capacity: 8, shape: "rectangular", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t7", tableNumber: "T1", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t8", tableNumber: "T2", areaId: "area2", capacity: 2, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t9", tableNumber: "T3", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t10", tableNumber: "B1", areaId: "area3", capacity: 2, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t11", tableNumber: "B2", areaId: "area3", capacity: 2, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
-      { id: "t12", tableNumber: "P1", areaId: "area4", capacity: 12, shape: "rectangular", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      // Salon Principal - Mesas 1-18
+      { id: "t1", tableNumber: "1", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 200, isActive: "true" },
+      { id: "t2", tableNumber: "2", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 200, isActive: "true" },
+      { id: "t3", tableNumber: "3", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 360, positionY: 200, isActive: "true" },
+      { id: "t4", tableNumber: "4", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 280, isActive: "true" },
+      { id: "t5", tableNumber: "5", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 280, isActive: "true" },
+      { id: "t6", tableNumber: "6", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 120, isActive: "true" },
+      { id: "t7", tableNumber: "7", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 360, isActive: "true" },
+      { id: "t8", tableNumber: "8", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 120, isActive: "true" },
+      { id: "t9", tableNumber: "9", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 360, isActive: "true" },
+      { id: "t10", tableNumber: "10", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 120, positionY: 440, isActive: "true" },
+      { id: "t11", tableNumber: "11", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 360, positionY: 440, isActive: "true" },
+      { id: "t12", tableNumber: "12", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 440, isActive: "true" },
+      { id: "t13", tableNumber: "13", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 440, isActive: "true" },
+      { id: "t14", tableNumber: "14", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 120, positionY: 280, isActive: "true" },
+      { id: "t15", tableNumber: "15", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 360, positionY: 40, isActive: "true" },
+      { id: "t16", tableNumber: "16", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 120, positionY: 200, isActive: "true" },
+      { id: "t17", tableNumber: "17", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 40, isActive: "true" },
+      { id: "t18", tableNumber: "18", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 40, isActive: "true" },
+      // Terraza - Mesas 19-32
+      { id: "t19", tableNumber: "19", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 440, isActive: "true" },
+      { id: "t20", tableNumber: "20", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 40, isActive: "true" },
+      { id: "t21", tableNumber: "21", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 360, isActive: "true" },
+      { id: "t22", tableNumber: "22", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 360, isActive: "true" },
+      { id: "t23", tableNumber: "23", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 280, isActive: "true" },
+      { id: "t24", tableNumber: "24", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 280, isActive: "true" },
+      { id: "t25", tableNumber: "25", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 280, positionY: 280, isActive: "true" },
+      { id: "t26", tableNumber: "26", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 200, isActive: "true" },
+      { id: "t27", tableNumber: "27", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 200, isActive: "true" },
+      { id: "t28", tableNumber: "28", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 280, positionY: 200, isActive: "true" },
+      { id: "t29", tableNumber: "29", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 120, isActive: "true" },
+      { id: "t30", tableNumber: "30", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 280, positionY: 120, isActive: "true" },
+      { id: "t31", tableNumber: "31", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 360, positionY: 120, isActive: "true" },
+      { id: "t32", tableNumber: "32", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 120, isActive: "true" },
     ];
     restaurantTables.forEach((t) => this.restaurantTables.set(t.id, t));
 
@@ -563,20 +585,20 @@ export class MemStorage implements IStorage {
 
     // Menu Items
     const menuItems: MenuItem[] = [
-      { id: "mi1", categoryId: "mc1", name: "Empanadas (3 unidades)", description: "Carne cortada a cuchillo", price: "3500.00", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 1 },
-      { id: "mi2", categoryId: "mc1", name: "Provoleta", description: "Queso provolone a la plancha con oregano", price: "4200.00", preparationTime: 12, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
-      { id: "mi3", categoryId: "mc1", name: "Tabla de Fiambres", description: "Jamon crudo, salamín, quesos", price: "6500.00", preparationTime: 8, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 3 },
+      { id: "mi1", categoryId: "mc1", name: "Empanadas (3 unidades)", description: "Carne cortada a cuchillo", price: "3500.00", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: ["gluten"], displayOrder: 1 },
+      { id: "mi2", categoryId: "mc1", name: "Provoleta", description: "Queso provolone a la plancha con oregano", price: "4200.00", preparationTime: 12, isAvailable: "true", isActive: "true", allergens: ["lacteos"], displayOrder: 2 },
+      { id: "mi3", categoryId: "mc1", name: "Tabla de Fiambres", description: "Jamon crudo, salamín, quesos", price: "6500.00", preparationTime: 8, isAvailable: "true", isActive: "true", allergens: ["lacteos"], displayOrder: 3 },
       { id: "mi4", categoryId: "mc2", name: "Bife de Chorizo", description: "400g, con guarnicion a eleccion", price: "12500.00", preparationTime: 25, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
-      { id: "mi5", categoryId: "mc2", name: "Salmon Grille", description: "Con vegetales de estacion", price: "14000.00", preparationTime: 20, isAvailable: "true", isActive: "true", allergens: "pescado", displayOrder: 2 },
-      { id: "mi6", categoryId: "mc2", name: "Ravioles de Ricota", description: "Con salsa bolognesa o filetto", price: "8500.00", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos", displayOrder: 3 },
+      { id: "mi5", categoryId: "mc2", name: "Salmon Grille", description: "Con vegetales de estacion", price: "14000.00", preparationTime: 20, isAvailable: "true", isActive: "true", allergens: ["pescado"], displayOrder: 2 },
+      { id: "mi6", categoryId: "mc2", name: "Ravioles de Ricota", description: "Con salsa bolognesa o filetto", price: "8500.00", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: ["gluten", "lacteos"], displayOrder: 3 },
       { id: "mi7", categoryId: "mc2", name: "Pollo a la Parrilla", description: "Medio pollo con ensalada", price: "7500.00", preparationTime: 30, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 4 },
-      { id: "mi8", categoryId: "mc3", name: "Flan con Dulce de Leche", description: "Casero", price: "2800.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "lacteos,huevo", displayOrder: 1 },
-      { id: "mi9", categoryId: "mc3", name: "Helado (3 bochas)", description: "Sabores a eleccion", price: "3200.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
-      { id: "mi10", categoryId: "mc3", name: "Tiramisu", description: "Postre italiano clasico", price: "4500.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos,huevo", displayOrder: 3 },
+      { id: "mi8", categoryId: "mc3", name: "Flan con Dulce de Leche", description: "Casero", price: "2800.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: ["lacteos", "huevo"], displayOrder: 1 },
+      { id: "mi9", categoryId: "mc3", name: "Helado (3 bochas)", description: "Sabores a eleccion", price: "3200.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: ["lacteos"], displayOrder: 2 },
+      { id: "mi10", categoryId: "mc3", name: "Tiramisu", description: "Postre italiano clasico", price: "4500.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: ["gluten", "lacteos", "huevo"], displayOrder: 3 },
       { id: "mi11", categoryId: "mc4", name: "Agua Mineral", description: "Con o sin gas 500ml", price: "1200.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
       { id: "mi12", categoryId: "mc4", name: "Gaseosa", description: "Coca-Cola, Sprite, Fanta", price: "1500.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 2 },
       { id: "mi13", categoryId: "mc4", name: "Copa de Vino Malbec", description: "Bodega Luigi Bosca", price: "3500.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
-      { id: "mi14", categoryId: "mc4", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 4 },
+      { id: "mi14", categoryId: "mc4", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: ["gluten"], displayOrder: 4 },
     ];
     menuItems.forEach((i) => this.menuItems.set(i.id, i));
 
