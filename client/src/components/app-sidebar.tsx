@@ -17,6 +17,7 @@ import {
   Sparkles,
   UtensilsCrossed,
   Package,
+  Flower2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -109,6 +110,11 @@ const operationsMenuItems = [
     title: "Inventario",
     url: "/inventory",
     icon: Package,
+  },
+  {
+    title: "SPA",
+    url: "/spa",
+    icon: Flower2,
   },
 ];
 
