@@ -1,13 +1,15 @@
 import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Info, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -30,7 +32,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType } from "@shared/schema";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, ReservationWithDetails, ReservationStatus } from "@shared/schema";
 
 function formatDate(dateStr: string) {
   const date = new Date(dateStr + "T12:00:00");
@@ -163,8 +165,13 @@ function QuickReservationDialog({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({
         title: "Reserva creada",
         description: "La reserva ha sido creada exitosamente desde el planning.",
@@ -220,9 +227,9 @@ function QuickReservationDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Nueva Reserva Rápida</DialogTitle>
+          <DialogTitle>Nueva Reserva Rapida</DialogTitle>
           <DialogDescription>
-            Habitación {reservationData.roomNumber} ({reservationData.roomTypeName}) - Check-in: {formatDateReadable(reservationData.checkInDate)}
+            Habitacion {reservationData.roomNumber} ({reservationData.roomTypeName}) - Check-in: {formatDateReadable(reservationData.checkInDate)}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
@@ -288,6 +295,232 @@ function QuickReservationDialog({
   );
 }
 
+function getStatusBadge(status: ReservationStatus) {
+  const config: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    tentative: { label: "Tentativa", variant: "outline" },
+    pending: { label: "Pendiente", variant: "secondary" },
+    confirmed: { label: "Confirmada", variant: "default" },
+    checked_in: { label: "Check-in", variant: "default" },
+    checked_out: { label: "Check-out", variant: "outline" },
+    cancelled: { label: "Cancelada", variant: "destructive" },
+  };
+  return config[status] || { label: status, variant: "outline" };
+}
+
+function ReservationDetailModal({
+  open,
+  onOpenChange,
+  reservationId,
+  onNavigate,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  reservationId: string | null;
+  onNavigate: (path: string) => void;
+}) {
+  const { toast } = useToast();
+
+  const { data: reservation, isLoading } = useQuery<ReservationWithDetails>({
+    queryKey: ["/api/reservations", reservationId],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservationId}`);
+      if (!res.ok) throw new Error("Failed to fetch reservation");
+      return res.json();
+    },
+    enabled: !!reservationId && open,
+  });
+
+  const checkInMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/reservations/${reservationId}/check-in`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Check-in realizado", description: "El huesped ha sido registrado." });
+      onOpenChange(false);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo realizar el check-in.", variant: "destructive" });
+    },
+  });
+
+  const checkOutMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Check-out realizado", description: "El huesped ha sido despedido." });
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo realizar el check-out.";
+      if (message.includes("saldo pendiente") || message.includes("balance")) {
+        toast({ title: "Saldo Pendiente", description: message, variant: "destructive" });
+      } else {
+        toast({ title: "Error", description: message, variant: "destructive" });
+      }
+    },
+  });
+
+  if (!reservationId) return null;
+
+  const statusBadge = reservation ? getStatusBadge(reservation.status) : null;
+  const canCheckIn = reservation?.status === "confirmed" || reservation?.status === "pending";
+  const canCheckOut = reservation?.status === "checked_in";
+  const totalCharges = reservation?.charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5" />
+            Detalle de Reserva
+          </DialogTitle>
+          {reservation && (
+            <DialogDescription>
+              Codigo: {reservation.reservationCode}
+            </DialogDescription>
+          )}
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="space-y-3 py-4">
+            <Skeleton className="h-6 w-full" />
+            <Skeleton className="h-6 w-3/4" />
+            <Skeleton className="h-6 w-1/2" />
+          </div>
+        ) : reservation ? (
+          <div className="space-y-4 py-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <User className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium">
+                  {reservation.guest?.firstName} {reservation.guest?.lastName}
+                </span>
+              </div>
+              <Badge variant={statusBadge?.variant}>{statusBadge?.label}</Badge>
+            </div>
+
+            <Separator />
+
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Habitacion</div>
+                <div className="font-medium flex items-center gap-1">
+                  <Bed className="h-4 w-4" />
+                  {reservation.room?.roomNumber} - {reservation.room?.roomType?.name}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Huespedes</div>
+                <div className="font-medium flex items-center gap-1">
+                  <Users className="h-4 w-4" />
+                  {reservation.numberOfGuests} persona(s)
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Check-in</div>
+                <div className="font-medium">{formatDateReadable(reservation.checkInDate)}</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Check-out</div>
+                <div className="font-medium">{formatDateReadable(reservation.checkOutDate)}</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Noches</div>
+                <div className="font-medium">{reservation.nights}</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Tarifa/noche</div>
+                <div className="font-medium">${reservation.finalRatePerNight}</div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between bg-muted/50 rounded-md p-3">
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-5 w-5 text-muted-foreground" />
+                <div>
+                  <div className="text-sm text-muted-foreground">Total Habitacion</div>
+                  <div className="font-semibold">${reservation.totalRoomAmount}</div>
+                </div>
+              </div>
+              {totalCharges > 0 && (
+                <div className="text-right">
+                  <div className="text-sm text-muted-foreground">Cargos extras</div>
+                  <div className="font-semibold">${totalCharges.toFixed(2)}</div>
+                </div>
+              )}
+            </div>
+
+            {reservation.notes && (
+              <div className="text-sm bg-muted/30 rounded-md p-3">
+                <div className="text-muted-foreground mb-1">Notas:</div>
+                <div>{reservation.notes}</div>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        <DialogFooter className="flex-col gap-2 sm:flex-row">
+          {canCheckIn && (
+            <Button
+              onClick={() => checkInMutation.mutate()}
+              disabled={checkInMutation.isPending}
+              className="w-full sm:w-auto"
+              data-testid="button-checkin-quick"
+            >
+              <LogIn className="h-4 w-4 mr-2" />
+              {checkInMutation.isPending ? "Procesando..." : "Check-in"}
+            </Button>
+          )}
+          {canCheckOut && (
+            <Button
+              onClick={() => checkOutMutation.mutate()}
+              disabled={checkOutMutation.isPending}
+              variant="secondary"
+              className="w-full sm:w-auto"
+              data-testid="button-checkout-quick"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              {checkOutMutation.isPending ? "Procesando..." : "Check-out"}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => {
+              onOpenChange(false);
+              onNavigate(`/reservations?view=${reservationId}`);
+            }}
+            className="w-full sm:w-auto"
+            data-testid="button-view-full"
+          >
+            <ExternalLink className="h-4 w-4 mr-2" />
+            Ver Completo
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function PlanningPage() {
   const [, navigate] = useLocation();
   const [dateRange, setDateRange] = useState(() => {
@@ -304,6 +537,8 @@ export default function PlanningPage() {
 
   const [quickReservationOpen, setQuickReservationOpen] = useState(false);
   const [selectedCell, setSelectedCell] = useState<QuickReservationData | null>(null);
+  const [reservationDetailOpen, setReservationDetailOpen] = useState(false);
+  const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<PlanningData>({
     queryKey: ["/api/planning", dateRange.start, dateRange.end],
@@ -357,7 +592,8 @@ export default function PlanningPage() {
       });
       setQuickReservationOpen(true);
     } else if (reservationId) {
-      navigate(`/reservations?view=${reservationId}`);
+      setSelectedReservationId(reservationId);
+      setReservationDetailOpen(true);
     }
   };
 
@@ -554,6 +790,13 @@ export default function PlanningPage() {
         onOpenChange={setQuickReservationOpen}
         reservationData={selectedCell}
         guests={guests}
+      />
+
+      <ReservationDetailModal
+        open={reservationDetailOpen}
+        onOpenChange={setReservationDetailOpen}
+        reservationId={selectedReservationId}
+        onNavigate={navigate}
       />
     </div>
   );

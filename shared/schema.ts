@@ -88,6 +88,7 @@ export type Company = typeof companies.$inferSelect;
 
 // Guests
 export type GuestSex = "masculino" | "femenino" | "otro" | "no_especifica";
+export type GuestSegment = "LEISURE" | "CORP" | "SPORT" | "CONGRESS" | "OTHER";
 
 export const guests = pgTable("guests", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -104,6 +105,7 @@ export const guests = pgTable("guests", {
   codigoPostal: text("codigo_postal"),
   fechaNacimiento: text("fecha_nacimiento"),
   sexo: text("sexo").$type<GuestSex>().default("no_especifica"),
+  segment: text("segment").$type<GuestSegment>().default("LEISURE"),
   cuilCuit: text("cuil_cuit"),
   companyId: varchar("company_id"),
   fechaAlta: text("fecha_alta"),

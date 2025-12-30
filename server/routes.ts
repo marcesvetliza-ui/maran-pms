@@ -23,6 +23,26 @@ export async function registerRoutes(
     }
   });
 
+  // Today's arrivals (check-ins scheduled for today)
+  app.get("/api/dashboard/arrivals", async (req, res) => {
+    try {
+      const arrivals = await storage.getReservationsForCheckIn();
+      res.json(arrivals);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching arrivals" });
+    }
+  });
+
+  // Today's departures (check-outs scheduled for today)
+  app.get("/api/dashboard/departures", async (req, res) => {
+    try {
+      const departures = await storage.getReservationsForCheckOut();
+      res.json(departures);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching departures" });
+    }
+  });
+
   // Planning
   app.get("/api/planning", async (req, res) => {
     try {
@@ -420,6 +440,107 @@ export async function registerRoutes(
     }
   });
 
+  // Duplicate reservation endpoint
+  app.post("/api/reservations/:id/duplicate", async (req, res) => {
+    try {
+      const original = await storage.getReservation(req.params.id);
+      if (!original) {
+        return res.status(404).json({ error: "Reservation not found" });
+      }
+      
+      const { checkInDate, checkOutDate, roomId } = req.body;
+      
+      if (!checkInDate || !checkOutDate) {
+        return res.status(400).json({ error: "Check-in and check-out dates are required" });
+      }
+      
+      // Normalize dates to date-only strings (YYYY-MM-DD) to avoid timezone issues
+      const normalizeDate = (dateStr: string): string => {
+        // If already in YYYY-MM-DD format, use as-is
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+        // Otherwise parse and extract date part
+        const d = new Date(dateStr);
+        return d.toISOString().split('T')[0];
+      };
+      
+      const normalizedCheckIn = normalizeDate(checkInDate);
+      const normalizedCheckOut = normalizeDate(checkOutDate);
+      
+      // Parse normalized dates for comparison (UTC midnight)
+      const checkIn = new Date(normalizedCheckIn + 'T00:00:00Z');
+      const checkOut = new Date(normalizedCheckOut + 'T00:00:00Z');
+      
+      if (checkOut <= checkIn) {
+        return res.status(400).json({ error: "La fecha de salida debe ser posterior a la entrada" });
+      }
+      
+      const nights = Math.round(
+        (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      
+      if (nights <= 0) {
+        return res.status(400).json({ error: "La reserva debe tener al menos 1 noche" });
+      }
+      
+      const finalRoomId = roomId || original.roomId;
+      const room = await storage.getRoom(finalRoomId);
+      
+      // Check for overlapping reservations on the same room
+      // Active statuses that block the room
+      const blockingStatuses = ["tentative", "pending", "confirmed", "checked_in"];
+      const allReservations = await storage.getReservations();
+      const overlapping = allReservations.filter(r => {
+        // Exclude the original reservation from overlap check
+        if (r.id === original.id) return false;
+        if (r.roomId !== finalRoomId) return false;
+        if (!blockingStatuses.includes(r.status)) return false;
+        
+        const rCheckIn = new Date(normalizeDate(r.checkInDate) + 'T00:00:00Z');
+        const rCheckOut = new Date(normalizeDate(r.checkOutDate) + 'T00:00:00Z');
+        
+        // Check for date overlap
+        return !(checkOut <= rCheckIn || checkIn >= rCheckOut);
+      });
+      
+      if (overlapping.length > 0) {
+        return res.status(400).json({ 
+          error: `La habitacion ${room?.roomNumber || finalRoomId} ya tiene una reserva en esas fechas` 
+        });
+      }
+      
+      const newCode = storage.generateReservationCode();
+      
+      const duplicated = await storage.createReservation({
+        reservationCode: newCode,
+        guestId: original.guestId,
+        companyId: original.companyId || null,
+        roomTypeId: room?.roomTypeId || original.roomTypeId,
+        roomId: finalRoomId,
+        ratePlanId: original.ratePlanId,
+        checkInDate: normalizedCheckIn,
+        checkOutDate: normalizedCheckOut,
+        nights,
+        baseRatePerNight: original.baseRatePerNight,
+        discountType: original.discountType,
+        discountValue: original.discountValue,
+        finalRatePerNight: original.finalRatePerNight,
+        totalRoomAmount: (parseFloat(original.finalRatePerNight || "0") * nights).toFixed(2),
+        status: "confirmed",
+        source: original.source,
+        otaChannelId: original.otaChannelId,
+        externalReservationId: null,
+        numberOfGuests: original.numberOfGuests,
+        notes: `Duplicada de ${original.reservationCode}`,
+        createdAt: new Date().toISOString(),
+        lastModifiedBy: null,
+      });
+      
+      res.status(201).json(duplicated);
+    } catch (error) {
+      res.status(500).json({ error: "Error duplicating reservation" });
+    }
+  });
+
   app.delete("/api/reservations/:id", async (req, res) => {
     try {
       const deleted = await storage.deleteReservation(req.params.id);
@@ -452,12 +573,60 @@ export async function registerRoutes(
     }
   });
 
+  // Get reservation folio (charges summary)
+  app.get("/api/reservations/:id/folio", async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) {
+        return res.status(404).json({ error: "Reservation not found" });
+      }
+      
+      const charges = await storage.getCharges(req.params.id);
+      const totalCharges = charges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+      const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+      const grandTotal = roomTotal + totalCharges;
+      
+      res.json({
+        reservationCode: reservation.reservationCode,
+        guestName: `${reservation.guest?.firstName} ${reservation.guest?.lastName}`,
+        roomNumber: reservation.room?.roomNumber,
+        checkInDate: reservation.checkInDate,
+        checkOutDate: reservation.checkOutDate,
+        nights: reservation.nights,
+        roomRate: reservation.finalRatePerNight,
+        roomTotal,
+        charges,
+        totalCharges,
+        grandTotal,
+        balance: grandTotal,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching folio" });
+    }
+  });
+
   // Check-out endpoint
   app.post("/api/reservations/:id/check-out", async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
+      }
+      
+      // Get balance - if forceCheckout is true, skip balance check
+      const forceCheckout = req.body.forceCheckout === true;
+      if (!forceCheckout) {
+        const chargesTotal = await storage.getChargesTotal(req.params.id);
+        const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+        const totalOwed = roomTotal + chargesTotal;
+        
+        if (totalOwed > 0) {
+          return res.status(400).json({ 
+            error: "Saldo pendiente",
+            message: `La reserva tiene un saldo pendiente de $${totalOwed.toFixed(2)}. Liquide antes de hacer check-out.`,
+            balance: totalOwed
+          });
+        }
       }
       
       // Update reservation status

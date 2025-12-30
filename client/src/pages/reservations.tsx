@@ -17,6 +17,7 @@ import {
   Check,
   LogIn,
   LogOut,
+  Copy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1053,6 +1054,9 @@ export default function ReservationsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const [duplicateCheckIn, setDuplicateCheckIn] = useState("");
+  const [duplicateCheckOut, setDuplicateCheckOut] = useState("");
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | undefined>();
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
@@ -1109,6 +1113,24 @@ export default function ReservationsPage() {
     },
   });
 
+  const duplicateMutation = useMutation({
+    mutationFn: async ({ id, checkInDate, checkOutDate }: { id: string; checkInDate: string; checkOutDate: string }) => {
+      return apiRequest("POST", `/api/reservations/${id}/duplicate`, { checkInDate, checkOutDate });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      setDuplicateDialogOpen(false);
+      setDuplicateCheckIn("");
+      setDuplicateCheckOut("");
+      toast({ title: "Reserva duplicada", description: "Se ha creado una nueva reserva con los datos copiados." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "No se pudo duplicar la reserva", variant: "destructive" });
+    },
+  });
+
   const filteredReservations = reservations?.filter((res) => {
     const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
     const matchesSearch =
@@ -1126,6 +1148,13 @@ export default function ReservationsPage() {
   const handleViewReservation = (reservation: ReservationWithDetails) => {
     setSelectedReservation(reservation);
     setDetailDialogOpen(true);
+  };
+
+  const handleDuplicateReservation = (reservation: ReservationWithDetails) => {
+    setSelectedReservation(reservation);
+    setDuplicateCheckIn("");
+    setDuplicateCheckOut("");
+    setDuplicateDialogOpen(true);
   };
 
   const handleNewReservation = () => {
@@ -1256,6 +1285,13 @@ export default function ReservationsPage() {
                           <Pencil className="mr-2 h-4 w-4" />
                           Editar
                         </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => handleDuplicateReservation(reservation)}
+                          data-testid={`duplicate-reservation-${reservation.id}`}
+                        >
+                          <Copy className="mr-2 h-4 w-4" />
+                          Duplicar
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         {reservation.status === "pending" && (
                           <DropdownMenuItem
@@ -1355,6 +1391,112 @@ export default function ReservationsPage() {
           onSuccess={() => setSelectedReservation(undefined)}
         />
       )}
+
+      {/* Duplicate Reservation Dialog */}
+      <Dialog open={duplicateDialogOpen} onOpenChange={setDuplicateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Duplicar Reserva</DialogTitle>
+            <DialogDescription>
+              Crea una nueva reserva con los mismos datos del huesped y habitacion.
+              Selecciona las nuevas fechas para la reserva duplicada.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedReservation && (() => {
+            const checkInDate = duplicateCheckIn ? new Date(duplicateCheckIn) : null;
+            const checkOutDate = duplicateCheckOut ? new Date(duplicateCheckOut) : null;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const isCheckInPast = checkInDate && checkInDate < today;
+            const isCheckOutBeforeCheckIn = checkInDate && checkOutDate && checkOutDate <= checkInDate;
+            const nights = checkInDate && checkOutDate && !isCheckOutBeforeCheckIn
+              ? Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
+              : 0;
+            const hasValidDates = duplicateCheckIn && duplicateCheckOut && !isCheckInPast && !isCheckOutBeforeCheckIn && nights > 0;
+
+            return (
+              <div className="space-y-4">
+                <div className="p-3 rounded-md bg-muted">
+                  <p className="text-sm font-medium">Reserva original:</p>
+                  <p className="text-sm text-muted-foreground">
+                    {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName} - Hab. {selectedReservation.room?.roomNumber}
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="duplicate-checkin">Nueva Fecha Entrada</Label>
+                    <Input
+                      id="duplicate-checkin"
+                      type="date"
+                      min={today.toISOString().split('T')[0]}
+                      value={duplicateCheckIn}
+                      onChange={(e) => setDuplicateCheckIn(e.target.value)}
+                      data-testid="input-duplicate-checkin"
+                    />
+                    {isCheckInPast && (
+                      <p className="text-xs text-destructive">La fecha no puede ser en el pasado</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="duplicate-checkout">Nueva Fecha Salida</Label>
+                    <Input
+                      id="duplicate-checkout"
+                      type="date"
+                      min={duplicateCheckIn || today.toISOString().split('T')[0]}
+                      value={duplicateCheckOut}
+                      onChange={(e) => setDuplicateCheckOut(e.target.value)}
+                      data-testid="input-duplicate-checkout"
+                    />
+                    {isCheckOutBeforeCheckIn && (
+                      <p className="text-xs text-destructive">La salida debe ser posterior a la entrada</p>
+                    )}
+                  </div>
+                </div>
+                {nights > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Estancia: {nights} noche(s)
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDuplicateDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedReservation && duplicateCheckIn && duplicateCheckOut) {
+                  const checkIn = new Date(duplicateCheckIn);
+                  const checkOut = new Date(duplicateCheckOut);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  
+                  if (checkIn < today) {
+                    toast({ title: "Error", description: "La fecha de entrada no puede ser en el pasado", variant: "destructive" });
+                    return;
+                  }
+                  if (checkOut <= checkIn) {
+                    toast({ title: "Error", description: "La fecha de salida debe ser posterior a la entrada", variant: "destructive" });
+                    return;
+                  }
+                  
+                  duplicateMutation.mutate({
+                    id: selectedReservation.id,
+                    checkInDate: duplicateCheckIn,
+                    checkOutDate: duplicateCheckOut,
+                  });
+                }
+              }}
+              disabled={!duplicateCheckIn || !duplicateCheckOut || duplicateMutation.isPending}
+              data-testid="button-confirm-duplicate"
+            >
+              {duplicateMutation.isPending ? "Duplicando..." : "Crear Reserva"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

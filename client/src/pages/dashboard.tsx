@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   DoorOpen,
   Users,
@@ -8,12 +8,16 @@ import {
   ArrowDownRight,
   Clock,
   AlertCircle,
+  LogIn,
+  LogOut,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails, RoomWithType } from "@shared/schema";
 
 type DashboardStats = {
@@ -151,6 +155,8 @@ function RoomStatusBadge({ status }: { status: string }) {
 }
 
 export default function Dashboard() {
+  const { toast } = useToast();
+
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
   });
@@ -161,6 +167,53 @@ export default function Dashboard() {
 
   const { data: roomsOverview, isLoading: roomsLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
+  });
+
+  const { data: arrivals = [], isLoading: arrivalsLoading } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/dashboard/arrivals"],
+  });
+
+  const { data: departures = [], isLoading: departuresLoading } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/dashboard/departures"],
+  });
+
+  const checkInMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/reservations/${id}/check-in`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Check-in realizado", description: "El huesped ha sido registrado." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo realizar el check-in.", variant: "destructive" });
+    },
+  });
+
+  const checkOutMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/reservations/${id}/check-out`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Check-out realizado", description: "El huesped ha sido despedido." });
+    },
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo realizar el check-out.";
+      if (message.includes("saldo pendiente") || message.includes("balance")) {
+        toast({ title: "Saldo Pendiente", description: message, variant: "destructive" });
+      } else {
+        toast({ title: "Error", description: message, variant: "destructive" });
+      }
+    },
   });
 
   const today = new Date().toLocaleDateString("es-ES", {
@@ -265,6 +318,120 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Arrivals & Departures */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Today's Arrivals */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <LogIn className="h-5 w-5 text-green-600" />
+                Llegadas del Dia
+              </CardTitle>
+              <CardDescription>{arrivals.length} check-ins pendientes</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {arrivalsLoading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : arrivals.length > 0 ? (
+              <div className="space-y-3">
+                {arrivals.slice(0, 5).map((reservation) => (
+                  <div
+                    key={reservation.id}
+                    className="flex items-center justify-between gap-3 p-3 rounded-md border bg-green-50/50 dark:bg-green-900/10"
+                    data-testid={`arrival-${reservation.id}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">
+                        {reservation.guest?.firstName} {reservation.guest?.lastName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Hab. {reservation.room?.roomNumber} | {reservation.nights} noche(s)
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => checkInMutation.mutate(reservation.id)}
+                      disabled={checkInMutation.isPending}
+                      data-testid={`checkin-btn-${reservation.id}`}
+                    >
+                      <LogIn className="h-4 w-4 mr-1" />
+                      Check-in
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <LogIn className="h-10 w-10 text-muted-foreground/30 mb-2" />
+                <p className="text-muted-foreground text-sm">No hay llegadas programadas</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Today's Departures */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <LogOut className="h-5 w-5 text-orange-600" />
+                Salidas del Dia
+              </CardTitle>
+              <CardDescription>{departures.length} check-outs pendientes</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {departuresLoading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : departures.length > 0 ? (
+              <div className="space-y-3">
+                {departures.slice(0, 5).map((reservation) => (
+                  <div
+                    key={reservation.id}
+                    className="flex items-center justify-between gap-3 p-3 rounded-md border bg-orange-50/50 dark:bg-orange-900/10"
+                    data-testid={`departure-${reservation.id}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">
+                        {reservation.guest?.firstName} {reservation.guest?.lastName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Hab. {reservation.room?.roomNumber} | ${reservation.totalRoomAmount}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => checkOutMutation.mutate(reservation.id)}
+                      disabled={checkOutMutation.isPending}
+                      data-testid={`checkout-btn-${reservation.id}`}
+                    >
+                      <LogOut className="h-4 w-4 mr-1" />
+                      Check-out
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <LogOut className="h-10 w-10 text-muted-foreground/30 mb-2" />
+                <p className="text-muted-foreground text-sm">No hay salidas programadas</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Main Content Grid */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Recent Reservations */}
@@ -272,7 +439,7 @@ export default function Dashboard() {
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <div>
               <CardTitle>Reservas Recientes</CardTitle>
-              <CardDescription>Últimas reservaciones registradas</CardDescription>
+              <CardDescription>Ultimas reservaciones registradas</CardDescription>
             </div>
             <Button variant="outline" size="sm" asChild>
               <Link href="/reservations">Ver todas</Link>
