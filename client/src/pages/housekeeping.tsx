@@ -11,6 +11,8 @@ import {
   Bed,
   Wrench,
   XCircle,
+  MoreHorizontal,
+  MessageSquare,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +33,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -80,6 +87,7 @@ function RoomCard({
   onCompleteTask,
   onCreateTask,
   onUpdateStatus,
+  onOpenDetails,
 }: { 
   room: RoomWithType;
   tasks: HousekeepingTaskWithRoom[];
@@ -87,10 +95,12 @@ function RoomCard({
   onCompleteTask: (taskId: string) => void;
   onCreateTask: (roomId: string) => void;
   onUpdateStatus: (roomId: string, status: RoomStatus) => void;
+  onOpenDetails: (roomId: string) => void;
 }) {
   const config = statusConfig[room.status];
   const Icon = config.icon;
   const pendingTasks = tasks.filter(t => t.status === "pending" || t.status === "in_progress");
+  const hasNotes = tasks.some(t => t.notes);
   
   return (
     <Card className={`${config.bgClass} border transition-all`}>
@@ -100,9 +110,70 @@ function RoomCard({
             <span className="font-bold text-lg">{room.roomNumber}</span>
             <Icon className={`h-4 w-4 ${config.className}`} />
           </div>
-          <Badge variant="outline" className="text-xs">
-            {room.roomType?.code || "N/A"}
-          </Badge>
+          <div className="flex items-center gap-1">
+            {hasNotes && (
+              <MessageSquare className="h-3 w-3 text-muted-foreground" />
+            )}
+            <Badge variant="outline" className="text-xs">
+              {room.roomType?.code || "N/A"}
+            </Badge>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  className="h-6 w-6"
+                  data-testid={`button-room-menu-${room.id}`}
+                >
+                  <MoreHorizontal className="h-3 w-3" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-2" align="end">
+                <div className="space-y-1">
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="w-full justify-start h-8 text-xs"
+                    onClick={() => onOpenDetails(room.id)}
+                    data-testid={`button-details-${room.id}`}
+                  >
+                    <MessageSquare className="h-3 w-3 mr-2" />
+                    Ver Detalles / Notas
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="w-full justify-start h-8 text-xs"
+                    onClick={() => onUpdateStatus(room.id, "available")}
+                    data-testid={`button-quick-available-${room.id}`}
+                  >
+                    <CheckCircle className="h-3 w-3 mr-2 text-green-500" />
+                    Marcar Disponible
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="w-full justify-start h-8 text-xs"
+                    onClick={() => onUpdateStatus(room.id, "dirty")}
+                    data-testid={`button-quick-dirty-${room.id}`}
+                  >
+                    <AlertCircle className="h-3 w-3 mr-2 text-orange-500" />
+                    Marcar Sucia
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="w-full justify-start h-8 text-xs"
+                    onClick={() => onUpdateStatus(room.id, "maintenance")}
+                    data-testid={`button-quick-maintenance-${room.id}`}
+                  >
+                    <Wrench className="h-3 w-3 mr-2 text-red-500" />
+                    Mantenimiento
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
         
         <div className="text-xs text-muted-foreground mb-2">
@@ -144,16 +215,28 @@ function RoomCard({
         ) : (
           <div className="flex gap-1 flex-wrap">
             {room.status === "dirty" && (
-              <Button 
-                size="sm" 
-                variant="outline" 
-                className="h-6 px-2 text-xs"
-                onClick={() => onCreateTask(room.id)}
-                data-testid={`button-create-task-${room.id}`}
-              >
-                <Sparkles className="h-3 w-3 mr-1" />
-                Crear Tarea
-              </Button>
+              <>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="h-6 px-2 text-xs"
+                  onClick={() => onUpdateStatus(room.id, "available")}
+                  data-testid={`button-mark-clean-${room.id}`}
+                >
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Marcar Limpia
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="ghost" 
+                  className="h-6 px-2 text-xs"
+                  onClick={() => onCreateTask(room.id)}
+                  data-testid={`button-create-task-${room.id}`}
+                >
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  Tarea
+                </Button>
+              </>
             )}
             {room.status === "cleaning" && (
               <Button 
@@ -161,7 +244,7 @@ function RoomCard({
                 variant="outline" 
                 className="h-6 px-2 text-xs"
                 onClick={() => onUpdateStatus(room.id, "available")}
-                data-testid={`button-mark-clean-${room.id}`}
+                data-testid={`button-finish-clean-${room.id}`}
               >
                 <CheckCircle className="h-3 w-3 mr-1" />
                 Marcar Limpia
@@ -190,10 +273,12 @@ export default function Housekeeping() {
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [createTaskDialogOpen, setCreateTaskDialogOpen] = useState(false);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [taskType, setTaskType] = useState<TaskType>("checkout_clean");
   const [priority, setPriority] = useState<Priority>("normal");
   const [notes, setNotes] = useState("");
+  const [detailNotes, setDetailNotes] = useState("");
 
   const { data: rooms, isLoading: roomsLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
@@ -286,6 +371,17 @@ export default function Housekeeping() {
     setSelectedRoomId(roomId);
     setCreateTaskDialogOpen(true);
   };
+
+  const handleOpenDetails = (roomId: string) => {
+    setSelectedRoomId(roomId);
+    const roomTasks = getTasksForRoom(roomId);
+    const existingNotes = roomTasks.find(t => t.notes)?.notes || "";
+    setDetailNotes(existingNotes);
+    setDetailsDialogOpen(true);
+  };
+
+  const selectedRoom = rooms?.find(r => r.id === selectedRoomId);
+  const selectedRoomTasks = selectedRoomId ? getTasksForRoom(selectedRoomId) : [];
 
   const handleSubmitTask = () => {
     if (!selectedRoomId) return;
@@ -430,6 +526,7 @@ export default function Housekeeping() {
                     onUpdateStatus={(roomId, status) => 
                       updateRoomStatusMutation.mutate({ roomId, status })
                     }
+                    onOpenDetails={handleOpenDetails}
                   />
                 ))}
             </div>
@@ -499,6 +596,125 @@ export default function Housekeeping() {
               data-testid="button-submit-task"
             >
               {createTaskMutation.isPending ? "Creando..." : "Crear Tarea"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Habitacion {selectedRoom?.roomNumber}</DialogTitle>
+            <DialogDescription>
+              {selectedRoom?.roomType?.name} - {statusConfig[selectedRoom?.status || "available"].label}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Estado Actual</Label>
+              <div className="flex gap-2 flex-wrap">
+                <Button 
+                  size="sm" 
+                  variant={selectedRoom?.status === "available" ? "default" : "outline"}
+                  onClick={() => {
+                    if (selectedRoomId) {
+                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "available" });
+                    }
+                  }}
+                  data-testid="button-detail-available"
+                >
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Disponible
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant={selectedRoom?.status === "dirty" ? "default" : "outline"}
+                  onClick={() => {
+                    if (selectedRoomId) {
+                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "dirty" });
+                    }
+                  }}
+                  data-testid="button-detail-dirty"
+                >
+                  <AlertCircle className="h-3 w-3 mr-1" />
+                  Sucia
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant={selectedRoom?.status === "maintenance" ? "default" : "outline"}
+                  onClick={() => {
+                    if (selectedRoomId) {
+                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "maintenance" });
+                    }
+                  }}
+                  data-testid="button-detail-maintenance"
+                >
+                  <Wrench className="h-3 w-3 mr-1" />
+                  Mantenimiento
+                </Button>
+              </div>
+            </div>
+
+            {selectedRoomTasks.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Tareas de Hoy</Label>
+                <div className="space-y-2">
+                  {selectedRoomTasks.map(task => (
+                    <div key={task.id} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                      <div>
+                        <Badge className={`${taskStatusConfig[task.status as TaskStatus].className} text-xs`}>
+                          {taskTypeLabels[task.taskType as TaskType]}
+                        </Badge>
+                        <Badge className={`${priorityConfig[task.priority as Priority].className} text-xs ml-1`}>
+                          {priorityConfig[task.priority as Priority].label}
+                        </Badge>
+                        {task.notes && (
+                          <p className="text-xs text-muted-foreground mt-1">{task.notes}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Agregar Nota Rapida</Label>
+              <Textarea
+                value={detailNotes}
+                onChange={(e) => setDetailNotes(e.target.value)}
+                placeholder="Observaciones, problemas, solicitudes especiales..."
+                className="text-sm"
+                data-testid="input-detail-notes"
+              />
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => {
+                  if (selectedRoomId && detailNotes.trim()) {
+                    createTaskMutation.mutate({
+                      roomId: selectedRoomId,
+                      taskType: "inspection",
+                      priority: "normal",
+                      notes: detailNotes,
+                      scheduledDate: today,
+                    });
+                    setDetailsDialogOpen(false);
+                  }
+                }}
+                disabled={!detailNotes.trim()}
+                data-testid="button-save-note"
+              >
+                <MessageSquare className="h-3 w-3 mr-1" />
+                Guardar como Tarea
+              </Button>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
+              Cerrar
             </Button>
           </DialogFooter>
         </DialogContent>
