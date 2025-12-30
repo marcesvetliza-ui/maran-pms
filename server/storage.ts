@@ -99,6 +99,22 @@ import {
   type SpaAccountItem,
   type InsertSpaAccountItem,
   type SpaAccountWithItems,
+  // Events
+  type EventRoom,
+  type InsertEventRoom,
+  type EventRoomStatus,
+  type Event as HotelEvent,
+  type InsertEvent,
+  type EventStatus,
+  type EventType,
+  type EventChargeType,
+  type InsertEventChargeType,
+  type EventCharge,
+  type InsertEventCharge,
+  type EventWithDetails,
+  type EventChargeWithType,
+  type EventPlanningData,
+  type EventPlanningCellStatus,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -389,6 +405,39 @@ export interface IStorage {
   createSpaAccountItem(item: InsertSpaAccountItem): Promise<SpaAccountItem>;
   updateSpaAccountItem(id: string, item: Partial<InsertSpaAccountItem>): Promise<SpaAccountItem | undefined>;
   deleteSpaAccountItem(id: string): Promise<boolean>;
+
+  // ==================== EVENTS ====================
+  // Event Rooms
+  getEventRooms(): Promise<EventRoom[]>;
+  getEventRoom(id: string): Promise<EventRoom | undefined>;
+  createEventRoom(room: InsertEventRoom): Promise<EventRoom>;
+  updateEventRoom(id: string, room: Partial<InsertEventRoom>): Promise<EventRoom | undefined>;
+  deleteEventRoom(id: string): Promise<boolean>;
+
+  // Events
+  getEvents(): Promise<EventWithDetails[]>;
+  getEvent(id: string): Promise<EventWithDetails | undefined>;
+  getEventsByDateRange(startDate: string, endDate: string): Promise<EventWithDetails[]>;
+  createEvent(event: InsertEvent): Promise<HotelEvent>;
+  updateEvent(id: string, event: Partial<InsertEvent>): Promise<HotelEvent | undefined>;
+  deleteEvent(id: string): Promise<boolean>;
+  generateEventCode(): string;
+
+  // Event Charge Types
+  getEventChargeTypes(): Promise<EventChargeType[]>;
+  getEventChargeType(id: string): Promise<EventChargeType | undefined>;
+  createEventChargeType(chargeType: InsertEventChargeType): Promise<EventChargeType>;
+  updateEventChargeType(id: string, chargeType: Partial<InsertEventChargeType>): Promise<EventChargeType | undefined>;
+  deleteEventChargeType(id: string): Promise<boolean>;
+
+  // Event Charges
+  getEventCharges(eventId: string): Promise<EventChargeWithType[]>;
+  createEventCharge(charge: InsertEventCharge): Promise<EventCharge>;
+  updateEventCharge(id: string, charge: Partial<InsertEventCharge>): Promise<EventCharge | undefined>;
+  deleteEventCharge(id: string): Promise<boolean>;
+
+  // Event Planning
+  getEventPlanningData(startDate: string, endDate: string): Promise<EventPlanningData>;
 }
 
 export class MemStorage implements IStorage {
@@ -428,11 +477,17 @@ export class MemStorage implements IStorage {
   private spaAppointments: Map<string, SpaAppointment>;
   private spaAccounts: Map<string, SpaAccount>;
   private spaAccountItems: Map<string, SpaAccountItem>;
+  // Events
+  private eventRooms: Map<string, EventRoom>;
+  private events: Map<string, HotelEvent>;
+  private eventChargeTypes: Map<string, EventChargeType>;
+  private eventCharges: Map<string, EventCharge>;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
   private groupCounter: number;
   private orderCounter: number;
+  private eventCounter: number;
 
   constructor() {
     this.users = new Map();
@@ -471,11 +526,17 @@ export class MemStorage implements IStorage {
     this.spaAppointments = new Map();
     this.spaAccounts = new Map();
     this.spaAccountItems = new Map();
+    // Events
+    this.eventRooms = new Map();
+    this.events = new Map();
+    this.eventChargeTypes = new Map();
+    this.eventCharges = new Map();
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
     this.groupCounter = 0;
     this.orderCounter = 1000;
+    this.eventCounter = 1000;
 
     // Seed with demo data
     this.seedData();
@@ -782,6 +843,29 @@ export class MemStorage implements IStorage {
       { id: "st14", categoryId: "stc5", name: "Experiencia en Pareja", description: "Circuito + masaje para dos personas", durationMinutes: 180, price: "55000.00", isActive: "true" },
     ];
     spaTreatments.forEach((t) => this.spaTreatments.set(t.id, t));
+
+    // Event Rooms (5 salones de eventos)
+    const eventRooms: EventRoom[] = [
+      { id: "er1", name: "Salon Parana", capacity: 100, status: "available", description: "Salon principal con vista al rio", amenities: ["projector", "audio", "wifi"], isActive: "true" },
+      { id: "er2", name: "Salon Victoria", capacity: 60, status: "available", description: "Salon ejecutivo para reuniones", amenities: ["projector", "wifi", "whiteboard"], isActive: "true" },
+      { id: "er3", name: "Salon Diamante", capacity: 40, status: "available", description: "Sala de conferencias", amenities: ["projector", "audio", "wifi", "videoconference"], isActive: "true" },
+      { id: "er4", name: "Salon Esmeralda", capacity: 30, status: "available", description: "Sala de reuniones ejecutivas", amenities: ["projector", "wifi"], isActive: "true" },
+      { id: "er5", name: "Terraza Eventos", capacity: 150, status: "available", description: "Espacio al aire libre para eventos sociales", amenities: ["audio", "lighting"], isActive: "true" },
+    ];
+    eventRooms.forEach((r) => this.eventRooms.set(r.id, r));
+
+    // Event Charge Types (tipos de cargo predefinidos)
+    const eventChargeTypes: EventChargeType[] = [
+      { id: "ect1", code: "CB1", name: "Coffee Break 1", defaultPrice: "8500.00", isActive: "true" },
+      { id: "ect2", code: "CB2", name: "Coffee Break 2", defaultPrice: "12000.00", isActive: "true" },
+      { id: "ect3", code: "CB3", name: "Coffee Break 3", defaultPrice: "15000.00", isActive: "true" },
+      { id: "ect4", code: "CENA", name: "Cena Ejecutiva", defaultPrice: "35000.00", isActive: "true" },
+      { id: "ect5", code: "COCKTAIL", name: "Cocktail", defaultPrice: "25000.00", isActive: "true" },
+      { id: "ect6", code: "SOC1", name: "Social 1", defaultPrice: "18000.00", isActive: "true" },
+      { id: "ect7", code: "SOC2", name: "Social 2", defaultPrice: "28000.00", isActive: "true" },
+      { id: "ect8", code: "SOC3", name: "Social 3", defaultPrice: "38000.00", isActive: "true" },
+    ];
+    eventChargeTypes.forEach((ct) => this.eventChargeTypes.set(ct.id, ct));
   }
 
   // Users
@@ -2926,8 +3010,7 @@ export class MemStorage implements IStorage {
           description: "Servicios SPA",
           amount: total.toFixed(2),
           date: new Date().toISOString().split("T")[0],
-          status: "pending",
-          notes: null,
+          createdBy: null,
         };
         this.charges.set(chargeId, charge);
       }
@@ -3006,6 +3089,251 @@ export class MemStorage implements IStorage {
     }
 
     return deleted;
+  }
+
+  // ==================== EVENTS ====================
+  // Event Rooms
+  async getEventRooms(): Promise<EventRoom[]> {
+    return Array.from(this.eventRooms.values());
+  }
+
+  async getEventRoom(id: string): Promise<EventRoom | undefined> {
+    return this.eventRooms.get(id);
+  }
+
+  async createEventRoom(room: InsertEventRoom): Promise<EventRoom> {
+    const id = randomUUID();
+    const newRoom: EventRoom = {
+      id,
+      name: room.name,
+      capacity: room.capacity ?? 50,
+      status: (room.status ?? "available") as EventRoomStatus,
+      description: room.description ?? null,
+      amenities: room.amenities ?? null,
+      isActive: room.isActive ?? "true",
+    };
+    this.eventRooms.set(id, newRoom);
+    return newRoom;
+  }
+
+  async updateEventRoom(id: string, room: Partial<InsertEventRoom>): Promise<EventRoom | undefined> {
+    const existing = this.eventRooms.get(id);
+    if (!existing) return undefined;
+    const updated: EventRoom = {
+      ...existing,
+      ...room,
+      status: (room.status ?? existing.status) as EventRoomStatus,
+    };
+    this.eventRooms.set(id, updated);
+    return updated;
+  }
+
+  async deleteEventRoom(id: string): Promise<boolean> {
+    return this.eventRooms.delete(id);
+  }
+
+  // Events
+  async getEvents(): Promise<EventWithDetails[]> {
+    return Array.from(this.events.values()).map(event => this.enrichEvent(event));
+  }
+
+  async getEvent(id: string): Promise<EventWithDetails | undefined> {
+    const event = this.events.get(id);
+    if (!event) return undefined;
+    return this.enrichEvent(event);
+  }
+
+  async getEventsByDateRange(startDate: string, endDate: string): Promise<EventWithDetails[]> {
+    const events = Array.from(this.events.values()).filter(event => {
+      return event.startDate <= endDate && event.endDate >= startDate;
+    });
+    return events.map(event => this.enrichEvent(event));
+  }
+
+  private enrichEvent(event: HotelEvent): EventWithDetails {
+    const eventRoom = this.eventRooms.get(event.eventRoomId)!;
+    const company = event.companyId ? this.companies.get(event.companyId) : undefined;
+    const charges = Array.from(this.eventCharges.values())
+      .filter(c => c.eventId === event.id)
+      .map(charge => {
+        const chargeType = charge.chargeTypeId ? this.eventChargeTypes.get(charge.chargeTypeId) : undefined;
+        return { ...charge, chargeType };
+      });
+    return { ...event, eventRoom, company, charges };
+  }
+
+  async createEvent(event: InsertEvent): Promise<HotelEvent> {
+    const id = randomUUID();
+    const newEvent: HotelEvent = {
+      id,
+      eventCode: event.eventCode,
+      name: event.name,
+      eventRoomId: event.eventRoomId,
+      eventType: (event.eventType ?? "corporate") as EventType,
+      contactName: event.contactName,
+      contactPhone: event.contactPhone ?? null,
+      contactEmail: event.contactEmail ?? null,
+      companyId: event.companyId ?? null,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      startTime: event.startTime ?? null,
+      endTime: event.endTime ?? null,
+      attendees: event.attendees ?? 10,
+      status: (event.status ?? "tentative") as EventStatus,
+      notes: event.notes ?? null,
+      createdAt: event.createdAt,
+    };
+    this.events.set(id, newEvent);
+    return newEvent;
+  }
+
+  async updateEvent(id: string, event: Partial<InsertEvent>): Promise<HotelEvent | undefined> {
+    const existing = this.events.get(id);
+    if (!existing) return undefined;
+    const updated: HotelEvent = { 
+      ...existing, 
+      ...event,
+      eventType: (event.eventType ?? existing.eventType) as EventType,
+      status: (event.status ?? existing.status) as EventStatus,
+    };
+    this.events.set(id, updated);
+    return updated;
+  }
+
+  async deleteEvent(id: string): Promise<boolean> {
+    // Also delete associated charges
+    const chargesToDelete = Array.from(this.eventCharges.values()).filter(c => c.eventId === id);
+    chargesToDelete.forEach(c => this.eventCharges.delete(c.id));
+    return this.events.delete(id);
+  }
+
+  generateEventCode(): string {
+    this.eventCounter++;
+    const year = new Date().getFullYear();
+    return `EVT-${year}-${this.eventCounter.toString().padStart(4, "0")}`;
+  }
+
+  // Event Charge Types
+  async getEventChargeTypes(): Promise<EventChargeType[]> {
+    return Array.from(this.eventChargeTypes.values());
+  }
+
+  async getEventChargeType(id: string): Promise<EventChargeType | undefined> {
+    return this.eventChargeTypes.get(id);
+  }
+
+  async createEventChargeType(chargeType: InsertEventChargeType): Promise<EventChargeType> {
+    const id = randomUUID();
+    const newChargeType: EventChargeType = {
+      id,
+      code: chargeType.code,
+      name: chargeType.name,
+      defaultPrice: chargeType.defaultPrice ?? null,
+      isActive: chargeType.isActive ?? "true",
+    };
+    this.eventChargeTypes.set(id, newChargeType);
+    return newChargeType;
+  }
+
+  async updateEventChargeType(id: string, chargeType: Partial<InsertEventChargeType>): Promise<EventChargeType | undefined> {
+    const existing = this.eventChargeTypes.get(id);
+    if (!existing) return undefined;
+    const updated: EventChargeType = { ...existing, ...chargeType };
+    this.eventChargeTypes.set(id, updated);
+    return updated;
+  }
+
+  async deleteEventChargeType(id: string): Promise<boolean> {
+    return this.eventChargeTypes.delete(id);
+  }
+
+  // Event Charges
+  async getEventCharges(eventId: string): Promise<EventChargeWithType[]> {
+    const charges = Array.from(this.eventCharges.values()).filter(c => c.eventId === eventId);
+    return charges.map(charge => {
+      const chargeType = charge.chargeTypeId ? this.eventChargeTypes.get(charge.chargeTypeId) : undefined;
+      return { ...charge, chargeType };
+    });
+  }
+
+  async createEventCharge(charge: InsertEventCharge): Promise<EventCharge> {
+    const id = randomUUID();
+    const newCharge: EventCharge = {
+      id,
+      eventId: charge.eventId,
+      chargeTypeId: charge.chargeTypeId ?? null,
+      description: charge.description,
+      quantity: charge.quantity ?? 1,
+      unitPrice: charge.unitPrice,
+      totalAmount: charge.totalAmount,
+      date: charge.date,
+      notes: charge.notes ?? null,
+      createdAt: charge.createdAt,
+    };
+    this.eventCharges.set(id, newCharge);
+    return newCharge;
+  }
+
+  async updateEventCharge(id: string, charge: Partial<InsertEventCharge>): Promise<EventCharge | undefined> {
+    const existing = this.eventCharges.get(id);
+    if (!existing) return undefined;
+    const updated: EventCharge = { ...existing, ...charge };
+    this.eventCharges.set(id, updated);
+    return updated;
+  }
+
+  async deleteEventCharge(id: string): Promise<boolean> {
+    return this.eventCharges.delete(id);
+  }
+
+  // Event Planning
+  async getEventPlanningData(startDate: string, endDate: string): Promise<EventPlanningData> {
+    const rooms = Array.from(this.eventRooms.values()).filter(r => r.isActive === "true");
+    const days: string[] = [];
+    const currentDate = new Date(startDate);
+    const end = new Date(endDate);
+    while (currentDate <= end) {
+      days.push(currentDate.toISOString().split("T")[0]);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    const eventsInRange = Array.from(this.events.values()).filter(event => {
+      return event.startDate <= endDate && event.endDate >= startDate && event.status !== "cancelled";
+    });
+
+    const occupancy: Record<string, EventPlanningCellStatus[]> = {};
+    const eventsMap: Record<string, { id: string; name: string; contactName: string; startDate: string; endDate: string; status: EventStatus; eventType: EventType }> = {};
+    const cellEvents: Record<string, Record<string, string>> = {};
+
+    rooms.forEach(room => {
+      occupancy[room.id] = [];
+      cellEvents[room.id] = {};
+
+      days.forEach(day => {
+        const event = eventsInRange.find(e => e.eventRoomId === room.id && e.startDate <= day && e.endDate >= day);
+        if (event) {
+          occupancy[room.id].push("event");
+          cellEvents[room.id][day] = event.id;
+          if (!eventsMap[event.id]) {
+            eventsMap[event.id] = {
+              id: event.id,
+              name: event.name,
+              contactName: event.contactName,
+              startDate: event.startDate,
+              endDate: event.endDate,
+              status: event.status as EventStatus,
+              eventType: event.eventType as EventType,
+            };
+          }
+        } else if (room.status === "maintenance") {
+          occupancy[room.id].push("maintenance");
+        } else {
+          occupancy[room.id].push("available");
+        }
+      });
+    });
+
+    return { rooms, days, occupancy, events: eventsMap, cellEvents };
   }
 }
 

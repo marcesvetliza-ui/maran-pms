@@ -2367,5 +2367,219 @@ Only respond with the JSON object.`;
     }
   });
 
+  // ==================== EVENTS ====================
+  // Event Rooms
+  app.get("/api/events/rooms", async (req, res) => {
+    try {
+      const rooms = await storage.getEventRooms();
+      res.json(rooms);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event rooms" });
+    }
+  });
+
+  app.get("/api/events/rooms/:id", async (req, res) => {
+    try {
+      const room = await storage.getEventRoom(req.params.id);
+      if (!room) return res.status(404).json({ error: "Event room not found" });
+      res.json(room);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event room" });
+    }
+  });
+
+  app.post("/api/events/rooms", async (req, res) => {
+    try {
+      const room = await storage.createEventRoom(req.body);
+      res.status(201).json(room);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event room" });
+    }
+  });
+
+  app.patch("/api/events/rooms/:id", async (req, res) => {
+    try {
+      const room = await storage.updateEventRoom(req.params.id, req.body);
+      if (!room) return res.status(404).json({ error: "Event room not found" });
+      res.json(room);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event room" });
+    }
+  });
+
+  app.delete("/api/events/rooms/:id", async (req, res) => {
+    try {
+      await storage.deleteEventRoom(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event room" });
+    }
+  });
+
+  // Event Planning
+  app.get("/api/events/planning", async (req, res) => {
+    try {
+      const startDate = req.query.start as string;
+      const endDate = req.query.end as string;
+      
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "Start and end dates are required" });
+      }
+      
+      const planningData = await storage.getEventPlanningData(startDate, endDate);
+      res.json(planningData);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event planning data" });
+    }
+  });
+
+  // Events
+  app.get("/api/events", async (req, res) => {
+    try {
+      const events = await storage.getEvents();
+      res.json(events);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching events" });
+    }
+  });
+
+  app.get("/api/events/:id", async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      res.json(event);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event" });
+    }
+  });
+
+  app.post("/api/events", async (req, res) => {
+    try {
+      const eventCode = storage.generateEventCode();
+      const event = await storage.createEvent({
+        ...req.body,
+        eventCode,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(event);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event" });
+    }
+  });
+
+  app.patch("/api/events/:id", async (req, res) => {
+    try {
+      const event = await storage.updateEvent(req.params.id, req.body);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      res.json(event);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event" });
+    }
+  });
+
+  app.delete("/api/events/:id", async (req, res) => {
+    try {
+      await storage.deleteEvent(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event" });
+    }
+  });
+
+  // Event Charge Types
+  app.get("/api/events/charge-types", async (req, res) => {
+    try {
+      const chargeTypes = await storage.getEventChargeTypes();
+      res.json(chargeTypes);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event charge types" });
+    }
+  });
+
+  app.post("/api/events/charge-types", async (req, res) => {
+    try {
+      const chargeType = await storage.createEventChargeType(req.body);
+      res.status(201).json(chargeType);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event charge type" });
+    }
+  });
+
+  app.patch("/api/events/charge-types/:id", async (req, res) => {
+    try {
+      const chargeType = await storage.updateEventChargeType(req.params.id, req.body);
+      if (!chargeType) return res.status(404).json({ error: "Event charge type not found" });
+      res.json(chargeType);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event charge type" });
+    }
+  });
+
+  app.delete("/api/events/charge-types/:id", async (req, res) => {
+    try {
+      await storage.deleteEventChargeType(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event charge type" });
+    }
+  });
+
+  // Event Charges
+  app.get("/api/events/:eventId/charges", async (req, res) => {
+    try {
+      const charges = await storage.getEventCharges(req.params.eventId);
+      res.json(charges);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event charges" });
+    }
+  });
+
+  app.post("/api/events/:eventId/charges", async (req, res) => {
+    try {
+      const { chargeTypeId, description, quantity, unitPrice, notes } = req.body;
+      
+      if (!description || !unitPrice) {
+        return res.status(400).json({ error: "description and unitPrice are required" });
+      }
+
+      const qty = quantity || 1;
+      const total = (parseFloat(unitPrice) * qty).toFixed(2);
+
+      const charge = await storage.createEventCharge({
+        eventId: req.params.eventId,
+        chargeTypeId: chargeTypeId || null,
+        description,
+        quantity: qty,
+        unitPrice,
+        totalAmount: total,
+        date: new Date().toISOString().split("T")[0],
+        notes: notes || null,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event charge" });
+    }
+  });
+
+  app.patch("/api/events/charges/:id", async (req, res) => {
+    try {
+      const charge = await storage.updateEventCharge(req.params.id, req.body);
+      if (!charge) return res.status(404).json({ error: "Event charge not found" });
+      res.json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event charge" });
+    }
+  });
+
+  app.delete("/api/events/charges/:id", async (req, res) => {
+    try {
+      await storage.deleteEventCharge(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event charge" });
+    }
+  });
+
   return httpServer;
 }
