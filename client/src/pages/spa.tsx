@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -27,6 +27,9 @@ import {
   Loader2,
   Calendar,
   Sparkles,
+  CreditCard,
+  Home,
+  Receipt,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -65,6 +68,43 @@ type SpaAppointment = {
   treatment?: SpaTreatment;
 };
 
+type SpaAccountItem = {
+  id: string;
+  accountId: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+  subtotal: string;
+  itemType: string;
+  notes: string | null;
+  createdAt: string;
+};
+
+type SpaAccount = {
+  id: string;
+  appointmentId: string;
+  guestName: string;
+  reservationId: string | null;
+  status: "open" | "closed" | "cancelled";
+  subtotal: string;
+  total: string;
+  notes: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  closedBy: string | null;
+  chargedTo: string | null;
+  items: SpaAccountItem[];
+};
+
+type Reservation = {
+  id: string;
+  guestId: string;
+  roomId: string;
+  status: string;
+  guest?: { firstName: string; lastName: string };
+  room?: { roomNumber: string };
+};
+
 const appointmentStatusColors: Record<string, string> = {
   pending: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/30",
   confirmed: "bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30",
@@ -99,6 +139,7 @@ const appointmentFormSchema = z.object({
   guestEmail: z.string().email("Email invalido").optional().or(z.literal("")),
   appointmentDate: z.string().min(1, "La fecha es requerida"),
   startTime: z.string().min(1, "La hora de inicio es requerida"),
+  reservationId: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -113,6 +154,8 @@ export default function SpaPage() {
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+  const [selectedReservationForCharge, setSelectedReservationForCharge] = useState<string>("");
   const { toast } = useToast();
 
   const { data: cabins = [], isLoading: cabinsLoading } = useQuery<SpaCabin[]>({
@@ -121,6 +164,11 @@ export default function SpaPage() {
 
   const { data: treatments = [] } = useQuery<SpaTreatment[]>({
     queryKey: ["/api/spa/treatments"],
+  });
+
+  const { data: checkedInReservations = [] } = useQuery<Reservation[]>({
+    queryKey: ["/api/reservations"],
+    select: (data) => data.filter((r) => r.status === "checked_in"),
   });
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -133,6 +181,17 @@ export default function SpaPage() {
       if (!response.ok) throw new Error("Error fetching appointments");
       return response.json();
     },
+  });
+
+  const { data: selectedAccount, refetch: refetchAccount } = useQuery<SpaAccount>({
+    queryKey: ["/api/spa/accounts/by-appointment", selectedAppointment?.id],
+    queryFn: async () => {
+      if (!selectedAppointment) throw new Error("No appointment selected");
+      const response = await fetch(`/api/spa/accounts/by-appointment/${selectedAppointment.id}`);
+      if (!response.ok) throw new Error("Account not found");
+      return response.json();
+    },
+    enabled: !!selectedAppointment,
   });
 
   const activeCabins = cabins.filter((c) => c.isActive === "true");
@@ -148,6 +207,7 @@ export default function SpaPage() {
       guestEmail: "",
       appointmentDate: dateStr,
       startTime: "",
+      reservationId: "",
       notes: "",
     },
   });
@@ -182,6 +242,7 @@ export default function SpaPage() {
         guestEmail: "",
         appointmentDate: dateStr,
         startTime: "",
+        reservationId: "",
         notes: "",
       });
     },
@@ -197,10 +258,29 @@ export default function SpaPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
       toast({ title: "Turno actualizado" });
-      setSelectedAppointment(null);
     },
     onError: () => {
       toast({ title: "Error al actualizar el turno", variant: "destructive" });
+    },
+  });
+
+  const closeAccountMutation = useMutation({
+    mutationFn: async ({ accountId, chargedTo }: { accountId: string; chargedTo: string }) => {
+      return apiRequest("POST", `/api/spa/accounts/${accountId}/close`, { chargedTo });
+    },
+    onSuccess: async () => {
+      if (selectedAppointment) {
+        await updateAppointmentMutation.mutateAsync({ id: selectedAppointment.id, status: "completed" });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+      toast({ title: "Cuenta cerrada correctamente" });
+      setIsCloseDialogOpen(false);
+      setSelectedAppointment(null);
+      setSelectedReservationForCharge("");
+    },
+    onError: () => {
+      toast({ title: "Error al cerrar la cuenta", variant: "destructive" });
     },
   });
 
@@ -226,6 +306,7 @@ export default function SpaPage() {
       guestEmail: "",
       appointmentDate: dateStr,
       startTime: time,
+      reservationId: "",
       notes: "",
     });
     setIsNewDialogOpen(true);
@@ -265,6 +346,23 @@ export default function SpaPage() {
 
   const onSubmit = (data: AppointmentFormValues) => {
     createAppointmentMutation.mutate(data);
+  };
+
+  const handleCompleteAppointment = () => {
+    if (selectedAccount && selectedAccount.status === "open") {
+      setIsCloseDialogOpen(true);
+    } else {
+      if (selectedAppointment) {
+        updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "completed" });
+        setSelectedAppointment(null);
+      }
+    }
+  };
+
+  const handleCloseAccount = (chargedTo: string) => {
+    if (selectedAccount) {
+      closeAccountMutation.mutate({ accountId: selectedAccount.id, chargedTo });
+    }
   };
 
   if (cabinsLoading || appointmentsLoading) {
@@ -313,6 +411,7 @@ export default function SpaPage() {
             guestEmail: "",
             appointmentDate: dateStr,
             startTime: "",
+            reservationId: "",
             notes: "",
           });
           setIsNewDialogOpen(true);
@@ -335,7 +434,7 @@ export default function SpaPage() {
                     <th className="border-b border-r p-2 text-left text-xs font-medium text-muted-foreground w-40 sticky left-0 bg-background z-20">
                       Gabinete
                     </th>
-                    {TIME_SLOTS.map((time, i) => (
+                    {TIME_SLOTS.map((time) => (
                       <th
                         key={time}
                         className="border-b border-r p-1 text-center text-[10px] font-medium text-muted-foreground"
@@ -521,6 +620,32 @@ export default function SpaPage() {
                 )}
               />
 
+              <FormField
+                control={form.control}
+                name="reservationId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Huesped del Hotel (opcional)</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-reservation">
+                          <SelectValue placeholder="Seleccionar huesped" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">Sin asociar</SelectItem>
+                        {checkedInReservations.map((res) => (
+                          <SelectItem key={res.id} value={res.id}>
+                            Hab. {res.room?.roomNumber} - {res.guest?.firstName} {res.guest?.lastName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -612,7 +737,7 @@ export default function SpaPage() {
       </Dialog>
 
       <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Detalle del Turno</DialogTitle>
           </DialogHeader>
@@ -624,49 +749,64 @@ export default function SpaPage() {
                 </Badge>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <span>{format(parseISO(selectedAppointment.appointmentDate), "EEEE d 'de' MMMM", { locale: es })}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span>{selectedAppointment.startTime} - {selectedAppointment.endTime}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <User className="h-4 w-4 text-muted-foreground" />
-                  <span>{selectedAppointment.guestName} {selectedAppointment.guestLastName || ""}</span>
-                </div>
-                {selectedAppointment.guestPhone && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm">
-                    <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span>{selectedAppointment.guestPhone}</span>
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <span>{format(parseISO(selectedAppointment.appointmentDate), "EEEE d 'de' MMMM", { locale: es })}</span>
                   </div>
-                )}
-                {selectedAppointment.guestEmail && (
                   <div className="flex items-center gap-2 text-sm">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    <span>{selectedAppointment.guestEmail}</span>
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <span>{selectedAppointment.startTime} - {selectedAppointment.endTime}</span>
                   </div>
-                )}
+                  <div className="flex items-center gap-2 text-sm">
+                    <User className="h-4 w-4 text-muted-foreground" />
+                    <span>{selectedAppointment.guestName} {selectedAppointment.guestLastName || ""}</span>
+                  </div>
+                  {selectedAppointment.guestPhone && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      <span>{selectedAppointment.guestPhone}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Tratamiento</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {treatments.find(t => t.id === selectedAppointment.treatmentId)?.name || "N/A"}
+                  </p>
+                  <h4 className="text-sm font-medium">Gabinete</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {cabins.find(c => c.id === selectedAppointment.cabinId)?.name || "N/A"}
+                  </p>
+                </div>
               </div>
 
-              <div className="border-t pt-4">
-                <h4 className="text-sm font-medium mb-2">Tratamiento</h4>
-                <p className="text-sm text-muted-foreground">
-                  {treatments.find(t => t.id === selectedAppointment.treatmentId)?.name || "N/A"}
-                </p>
-                <p className="text-sm font-medium mt-1">
-                  ${parseFloat(treatments.find(t => t.id === selectedAppointment.treatmentId)?.price || "0").toLocaleString()}
-                </p>
-              </div>
-
-              <div className="border-t pt-4">
-                <h4 className="text-sm font-medium mb-2">Gabinete</h4>
-                <p className="text-sm text-muted-foreground">
-                  {cabins.find(c => c.id === selectedAppointment.cabinId)?.name || "N/A"}
-                </p>
-              </div>
+              {selectedAccount && selectedAccount.items.length > 0 && (
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                    <Receipt className="h-4 w-4" />
+                    Cuenta
+                  </h4>
+                  <div className="space-y-1 text-sm">
+                    {selectedAccount.items.map((item) => (
+                      <div key={item.id} className="flex justify-between">
+                        <span>{item.description} x{item.quantity}</span>
+                        <span>${parseFloat(item.subtotal).toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between font-bold pt-2 border-t">
+                      <span>Total</span>
+                      <span>${parseFloat(selectedAccount.total).toLocaleString()}</span>
+                    </div>
+                  </div>
+                  {selectedAccount.status === "closed" && (
+                    <Badge className="mt-2" variant="secondary">
+                      Cuenta cerrada - {selectedAccount.chargedTo?.startsWith("room:") ? "Cargo a habitacion" : "Facturado"}
+                    </Badge>
+                  )}
+                </div>
+              )}
 
               {selectedAppointment.notes && (
                 <div className="border-t pt-4">
@@ -679,7 +819,9 @@ export default function SpaPage() {
                 {selectedAppointment.status === "confirmed" && (
                   <Button
                     variant="default"
-                    onClick={() => updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "in_progress" })}
+                    onClick={() => {
+                      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "in_progress" });
+                    }}
                     disabled={updateAppointmentMutation.isPending}
                     data-testid="button-start-appointment"
                   >
@@ -689,11 +831,12 @@ export default function SpaPage() {
                 {selectedAppointment.status === "in_progress" && (
                   <Button
                     variant="default"
-                    onClick={() => updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "completed" })}
-                    disabled={updateAppointmentMutation.isPending}
+                    onClick={handleCompleteAppointment}
+                    disabled={updateAppointmentMutation.isPending || closeAccountMutation.isPending}
                     data-testid="button-complete-appointment"
                   >
-                    Completar
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Completar y Cerrar
                   </Button>
                 )}
                 {selectedAppointment.status === "pending" && (
@@ -710,7 +853,10 @@ export default function SpaPage() {
                   <>
                     <Button
                       variant="outline"
-                      onClick={() => updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "no_show" })}
+                      onClick={() => {
+                        updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "no_show" });
+                        setSelectedAppointment(null);
+                      }}
                       disabled={updateAppointmentMutation.isPending}
                       data-testid="button-noshow-appointment"
                     >
@@ -718,7 +864,10 @@ export default function SpaPage() {
                     </Button>
                     <Button
                       variant="destructive"
-                      onClick={() => updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "cancelled" })}
+                      onClick={() => {
+                        updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "cancelled" });
+                        setSelectedAppointment(null);
+                      }}
                       disabled={updateAppointmentMutation.isPending}
                       data-testid="button-cancel-appointment"
                     >
@@ -727,6 +876,82 @@ export default function SpaPage() {
                   </>
                 )}
               </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCloseDialogOpen} onOpenChange={setIsCloseDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cerrar Cuenta SPA</DialogTitle>
+          </DialogHeader>
+          {selectedAccount && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <h4 className="font-medium">Resumen</h4>
+                {selectedAccount.items.map((item) => (
+                  <div key={item.id} className="flex justify-between text-sm py-1 border-b">
+                    <span>{item.description} x{item.quantity}</span>
+                    <span>${parseFloat(item.subtotal).toLocaleString()}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-lg font-bold pt-2">
+                  <span>Total</span>
+                  <span>${parseFloat(selectedAccount.total).toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-4 border-t">
+                <h4 className="font-medium">Forma de Pago</h4>
+                
+                {checkedInReservations.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">Cargar a habitacion:</p>
+                    <Select 
+                      value={selectedReservationForCharge} 
+                      onValueChange={setSelectedReservationForCharge}
+                    >
+                      <SelectTrigger data-testid="select-room-charge">
+                        <SelectValue placeholder="Seleccionar habitacion" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {checkedInReservations.map((res) => (
+                          <SelectItem key={res.id} value={res.id}>
+                            Hab. {res.room?.roomNumber} - {res.guest?.firstName} {res.guest?.lastName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedReservationForCharge && (
+                      <Button 
+                        className="w-full" 
+                        onClick={() => handleCloseAccount(`room:${selectedReservationForCharge}`)}
+                        disabled={closeAccountMutation.isPending}
+                        data-testid="button-charge-room"
+                      >
+                        {closeAccountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        <Home className="h-4 w-4 mr-2" />
+                        Cargar a Habitacion
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => handleCloseAccount("invoice")}
+                    disabled={closeAccountMutation.isPending}
+                    data-testid="button-invoice"
+                  >
+                    {closeAccountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    <Receipt className="h-4 w-4 mr-2" />
+                    Facturar Directamente
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </DialogContent>

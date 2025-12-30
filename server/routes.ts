@@ -2168,6 +2168,37 @@ Only respond with the JSON object.`;
         notes: notes || null,
         createdAt: new Date().toISOString(),
       });
+
+      const treatment = await storage.getSpaTreatment(treatmentId);
+      const fullName = guestLastName ? `${guestName} ${guestLastName}` : guestName;
+      
+      const account = await storage.createSpaAccount({
+        appointmentId: appointment.id,
+        guestName: fullName,
+        reservationId: reservationId || null,
+        status: "open",
+        subtotal: treatment?.price || "0",
+        total: treatment?.price || "0",
+        notes: null,
+        openedAt: new Date().toISOString(),
+        closedAt: null,
+        closedBy: null,
+        chargedTo: null,
+      });
+
+      if (treatment) {
+        await storage.createSpaAccountItem({
+          accountId: account.id,
+          description: treatment.name,
+          quantity: 1,
+          unitPrice: treatment.price,
+          subtotal: treatment.price,
+          itemType: "treatment",
+          notes: null,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
       res.status(201).json(appointment);
     } catch (error) {
       res.status(500).json({ error: "Error creating appointment" });
