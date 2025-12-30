@@ -15,6 +15,8 @@ import {
   Users2,
   MessageSquare,
   Sparkles,
+  UtensilsCrossed,
+  Package,
 } from "lucide-react";
 import {
   Sidebar,
@@ -97,6 +99,16 @@ const operationsMenuItems = [
     title: "Housekeeping",
     url: "/housekeeping",
     icon: Sparkles,
+  },
+  {
+    title: "Restaurante",
+    url: "/restaurant",
+    icon: UtensilsCrossed,
+  },
+  {
+    title: "Inventario",
+    url: "/inventory",
+    icon: Package,
   },
 ];
 

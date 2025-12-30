@@ -22,6 +22,8 @@ import GroupsPage from "@/pages/groups";
 import GroupDetailPage from "@/pages/group-detail";
 import ReviewsPage from "@/pages/reviews";
 import HousekeepingPage from "@/pages/housekeeping";
+import RestaurantPage from "@/pages/restaurant";
+import InventoryPage from "@/pages/inventory";
 
 function Router() {
   return (
@@ -40,6 +42,8 @@ function Router() {
       <Route path="/ota-channels" component={OTAChannelsPage} />
       <Route path="/reviews" component={ReviewsPage} />
       <Route path="/housekeeping" component={HousekeepingPage} />
+      <Route path="/restaurant" component={RestaurantPage} />
+      <Route path="/inventory" component={InventoryPage} />
       <Route component={NotFound} />
     </Switch>
   );

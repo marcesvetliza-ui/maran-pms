@@ -439,3 +439,263 @@ export const messages = pgTable("messages", {
   content: text("content").notNull(),
   createdAt: text("created_at"),
 });
+
+// ==================== RESTAURANT MODULE ====================
+
+// Restaurant Areas (Salones)
+export type RestaurantAreaType = "indoor" | "outdoor" | "terrace" | "bar" | "private";
+
+export const restaurantAreas = pgTable("restaurant_areas", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  areaType: text("area_type").$type<RestaurantAreaType>().notNull().default("indoor"),
+  capacity: integer("capacity").notNull().default(20),
+  isActive: text("is_active").default("true"),
+  notes: text("notes"),
+});
+
+export const insertRestaurantAreaSchema = createInsertSchema(restaurantAreas).omit({ id: true });
+export type InsertRestaurantArea = z.infer<typeof insertRestaurantAreaSchema>;
+export type RestaurantArea = typeof restaurantAreas.$inferSelect;
+
+// Restaurant Tables
+export type TableStatus = "available" | "occupied" | "reserved" | "cleaning" | "blocked";
+export type TableShape = "square" | "round" | "rectangular";
+
+export const restaurantTables = pgTable("restaurant_tables", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tableNumber: text("table_number").notNull(),
+  areaId: varchar("area_id").notNull(),
+  capacity: integer("capacity").notNull().default(4),
+  shape: text("shape").$type<TableShape>().default("square"),
+  status: text("status").$type<TableStatus>().notNull().default("available"),
+  positionX: integer("position_x").default(0),
+  positionY: integer("position_y").default(0),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).omit({ id: true });
+export type InsertRestaurantTable = z.infer<typeof insertRestaurantTableSchema>;
+export type RestaurantTable = typeof restaurantTables.$inferSelect;
+
+export type RestaurantTableWithArea = RestaurantTable & {
+  area: RestaurantArea;
+};
+
+// Menu Categories
+export const menuCategories = pgTable("menu_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  displayOrder: integer("display_order").default(0),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertMenuCategorySchema = createInsertSchema(menuCategories).omit({ id: true });
+export type InsertMenuCategory = z.infer<typeof insertMenuCategorySchema>;
+export type MenuCategory = typeof menuCategories.$inferSelect;
+
+// Menu Items
+export const menuItems = pgTable("menu_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryId: varchar("category_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  preparationTime: integer("preparation_time"),
+  isAvailable: text("is_available").default("true"),
+  isActive: text("is_active").default("true"),
+  allergens: text("allergens").array(),
+  displayOrder: integer("display_order").default(0),
+});
+
+export const insertMenuItemSchema = createInsertSchema(menuItems).omit({ id: true });
+export type InsertMenuItem = z.infer<typeof insertMenuItemSchema>;
+export type MenuItem = typeof menuItems.$inferSelect;
+
+export type MenuItemWithCategory = MenuItem & {
+  category: MenuCategory;
+};
+
+// Restaurant Orders
+export type OrderStatus = "open" | "in_progress" | "served" | "closed" | "cancelled";
+export type OrderType = "dine_in" | "room_service" | "takeaway";
+
+export const restaurantOrders = pgTable("restaurant_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderNumber: text("order_number").notNull(),
+  tableId: varchar("table_id"),
+  reservationId: varchar("reservation_id"),
+  guestId: varchar("guest_id"),
+  orderType: text("order_type").$type<OrderType>().notNull().default("dine_in"),
+  status: text("status").$type<OrderStatus>().notNull().default("open"),
+  covers: integer("covers").default(1),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0"),
+  tax: decimal("tax", { precision: 10, scale: 2 }).default("0"),
+  total: decimal("total", { precision: 10, scale: 2 }).default("0"),
+  notes: text("notes"),
+  openedAt: text("opened_at").notNull(),
+  closedAt: text("closed_at"),
+  chargedToRoom: text("charged_to_room").default("false"),
+  roomNumber: text("room_number"),
+});
+
+export const insertRestaurantOrderSchema = createInsertSchema(restaurantOrders).omit({ id: true });
+export type InsertRestaurantOrder = z.infer<typeof insertRestaurantOrderSchema>;
+export type RestaurantOrder = typeof restaurantOrders.$inferSelect;
+
+// Order Items
+export type OrderItemStatus = "pending" | "preparing" | "ready" | "served" | "cancelled";
+
+export const orderItems = pgTable("order_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull(),
+  menuItemId: varchar("menu_item_id").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").$type<OrderItemStatus>().notNull().default("pending"),
+  notes: text("notes"),
+  sentAt: text("sent_at"),
+});
+
+export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
+export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+export type OrderItem = typeof orderItems.$inferSelect;
+
+export type OrderItemWithMenuItem = OrderItem & {
+  menuItem: MenuItem;
+};
+
+export type RestaurantOrderWithDetails = RestaurantOrder & {
+  table?: RestaurantTableWithArea;
+  guest?: Guest;
+  items: OrderItemWithMenuItem[];
+};
+
+// ==================== INVENTORY MODULE ====================
+
+// Item Categories (for inventory)
+export const itemCategories = pgTable("item_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  parentId: varchar("parent_id"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertItemCategorySchema = createInsertSchema(itemCategories).omit({ id: true });
+export type InsertItemCategory = z.infer<typeof insertItemCategorySchema>;
+export type ItemCategory = typeof itemCategories.$inferSelect;
+
+// Suppliers (Proveedores)
+export const suppliers = pgTable("suppliers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  contactName: text("contact_name"),
+  phone: text("phone"),
+  email: text("email"),
+  address: text("address"),
+  cuit: text("cuit"),
+  paymentTermDays: integer("payment_term_days").default(30),
+  notes: text("notes"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true });
+export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
+export type Supplier = typeof suppliers.$inferSelect;
+
+// Inventory Items (Articulos)
+export type UnitType = "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena";
+
+export const inventoryItems = pgTable("inventory_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sku: text("sku").unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  categoryId: varchar("category_id"),
+  supplierId: varchar("supplier_id"),
+  unit: text("unit").$type<UnitType>().notNull().default("unidad"),
+  costPrice: decimal("cost_price", { precision: 10, scale: 2 }).default("0"),
+  minStock: integer("min_stock").default(0),
+  maxStock: integer("max_stock"),
+  currentStock: integer("current_stock").default(0),
+  location: text("location"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertInventoryItemSchema = createInsertSchema(inventoryItems).omit({ id: true });
+export type InsertInventoryItem = z.infer<typeof insertInventoryItemSchema>;
+export type InventoryItem = typeof inventoryItems.$inferSelect;
+
+export type InventoryItemWithDetails = InventoryItem & {
+  category?: ItemCategory;
+  supplier?: Supplier;
+};
+
+// Stock Movements (Movimientos de Stock)
+export type MovementType = "entrada" | "salida" | "ajuste" | "transferencia" | "consumo";
+
+export const stockMovements = pgTable("stock_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  itemId: varchar("item_id").notNull(),
+  movementType: text("movement_type").$type<MovementType>().notNull(),
+  quantity: integer("quantity").notNull(),
+  previousStock: integer("previous_stock").notNull(),
+  newStock: integer("new_stock").notNull(),
+  unitCost: decimal("unit_cost", { precision: 10, scale: 2 }),
+  reference: text("reference"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+  createdBy: text("created_by"),
+});
+
+export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({ id: true });
+export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
+export type StockMovement = typeof stockMovements.$inferSelect;
+
+export type StockMovementWithItem = StockMovement & {
+  item: InventoryItem;
+};
+
+// Purchase Orders (Ordenes de Compra)
+export type PurchaseOrderStatus = "draft" | "sent" | "partial" | "received" | "cancelled";
+
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderNumber: text("order_number").notNull(),
+  supplierId: varchar("supplier_id").notNull(),
+  status: text("status").$type<PurchaseOrderStatus>().notNull().default("draft"),
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).default("0"),
+  tax: decimal("tax", { precision: 12, scale: 2 }).default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).default("0"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+  expectedDate: text("expected_date"),
+  receivedAt: text("received_at"),
+});
+
+export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders).omit({ id: true });
+export type InsertPurchaseOrder = z.infer<typeof insertPurchaseOrderSchema>;
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+
+// Purchase Order Items
+export const purchaseOrderItems = pgTable("purchase_order_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  purchaseOrderId: varchar("purchase_order_id").notNull(),
+  itemId: varchar("item_id").notNull(),
+  quantity: integer("quantity").notNull(),
+  unitCost: decimal("unit_cost", { precision: 10, scale: 2 }).notNull(),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  receivedQuantity: integer("received_quantity").default(0),
+});
+
+export const insertPurchaseOrderItemSchema = createInsertSchema(purchaseOrderItems).omit({ id: true });
+export type InsertPurchaseOrderItem = z.infer<typeof insertPurchaseOrderItemSchema>;
+export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;
+
+export type PurchaseOrderWithDetails = PurchaseOrder & {
+  supplier: Supplier;
+  items: (PurchaseOrderItem & { item: InventoryItem })[];
+};

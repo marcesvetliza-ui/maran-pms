@@ -45,6 +45,40 @@ import {
   type HousekeepingTask,
   type InsertHousekeepingTask,
   type HousekeepingTaskWithRoom,
+  // Restaurant
+  type RestaurantArea,
+  type InsertRestaurantArea,
+  type RestaurantTable,
+  type InsertRestaurantTable,
+  type RestaurantTableWithArea,
+  type MenuCategory,
+  type InsertMenuCategory,
+  type MenuItem,
+  type InsertMenuItem,
+  type MenuItemWithCategory,
+  type RestaurantOrder,
+  type InsertRestaurantOrder,
+  type OrderItem,
+  type InsertOrderItem,
+  type RestaurantOrderWithDetails,
+  type TableStatus,
+  type OrderStatus,
+  // Inventory
+  type ItemCategory,
+  type InsertItemCategory,
+  type Supplier,
+  type InsertSupplier,
+  type InventoryItem,
+  type InsertInventoryItem,
+  type InventoryItemWithDetails,
+  type StockMovement,
+  type InsertStockMovement,
+  type StockMovementWithItem,
+  type PurchaseOrder,
+  type InsertPurchaseOrder,
+  type PurchaseOrderItem,
+  type InsertPurchaseOrderItem,
+  type PurchaseOrderWithDetails,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -207,6 +241,79 @@ export interface IStorage {
   updateHousekeepingTask(id: string, task: Partial<InsertHousekeepingTask>): Promise<HousekeepingTask | undefined>;
   deleteHousekeepingTask(id: string): Promise<boolean>;
   createCheckoutCleaningTask(roomId: string): Promise<HousekeepingTask>;
+
+  // ==================== RESTAURANT ====================
+  // Restaurant Areas
+  getRestaurantAreas(): Promise<RestaurantArea[]>;
+  getRestaurantArea(id: string): Promise<RestaurantArea | undefined>;
+  createRestaurantArea(area: InsertRestaurantArea): Promise<RestaurantArea>;
+  updateRestaurantArea(id: string, area: Partial<InsertRestaurantArea>): Promise<RestaurantArea | undefined>;
+  deleteRestaurantArea(id: string): Promise<boolean>;
+
+  // Restaurant Tables
+  getRestaurantTables(): Promise<RestaurantTableWithArea[]>;
+  getRestaurantTable(id: string): Promise<RestaurantTableWithArea | undefined>;
+  getTablesByArea(areaId: string): Promise<RestaurantTable[]>;
+  createRestaurantTable(table: InsertRestaurantTable): Promise<RestaurantTable>;
+  updateRestaurantTable(id: string, table: Partial<InsertRestaurantTable>): Promise<RestaurantTable | undefined>;
+  deleteRestaurantTable(id: string): Promise<boolean>;
+
+  // Menu Categories
+  getMenuCategories(): Promise<MenuCategory[]>;
+  getMenuCategory(id: string): Promise<MenuCategory | undefined>;
+  createMenuCategory(category: InsertMenuCategory): Promise<MenuCategory>;
+  updateMenuCategory(id: string, category: Partial<InsertMenuCategory>): Promise<MenuCategory | undefined>;
+  deleteMenuCategory(id: string): Promise<boolean>;
+
+  // Menu Items
+  getMenuItems(): Promise<MenuItemWithCategory[]>;
+  getMenuItem(id: string): Promise<MenuItemWithCategory | undefined>;
+  getMenuItemsByCategory(categoryId: string): Promise<MenuItem[]>;
+  createMenuItem(item: InsertMenuItem): Promise<MenuItem>;
+  updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined>;
+  deleteMenuItem(id: string): Promise<boolean>;
+
+  // Restaurant Orders
+  getRestaurantOrders(status?: OrderStatus): Promise<RestaurantOrderWithDetails[]>;
+  getRestaurantOrder(id: string): Promise<RestaurantOrderWithDetails | undefined>;
+  getOrdersByTable(tableId: string): Promise<RestaurantOrder[]>;
+  createRestaurantOrder(order: InsertRestaurantOrder): Promise<RestaurantOrder>;
+  updateRestaurantOrder(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined>;
+  deleteRestaurantOrder(id: string): Promise<boolean>;
+  generateOrderNumber(): string;
+
+  // Order Items
+  getOrderItems(orderId: string): Promise<OrderItem[]>;
+  createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
+  updateOrderItem(id: string, item: Partial<InsertOrderItem>): Promise<OrderItem | undefined>;
+  deleteOrderItem(id: string): Promise<boolean>;
+
+  // ==================== INVENTORY ====================
+  // Item Categories
+  getItemCategories(): Promise<ItemCategory[]>;
+  getItemCategory(id: string): Promise<ItemCategory | undefined>;
+  createItemCategory(category: InsertItemCategory): Promise<ItemCategory>;
+  updateItemCategory(id: string, category: Partial<InsertItemCategory>): Promise<ItemCategory | undefined>;
+  deleteItemCategory(id: string): Promise<boolean>;
+
+  // Suppliers
+  getSuppliers(): Promise<Supplier[]>;
+  getSupplier(id: string): Promise<Supplier | undefined>;
+  createSupplier(supplier: InsertSupplier): Promise<Supplier>;
+  updateSupplier(id: string, supplier: Partial<InsertSupplier>): Promise<Supplier | undefined>;
+  deleteSupplier(id: string): Promise<boolean>;
+
+  // Inventory Items
+  getInventoryItems(): Promise<InventoryItemWithDetails[]>;
+  getInventoryItem(id: string): Promise<InventoryItemWithDetails | undefined>;
+  getInventoryItemsBelowMinStock(): Promise<InventoryItem[]>;
+  createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem>;
+  updateInventoryItem(id: string, item: Partial<InsertInventoryItem>): Promise<InventoryItem | undefined>;
+  deleteInventoryItem(id: string): Promise<boolean>;
+
+  // Stock Movements
+  getStockMovements(itemId?: string): Promise<StockMovementWithItem[]>;
+  createStockMovement(movement: InsertStockMovement): Promise<StockMovement>;
 }
 
 export class MemStorage implements IStorage {
@@ -226,9 +333,23 @@ export class MemStorage implements IStorage {
   private groupReservationLinks: Map<string, GroupReservationLink>;
   private guestReviews: Map<string, GuestReview>;
   private housekeepingTasks: Map<string, HousekeepingTask>;
+  // Restaurant
+  private restaurantAreas: Map<string, RestaurantArea>;
+  private restaurantTables: Map<string, RestaurantTable>;
+  private menuCategories: Map<string, MenuCategory>;
+  private menuItems: Map<string, MenuItem>;
+  private restaurantOrders: Map<string, RestaurantOrder>;
+  private orderItems: Map<string, OrderItem>;
+  // Inventory
+  private itemCategories: Map<string, ItemCategory>;
+  private suppliers: Map<string, Supplier>;
+  private inventoryItems: Map<string, InventoryItem>;
+  private stockMovements: Map<string, StockMovement>;
+  // Counters
   private reservationCounter: number;
   private guestCounter: number;
   private groupCounter: number;
+  private orderCounter: number;
 
   constructor() {
     this.users = new Map();
@@ -247,9 +368,23 @@ export class MemStorage implements IStorage {
     this.groupReservationLinks = new Map();
     this.guestReviews = new Map();
     this.housekeepingTasks = new Map();
+    // Restaurant
+    this.restaurantAreas = new Map();
+    this.restaurantTables = new Map();
+    this.menuCategories = new Map();
+    this.menuItems = new Map();
+    this.restaurantOrders = new Map();
+    this.orderItems = new Map();
+    // Inventory
+    this.itemCategories = new Map();
+    this.suppliers = new Map();
+    this.inventoryItems = new Map();
+    this.stockMovements = new Map();
+    // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
     this.groupCounter = 0;
+    this.orderCounter = 1000;
 
     // Seed with demo data
     this.seedData();
@@ -390,6 +525,93 @@ export class MemStorage implements IStorage {
     charges.forEach((c) => this.charges.set(c.id, c));
 
     this.reservationCounter = 1008;
+
+    // Restaurant Areas
+    const restaurantAreas: RestaurantArea[] = [
+      { id: "area1", name: "Salon Principal", areaType: "indoor", capacity: 60, isActive: "true", notes: null },
+      { id: "area2", name: "Terraza", areaType: "terrace", capacity: 30, isActive: "true", notes: "Vista al rio" },
+      { id: "area3", name: "Bar", areaType: "bar", capacity: 15, isActive: "true", notes: null },
+      { id: "area4", name: "Salon Privado", areaType: "private", capacity: 12, isActive: "true", notes: "Para eventos privados" },
+    ];
+    restaurantAreas.forEach((a) => this.restaurantAreas.set(a.id, a));
+
+    // Restaurant Tables
+    const restaurantTables: RestaurantTable[] = [
+      { id: "t1", tableNumber: "1", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t2", tableNumber: "2", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t3", tableNumber: "3", areaId: "area1", capacity: 2, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t4", tableNumber: "4", areaId: "area1", capacity: 6, shape: "rectangular", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t5", tableNumber: "5", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t6", tableNumber: "6", areaId: "area1", capacity: 8, shape: "rectangular", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t7", tableNumber: "T1", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t8", tableNumber: "T2", areaId: "area2", capacity: 2, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t9", tableNumber: "T3", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t10", tableNumber: "B1", areaId: "area3", capacity: 2, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t11", tableNumber: "B2", areaId: "area3", capacity: 2, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t12", tableNumber: "P1", areaId: "area4", capacity: 12, shape: "rectangular", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+    ];
+    restaurantTables.forEach((t) => this.restaurantTables.set(t.id, t));
+
+    // Menu Categories
+    const menuCategories: MenuCategory[] = [
+      { id: "mc1", name: "Entradas", description: "Para comenzar", displayOrder: 1, isActive: "true" },
+      { id: "mc2", name: "Platos Principales", description: "Carnes, pastas y pescados", displayOrder: 2, isActive: "true" },
+      { id: "mc3", name: "Postres", description: "Dulces y helados", displayOrder: 3, isActive: "true" },
+      { id: "mc4", name: "Bebidas", description: "Refrescos, vinos y cocktails", displayOrder: 4, isActive: "true" },
+    ];
+    menuCategories.forEach((c) => this.menuCategories.set(c.id, c));
+
+    // Menu Items
+    const menuItems: MenuItem[] = [
+      { id: "mi1", categoryId: "mc1", name: "Empanadas (3 unidades)", description: "Carne cortada a cuchillo", price: "3500", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 1 },
+      { id: "mi2", categoryId: "mc1", name: "Provoleta", description: "Queso provolone a la plancha con oregano", price: "4200", preparationTime: 12, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
+      { id: "mi3", categoryId: "mc1", name: "Tabla de Fiambres", description: "Jamon crudo, salamín, quesos", price: "6500", preparationTime: 8, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 3 },
+      { id: "mi4", categoryId: "mc2", name: "Bife de Chorizo", description: "400g, con guarnicion a eleccion", price: "12500", preparationTime: 25, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
+      { id: "mi5", categoryId: "mc2", name: "Salmon Grille", description: "Con vegetales de estacion", price: "14000", preparationTime: 20, isAvailable: "true", isActive: "true", allergens: "pescado", displayOrder: 2 },
+      { id: "mi6", categoryId: "mc2", name: "Ravioles de Ricota", description: "Con salsa bolognesa o filetto", price: "8500", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos", displayOrder: 3 },
+      { id: "mi7", categoryId: "mc2", name: "Pollo a la Parrilla", description: "Medio pollo con ensalada", price: "7500", preparationTime: 30, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 4 },
+      { id: "mi8", categoryId: "mc3", name: "Flan con Dulce de Leche", description: "Casero", price: "2800", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "lacteos,huevo", displayOrder: 1 },
+      { id: "mi9", categoryId: "mc3", name: "Helado (3 bochas)", description: "Sabores a eleccion", price: "3200", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
+      { id: "mi10", categoryId: "mc3", name: "Tiramisu", description: "Postre italiano clasico", price: "4500", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos,huevo", displayOrder: 3 },
+      { id: "mi11", categoryId: "mc4", name: "Agua Mineral", description: "Con o sin gas 500ml", price: "1200", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
+      { id: "mi12", categoryId: "mc4", name: "Gaseosa", description: "Coca-Cola, Sprite, Fanta", price: "1500", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 2 },
+      { id: "mi13", categoryId: "mc4", name: "Copa de Vino Malbec", description: "Bodega Luigi Bosca", price: "3500", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
+      { id: "mi14", categoryId: "mc4", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 4 },
+    ];
+    menuItems.forEach((i) => this.menuItems.set(i.id, i));
+
+    // Inventory Categories
+    const itemCategories: ItemCategory[] = [
+      { id: "ic1", name: "Alimentos", description: "Productos alimenticios", parentId: null, isActive: "true" },
+      { id: "ic2", name: "Bebidas", description: "Bebidas alcoholicas y sin alcohol", parentId: null, isActive: "true" },
+      { id: "ic3", name: "Limpieza", description: "Productos de limpieza", parentId: null, isActive: "true" },
+      { id: "ic4", name: "Amenities", description: "Articulos de tocador para huespedes", parentId: null, isActive: "true" },
+      { id: "ic5", name: "Manteleria", description: "Sabanas, toallas, manteles", parentId: null, isActive: "true" },
+    ];
+    itemCategories.forEach((c) => this.itemCategories.set(c.id, c));
+
+    // Suppliers
+    const suppliers: Supplier[] = [
+      { id: "sup1", name: "Distribuidora Norte S.A.", contactName: "Juan Perez", phone: "+54 343 456-7890", email: "ventas@distnorte.com", address: "Ruta 14 Km 5", cuit: "30-71234567-8", paymentTermDays: 30, notes: null, isActive: "true" },
+      { id: "sup2", name: "Bebidas Premium", contactName: "Maria Garcia", phone: "+54 343 567-8901", email: "pedidos@bebidaspremium.com", address: "Av. Ramirez 1500", cuit: "30-70987654-3", paymentTermDays: 15, notes: "Solo bebidas", isActive: "true" },
+      { id: "sup3", name: "Limpieza Total S.R.L.", contactName: "Carlos Lopez", phone: "+54 343 678-9012", email: "ventas@limpiezatotal.com", address: "Zona Industrial", cuit: "30-65432198-7", paymentTermDays: 30, notes: null, isActive: "true" },
+    ];
+    suppliers.forEach((s) => this.suppliers.set(s.id, s));
+
+    // Inventory Items
+    const inventoryItems: InventoryItem[] = [
+      { id: "inv1", sku: "ALI-001", name: "Cafe en grano", description: "Cafe colombiano premium", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "8500", minStock: 5, maxStock: 20, currentStock: 12, location: "Deposito A", isActive: "true" },
+      { id: "inv2", sku: "ALI-002", name: "Azucar", description: "Azucar comun", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "1200", minStock: 10, maxStock: 50, currentStock: 25, location: "Deposito A", isActive: "true" },
+      { id: "inv3", sku: "BEB-001", name: "Agua Mineral 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "4800", minStock: 10, maxStock: 50, currentStock: 8, location: "Deposito B", isActive: "true" },
+      { id: "inv4", sku: "BEB-002", name: "Coca-Cola 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "7200", minStock: 8, maxStock: 40, currentStock: 15, location: "Deposito B", isActive: "true" },
+      { id: "inv5", sku: "BEB-003", name: "Vino Malbec Reserva", description: "Bodega Luigi Bosca", categoryId: "ic2", supplierId: "sup2", unit: "unidad", costPrice: "12000", minStock: 12, maxStock: 48, currentStock: 24, location: "Bodega", isActive: "true" },
+      { id: "inv6", sku: "LIM-001", name: "Detergente Industrial", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "3500", minStock: 5, maxStock: 20, currentStock: 3, location: "Deposito C", isActive: "true" },
+      { id: "inv7", sku: "LIM-002", name: "Desinfectante", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "4200", minStock: 5, maxStock: 20, currentStock: 8, location: "Deposito C", isActive: "true" },
+      { id: "inv8", sku: "AME-001", name: "Shampoo Individual", description: "Sachet 30ml x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "6500", minStock: 10, maxStock: 50, currentStock: 2, location: "Deposito D", isActive: "true" },
+      { id: "inv9", sku: "AME-002", name: "Jabon Individual", description: "Pastilla 20g x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "5000", minStock: 10, maxStock: 50, currentStock: 35, location: "Deposito D", isActive: "true" },
+      { id: "inv10", sku: "MAN-001", name: "Toallas Blancas", description: "Toalla 70x140cm", categoryId: "ic5", supplierId: "sup1", unit: "unidad", costPrice: "4500", minStock: 50, maxStock: 200, currentStock: 120, location: "Lavanderia", isActive: "true" },
+    ];
+    inventoryItems.forEach((i) => this.inventoryItems.set(i.id, i));
   }
 
   // Users
@@ -1697,6 +1919,490 @@ export class MemStorage implements IStorage {
       scheduledDate: today,
       createdAt: new Date().toISOString(),
     });
+  }
+
+  // ==================== RESTAURANT ====================
+  async getRestaurantAreas(): Promise<RestaurantArea[]> {
+    return Array.from(this.restaurantAreas.values()).filter(a => a.isActive === "true");
+  }
+
+  async getRestaurantArea(id: string): Promise<RestaurantArea | undefined> {
+    return this.restaurantAreas.get(id);
+  }
+
+  async createRestaurantArea(area: InsertRestaurantArea): Promise<RestaurantArea> {
+    const id = randomUUID();
+    const newArea: RestaurantArea = { 
+      id, 
+      name: area.name,
+      areaType: (area.areaType ?? "indoor") as "indoor" | "outdoor" | "terrace" | "bar" | "private",
+      capacity: area.capacity ?? 20,
+      isActive: area.isActive ?? "true",
+      notes: area.notes ?? null,
+    };
+    this.restaurantAreas.set(id, newArea);
+    return newArea;
+  }
+
+  async updateRestaurantArea(id: string, area: Partial<InsertRestaurantArea>): Promise<RestaurantArea | undefined> {
+    const existing = this.restaurantAreas.get(id);
+    if (!existing) return undefined;
+    const updated: RestaurantArea = { 
+      ...existing, 
+      ...area,
+      areaType: (area.areaType ?? existing.areaType) as "indoor" | "outdoor" | "terrace" | "bar" | "private",
+    };
+    this.restaurantAreas.set(id, updated);
+    return updated;
+  }
+
+  async deleteRestaurantArea(id: string): Promise<boolean> {
+    return this.restaurantAreas.delete(id);
+  }
+
+  async getRestaurantTables(): Promise<RestaurantTableWithArea[]> {
+    return Array.from(this.restaurantTables.values())
+      .filter(t => t.isActive === "true")
+      .map(table => ({
+        ...table,
+        area: this.restaurantAreas.get(table.areaId)!,
+      }));
+  }
+
+  async getRestaurantTable(id: string): Promise<RestaurantTableWithArea | undefined> {
+    const table = this.restaurantTables.get(id);
+    if (!table) return undefined;
+    return { ...table, area: this.restaurantAreas.get(table.areaId)! };
+  }
+
+  async getTablesByArea(areaId: string): Promise<RestaurantTable[]> {
+    return Array.from(this.restaurantTables.values()).filter(t => t.areaId === areaId);
+  }
+
+  async createRestaurantTable(table: InsertRestaurantTable): Promise<RestaurantTable> {
+    const id = randomUUID();
+    const newTable: RestaurantTable = { 
+      id, 
+      tableNumber: table.tableNumber,
+      areaId: table.areaId,
+      capacity: table.capacity ?? 4,
+      shape: (table.shape ?? "square") as "square" | "round" | "rectangular",
+      status: (table.status ?? "available") as "available" | "occupied" | "reserved" | "cleaning" | "blocked",
+      positionX: table.positionX ?? 0,
+      positionY: table.positionY ?? 0,
+      isActive: table.isActive ?? "true",
+    };
+    this.restaurantTables.set(id, newTable);
+    return newTable;
+  }
+
+  async updateRestaurantTable(id: string, table: Partial<InsertRestaurantTable>): Promise<RestaurantTable | undefined> {
+    const existing = this.restaurantTables.get(id);
+    if (!existing) return undefined;
+    const updated: RestaurantTable = { 
+      ...existing, 
+      ...table,
+      status: (table.status ?? existing.status) as "available" | "occupied" | "reserved" | "cleaning" | "blocked",
+      shape: (table.shape ?? existing.shape) as "square" | "round" | "rectangular",
+    };
+    this.restaurantTables.set(id, updated);
+    return updated;
+  }
+
+  async deleteRestaurantTable(id: string): Promise<boolean> {
+    return this.restaurantTables.delete(id);
+  }
+
+  async getMenuCategories(): Promise<MenuCategory[]> {
+    return Array.from(this.menuCategories.values())
+      .filter(c => c.isActive === "true")
+      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  }
+
+  async getMenuCategory(id: string): Promise<MenuCategory | undefined> {
+    return this.menuCategories.get(id);
+  }
+
+  async createMenuCategory(category: InsertMenuCategory): Promise<MenuCategory> {
+    const id = randomUUID();
+    const newCategory: MenuCategory = { 
+      id, 
+      name: category.name,
+      description: category.description ?? null,
+      displayOrder: category.displayOrder ?? 0,
+      isActive: category.isActive ?? "true",
+    };
+    this.menuCategories.set(id, newCategory);
+    return newCategory;
+  }
+
+  async updateMenuCategory(id: string, category: Partial<InsertMenuCategory>): Promise<MenuCategory | undefined> {
+    const existing = this.menuCategories.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...category };
+    this.menuCategories.set(id, updated);
+    return updated;
+  }
+
+  async deleteMenuCategory(id: string): Promise<boolean> {
+    return this.menuCategories.delete(id);
+  }
+
+  async getMenuItems(): Promise<MenuItemWithCategory[]> {
+    return Array.from(this.menuItems.values())
+      .filter(i => i.isActive === "true")
+      .map(item => ({
+        ...item,
+        category: this.menuCategories.get(item.categoryId)!,
+      }))
+      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  }
+
+  async getMenuItem(id: string): Promise<MenuItemWithCategory | undefined> {
+    const item = this.menuItems.get(id);
+    if (!item) return undefined;
+    return { ...item, category: this.menuCategories.get(item.categoryId)! };
+  }
+
+  async getMenuItemsByCategory(categoryId: string): Promise<MenuItem[]> {
+    return Array.from(this.menuItems.values()).filter(i => i.categoryId === categoryId);
+  }
+
+  async createMenuItem(item: InsertMenuItem): Promise<MenuItem> {
+    const id = randomUUID();
+    const newItem: MenuItem = { 
+      id, 
+      categoryId: item.categoryId,
+      name: item.name,
+      description: item.description ?? null,
+      price: item.price,
+      preparationTime: item.preparationTime ?? null,
+      isAvailable: item.isAvailable ?? "true",
+      isActive: item.isActive ?? "true",
+      allergens: item.allergens ?? null,
+      displayOrder: item.displayOrder ?? 0,
+    };
+    this.menuItems.set(id, newItem);
+    return newItem;
+  }
+
+  async updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined> {
+    const existing = this.menuItems.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...item };
+    this.menuItems.set(id, updated);
+    return updated;
+  }
+
+  async deleteMenuItem(id: string): Promise<boolean> {
+    return this.menuItems.delete(id);
+  }
+
+  async getRestaurantOrders(status?: OrderStatus): Promise<RestaurantOrderWithDetails[]> {
+    let orders = Array.from(this.restaurantOrders.values());
+    if (status) {
+      orders = orders.filter(o => o.status === status);
+    }
+    return orders.map(order => {
+      const table = order.tableId ? this.restaurantTables.get(order.tableId) : undefined;
+      const area = table ? this.restaurantAreas.get(table.areaId) : undefined;
+      const guest = order.guestId ? this.guests.get(order.guestId) : undefined;
+      const items = Array.from(this.orderItems.values())
+        .filter(i => i.orderId === order.id)
+        .map(item => ({
+          ...item,
+          menuItem: this.menuItems.get(item.menuItemId)!,
+        }));
+      return {
+        ...order,
+        table: table ? { ...table, area: area! } : undefined,
+        guest,
+        items,
+      };
+    }).sort((a, b) => b.openedAt.localeCompare(a.openedAt));
+  }
+
+  async getRestaurantOrder(id: string): Promise<RestaurantOrderWithDetails | undefined> {
+    const order = this.restaurantOrders.get(id);
+    if (!order) return undefined;
+    const table = order.tableId ? this.restaurantTables.get(order.tableId) : undefined;
+    const area = table ? this.restaurantAreas.get(table.areaId) : undefined;
+    const guest = order.guestId ? this.guests.get(order.guestId) : undefined;
+    const items = Array.from(this.orderItems.values())
+      .filter(i => i.orderId === order.id)
+      .map(item => ({
+        ...item,
+        menuItem: this.menuItems.get(item.menuItemId)!,
+      }));
+    return {
+      ...order,
+      table: table ? { ...table, area: area! } : undefined,
+      guest,
+      items,
+    };
+  }
+
+  async getOrdersByTable(tableId: string): Promise<RestaurantOrder[]> {
+    return Array.from(this.restaurantOrders.values()).filter(o => o.tableId === tableId);
+  }
+
+  async createRestaurantOrder(order: InsertRestaurantOrder): Promise<RestaurantOrder> {
+    const id = randomUUID();
+    const newOrder: RestaurantOrder = { 
+      id,
+      orderNumber: order.orderNumber,
+      tableId: order.tableId ?? null,
+      reservationId: order.reservationId ?? null,
+      guestId: order.guestId ?? null,
+      orderType: (order.orderType ?? "dine_in") as "dine_in" | "room_service" | "takeaway",
+      status: (order.status ?? "open") as "open" | "in_progress" | "served" | "closed" | "cancelled",
+      covers: order.covers ?? 1,
+      subtotal: order.subtotal ?? "0",
+      tax: order.tax ?? "0",
+      total: order.total ?? "0",
+      notes: order.notes ?? null,
+      openedAt: order.openedAt,
+      closedAt: order.closedAt ?? null,
+      chargedToRoom: order.chargedToRoom ?? "false",
+      roomNumber: order.roomNumber ?? null,
+    };
+    this.restaurantOrders.set(id, newOrder);
+    return newOrder;
+  }
+
+  async updateRestaurantOrder(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined> {
+    const existing = this.restaurantOrders.get(id);
+    if (!existing) return undefined;
+    const updated: RestaurantOrder = { 
+      ...existing, 
+      ...order,
+      status: (order.status ?? existing.status) as "open" | "in_progress" | "served" | "closed" | "cancelled",
+      orderType: (order.orderType ?? existing.orderType) as "dine_in" | "room_service" | "takeaway",
+    };
+    this.restaurantOrders.set(id, updated);
+    return updated;
+  }
+
+  async deleteRestaurantOrder(id: string): Promise<boolean> {
+    return this.restaurantOrders.delete(id);
+  }
+
+  generateOrderNumber(): string {
+    this.orderCounter++;
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
+    return `ORD-${dateStr}-${this.orderCounter}`;
+  }
+
+  async getOrderItems(orderId: string): Promise<OrderItem[]> {
+    return Array.from(this.orderItems.values()).filter(i => i.orderId === orderId);
+  }
+
+  async createOrderItem(item: InsertOrderItem): Promise<OrderItem> {
+    const id = randomUUID();
+    const newItem: OrderItem = { 
+      id,
+      orderId: item.orderId,
+      menuItemId: item.menuItemId,
+      quantity: item.quantity ?? 1,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal,
+      status: (item.status ?? "pending") as "pending" | "preparing" | "ready" | "served" | "cancelled",
+      notes: item.notes ?? null,
+      sentAt: item.sentAt ?? null,
+    };
+    this.orderItems.set(id, newItem);
+    return newItem;
+  }
+
+  async updateOrderItem(id: string, item: Partial<InsertOrderItem>): Promise<OrderItem | undefined> {
+    const existing = this.orderItems.get(id);
+    if (!existing) return undefined;
+    const updated: OrderItem = { 
+      ...existing, 
+      ...item,
+      status: (item.status ?? existing.status) as "pending" | "preparing" | "ready" | "served" | "cancelled",
+    };
+    this.orderItems.set(id, updated);
+    return updated;
+  }
+
+  async deleteOrderItem(id: string): Promise<boolean> {
+    return this.orderItems.delete(id);
+  }
+
+  // ==================== INVENTORY ====================
+  async getItemCategories(): Promise<ItemCategory[]> {
+    return Array.from(this.itemCategories.values()).filter(c => c.isActive === "true");
+  }
+
+  async getItemCategory(id: string): Promise<ItemCategory | undefined> {
+    return this.itemCategories.get(id);
+  }
+
+  async createItemCategory(category: InsertItemCategory): Promise<ItemCategory> {
+    const id = randomUUID();
+    const newCategory: ItemCategory = { 
+      id, 
+      name: category.name,
+      description: category.description ?? null,
+      parentId: category.parentId ?? null,
+      isActive: category.isActive ?? "true",
+    };
+    this.itemCategories.set(id, newCategory);
+    return newCategory;
+  }
+
+  async updateItemCategory(id: string, category: Partial<InsertItemCategory>): Promise<ItemCategory | undefined> {
+    const existing = this.itemCategories.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...category };
+    this.itemCategories.set(id, updated);
+    return updated;
+  }
+
+  async deleteItemCategory(id: string): Promise<boolean> {
+    return this.itemCategories.delete(id);
+  }
+
+  async getSuppliers(): Promise<Supplier[]> {
+    return Array.from(this.suppliers.values()).filter(s => s.isActive === "true");
+  }
+
+  async getSupplier(id: string): Promise<Supplier | undefined> {
+    return this.suppliers.get(id);
+  }
+
+  async createSupplier(supplier: InsertSupplier): Promise<Supplier> {
+    const id = randomUUID();
+    const newSupplier: Supplier = { 
+      id, 
+      name: supplier.name,
+      contactName: supplier.contactName ?? null,
+      phone: supplier.phone ?? null,
+      email: supplier.email ?? null,
+      address: supplier.address ?? null,
+      cuit: supplier.cuit ?? null,
+      paymentTermDays: supplier.paymentTermDays ?? 30,
+      notes: supplier.notes ?? null,
+      isActive: supplier.isActive ?? "true",
+    };
+    this.suppliers.set(id, newSupplier);
+    return newSupplier;
+  }
+
+  async updateSupplier(id: string, supplier: Partial<InsertSupplier>): Promise<Supplier | undefined> {
+    const existing = this.suppliers.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...supplier };
+    this.suppliers.set(id, updated);
+    return updated;
+  }
+
+  async deleteSupplier(id: string): Promise<boolean> {
+    return this.suppliers.delete(id);
+  }
+
+  async getInventoryItems(): Promise<InventoryItemWithDetails[]> {
+    return Array.from(this.inventoryItems.values())
+      .filter(i => i.isActive === "true")
+      .map(item => ({
+        ...item,
+        category: item.categoryId ? this.itemCategories.get(item.categoryId) : undefined,
+        supplier: item.supplierId ? this.suppliers.get(item.supplierId) : undefined,
+      }));
+  }
+
+  async getInventoryItem(id: string): Promise<InventoryItemWithDetails | undefined> {
+    const item = this.inventoryItems.get(id);
+    if (!item) return undefined;
+    return {
+      ...item,
+      category: item.categoryId ? this.itemCategories.get(item.categoryId) : undefined,
+      supplier: item.supplierId ? this.suppliers.get(item.supplierId) : undefined,
+    };
+  }
+
+  async getInventoryItemsBelowMinStock(): Promise<InventoryItem[]> {
+    return Array.from(this.inventoryItems.values())
+      .filter(i => i.isActive === "true" && (i.currentStock ?? 0) < (i.minStock ?? 0));
+  }
+
+  async createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem> {
+    const id = randomUUID();
+    const newItem: InventoryItem = { 
+      id,
+      sku: item.sku ?? null,
+      name: item.name,
+      description: item.description ?? null,
+      categoryId: item.categoryId ?? null,
+      supplierId: item.supplierId ?? null,
+      unit: (item.unit ?? "unidad") as "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena",
+      costPrice: item.costPrice ?? "0",
+      minStock: item.minStock ?? 0,
+      maxStock: item.maxStock ?? null,
+      currentStock: item.currentStock ?? 0,
+      location: item.location ?? null,
+      isActive: item.isActive ?? "true",
+    };
+    this.inventoryItems.set(id, newItem);
+    return newItem;
+  }
+
+  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem>): Promise<InventoryItem | undefined> {
+    const existing = this.inventoryItems.get(id);
+    if (!existing) return undefined;
+    const updated: InventoryItem = { 
+      ...existing, 
+      ...item,
+      unit: (item.unit ?? existing.unit) as "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena",
+    };
+    this.inventoryItems.set(id, updated);
+    return updated;
+  }
+
+  async deleteInventoryItem(id: string): Promise<boolean> {
+    return this.inventoryItems.delete(id);
+  }
+
+  async getStockMovements(itemId?: string): Promise<StockMovementWithItem[]> {
+    let movements = Array.from(this.stockMovements.values());
+    if (itemId) {
+      movements = movements.filter(m => m.itemId === itemId);
+    }
+    return movements
+      .map(movement => ({
+        ...movement,
+        item: this.inventoryItems.get(movement.itemId)!,
+      }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async createStockMovement(movement: InsertStockMovement): Promise<StockMovement> {
+    const id = randomUUID();
+    const newMovement: StockMovement = { 
+      id,
+      itemId: movement.itemId,
+      movementType: movement.movementType as "entrada" | "salida" | "ajuste" | "transferencia" | "consumo",
+      quantity: movement.quantity,
+      previousStock: movement.previousStock,
+      newStock: movement.newStock,
+      unitCost: movement.unitCost ?? null,
+      reference: movement.reference ?? null,
+      notes: movement.notes ?? null,
+      createdAt: movement.createdAt,
+      createdBy: movement.createdBy ?? null,
+    };
+    this.stockMovements.set(id, newMovement);
+    
+    // Update current stock in the inventory item
+    const item = this.inventoryItems.get(movement.itemId);
+    if (item) {
+      item.currentStock = movement.newStock;
+      this.inventoryItems.set(movement.itemId, item);
+    }
+    
+    return newMovement;
   }
 }
 
