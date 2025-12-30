@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ChevronLeft, ChevronRight, Info, Plus } from "lucide-react";
@@ -62,6 +62,8 @@ function getStatusColor(status: PlanningCellStatus): string {
       return "bg-red-100 dark:bg-red-900/40 border-red-200 dark:border-red-800";
     case "cleaning":
       return "bg-purple-100 dark:bg-purple-900/40 border-purple-200 dark:border-purple-800";
+    case "group_blocked":
+      return "bg-indigo-100 dark:bg-indigo-900/40 border-indigo-200 dark:border-indigo-800";
     default:
       return "bg-muted";
   }
@@ -81,6 +83,8 @@ function getStatusLabel(status: PlanningCellStatus): string {
       return "Mantenimiento";
     case "cleaning":
       return "Limpieza";
+    case "group_blocked":
+      return "Grupo";
     default:
       return status;
   }
@@ -92,6 +96,7 @@ function Legend() {
     { status: "booked", label: "Reservado" },
     { status: "checked_in", label: "Ocupado" },
     { status: "checkout_today", label: "Check-out hoy" },
+    { status: "group_blocked", label: "Grupo" },
     { status: "cleaning", label: "Limpieza" },
     { status: "maintenance", label: "Mantenimiento" },
   ];
@@ -452,8 +457,8 @@ export default function PlanningPage() {
                   </thead>
                   <tbody>
                     {floors.map((floor) => (
-                      <>
-                        <tr key={`floor-${floor}`} className="bg-muted/30">
+                      <Fragment key={`floor-${floor}`}>
+                        <tr className="bg-muted/30">
                           <td
                             colSpan={data.days.length + 1}
                             className="px-3 py-1.5 text-xs font-semibold text-muted-foreground sticky left-0 bg-muted/30"
@@ -494,7 +499,7 @@ export default function PlanningPage() {
                                       >
                                         {reservation ? (
                                           <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
-                                            {reservation.guestName.split(" ")[0]}
+                                            {reservation.isGroup ? "GRP" : reservation.guestName.split(" ")[0]}
                                           </span>
                                         ) : isClickable ? (
                                           <Plus className="h-3 w-3 text-green-600 dark:text-green-400 opacity-0 group-hover:opacity-100" />
@@ -507,9 +512,14 @@ export default function PlanningPage() {
                                         <div>Estado: {getStatusLabel(status)}</div>
                                         {reservation ? (
                                           <div className="border-t pt-1 mt-1">
+                                            {reservation.isGroup && reservation.groupName && (
+                                              <div className="font-semibold text-indigo-600 dark:text-indigo-400">
+                                                Grupo: {reservation.groupName}
+                                              </div>
+                                            )}
                                             <div className="font-medium">{reservation.guestName}</div>
                                             <div className="text-muted-foreground">
-                                              {reservation.checkIn} → {reservation.checkOut}
+                                              {reservation.checkIn} a {reservation.checkOut}
                                             </div>
                                             <div className="border-t pt-1 mt-1 text-primary">
                                               Clic para ver detalle
@@ -528,7 +538,7 @@ export default function PlanningPage() {
                             })}
                           </tr>
                         ))}
-                      </>
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>

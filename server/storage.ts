@@ -920,6 +920,7 @@ export class MemStorage implements IStorage {
   async getPlanningData(startDate: string, endDate: string): Promise<PlanningData> {
     const rooms = await this.getRooms();
     const allReservations = Array.from(this.reservations.values());
+    const allGroupLinks = Array.from(this.groupReservationLinks.values());
     
     // Generate array of days between start and end
     const days: string[] = [];
@@ -929,10 +930,15 @@ export class MemStorage implements IStorage {
       days.push(d.toISOString().split("T")[0]);
     }
 
+    // Build set of reservation IDs linked to groups
+    const groupReservationIds = new Set(allGroupLinks.map(l => l.reservationId));
+
     // Build occupancy map and cell reservations
     const occupancy: Record<string, PlanningCellStatus[]> = {};
     const cellReservations: Record<string, Record<string, string>> = {};
-    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus }> = {};
+    const cellGroupBlocks: Record<string, Record<string, string>> = {};
+    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; isGroup?: boolean; groupName?: string }> = {};
+    const groupBlocksMap: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }> = {};
 
     // Filter active reservations (not cancelled or checked_out)
     const activeReservations = allReservations.filter(r => 
@@ -943,12 +949,27 @@ export class MemStorage implements IStorage {
     for (const res of activeReservations) {
       const guest = this.guests.get(res.guestId);
       if (guest) {
+        const isGroupReservation = groupReservationIds.has(res.id);
+        let groupName: string | undefined;
+        
+        if (isGroupReservation) {
+          const link = allGroupLinks.find(l => l.reservationId === res.id);
+          if (link) {
+            const group = this.groups.get(link.groupId);
+            if (group) {
+              groupName = group.name;
+            }
+          }
+        }
+        
         reservationsMap[res.id] = {
           id: res.id,
           guestName: `${guest.firstName} ${guest.lastName}`,
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,
+          isGroup: isGroupReservation,
+          groupName,
         };
       }
     }
@@ -957,6 +978,7 @@ export class MemStorage implements IStorage {
     for (const room of rooms) {
       occupancy[room.id] = [];
       cellReservations[room.id] = {};
+      cellGroupBlocks[room.id] = {};
 
       for (const day of days) {
         // Check room status first
@@ -979,7 +1001,11 @@ export class MemStorage implements IStorage {
 
         if (reservation) {
           cellReservations[room.id][day] = reservation.id;
-          if (reservation.status === "checked_in") {
+          const isGroupRes = groupReservationIds.has(reservation.id);
+          
+          if (isGroupRes) {
+            occupancy[room.id].push("group_blocked");
+          } else if (reservation.status === "checked_in") {
             if (day === reservation.checkOutDate) {
               occupancy[room.id].push("checkout_today");
             } else {
@@ -998,6 +1024,8 @@ export class MemStorage implements IStorage {
       rooms,
       days,
       occupancy,
+      groupBlocks: groupBlocksMap,
+      cellGroupBlocks,
       reservations: reservationsMap,
       cellReservations,
     };

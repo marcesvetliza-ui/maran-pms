@@ -204,14 +204,16 @@ export type RoomWithType = Room & {
 };
 
 // Planning types
-export type PlanningCellStatus = "available" | "booked" | "checked_in" | "checkout_today" | "maintenance" | "cleaning";
+export type PlanningCellStatus = "available" | "booked" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "group_blocked";
 
 export type PlanningData = {
   rooms: RoomWithType[];
   days: string[];
   occupancy: Record<string, PlanningCellStatus[]>;
-  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus }>;
+  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; isGroup?: boolean; groupName?: string }>;
   cellReservations: Record<string, Record<string, string>>; // roomId -> date -> reservationId
+  groupBlocks: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }>;
+  cellGroupBlocks: Record<string, Record<string, string>>; // roomId -> date -> groupBlockId
 };
 
 // Users (for authentication)
