@@ -63,6 +63,9 @@ import {
   type RestaurantOrderWithDetails,
   type TableStatus,
   type OrderStatus,
+  type TableReservation,
+  type InsertTableReservation,
+  type TableReservationWithTable,
   // Inventory
   type ItemCategory,
   type InsertItemCategory,
@@ -288,6 +291,15 @@ export interface IStorage {
   updateOrderItem(id: string, item: Partial<InsertOrderItem>): Promise<OrderItem | undefined>;
   deleteOrderItem(id: string): Promise<boolean>;
 
+  // Table Reservations
+  getTableReservations(): Promise<TableReservationWithTable[]>;
+  getTableReservation(id: string): Promise<TableReservationWithTable | undefined>;
+  getTableReservationsByDate(date: string): Promise<TableReservationWithTable[]>;
+  getTableReservationsByTable(tableId: string): Promise<TableReservation[]>;
+  createTableReservation(reservation: InsertTableReservation): Promise<TableReservation>;
+  updateTableReservation(id: string, reservation: Partial<InsertTableReservation>): Promise<TableReservation | undefined>;
+  deleteTableReservation(id: string): Promise<boolean>;
+
   // ==================== INVENTORY ====================
   // Item Categories
   getItemCategories(): Promise<ItemCategory[]>;
@@ -340,6 +352,7 @@ export class MemStorage implements IStorage {
   private menuItems: Map<string, MenuItem>;
   private restaurantOrders: Map<string, RestaurantOrder>;
   private orderItems: Map<string, OrderItem>;
+  private tableReservations: Map<string, TableReservation>;
   // Inventory
   private itemCategories: Map<string, ItemCategory>;
   private suppliers: Map<string, Supplier>;
@@ -375,6 +388,7 @@ export class MemStorage implements IStorage {
     this.menuItems = new Map();
     this.restaurantOrders = new Map();
     this.orderItems = new Map();
+    this.tableReservations = new Map();
     // Inventory
     this.itemCategories = new Map();
     this.suppliers = new Map();
@@ -2263,6 +2277,68 @@ export class MemStorage implements IStorage {
 
   async deleteOrderItem(id: string): Promise<boolean> {
     return this.orderItems.delete(id);
+  }
+
+  // Table Reservations
+  async getTableReservations(): Promise<TableReservationWithTable[]> {
+    const reservations = Array.from(this.tableReservations.values());
+    return reservations.map(r => ({
+      ...r,
+      table: this.restaurantTables.get(r.tableId)!,
+    })).filter(r => r.table);
+  }
+
+  async getTableReservation(id: string): Promise<TableReservationWithTable | undefined> {
+    const reservation = this.tableReservations.get(id);
+    if (!reservation) return undefined;
+    const table = this.restaurantTables.get(reservation.tableId);
+    if (!table) return undefined;
+    return { ...reservation, table };
+  }
+
+  async getTableReservationsByDate(date: string): Promise<TableReservationWithTable[]> {
+    const reservations = Array.from(this.tableReservations.values())
+      .filter(r => r.reservationDate === date && r.status !== "cancelled");
+    return reservations.map(r => ({
+      ...r,
+      table: this.restaurantTables.get(r.tableId)!,
+    })).filter(r => r.table);
+  }
+
+  async getTableReservationsByTable(tableId: string): Promise<TableReservation[]> {
+    return Array.from(this.tableReservations.values())
+      .filter(r => r.tableId === tableId);
+  }
+
+  async createTableReservation(reservation: InsertTableReservation): Promise<TableReservation> {
+    const id = randomUUID();
+    const newReservation: TableReservation = {
+      id,
+      tableId: reservation.tableId,
+      guestName: reservation.guestName,
+      guestPhone: reservation.guestPhone ?? null,
+      guestEmail: reservation.guestEmail ?? null,
+      partySize: reservation.partySize ?? 2,
+      reservationDate: reservation.reservationDate,
+      reservationTime: reservation.reservationTime,
+      status: (reservation.status ?? "pending") as "pending" | "confirmed" | "seated" | "completed" | "cancelled" | "no_show",
+      notes: reservation.notes ?? null,
+      createdAt: reservation.createdAt,
+    };
+    this.tableReservations.set(id, newReservation);
+    return newReservation;
+  }
+
+  async updateTableReservation(id: string, reservation: Partial<InsertTableReservation>): Promise<TableReservation | undefined> {
+    const existing = this.tableReservations.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...reservation } as TableReservation;
+    this.tableReservations.set(id, updated);
+    return updated;
+  }
+
+  async deleteTableReservation(id: string): Promise<boolean> {
+    return this.tableReservations.delete(id);
   }
 
   // ==================== INVENTORY ====================

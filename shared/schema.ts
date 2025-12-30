@@ -482,6 +482,31 @@ export type RestaurantTableWithArea = RestaurantTable & {
   area: RestaurantArea;
 };
 
+// Table Reservations
+export type TableReservationStatus = "pending" | "confirmed" | "seated" | "completed" | "cancelled" | "no_show";
+
+export const tableReservations = pgTable("table_reservations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tableId: varchar("table_id").notNull(),
+  guestName: text("guest_name").notNull(),
+  guestPhone: text("guest_phone"),
+  guestEmail: text("guest_email"),
+  partySize: integer("party_size").notNull().default(2),
+  reservationDate: text("reservation_date").notNull(),
+  reservationTime: text("reservation_time").notNull(),
+  status: text("status").$type<TableReservationStatus>().notNull().default("pending"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertTableReservationSchema = createInsertSchema(tableReservations).omit({ id: true });
+export type InsertTableReservation = z.infer<typeof insertTableReservationSchema>;
+export type TableReservation = typeof tableReservations.$inferSelect;
+
+export type TableReservationWithTable = TableReservation & {
+  table: RestaurantTable;
+};
+
 // Menu Categories
 export const menuCategories = pgTable("menu_categories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
