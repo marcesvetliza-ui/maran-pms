@@ -528,8 +528,8 @@ export class MemStorage implements IStorage {
 
     // Restaurant Areas - Dos secciones del plano
     const restaurantAreas: RestaurantArea[] = [
-      { id: "area1", name: "Seccion A (Mesas 1-18)", areaType: "indoor", capacity: 72, isActive: "true", notes: "Mesas cuadradas" },
-      { id: "area2", name: "Seccion B (Mesas 19-32)", areaType: "indoor", capacity: 56, isActive: "true", notes: "Mesas redondas" },
+      { id: "area1", name: "Sector Rectangular (Mesas 1-18)", areaType: "indoor", capacity: 72, isActive: "true", notes: "Mesas cuadradas" },
+      { id: "area2", name: "Sector Curvo (Mesas 19-32)", areaType: "indoor", capacity: 56, isActive: "true", notes: "Mesas redondas" },
     ];
     restaurantAreas.forEach((a) => this.restaurantAreas.set(a.id, a));
 

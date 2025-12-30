@@ -294,7 +294,7 @@ export default function RestaurantPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6">
               {(selectedArea === "all" ? areas : areas.filter((a) => a.id === selectedArea)).map((area) => {
                 const areaTables = filteredTables.filter((t) => t.areaId === area.id);
                 const maxX = Math.max(...areaTables.map(t => t.positionX), 3);
