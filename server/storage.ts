@@ -737,6 +737,51 @@ export class MemStorage implements IStorage {
       { id: "inv10", sku: "MAN-001", name: "Toallas Blancas", description: "Toalla 70x140cm", categoryId: "ic5", supplierId: "sup1", unit: "unidad", costPrice: "4500.00", minStock: 50, maxStock: 200, currentStock: 120, location: "Lavanderia", isActive: "true" },
     ];
     inventoryItems.forEach((i) => this.inventoryItems.set(i.id, i));
+
+    // SPA Cabins (Gabinetes)
+    const spaCabins: SpaCabin[] = [
+      { id: "cab1", name: "Cabina 1 - Masajes", description: "Cabina para masajes relajantes y terapeuticos", isActive: "true" },
+      { id: "cab2", name: "Cabina 2 - Masajes", description: "Cabina para masajes con aromaterapia", isActive: "true" },
+      { id: "cab3", name: "Cabina 3 - Faciales", description: "Cabina especializada en tratamientos faciales", isActive: "true" },
+      { id: "cab4", name: "Cabina 4 - Corporales", description: "Cabina para tratamientos corporales", isActive: "true" },
+      { id: "cab5", name: "Cabina 5 - VIP", description: "Cabina VIP para tratamientos premium", isActive: "true" },
+      { id: "cab6", name: "Cabina 6 - Parejas", description: "Cabina doble para tratamientos en pareja", isActive: "true" },
+    ];
+    spaCabins.forEach((c) => this.spaCabins.set(c.id, c));
+
+    // SPA Treatment Categories
+    const spaTreatmentCategories: SpaTreatmentCategory[] = [
+      { id: "stc1", name: "Masajes", description: "Masajes relajantes y terapeuticos", sortOrder: 1 },
+      { id: "stc2", name: "Faciales", description: "Tratamientos de limpieza y rejuvenecimiento facial", sortOrder: 2 },
+      { id: "stc3", name: "Corporales", description: "Tratamientos corporales de embellecimiento", sortOrder: 3 },
+      { id: "stc4", name: "Circuitos", description: "Circuitos de aguas termales", sortOrder: 4 },
+      { id: "stc5", name: "Especiales", description: "Tratamientos premium y paquetes especiales", sortOrder: 5 },
+    ];
+    spaTreatmentCategories.forEach((c) => this.spaTreatmentCategories.set(c.id, c));
+
+    // SPA Treatments
+    const spaTreatments: SpaTreatment[] = [
+      // Masajes
+      { id: "st1", categoryId: "stc1", name: "Masaje Relajante", description: "Masaje corporal con aceites esenciales", durationMinutes: 60, price: "15000.00", isActive: "true" },
+      { id: "st2", categoryId: "stc1", name: "Masaje Descontracturante", description: "Masaje profundo para aliviar tensiones musculares", durationMinutes: 60, price: "18000.00", isActive: "true" },
+      { id: "st3", categoryId: "stc1", name: "Masaje con Piedras Calientes", description: "Terapia con piedras volcanicas calientes", durationMinutes: 90, price: "25000.00", isActive: "true" },
+      { id: "st4", categoryId: "stc1", name: "Reflexologia Podal", description: "Masaje de pies con tecnica reflexologica", durationMinutes: 45, price: "12000.00", isActive: "true" },
+      // Faciales
+      { id: "st5", categoryId: "stc2", name: "Limpieza Facial Profunda", description: "Limpieza e hidratacion profunda del rostro", durationMinutes: 60, price: "14000.00", isActive: "true" },
+      { id: "st6", categoryId: "stc2", name: "Tratamiento Antiage", description: "Tratamiento rejuvenecedor con colageno", durationMinutes: 75, price: "22000.00", isActive: "true" },
+      { id: "st7", categoryId: "stc2", name: "Mascara de Oro", description: "Mascara facial premium con particulas de oro", durationMinutes: 60, price: "28000.00", isActive: "true" },
+      // Corporales
+      { id: "st8", categoryId: "stc3", name: "Exfoliacion Corporal", description: "Exfoliacion con sales marinas", durationMinutes: 45, price: "13000.00", isActive: "true" },
+      { id: "st9", categoryId: "stc3", name: "Envoltura de Chocolate", description: "Tratamiento hidratante con cacao", durationMinutes: 60, price: "18000.00", isActive: "true" },
+      { id: "st10", categoryId: "stc3", name: "Reductor Modelador", description: "Tratamiento reductivo con vendas frias", durationMinutes: 90, price: "24000.00", isActive: "true" },
+      // Circuitos
+      { id: "st11", categoryId: "stc4", name: "Circuito de Aguas", description: "Acceso a piscinas termales, sauna y jacuzzi", durationMinutes: 120, price: "10000.00", isActive: "true" },
+      { id: "st12", categoryId: "stc4", name: "Circuito Premium", description: "Circuito de aguas + te y frutas", durationMinutes: 150, price: "15000.00", isActive: "true" },
+      // Especiales
+      { id: "st13", categoryId: "stc5", name: "Dia de Spa Completo", description: "Circuito + masaje + facial + almuerzo", durationMinutes: 300, price: "45000.00", isActive: "true" },
+      { id: "st14", categoryId: "stc5", name: "Experiencia en Pareja", description: "Circuito + masaje para dos personas", durationMinutes: 180, price: "55000.00", isActive: "true" },
+    ];
+    spaTreatments.forEach((t) => this.spaTreatments.set(t.id, t));
   }
 
   // Users
