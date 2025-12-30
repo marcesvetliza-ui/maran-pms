@@ -526,51 +526,63 @@ export class MemStorage implements IStorage {
 
     this.reservationCounter = 1008;
 
-    // Restaurant Areas
+    // Restaurant Areas - Dos secciones del plano
     const restaurantAreas: RestaurantArea[] = [
-      { id: "area1", name: "Salon Principal", areaType: "indoor", capacity: 60, isActive: "true", notes: null },
-      { id: "area2", name: "Terraza", areaType: "terrace", capacity: 30, isActive: "true", notes: "Vista al rio" },
-      { id: "area3", name: "Bar", areaType: "bar", capacity: 15, isActive: "true", notes: null },
-      { id: "area4", name: "Salon Privado", areaType: "private", capacity: 12, isActive: "true", notes: "Para eventos privados" },
+      { id: "area1", name: "Seccion A (Mesas 1-18)", areaType: "indoor", capacity: 72, isActive: "true", notes: "Mesas cuadradas" },
+      { id: "area2", name: "Seccion B (Mesas 19-32)", areaType: "indoor", capacity: 56, isActive: "true", notes: "Mesas redondas" },
     ];
     restaurantAreas.forEach((a) => this.restaurantAreas.set(a.id, a));
 
-    // Restaurant Tables - Based on floor plan "Plano Justo"
+    // Restaurant Tables - Plano Justo - Seccion A (Mesas 1-18)
+    // Layout del plano:
+    // Fila 1: 18, 17, 15
+    // Fila 2: 8, 6
+    // Fila 3: 1, 2, 3
+    // Fila 4: 16, 14 | 4, 5
+    // Fila 5: 7, 9
+    // Fila 6: 10, 13, 12, 11
     const restaurantTables: RestaurantTable[] = [
-      // Salon Principal - Mesas 1-18
-      { id: "t1", tableNumber: "1", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 200, isActive: "true" },
-      { id: "t2", tableNumber: "2", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 200, isActive: "true" },
-      { id: "t3", tableNumber: "3", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 360, positionY: 200, isActive: "true" },
-      { id: "t4", tableNumber: "4", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 280, isActive: "true" },
-      { id: "t5", tableNumber: "5", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 280, isActive: "true" },
-      { id: "t6", tableNumber: "6", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 120, isActive: "true" },
-      { id: "t7", tableNumber: "7", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 360, isActive: "true" },
-      { id: "t8", tableNumber: "8", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 120, isActive: "true" },
-      { id: "t9", tableNumber: "9", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 360, isActive: "true" },
-      { id: "t10", tableNumber: "10", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 120, positionY: 440, isActive: "true" },
-      { id: "t11", tableNumber: "11", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 360, positionY: 440, isActive: "true" },
-      { id: "t12", tableNumber: "12", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 440, isActive: "true" },
-      { id: "t13", tableNumber: "13", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 440, isActive: "true" },
-      { id: "t14", tableNumber: "14", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 120, positionY: 280, isActive: "true" },
-      { id: "t15", tableNumber: "15", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 360, positionY: 40, isActive: "true" },
-      { id: "t16", tableNumber: "16", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 120, positionY: 200, isActive: "true" },
-      { id: "t17", tableNumber: "17", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 280, positionY: 40, isActive: "true" },
-      { id: "t18", tableNumber: "18", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 200, positionY: 40, isActive: "true" },
-      // Terraza - Mesas 19-32
-      { id: "t19", tableNumber: "19", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 440, isActive: "true" },
-      { id: "t20", tableNumber: "20", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 40, isActive: "true" },
-      { id: "t21", tableNumber: "21", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 360, isActive: "true" },
-      { id: "t22", tableNumber: "22", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 360, isActive: "true" },
-      { id: "t23", tableNumber: "23", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 280, isActive: "true" },
-      { id: "t24", tableNumber: "24", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 280, isActive: "true" },
-      { id: "t25", tableNumber: "25", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 280, positionY: 280, isActive: "true" },
-      { id: "t26", tableNumber: "26", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 200, isActive: "true" },
-      { id: "t27", tableNumber: "27", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 200, isActive: "true" },
-      { id: "t28", tableNumber: "28", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 280, positionY: 200, isActive: "true" },
-      { id: "t29", tableNumber: "29", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 200, positionY: 120, isActive: "true" },
-      { id: "t30", tableNumber: "30", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 280, positionY: 120, isActive: "true" },
-      { id: "t31", tableNumber: "31", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 360, positionY: 120, isActive: "true" },
-      { id: "t32", tableNumber: "32", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 120, positionY: 120, isActive: "true" },
+      // Seccion A - Mesas 1-18 (cuadradas)
+      { id: "t1", tableNumber: "1", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 2, isActive: "true" },
+      { id: "t2", tableNumber: "2", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 2, isActive: "true" },
+      { id: "t3", tableNumber: "3", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 2, positionY: 2, isActive: "true" },
+      { id: "t4", tableNumber: "4", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 2, positionY: 3, isActive: "true" },
+      { id: "t5", tableNumber: "5", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 3, positionY: 3, isActive: "true" },
+      { id: "t6", tableNumber: "6", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 1, isActive: "true" },
+      { id: "t7", tableNumber: "7", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 4, isActive: "true" },
+      { id: "t8", tableNumber: "8", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 1, isActive: "true" },
+      { id: "t9", tableNumber: "9", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 4, isActive: "true" },
+      { id: "t10", tableNumber: "10", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 5, isActive: "true" },
+      { id: "t11", tableNumber: "11", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 3, positionY: 5, isActive: "true" },
+      { id: "t12", tableNumber: "12", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 2, positionY: 5, isActive: "true" },
+      { id: "t13", tableNumber: "13", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 5, isActive: "true" },
+      { id: "t14", tableNumber: "14", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 3, isActive: "true" },
+      { id: "t15", tableNumber: "15", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 2, positionY: 0, isActive: "true" },
+      { id: "t16", tableNumber: "16", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 3, isActive: "true" },
+      { id: "t17", tableNumber: "17", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 0, isActive: "true" },
+      { id: "t18", tableNumber: "18", areaId: "area1", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      // Seccion B - Mesas 19-32 (redondas)
+      // Layout del plano:
+      // Fila 1: 20
+      // Fila 2: 32, 29, 30, 31
+      // Fila 3: 26, 27, 28
+      // Fila 4: 23, 24, 25
+      // Fila 5: 21, 22
+      // Fila 6: 19
+      { id: "t19", tableNumber: "19", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 5, isActive: "true" },
+      { id: "t20", tableNumber: "20", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+      { id: "t21", tableNumber: "21", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 4, isActive: "true" },
+      { id: "t22", tableNumber: "22", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 1, positionY: 4, isActive: "true" },
+      { id: "t23", tableNumber: "23", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 3, isActive: "true" },
+      { id: "t24", tableNumber: "24", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 1, positionY: 3, isActive: "true" },
+      { id: "t25", tableNumber: "25", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 2, positionY: 3, isActive: "true" },
+      { id: "t26", tableNumber: "26", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 2, isActive: "true" },
+      { id: "t27", tableNumber: "27", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 1, positionY: 2, isActive: "true" },
+      { id: "t28", tableNumber: "28", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 2, positionY: 2, isActive: "true" },
+      { id: "t29", tableNumber: "29", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 1, positionY: 1, isActive: "true" },
+      { id: "t30", tableNumber: "30", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 2, positionY: 1, isActive: "true" },
+      { id: "t31", tableNumber: "31", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 3, positionY: 1, isActive: "true" },
+      { id: "t32", tableNumber: "32", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 1, isActive: "true" },
     ];
     restaurantTables.forEach((t) => this.restaurantTables.set(t.id, t));
 

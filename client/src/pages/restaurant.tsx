@@ -294,55 +294,72 @@ export default function RestaurantPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-6">
-              {(selectedArea === "all" ? areas : areas.filter((a) => a.id === selectedArea)).map((area) => (
-                <Card key={area.id}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between gap-4">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        {area.name}
-                        <Badge variant="secondary" className="text-xs">
-                          {areaTypeLabels[area.areaType]}
-                        </Badge>
-                      </CardTitle>
-                      <span className="text-sm text-muted-foreground">
-                        Capacidad: {area.capacity} personas
-                      </span>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                      {filteredTables
-                        .filter((t) => t.areaId === area.id)
-                        .map((table) => (
-                          <button
-                            key={table.id}
-                            onClick={() => handleTableClick(table)}
-                            className={`p-4 rounded-md border-2 transition-all hover-elevate flex flex-col items-center gap-2 ${
-                              tableStatusColors[table.status]
-                            }`}
-                            data-testid={`table-${table.tableNumber}`}
-                          >
-                            <TableShape shape={table.shape} />
-                            <span className="font-semibold">Mesa {table.tableNumber}</span>
-                            <div className="flex items-center gap-1 text-xs">
-                              <Users className="h-3 w-3" />
-                              {table.capacity}
-                            </div>
-                            <Badge variant="outline" className="text-xs">
-                              {tableStatusLabels[table.status]}
-                            </Badge>
-                          </button>
-                        ))}
-                      {filteredTables.filter((t) => t.areaId === area.id).length === 0 && (
-                        <div className="col-span-full text-center py-8 text-muted-foreground">
+            <div className="grid gap-6 md:grid-cols-2">
+              {(selectedArea === "all" ? areas : areas.filter((a) => a.id === selectedArea)).map((area) => {
+                const areaTables = filteredTables.filter((t) => t.areaId === area.id);
+                const maxX = Math.max(...areaTables.map(t => t.positionX), 3);
+                const maxY = Math.max(...areaTables.map(t => t.positionY), 5);
+                
+                return (
+                  <Card key={area.id}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          {area.name}
+                        </CardTitle>
+                        <span className="text-sm text-muted-foreground">
+                          {areaTables.length} mesas
+                        </span>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div 
+                        className="grid gap-2 p-4 bg-muted/30 rounded-lg"
+                        style={{
+                          gridTemplateColumns: `repeat(${maxX + 1}, minmax(70px, 1fr))`,
+                          gridTemplateRows: `repeat(${maxY + 1}, 70px)`,
+                        }}
+                      >
+                        {Array.from({ length: (maxX + 1) * (maxY + 1) }).map((_, idx) => {
+                          const x = idx % (maxX + 1);
+                          const y = Math.floor(idx / (maxX + 1));
+                          const table = areaTables.find(t => t.positionX === x && t.positionY === y);
+                          
+                          if (!table) {
+                            return <div key={`empty-${x}-${y}`} className="opacity-0" />;
+                          }
+                          
+                          return (
+                            <button
+                              key={table.id}
+                              onClick={() => handleTableClick(table)}
+                              className={`p-2 border-2 transition-all hover-elevate flex flex-col items-center justify-center gap-1 ${
+                                tableStatusColors[table.status]
+                              } ${table.shape === "round" ? "rounded-full" : "rounded-md"}`}
+                              style={{
+                                gridColumn: x + 1,
+                                gridRow: y + 1,
+                              }}
+                              data-testid={`table-${table.tableNumber}`}
+                            >
+                              <span className="font-bold text-lg">{table.tableNumber}</span>
+                              <div className="flex items-center gap-1 text-xs">
+                                <Users className="h-3 w-3" />
+                                {table.capacity}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {areaTables.length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground">
                           No hay mesas en esta area
                         </div>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </TabsContent>
