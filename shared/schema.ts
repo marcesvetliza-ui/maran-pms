@@ -425,6 +425,109 @@ export type GuestReviewWithDetails = GuestReview & {
   reservation?: Reservation;
 };
 
+// ==================== EVENTS MODULE ====================
+
+// Event Rooms (Salones de Eventos)
+export type EventRoomStatus = "available" | "occupied" | "maintenance" | "reserved";
+
+export const eventRooms = pgTable("event_rooms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  capacity: integer("capacity").notNull().default(50),
+  status: text("status").$type<EventRoomStatus>().notNull().default("available"),
+  description: text("description"),
+  amenities: text("amenities").array(),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertEventRoomSchema = createInsertSchema(eventRooms).omit({ id: true });
+export type InsertEventRoom = z.infer<typeof insertEventRoomSchema>;
+export type EventRoom = typeof eventRooms.$inferSelect;
+
+// Event Types (Tipos de evento)
+export type EventType = "corporate" | "social" | "wedding" | "conference" | "seminar" | "cocktail" | "meeting" | "other";
+
+// Event Status
+export type EventStatus = "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled";
+
+// Events (Eventos)
+export const events = pgTable("events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventCode: text("event_code").notNull(),
+  name: text("name").notNull(),
+  eventRoomId: varchar("event_room_id").notNull(),
+  eventType: text("event_type").$type<EventType>().notNull().default("corporate"),
+  contactName: text("contact_name").notNull(),
+  contactPhone: text("contact_phone"),
+  contactEmail: text("contact_email"),
+  companyId: varchar("company_id"),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date").notNull(),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
+  attendees: integer("attendees").default(10),
+  status: text("status").$type<EventStatus>().notNull().default("tentative"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertEventSchema = createInsertSchema(events).omit({ id: true });
+export type InsertEvent = z.infer<typeof insertEventSchema>;
+export type Event = typeof events.$inferSelect;
+
+// Event Charge Types (Tipos de cargo predefinidos)
+export const eventChargeTypes = pgTable("event_charge_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  defaultPrice: decimal("default_price", { precision: 10, scale: 2 }),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertEventChargeTypeSchema = createInsertSchema(eventChargeTypes).omit({ id: true });
+export type InsertEventChargeType = z.infer<typeof insertEventChargeTypeSchema>;
+export type EventChargeType = typeof eventChargeTypes.$inferSelect;
+
+// Event Charges (Cargos de eventos)
+export const eventCharges = pgTable("event_charges", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull(),
+  chargeTypeId: varchar("charge_type_id"),
+  description: text("description").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  date: text("date").notNull(),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertEventChargeSchema = createInsertSchema(eventCharges).omit({ id: true });
+export type InsertEventCharge = z.infer<typeof insertEventChargeSchema>;
+export type EventCharge = typeof eventCharges.$inferSelect;
+
+// Extended Event types
+export type EventWithDetails = Event & {
+  eventRoom: EventRoom;
+  company?: Company;
+  charges?: EventChargeWithType[];
+};
+
+export type EventChargeWithType = EventCharge & {
+  chargeType?: EventChargeType;
+};
+
+// Event Planning types
+export type EventPlanningCellStatus = "available" | "event" | "maintenance" | "reserved";
+
+export type EventPlanningData = {
+  rooms: EventRoom[];
+  days: string[];
+  occupancy: Record<string, EventPlanningCellStatus[]>;
+  events: Record<string, { id: string; name: string; contactName: string; startDate: string; endDate: string; status: EventStatus; eventType: EventType }>;
+  cellEvents: Record<string, Record<string, string>>; // roomId -> date -> eventId
+};
+
 // Conversations and Messages for Chat (AI Integrations)
 export const conversations = pgTable("conversations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
