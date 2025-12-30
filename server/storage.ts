@@ -563,20 +563,20 @@ export class MemStorage implements IStorage {
 
     // Menu Items
     const menuItems: MenuItem[] = [
-      { id: "mi1", categoryId: "mc1", name: "Empanadas (3 unidades)", description: "Carne cortada a cuchillo", price: "3500", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 1 },
-      { id: "mi2", categoryId: "mc1", name: "Provoleta", description: "Queso provolone a la plancha con oregano", price: "4200", preparationTime: 12, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
-      { id: "mi3", categoryId: "mc1", name: "Tabla de Fiambres", description: "Jamon crudo, salamín, quesos", price: "6500", preparationTime: 8, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 3 },
-      { id: "mi4", categoryId: "mc2", name: "Bife de Chorizo", description: "400g, con guarnicion a eleccion", price: "12500", preparationTime: 25, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
-      { id: "mi5", categoryId: "mc2", name: "Salmon Grille", description: "Con vegetales de estacion", price: "14000", preparationTime: 20, isAvailable: "true", isActive: "true", allergens: "pescado", displayOrder: 2 },
-      { id: "mi6", categoryId: "mc2", name: "Ravioles de Ricota", description: "Con salsa bolognesa o filetto", price: "8500", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos", displayOrder: 3 },
-      { id: "mi7", categoryId: "mc2", name: "Pollo a la Parrilla", description: "Medio pollo con ensalada", price: "7500", preparationTime: 30, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 4 },
-      { id: "mi8", categoryId: "mc3", name: "Flan con Dulce de Leche", description: "Casero", price: "2800", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "lacteos,huevo", displayOrder: 1 },
-      { id: "mi9", categoryId: "mc3", name: "Helado (3 bochas)", description: "Sabores a eleccion", price: "3200", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
-      { id: "mi10", categoryId: "mc3", name: "Tiramisu", description: "Postre italiano clasico", price: "4500", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos,huevo", displayOrder: 3 },
-      { id: "mi11", categoryId: "mc4", name: "Agua Mineral", description: "Con o sin gas 500ml", price: "1200", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
-      { id: "mi12", categoryId: "mc4", name: "Gaseosa", description: "Coca-Cola, Sprite, Fanta", price: "1500", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 2 },
-      { id: "mi13", categoryId: "mc4", name: "Copa de Vino Malbec", description: "Bodega Luigi Bosca", price: "3500", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
-      { id: "mi14", categoryId: "mc4", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 4 },
+      { id: "mi1", categoryId: "mc1", name: "Empanadas (3 unidades)", description: "Carne cortada a cuchillo", price: "3500.00", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 1 },
+      { id: "mi2", categoryId: "mc1", name: "Provoleta", description: "Queso provolone a la plancha con oregano", price: "4200.00", preparationTime: 12, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
+      { id: "mi3", categoryId: "mc1", name: "Tabla de Fiambres", description: "Jamon crudo, salamín, quesos", price: "6500.00", preparationTime: 8, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 3 },
+      { id: "mi4", categoryId: "mc2", name: "Bife de Chorizo", description: "400g, con guarnicion a eleccion", price: "12500.00", preparationTime: 25, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
+      { id: "mi5", categoryId: "mc2", name: "Salmon Grille", description: "Con vegetales de estacion", price: "14000.00", preparationTime: 20, isAvailable: "true", isActive: "true", allergens: "pescado", displayOrder: 2 },
+      { id: "mi6", categoryId: "mc2", name: "Ravioles de Ricota", description: "Con salsa bolognesa o filetto", price: "8500.00", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos", displayOrder: 3 },
+      { id: "mi7", categoryId: "mc2", name: "Pollo a la Parrilla", description: "Medio pollo con ensalada", price: "7500.00", preparationTime: 30, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 4 },
+      { id: "mi8", categoryId: "mc3", name: "Flan con Dulce de Leche", description: "Casero", price: "2800.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "lacteos,huevo", displayOrder: 1 },
+      { id: "mi9", categoryId: "mc3", name: "Helado (3 bochas)", description: "Sabores a eleccion", price: "3200.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: "lacteos", displayOrder: 2 },
+      { id: "mi10", categoryId: "mc3", name: "Tiramisu", description: "Postre italiano clasico", price: "4500.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: "gluten,lacteos,huevo", displayOrder: 3 },
+      { id: "mi11", categoryId: "mc4", name: "Agua Mineral", description: "Con o sin gas 500ml", price: "1200.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
+      { id: "mi12", categoryId: "mc4", name: "Gaseosa", description: "Coca-Cola, Sprite, Fanta", price: "1500.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 2 },
+      { id: "mi13", categoryId: "mc4", name: "Copa de Vino Malbec", description: "Bodega Luigi Bosca", price: "3500.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
+      { id: "mi14", categoryId: "mc4", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: "gluten", displayOrder: 4 },
     ];
     menuItems.forEach((i) => this.menuItems.set(i.id, i));
 
@@ -598,18 +598,18 @@ export class MemStorage implements IStorage {
     ];
     suppliers.forEach((s) => this.suppliers.set(s.id, s));
 
-    // Inventory Items
+    // Inventory Items (some items intentionally below minStock to show low stock alerts)
     const inventoryItems: InventoryItem[] = [
-      { id: "inv1", sku: "ALI-001", name: "Cafe en grano", description: "Cafe colombiano premium", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "8500", minStock: 5, maxStock: 20, currentStock: 12, location: "Deposito A", isActive: "true" },
-      { id: "inv2", sku: "ALI-002", name: "Azucar", description: "Azucar comun", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "1200", minStock: 10, maxStock: 50, currentStock: 25, location: "Deposito A", isActive: "true" },
-      { id: "inv3", sku: "BEB-001", name: "Agua Mineral 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "4800", minStock: 10, maxStock: 50, currentStock: 8, location: "Deposito B", isActive: "true" },
-      { id: "inv4", sku: "BEB-002", name: "Coca-Cola 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "7200", minStock: 8, maxStock: 40, currentStock: 15, location: "Deposito B", isActive: "true" },
-      { id: "inv5", sku: "BEB-003", name: "Vino Malbec Reserva", description: "Bodega Luigi Bosca", categoryId: "ic2", supplierId: "sup2", unit: "unidad", costPrice: "12000", minStock: 12, maxStock: 48, currentStock: 24, location: "Bodega", isActive: "true" },
-      { id: "inv6", sku: "LIM-001", name: "Detergente Industrial", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "3500", minStock: 5, maxStock: 20, currentStock: 3, location: "Deposito C", isActive: "true" },
-      { id: "inv7", sku: "LIM-002", name: "Desinfectante", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "4200", minStock: 5, maxStock: 20, currentStock: 8, location: "Deposito C", isActive: "true" },
-      { id: "inv8", sku: "AME-001", name: "Shampoo Individual", description: "Sachet 30ml x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "6500", minStock: 10, maxStock: 50, currentStock: 2, location: "Deposito D", isActive: "true" },
-      { id: "inv9", sku: "AME-002", name: "Jabon Individual", description: "Pastilla 20g x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "5000", minStock: 10, maxStock: 50, currentStock: 35, location: "Deposito D", isActive: "true" },
-      { id: "inv10", sku: "MAN-001", name: "Toallas Blancas", description: "Toalla 70x140cm", categoryId: "ic5", supplierId: "sup1", unit: "unidad", costPrice: "4500", minStock: 50, maxStock: 200, currentStock: 120, location: "Lavanderia", isActive: "true" },
+      { id: "inv1", sku: "ALI-001", name: "Cafe en grano", description: "Cafe colombiano premium", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "8500.00", minStock: 5, maxStock: 20, currentStock: 12, location: "Deposito A", isActive: "true" },
+      { id: "inv2", sku: "ALI-002", name: "Azucar", description: "Azucar comun", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "1200.00", minStock: 10, maxStock: 50, currentStock: 25, location: "Deposito A", isActive: "true" },
+      { id: "inv3", sku: "BEB-001", name: "Agua Mineral 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "4800.00", minStock: 10, maxStock: 50, currentStock: 8, location: "Deposito B", isActive: "true" },
+      { id: "inv4", sku: "BEB-002", name: "Coca-Cola 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "7200.00", minStock: 8, maxStock: 40, currentStock: 15, location: "Deposito B", isActive: "true" },
+      { id: "inv5", sku: "BEB-003", name: "Vino Malbec Reserva", description: "Bodega Luigi Bosca", categoryId: "ic2", supplierId: "sup2", unit: "unidad", costPrice: "12000.00", minStock: 12, maxStock: 48, currentStock: 24, location: "Bodega", isActive: "true" },
+      { id: "inv6", sku: "LIM-001", name: "Detergente Industrial", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "3500.00", minStock: 5, maxStock: 20, currentStock: 3, location: "Deposito C", isActive: "true" },
+      { id: "inv7", sku: "LIM-002", name: "Desinfectante", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "4200.00", minStock: 5, maxStock: 20, currentStock: 8, location: "Deposito C", isActive: "true" },
+      { id: "inv8", sku: "AME-001", name: "Shampoo Individual", description: "Sachet 30ml x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "6500.00", minStock: 10, maxStock: 50, currentStock: 5, location: "Deposito D", isActive: "true" },
+      { id: "inv9", sku: "AME-002", name: "Jabon Individual", description: "Pastilla 20g x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "5000.00", minStock: 10, maxStock: 50, currentStock: 35, location: "Deposito D", isActive: "true" },
+      { id: "inv10", sku: "MAN-001", name: "Toallas Blancas", description: "Toalla 70x140cm", categoryId: "ic5", supplierId: "sup1", unit: "unidad", costPrice: "4500.00", minStock: 50, maxStock: 200, currentStock: 120, location: "Lavanderia", isActive: "true" },
     ];
     inventoryItems.forEach((i) => this.inventoryItems.set(i.id, i));
   }
