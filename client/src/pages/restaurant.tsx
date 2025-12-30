@@ -121,9 +121,14 @@ export default function RestaurantPage() {
   const [selectedArea, setSelectedArea] = useState<string>("all");
   const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null);
   const [isNewOrderDialogOpen, setIsNewOrderDialogOpen] = useState(false);
-  const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
+  const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
   const [currentOrder, setCurrentOrder] = useState<RestaurantOrder | null>(null);
   const [newCovers, setNewCovers] = useState(2);
+  const [orderView, setOrderView] = useState<"folio" | "menu" | "delete">("menu");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [pendingItem, setPendingItem] = useState<MenuItem | null>(null);
+  const [itemNotes, setItemNotes] = useState("");
+  const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
 
   const { data: areas = [], isLoading: areasLoading } = useQuery<RestaurantArea[]>({
     queryKey: ["/api/restaurant/areas"],
@@ -155,22 +160,38 @@ export default function RestaurantPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       setCurrentOrder(order);
       setIsNewOrderDialogOpen(false);
-      setIsAddItemDialogOpen(true);
+      setOrderView("menu");
+      setSelectedCategory(null);
+      setIsOrderDialogOpen(true);
       toast({ title: "Pedido creado", description: `Pedido ${order.orderNumber} iniciado` });
     },
   });
 
   const addItemMutation = useMutation({
-    mutationFn: async (data: { orderId: string; menuItemId: string; quantity: number }) => {
+    mutationFn: async (data: { orderId: string; menuItemId: string; quantity: number; notes?: string }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/items`, { 
         menuItemId: data.menuItemId, 
         quantity: data.quantity,
+        notes: data.notes,
       });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      setPendingItem(null);
+      setItemNotes("");
       toast({ title: "Item agregado" });
+    },
+  });
+
+  const deleteItemMutation = useMutation({
+    mutationFn: async (data: { orderId: string; itemId: string }) => {
+      const res = await apiRequest("DELETE", `/api/restaurant/orders/${data.orderId}/items/${data.itemId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      toast({ title: "Item eliminado" });
     },
   });
 
@@ -201,9 +222,33 @@ export default function RestaurantPage() {
       const tableOrder = orders.find((o) => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
       if (tableOrder) {
         setCurrentOrder(tableOrder);
-        setIsAddItemDialogOpen(true);
+        setOrderView("menu");
+        setSelectedCategory(null);
+        setIsOrderDialogOpen(true);
       }
     }
+  };
+
+  const handleConfirmItem = () => {
+    if (currentOrder && pendingItem) {
+      addItemMutation.mutate({
+        orderId: currentOrder.id,
+        menuItemId: pendingItem.id,
+        quantity: 1,
+        notes: itemNotes || undefined,
+      });
+    }
+  };
+
+  const handleCancelItem = () => {
+    setPendingItem(null);
+    setItemNotes("");
+  };
+
+  const getOrderItems = () => {
+    if (!currentOrder) return [];
+    const fullOrder = orders.find(o => o.id === currentOrder.id);
+    return fullOrder?.items || [];
   };
 
   const TableShape = ({ shape }: { shape: string }) => {
@@ -417,7 +462,9 @@ export default function RestaurantPage() {
                         className="flex-1"
                         onClick={() => {
                           setCurrentOrder(order);
-                          setIsAddItemDialogOpen(true);
+                          setOrderView("menu");
+                          setSelectedCategory(null);
+                          setIsOrderDialogOpen(true);
                         }}
                         data-testid={`button-add-items-${order.orderNumber}`}
                       >
@@ -552,35 +599,147 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isAddItemDialogOpen} onOpenChange={setIsAddItemDialogOpen}>
-        <DialogContent className="max-w-2xl">
+      <Dialog open={isOrderDialogOpen} onOpenChange={(open) => {
+        setIsOrderDialogOpen(open);
+        if (!open) {
+          setPendingItem(null);
+          setItemNotes("");
+          setSelectedCategory(null);
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>
-              Agregar Items - {currentOrder?.orderNumber}
-              {currentOrder?.table && ` (Mesa ${currentOrder.table.tableNumber})`}
-            </DialogTitle>
+            <div className="flex items-center justify-between gap-4">
+              <DialogTitle>
+                {currentOrder?.orderNumber} - Mesa {currentOrder?.table?.tableNumber || selectedTable?.tableNumber}
+              </DialogTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setOrderView("folio")}
+                className={orderView === "folio" ? "bg-muted" : ""}
+                data-testid="button-view-folio"
+              >
+                <CircleDollarSign className="h-4 w-4 mr-1" />
+                Ver Folio
+              </Button>
+            </div>
           </DialogHeader>
-          <div className="max-h-96 overflow-y-auto space-y-4">
-            {menuCategories.map((category) => (
-              <div key={category.id}>
-                <h4 className="font-semibold mb-2">{category.name}</h4>
+
+          {orderView === "folio" && (
+            <div className="flex-1 overflow-y-auto space-y-4">
+              <h3 className="font-semibold text-lg">Resumen de Consumos</h3>
+              {getOrderItems().length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">No hay items en este pedido</p>
+              ) : (
+                <div className="space-y-2">
+                  {getOrderItems().map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-3 border rounded-md">
+                      <div>
+                        <span className="font-medium">{item.menuItem?.name || "Item"}</span>
+                        <span className="text-muted-foreground ml-2">x{item.quantity}</span>
+                      </div>
+                      <span className="font-semibold">
+                        ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="pt-4 border-t flex items-center justify-between text-lg font-bold">
+                    <span>Total:</span>
+                    <span>
+                      ${parseFloat(currentOrder?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <Button 
+                variant="outline" 
+                onClick={() => setOrderView("menu")} 
+                className="w-full"
+                data-testid="button-back-to-menu"
+              >
+                Volver al Menu
+              </Button>
+            </div>
+          )}
+
+          {orderView === "delete" && (
+            <div className="flex-1 overflow-y-auto space-y-4">
+              <h3 className="font-semibold text-lg">Eliminar Items</h3>
+              {getOrderItems().length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">No hay items para eliminar</p>
+              ) : (
+                <div className="space-y-2">
+                  {getOrderItems().map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-3 border rounded-md">
+                      <div>
+                        <span className="font-medium">{item.menuItem?.name || "Item"}</span>
+                        <span className="text-muted-foreground ml-2">x{item.quantity}</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          if (currentOrder) {
+                            deleteItemMutation.mutate({ orderId: currentOrder.id, itemId: item.id });
+                          }
+                        }}
+                        disabled={deleteItemMutation.isPending}
+                        data-testid={`button-delete-item-${item.id}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button 
+                variant="outline" 
+                onClick={() => setOrderView("menu")} 
+                className="w-full"
+                data-testid="button-back-from-delete"
+              >
+                Volver al Menu
+              </Button>
+            </div>
+          )}
+
+          {orderView === "menu" && !pendingItem && (
+            <div className="flex-1 overflow-y-auto space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {menuCategories.map((cat) => (
+                  <Button
+                    key={cat.id}
+                    variant={selectedCategory === cat.id ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSelectedCategory(selectedCategory === cat.id ? null : cat.id)}
+                    data-testid={`button-category-${cat.id}`}
+                  >
+                    {cat.name}
+                  </Button>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setOrderView("delete")}
+                  className="text-destructive border-destructive"
+                  data-testid="button-delete-mode"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Borrar Item
+                </Button>
+              </div>
+
+              {selectedCategory ? (
                 <div className="grid gap-2 sm:grid-cols-2">
                   {menuItems
-                    .filter((item) => item.categoryId === category.id && item.isAvailable !== "false")
+                    .filter((item) => item.categoryId === selectedCategory && item.isAvailable !== "false")
                     .map((item) => (
                       <button
                         key={item.id}
                         className="p-3 border rounded-md text-left hover-elevate flex items-center justify-between"
-                        onClick={() => {
-                          if (currentOrder) {
-                            addItemMutation.mutate({
-                              orderId: currentOrder.id,
-                              menuItemId: item.id,
-                              quantity: 1,
-                            });
-                          }
-                        }}
-                        data-testid={`add-item-${item.id}`}
+                        onClick={() => setPendingItem(item)}
+                        data-testid={`select-item-${item.id}`}
                       >
                         <span className="font-medium">{item.name}</span>
                         <span className="text-muted-foreground">
@@ -589,12 +748,145 @@ export default function RestaurantPage() {
                       </button>
                     ))}
                 </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  Selecciona una categoria para ver los platos
+                </div>
+              )}
+            </div>
+          )}
+
+          {orderView === "menu" && pendingItem && (
+            <div className="flex-1 space-y-4">
+              <div className="p-4 border rounded-md bg-muted/30">
+                <h3 className="font-semibold text-lg mb-1">{pendingItem.name}</h3>
+                <p className="text-muted-foreground">
+                  ${parseFloat(pendingItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                </p>
+                {pendingItem.description && (
+                  <p className="text-sm text-muted-foreground mt-2">{pendingItem.description}</p>
+                )}
               </div>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setIsAddItemDialogOpen(false)} data-testid="button-done-adding">
+              <div className="space-y-2">
+                <Label htmlFor="item-notes">Observaciones (opcional)</Label>
+                <Textarea
+                  id="item-notes"
+                  value={itemNotes}
+                  onChange={(e) => setItemNotes(e.target.value)}
+                  placeholder="Ej: sin sal, termino medio, etc."
+                  rows={2}
+                  data-testid="input-item-notes"
+                />
+              </div>
+              <p className="font-medium">Agregar este item?</p>
+              <div className="flex gap-2">
+                <Button 
+                  className="flex-1" 
+                  onClick={handleConfirmItem}
+                  disabled={addItemMutation.isPending}
+                  data-testid="button-confirm-item"
+                >
+                  {addItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Si
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="flex-1" 
+                  onClick={handleCancelItem}
+                  data-testid="button-cancel-item"
+                >
+                  No
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 border-t pt-4">
+            <Button
+              variant="destructive"
+              size="lg"
+              className="w-full sm:w-auto"
+              onClick={() => {
+                setIsOrderDialogOpen(false);
+                setIsCloseDialogOpen(true);
+              }}
+              data-testid="button-close-table"
+            >
+              <CreditCard className="h-5 w-5 mr-2" />
+              Cerrar Mesa
+            </Button>
+            <Button 
+              onClick={() => setIsOrderDialogOpen(false)} 
+              className="w-full sm:w-auto"
+              data-testid="button-done"
+            >
               Listo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCloseDialogOpen} onOpenChange={setIsCloseDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Cerrar Mesa - {currentOrder?.orderNumber}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <h3 className="font-semibold">Resumen de Consumos</h3>
+            {getOrderItems().length === 0 ? (
+              <p className="text-muted-foreground text-center py-4">No hay items en este pedido</p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {getOrderItems().map((item) => (
+                  <div key={item.id} className="flex items-center justify-between py-2 border-b">
+                    <div>
+                      <span>{item.menuItem?.name || "Item"}</span>
+                      <span className="text-muted-foreground ml-2">x{item.quantity}</span>
+                    </div>
+                    <span>
+                      ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="pt-4 border-t space-y-2">
+              <div className="flex justify-between">
+                <span>Subtotal:</span>
+                <span>${parseFloat(currentOrder?.subtotal || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>IVA:</span>
+                <span>${parseFloat(currentOrder?.tax || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between text-xl font-bold">
+                <span>Total:</span>
+                <span>${parseFloat(currentOrder?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsCloseDialogOpen(false)}
+              className="w-full sm:w-auto"
+            >
+              Volver
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (currentOrder) {
+                  closeOrderMutation.mutate(currentOrder.id);
+                  setIsCloseDialogOpen(false);
+                }
+              }}
+              disabled={closeOrderMutation.isPending}
+              className="w-full sm:w-auto"
+              data-testid="button-confirm-close"
+            >
+              {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Confirmar Cierre
             </Button>
           </DialogFooter>
         </DialogContent>
