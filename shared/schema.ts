@@ -184,6 +184,35 @@ export const insertCancelledReservationLogSchema = createInsertSchema(cancelledR
 export type InsertCancelledReservationLog = z.infer<typeof insertCancelledReservationLogSchema>;
 export type CancelledReservationLog = typeof cancelledReservationLogs.$inferSelect;
 
+// Housekeeping Tasks
+export type HousekeepingTaskStatus = "pending" | "in_progress" | "completed" | "inspected";
+export type HousekeepingTaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep";
+export type HousekeepingPriority = "low" | "normal" | "high" | "urgent";
+
+export const housekeepingTasks = pgTable("housekeeping_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull(),
+  taskType: text("task_type").$type<HousekeepingTaskType>().notNull().default("checkout_clean"),
+  status: text("status").$type<HousekeepingTaskStatus>().notNull().default("pending"),
+  priority: text("priority").$type<HousekeepingPriority>().notNull().default("normal"),
+  assignedTo: varchar("assigned_to"),
+  notes: text("notes"),
+  scheduledDate: text("scheduled_date").notNull(),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+  inspectedBy: varchar("inspected_by"),
+  inspectedAt: text("inspected_at"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertHousekeepingTaskSchema = createInsertSchema(housekeepingTasks).omit({ id: true });
+export type InsertHousekeepingTask = z.infer<typeof insertHousekeepingTaskSchema>;
+export type HousekeepingTask = typeof housekeepingTasks.$inferSelect;
+
+export type HousekeepingTaskWithRoom = HousekeepingTask & {
+  room: Room & { roomType?: RoomType };
+};
+
 // Extended types for frontend with joined data
 export type RatePlanWithRoomType = RatePlan & {
   roomType: RoomType;

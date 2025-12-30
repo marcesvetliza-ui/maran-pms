@@ -42,6 +42,9 @@ import {
   type InsertGuestReview,
   type GuestReviewWithDetails,
   type SentimentType,
+  type HousekeepingTask,
+  type InsertHousekeepingTask,
+  type HousekeepingTaskWithRoom,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -195,6 +198,15 @@ export interface IStorage {
     recentTrend: { date: string; avgRating: number; count: number }[];
     improvementAreas: string[];
   }>;
+
+  // Housekeeping Tasks
+  getHousekeepingTasks(date?: string): Promise<HousekeepingTaskWithRoom[]>;
+  getHousekeepingTask(id: string): Promise<HousekeepingTaskWithRoom | undefined>;
+  getHousekeepingTasksByRoom(roomId: string): Promise<HousekeepingTask[]>;
+  createHousekeepingTask(task: InsertHousekeepingTask): Promise<HousekeepingTask>;
+  updateHousekeepingTask(id: string, task: Partial<InsertHousekeepingTask>): Promise<HousekeepingTask | undefined>;
+  deleteHousekeepingTask(id: string): Promise<boolean>;
+  createCheckoutCleaningTask(roomId: string): Promise<HousekeepingTask>;
 }
 
 export class MemStorage implements IStorage {
@@ -213,6 +225,7 @@ export class MemStorage implements IStorage {
   private groupRoomBlocks: Map<string, GroupRoomBlock>;
   private groupReservationLinks: Map<string, GroupReservationLink>;
   private guestReviews: Map<string, GuestReview>;
+  private housekeepingTasks: Map<string, HousekeepingTask>;
   private reservationCounter: number;
   private guestCounter: number;
   private groupCounter: number;
@@ -233,6 +246,7 @@ export class MemStorage implements IStorage {
     this.groupRoomBlocks = new Map();
     this.groupReservationLinks = new Map();
     this.guestReviews = new Map();
+    this.housekeepingTasks = new Map();
     this.reservationCounter = 1000;
     this.guestCounter = 0;
     this.groupCounter = 0;
@@ -321,14 +335,14 @@ export class MemStorage implements IStorage {
     // Create guests
     const guestSeedDate = new Date().toISOString().split("T")[0];
     const guests: Guest[] = [
-      { id: "g1", codigo: "H-2025-0001", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", direccion: "Av. Corrientes 1234", localidad: "CABA", codigoPostal: "1043", fechaNacimiento: "1985-03-15", sexo: "masculino", cuilCuit: "20-30456789-3", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g2", codigo: "H-2025-0002", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", direccion: "Calle Florida 567", localidad: "CABA", codigoPostal: "1005", fechaNacimiento: "1990-07-22", sexo: "femenino", cuilCuit: "27-28765432-4", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g3", codigo: "H-2025-0003", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", direccion: "123 Main St", localidad: "New York", codigoPostal: "10001", fechaNacimiento: "1978-11-30", sexo: "masculino", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
-      { id: "g4", codigo: "H-2025-0004", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", direccion: "Av. Santa Fe 890", localidad: "CABA", codigoPostal: "1059", fechaNacimiento: "1995-01-10", sexo: "femenino", cuilCuit: "27-35678901-9", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g5", codigo: "H-2025-0005", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", direccion: "Callao 456", localidad: "CABA", codigoPostal: "1022", fechaNacimiento: "1982-05-20", sexo: "masculino", cuilCuit: "20-32109876-5", companyId: "comp1", fechaAlta: guestSeedDate },
-      { id: "g6", codigo: "H-2025-0006", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", direccion: "Av. Libertador 123", localidad: "CABA", codigoPostal: "1426", fechaNacimiento: "1988-09-08", sexo: "femenino", cuilCuit: "27-29876543-2", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g7", codigo: "H-2025-0007", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", direccion: "Av. Belgrano 456", localidad: "CABA", codigoPostal: "1092", fechaNacimiento: "1992-12-25", sexo: "masculino", cuilCuit: "20-31234567-8", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g8", codigo: "H-2025-0008", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", direccion: "15 Rue de Paris", localidad: "Lyon", codigoPostal: "69001", fechaNacimiento: "1987-04-18", sexo: "femenino", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
+      { id: "g1", codigo: "H-2025-0001", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", direccion: "Av. Corrientes 1234", localidad: "CABA", codigoPostal: "1043", fechaNacimiento: "1985-03-15", sexo: "masculino", segment: "LEISURE", cuilCuit: "20-30456789-3", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g2", codigo: "H-2025-0002", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", direccion: "Calle Florida 567", localidad: "CABA", codigoPostal: "1005", fechaNacimiento: "1990-07-22", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-28765432-4", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g3", codigo: "H-2025-0003", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", direccion: "123 Main St", localidad: "New York", codigoPostal: "10001", fechaNacimiento: "1978-11-30", sexo: "masculino", segment: "LEISURE", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
+      { id: "g4", codigo: "H-2025-0004", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", direccion: "Av. Santa Fe 890", localidad: "CABA", codigoPostal: "1059", fechaNacimiento: "1995-01-10", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-35678901-9", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g5", codigo: "H-2025-0005", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", direccion: "Callao 456", localidad: "CABA", codigoPostal: "1022", fechaNacimiento: "1982-05-20", sexo: "masculino", segment: "CORP", cuilCuit: "20-32109876-5", companyId: "comp1", fechaAlta: guestSeedDate },
+      { id: "g6", codigo: "H-2025-0006", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", direccion: "Av. Libertador 123", localidad: "CABA", codigoPostal: "1426", fechaNacimiento: "1988-09-08", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-29876543-2", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g7", codigo: "H-2025-0007", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", direccion: "Av. Belgrano 456", localidad: "CABA", codigoPostal: "1092", fechaNacimiento: "1992-12-25", sexo: "masculino", segment: "LEISURE", cuilCuit: "20-31234567-8", companyId: null, fechaAlta: guestSeedDate },
+      { id: "g8", codigo: "H-2025-0008", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", direccion: "15 Rue de Paris", localidad: "Lyon", codigoPostal: "69001", fechaNacimiento: "1987-04-18", sexo: "femenino", segment: "LEISURE", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
     ];
     guests.forEach((g) => this.guests.set(g.id, g));
     this.guestCounter = 8;
@@ -649,6 +663,7 @@ export class MemStorage implements IStorage {
       codigoPostal: insertGuest.codigoPostal ?? null,
       fechaNacimiento: insertGuest.fechaNacimiento ?? null,
       sexo: (insertGuest.sexo ?? "no_especifica") as "masculino" | "femenino" | "otro" | "no_especifica",
+      segment: (insertGuest.segment ?? "LEISURE") as "LEISURE" | "CORP" | "SPORT" | "CONGRESS" | "OTHER",
       cuilCuit: insertGuest.cuilCuit ?? null,
       companyId: insertGuest.companyId ?? null,
       fechaAlta: new Date().toISOString().split("T")[0],
@@ -664,6 +679,7 @@ export class MemStorage implements IStorage {
       ...guest, 
       ...updates,
       sexo: (updates.sexo ?? guest.sexo) as "masculino" | "femenino" | "otro" | "no_especifica",
+      segment: (updates.segment ?? guest.segment) as "LEISURE" | "CORP" | "SPORT" | "CONGRESS" | "OTHER",
     };
     this.guests.set(id, updatedGuest);
     return updatedGuest;
@@ -1592,6 +1608,95 @@ export class MemStorage implements IStorage {
       recentTrend,
       improvementAreas: Array.from(new Set(improvementAreas)).slice(0, 10),
     };
+  }
+
+  // Housekeeping Tasks
+  async getHousekeepingTasks(date?: string): Promise<HousekeepingTaskWithRoom[]> {
+    const tasks = Array.from(this.housekeepingTasks.values());
+    const filteredTasks = date 
+      ? tasks.filter(t => t.scheduledDate === date)
+      : tasks;
+    
+    return filteredTasks.map(task => {
+      const room = this.rooms.get(task.roomId);
+      const roomType = room ? this.roomTypes.get(room.roomTypeId) : undefined;
+      return {
+        ...task,
+        room: { ...room!, roomType },
+      };
+    }).sort((a, b) => {
+      const priorityOrder = { urgent: 0, high: 1, normal: 2, low: 3 };
+      return priorityOrder[a.priority as keyof typeof priorityOrder] - priorityOrder[b.priority as keyof typeof priorityOrder];
+    });
+  }
+
+  async getHousekeepingTask(id: string): Promise<HousekeepingTaskWithRoom | undefined> {
+    const task = this.housekeepingTasks.get(id);
+    if (!task) return undefined;
+    
+    const room = this.rooms.get(task.roomId);
+    const roomType = room ? this.roomTypes.get(room.roomTypeId) : undefined;
+    return {
+      ...task,
+      room: { ...room!, roomType },
+    };
+  }
+
+  async getHousekeepingTasksByRoom(roomId: string): Promise<HousekeepingTask[]> {
+    return Array.from(this.housekeepingTasks.values())
+      .filter(t => t.roomId === roomId);
+  }
+
+  async createHousekeepingTask(task: InsertHousekeepingTask): Promise<HousekeepingTask> {
+    const id = randomUUID();
+    const newTask: HousekeepingTask = { 
+      id,
+      roomId: task.roomId,
+      taskType: (task.taskType || "checkout_clean") as "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep",
+      status: (task.status || "pending") as "pending" | "in_progress" | "completed" | "inspected",
+      priority: (task.priority || "normal") as "low" | "normal" | "high" | "urgent",
+      assignedTo: task.assignedTo ?? null,
+      notes: task.notes ?? null,
+      scheduledDate: task.scheduledDate,
+      startedAt: task.startedAt ?? null,
+      completedAt: task.completedAt ?? null,
+      inspectedBy: task.inspectedBy ?? null,
+      inspectedAt: task.inspectedAt ?? null,
+      createdAt: task.createdAt,
+    };
+    this.housekeepingTasks.set(id, newTask);
+    return newTask;
+  }
+
+  async updateHousekeepingTask(id: string, task: Partial<InsertHousekeepingTask>): Promise<HousekeepingTask | undefined> {
+    const existing = this.housekeepingTasks.get(id);
+    if (!existing) return undefined;
+    
+    const updated: HousekeepingTask = { 
+      ...existing, 
+      ...task,
+      status: (task.status ?? existing.status) as "pending" | "in_progress" | "completed" | "inspected",
+      taskType: (task.taskType ?? existing.taskType) as "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep",
+      priority: (task.priority ?? existing.priority) as "low" | "normal" | "high" | "urgent",
+    };
+    this.housekeepingTasks.set(id, updated);
+    return updated;
+  }
+
+  async deleteHousekeepingTask(id: string): Promise<boolean> {
+    return this.housekeepingTasks.delete(id);
+  }
+
+  async createCheckoutCleaningTask(roomId: string): Promise<HousekeepingTask> {
+    const today = new Date().toISOString().split("T")[0];
+    return this.createHousekeepingTask({
+      roomId,
+      taskType: "checkout_clean",
+      status: "pending",
+      priority: "high",
+      scheduledDate: today,
+      createdAt: new Date().toISOString(),
+    });
   }
 }
 

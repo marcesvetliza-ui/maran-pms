@@ -635,6 +635,9 @@ export async function registerRoutes(
       // Update room status to dirty (housekeeping will clean it)
       await storage.updateRoom(reservation.roomId, { status: "dirty" });
       
+      // Create housekeeping task for the room
+      await storage.createCheckoutCleaningTask(reservation.roomId);
+      
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing check-out" });
@@ -1301,6 +1304,133 @@ Only respond with the JSON object.`;
       res.json({ message: `Analyzed ${results.analyzed} reviews, ${results.errors} errors`, ...results });
     } catch (error) {
       res.status(500).json({ error: "Error batch analyzing reviews" });
+    }
+  });
+
+  // Housekeeping Tasks
+  app.get("/api/housekeeping", async (req, res) => {
+    try {
+      const date = req.query.date as string | undefined;
+      const tasks = await storage.getHousekeepingTasks(date);
+      res.json(tasks);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching housekeeping tasks" });
+    }
+  });
+
+  app.get("/api/housekeeping/:id", async (req, res) => {
+    try {
+      const task = await storage.getHousekeepingTask(req.params.id);
+      if (!task) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching task" });
+    }
+  });
+
+  app.post("/api/housekeeping", async (req, res) => {
+    try {
+      const task = await storage.createHousekeepingTask({
+        ...req.body,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(task);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating housekeeping task" });
+    }
+  });
+
+  app.patch("/api/housekeeping/:id", async (req, res) => {
+    try {
+      const task = await storage.updateHousekeepingTask(req.params.id, req.body);
+      if (!task) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating task" });
+    }
+  });
+
+  app.delete("/api/housekeeping/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteHousekeepingTask(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting task" });
+    }
+  });
+
+  // Update room status (for housekeeping)
+  app.patch("/api/housekeeping/room/:roomId/status", async (req, res) => {
+    try {
+      const { status } = req.body;
+      const room = await storage.updateRoom(req.params.roomId, { status });
+      if (!room) {
+        return res.status(404).json({ error: "Room not found" });
+      }
+      res.json(room);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating room status" });
+    }
+  });
+
+  // Start a task (change status to in_progress)
+  app.post("/api/housekeeping/:id/start", async (req, res) => {
+    try {
+      const task = await storage.updateHousekeepingTask(req.params.id, {
+        status: "in_progress",
+        startedAt: new Date().toISOString(),
+      });
+      if (!task) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      // Also update room status to cleaning
+      await storage.updateRoom(task.roomId, { status: "cleaning" });
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({ error: "Error starting task" });
+    }
+  });
+
+  // Complete a task (change status to completed)
+  app.post("/api/housekeeping/:id/complete", async (req, res) => {
+    try {
+      const task = await storage.updateHousekeepingTask(req.params.id, {
+        status: "completed",
+        completedAt: new Date().toISOString(),
+      });
+      if (!task) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      // Mark room as available
+      await storage.updateRoom(task.roomId, { status: "available" });
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({ error: "Error completing task" });
+    }
+  });
+
+  // Inspect a task (for supervisor)
+  app.post("/api/housekeeping/:id/inspect", async (req, res) => {
+    try {
+      const { inspectedBy } = req.body;
+      const task = await storage.updateHousekeepingTask(req.params.id, {
+        status: "inspected",
+        inspectedBy,
+        inspectedAt: new Date().toISOString(),
+      });
+      if (!task) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({ error: "Error inspecting task" });
     }
   });
 

@@ -14,6 +14,7 @@ import {
   CalendarPlus,
   Users2,
   MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import {
   Sidebar,
@@ -91,6 +92,11 @@ const operationsMenuItems = [
     title: "Check-out",
     url: "/check-out",
     icon: LogOut,
+  },
+  {
+    title: "Housekeeping",
+    url: "/housekeeping",
+    icon: Sparkles,
   },
 ];
 
