@@ -1658,9 +1658,9 @@ Only respond with the JSON object.`;
         await storage.createCharge({
           reservationId,
           description: `Restaurante - Pedido ${order.orderNumber}`,
-          amount: order.total,
-          chargeType: "restaurant",
-          chargeDate: new Date().toISOString(),
+          amount: order.total || "0",
+          category: "restaurant",
+          date: new Date().toISOString(),
         });
       }
       

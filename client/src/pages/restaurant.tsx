@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Plus, 
@@ -24,6 +27,12 @@ import {
   X,
   CreditCard,
   Loader2,
+  CalendarDays,
+  Phone,
+  Mail,
+  Trash2,
+  Check,
+  XCircle,
 } from "lucide-react";
 
 type RestaurantArea = {
@@ -91,6 +100,52 @@ type RestaurantOrder = {
   }>;
 };
 
+type TableReservation = {
+  id: string;
+  tableId: string;
+  guestName: string;
+  guestPhone: string | null;
+  guestEmail: string | null;
+  partySize: number;
+  reservationDate: string;
+  reservationTime: string;
+  status: "pending" | "confirmed" | "seated" | "completed" | "cancelled" | "no_show";
+  notes: string | null;
+  createdAt: string;
+  table?: RestaurantTable;
+};
+
+const reservationStatusColors: Record<string, string> = {
+  pending: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400",
+  confirmed: "bg-blue-500/20 text-blue-700 dark:text-blue-400",
+  seated: "bg-green-500/20 text-green-700 dark:text-green-400",
+  completed: "bg-gray-500/20 text-gray-700 dark:text-gray-400",
+  cancelled: "bg-red-500/20 text-red-700 dark:text-red-400",
+  no_show: "bg-orange-500/20 text-orange-700 dark:text-orange-400",
+};
+
+const reservationStatusLabels: Record<string, string> = {
+  pending: "Pendiente",
+  confirmed: "Confirmada",
+  seated: "Sentado",
+  completed: "Completada",
+  cancelled: "Cancelada",
+  no_show: "No se presento",
+};
+
+const reservationFormSchema = z.object({
+  tableId: z.string().min(1, "Debe seleccionar una mesa"),
+  guestName: z.string().min(1, "El nombre es requerido"),
+  guestPhone: z.string().optional(),
+  guestEmail: z.string().email("Email invalido").optional().or(z.literal("")),
+  partySize: z.coerce.number().min(1, "Minimo 1 persona"),
+  reservationDate: z.string().min(1, "La fecha es requerida"),
+  reservationTime: z.string().min(1, "La hora es requerida"),
+  notes: z.string().optional(),
+});
+
+type ReservationFormValues = z.infer<typeof reservationFormSchema>;
+
 const tableStatusColors: Record<string, string> = {
   available: "bg-green-500/20 text-green-700 dark:text-green-400",
   occupied: "bg-red-500/20 text-red-700 dark:text-red-400",
@@ -129,6 +184,24 @@ export default function RestaurantPage() {
   const [pendingItem, setPendingItem] = useState<MenuItem | null>(null);
   const [itemNotes, setItemNotes] = useState("");
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+  const [isReservationDialogOpen, setIsReservationDialogOpen] = useState(false);
+  const [isDailyReservationsOpen, setIsDailyReservationsOpen] = useState(false);
+  const [reservationDate, setReservationDate] = useState(new Date().toISOString().split("T")[0]);
+  const [editingReservation, setEditingReservation] = useState<TableReservation | null>(null);
+
+  const reservationForm = useForm<ReservationFormValues>({
+    resolver: zodResolver(reservationFormSchema),
+    defaultValues: {
+      tableId: "",
+      guestName: "",
+      guestPhone: "",
+      guestEmail: "",
+      partySize: 2,
+      reservationDate: new Date().toISOString().split("T")[0],
+      reservationTime: "20:00",
+      notes: "",
+    },
+  });
 
   const { data: areas = [], isLoading: areasLoading } = useQuery<RestaurantArea[]>({
     queryKey: ["/api/restaurant/areas"],
@@ -148,6 +221,50 @@ export default function RestaurantPage() {
 
   const { data: orders = [], isLoading: ordersLoading } = useQuery<RestaurantOrder[]>({
     queryKey: ["/api/restaurant/orders"],
+  });
+
+  const { data: reservations = [] } = useQuery<TableReservation[]>({
+    queryKey: ["/api/restaurant/table-reservations"],
+  });
+
+  const todayReservations = reservations.filter(r => 
+    r.reservationDate === new Date().toISOString().split("T")[0] && 
+    r.status !== "cancelled" && r.status !== "completed"
+  );
+
+  const createReservationMutation = useMutation({
+    mutationFn: async (data: ReservationFormValues) => {
+      const res = await apiRequest("POST", "/api/restaurant/table-reservations", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
+      setIsReservationDialogOpen(false);
+      reservationForm.reset();
+      toast({ title: "Reserva creada", description: "La reserva ha sido registrada" });
+    },
+  });
+
+  const updateReservationMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<TableReservation> }) => {
+      const res = await apiRequest("PATCH", `/api/restaurant/table-reservations/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
+      setEditingReservation(null);
+      toast({ title: "Reserva actualizada" });
+    },
+  });
+
+  const deleteReservationMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/restaurant/table-reservations/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
+      toast({ title: "Reserva eliminada" });
+    },
   });
 
   const createOrderMutation = useMutation({
@@ -281,7 +398,18 @@ export default function RestaurantPage() {
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Restaurante</h1>
           <p className="text-muted-foreground">Gestiona mesas, pedidos y menu</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button 
+            variant="outline" 
+            onClick={() => setIsDailyReservationsOpen(true)}
+            data-testid="button-daily-reservations"
+          >
+            <CalendarDays className="h-4 w-4 mr-2" />
+            Reservas del dia
+            {todayReservations.length > 0 && (
+              <Badge variant="secondary" className="ml-2">{todayReservations.length}</Badge>
+            )}
+          </Button>
           <Badge variant="outline" className="gap-1">
             <UtensilsCrossed className="h-3 w-3" />
             {activeOrders.length} pedidos activos
@@ -302,6 +430,13 @@ export default function RestaurantPage() {
           <TabsTrigger value="menu" data-testid="tab-menu">
             <UtensilsCrossed className="h-4 w-4 mr-2" />
             Menu
+          </TabsTrigger>
+          <TabsTrigger value="reservations" data-testid="tab-reservations">
+            <CalendarDays className="h-4 w-4 mr-2" />
+            Reservas
+            {todayReservations.length > 0 && (
+              <Badge variant="secondary" className="ml-2">{todayReservations.length}</Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -559,6 +694,123 @@ export default function RestaurantPage() {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="reservations" className="space-y-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <h2 className="text-lg font-semibold">Reservas de Mesa</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Input
+                type="date"
+                value={reservationDate}
+                onChange={(e) => setReservationDate(e.target.value)}
+                className="w-40"
+                data-testid="input-reservation-date-filter"
+              />
+              <Button onClick={() => setIsReservationDialogOpen(true)} data-testid="button-new-reservation">
+                <Plus className="h-4 w-4 mr-2" />
+                Nueva Reserva
+              </Button>
+            </div>
+          </div>
+
+          {reservations.filter(r => r.reservationDate === reservationDate).length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <CalendarDays className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">Sin reservas para esta fecha</h3>
+                <p className="text-muted-foreground mb-4">No hay reservas programadas</p>
+                <Button onClick={() => setIsReservationDialogOpen(true)} data-testid="button-add-first-reservation">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Crear Reserva
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {reservations
+                .filter(r => r.reservationDate === reservationDate)
+                .sort((a, b) => a.reservationTime.localeCompare(b.reservationTime))
+                .map((reservation) => {
+                  const table = tables.find(t => t.id === reservation.tableId);
+                  return (
+                    <Card key={reservation.id} data-testid={`reservation-card-${reservation.id}`}>
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <CardTitle className="text-base">{reservation.guestName}</CardTitle>
+                          <Badge className={reservationStatusColors[reservation.status]}>
+                            {reservationStatusLabels[reservation.status]}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Clock className="h-4 w-4 text-muted-foreground" />
+                          <span>{reservation.reservationTime}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <MapPin className="h-4 w-4 text-muted-foreground" />
+                          <span>Mesa {table?.tableNumber || "?"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <Users className="h-4 w-4 text-muted-foreground" />
+                          <span>{reservation.partySize} personas</span>
+                        </div>
+                        {reservation.guestPhone && (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Phone className="h-4 w-4" />
+                            <span>{reservation.guestPhone}</span>
+                          </div>
+                        )}
+                        {reservation.notes && (
+                          <p className="text-sm text-muted-foreground mt-2">{reservation.notes}</p>
+                        )}
+                        <div className="flex items-center gap-2 pt-2">
+                          {reservation.status === "pending" && (
+                            <Button 
+                              size="sm" 
+                              onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}
+                              data-testid={`button-confirm-${reservation.id}`}
+                            >
+                              <Check className="h-4 w-4 mr-1" />
+                              Confirmar
+                            </Button>
+                          )}
+                          {(reservation.status === "pending" || reservation.status === "confirmed") && (
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "seated" } })}
+                              data-testid={`button-seat-${reservation.id}`}
+                            >
+                              Sentar
+                            </Button>
+                          )}
+                          {reservation.status !== "cancelled" && reservation.status !== "completed" && (
+                            <Button 
+                              size="sm" 
+                              variant="ghost"
+                              onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "cancelled" } })}
+                              data-testid={`button-cancel-${reservation.id}`}
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button 
+                            size="icon" 
+                            variant="ghost"
+                            onClick={() => deleteReservationMutation.mutate(reservation.id)}
+                            data-testid={`button-delete-${reservation.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
             </div>
           )}
         </TabsContent>
@@ -891,6 +1143,220 @@ export default function RestaurantPage() {
             >
               {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Confirmar Cierre
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isReservationDialogOpen} onOpenChange={setIsReservationDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nueva Reserva</DialogTitle>
+          </DialogHeader>
+          <Form {...reservationForm}>
+            <form onSubmit={reservationForm.handleSubmit((data) => createReservationMutation.mutate(data))} className="space-y-4">
+              <FormField
+                control={reservationForm.control}
+                name="guestName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nombre del huesped *</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Nombre completo" data-testid="input-guest-name" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={reservationForm.control}
+                  name="guestPhone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Telefono</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="+54 11 xxxx-xxxx" data-testid="input-guest-phone" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={reservationForm.control}
+                  name="guestEmail"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="email" placeholder="email@ejemplo.com" data-testid="input-guest-email" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={reservationForm.control}
+                  name="reservationDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Fecha *</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="date" data-testid="input-reservation-date" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={reservationForm.control}
+                  name="reservationTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Hora *</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="time" data-testid="input-reservation-time" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={reservationForm.control}
+                  name="tableId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Mesa *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-table">
+                            <SelectValue placeholder="Seleccionar mesa" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {tables.filter(t => t.isActive === "true").map((table) => (
+                            <SelectItem key={table.id} value={table.id}>
+                              Mesa {table.tableNumber} ({table.capacity} pers.)
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={reservationForm.control}
+                  name="partySize"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Personas *</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="number" min={1} data-testid="input-party-size" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={reservationForm.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notas</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} placeholder="Preferencias, alergias, ocasion especial..." data-testid="input-reservation-notes" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsReservationDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={createReservationMutation.isPending}
+                  data-testid="button-save-reservation"
+                >
+                  {createReservationMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Guardar Reserva
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDailyReservationsOpen} onOpenChange={setIsDailyReservationsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Reservas del Dia - {new Date().toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {todayReservations.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <CalendarDays className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No hay reservas para hoy</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {todayReservations
+                  .sort((a, b) => a.reservationTime.localeCompare(b.reservationTime))
+                  .map((reservation) => {
+                    const table = tables.find(t => t.id === reservation.tableId);
+                    return (
+                      <div 
+                        key={reservation.id} 
+                        className="flex items-center justify-between p-3 border rounded-md gap-4"
+                        data-testid={`daily-reservation-${reservation.id}`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="text-lg font-bold">{reservation.reservationTime}</div>
+                          <div>
+                            <div className="font-medium">{reservation.guestName}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Mesa {table?.tableNumber || "?"} - {reservation.partySize} personas
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge className={reservationStatusColors[reservation.status]}>
+                            {reservationStatusLabels[reservation.status]}
+                          </Badge>
+                          {reservation.status === "pending" && (
+                            <Button 
+                              size="sm" 
+                              onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}
+                            >
+                              <Check className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {(reservation.status === "pending" || reservation.status === "confirmed") && (
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "seated" } })}
+                            >
+                              Sentar
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setIsDailyReservationsOpen(false)}>
+              Cerrar
             </Button>
           </DialogFooter>
         </DialogContent>
