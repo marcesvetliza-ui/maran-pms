@@ -245,10 +245,14 @@ export default function RestaurantPage() {
     setItemNotes("");
   };
 
+  const getUpdatedOrder = () => {
+    if (!currentOrder) return null;
+    return orders.find(o => o.id === currentOrder.id) || currentOrder;
+  };
+
   const getOrderItems = () => {
-    if (!currentOrder) return [];
-    const fullOrder = orders.find(o => o.id === currentOrder.id);
-    return fullOrder?.items || [];
+    const order = getUpdatedOrder();
+    return order?.items || [];
   };
 
   const TableShape = ({ shape }: { shape: string }) => {
@@ -647,7 +651,7 @@ export default function RestaurantPage() {
                   <div className="pt-4 border-t flex items-center justify-between text-lg font-bold">
                     <span>Total:</span>
                     <span>
-                      ${parseFloat(currentOrder?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      ${parseFloat(getUpdatedOrder()?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
@@ -853,15 +857,15 @@ export default function RestaurantPage() {
             <div className="pt-4 border-t space-y-2">
               <div className="flex justify-between">
                 <span>Subtotal:</span>
-                <span>${parseFloat(currentOrder?.subtotal || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                <span>${parseFloat(getUpdatedOrder()?.subtotal || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between">
                 <span>IVA:</span>
-                <span>${parseFloat(currentOrder?.tax || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                <span>${parseFloat(getUpdatedOrder()?.tax || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between text-xl font-bold">
                 <span>Total:</span>
-                <span>${parseFloat(currentOrder?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                <span>${parseFloat(getUpdatedOrder()?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
           </div>
