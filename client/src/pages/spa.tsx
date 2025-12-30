@@ -821,6 +821,7 @@ export default function SpaPage() {
                     variant="default"
                     onClick={() => {
                       updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "in_progress" });
+                      setSelectedAppointment(null);
                     }}
                     disabled={updateAppointmentMutation.isPending}
                     data-testid="button-start-appointment"
@@ -842,7 +843,10 @@ export default function SpaPage() {
                 {selectedAppointment.status === "pending" && (
                   <Button
                     variant="default"
-                    onClick={() => updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "confirmed" })}
+                    onClick={() => {
+                      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "confirmed" });
+                      setSelectedAppointment(null);
+                    }}
                     disabled={updateAppointmentMutation.isPending}
                     data-testid="button-confirm-appointment"
                   >
