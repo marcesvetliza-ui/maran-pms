@@ -627,14 +627,13 @@ export default function SpaPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Huesped del Hotel (opcional)</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || undefined}>
                       <FormControl>
                         <SelectTrigger data-testid="select-reservation">
-                          <SelectValue placeholder="Seleccionar huesped" />
+                          <SelectValue placeholder="Sin asociar" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Sin asociar</SelectItem>
                         {checkedInReservations.map((res) => (
                           <SelectItem key={res.id} value={res.id}>
                             Hab. {res.room?.roomNumber} - {res.guest?.firstName} {res.guest?.lastName}
