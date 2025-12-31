@@ -20,6 +20,7 @@ import {
   Flower2,
   PartyPopper,
   Wrench,
+  Shield,
 } from "lucide-react";
 import {
   Sidebar,
@@ -127,6 +128,11 @@ const operationsMenuItems = [
     title: "Mantenimiento",
     url: "/maintenance",
     icon: Wrench,
+  },
+  {
+    title: "Administracion",
+    url: "/administration",
+    icon: Shield,
   },
 ];
 
