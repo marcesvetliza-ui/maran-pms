@@ -199,9 +199,9 @@ export default function MaintenancePage() {
     mutationFn: async (data: WorkOrderFormValues) => {
       return apiRequest("POST", "/api/maintenance/work-orders", {
         ...data,
-        roomId: data.roomId || null,
-        assignedToId: data.assignedToId || null,
-        status: data.assignedToId ? "assigned" : "pending",
+        roomId: data.roomId && data.roomId !== "none" ? data.roomId : null,
+        assignedToId: data.assignedToId && data.assignedToId !== "none" ? data.assignedToId : null,
+        status: data.assignedToId && data.assignedToId !== "none" ? "assigned" : "pending",
       });
     },
     onSuccess: () => {
@@ -625,7 +625,7 @@ export default function MaintenancePage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">Ninguna</SelectItem>
+                          <SelectItem value="none">Ninguna</SelectItem>
                           {rooms.map((room) => (
                             <SelectItem key={room.id} value={room.id}>
                               {room.roomNumber} (Piso {room.floor})
@@ -710,7 +710,7 @@ export default function MaintenancePage() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Sin asignar</SelectItem>
+                        <SelectItem value="none">Sin asignar</SelectItem>
                         {staff.filter(s => s.isActive === "true").map((s) => (
                           <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                         ))}
