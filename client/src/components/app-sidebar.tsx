@@ -18,6 +18,7 @@ import {
   UtensilsCrossed,
   Package,
   Flower2,
+  PartyPopper,
 } from "lucide-react";
 import {
   Sidebar,
@@ -115,6 +116,11 @@ const operationsMenuItems = [
     title: "SPA",
     url: "/spa",
     icon: Flower2,
+  },
+  {
+    title: "Eventos",
+    url: "/events",
+    icon: PartyPopper,
   },
 ];
 

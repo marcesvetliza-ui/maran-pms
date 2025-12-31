@@ -2433,6 +2433,44 @@ Only respond with the JSON object.`;
     }
   });
 
+  // Event Charge Types - MUST come before /api/events/:id
+  app.get("/api/events/charge-types", async (req, res) => {
+    try {
+      const chargeTypes = await storage.getEventChargeTypes();
+      res.json(chargeTypes);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event charge types" });
+    }
+  });
+
+  app.post("/api/events/charge-types", async (req, res) => {
+    try {
+      const chargeType = await storage.createEventChargeType(req.body);
+      res.status(201).json(chargeType);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event charge type" });
+    }
+  });
+
+  app.patch("/api/events/charge-types/:id", async (req, res) => {
+    try {
+      const chargeType = await storage.updateEventChargeType(req.params.id, req.body);
+      if (!chargeType) return res.status(404).json({ error: "Event charge type not found" });
+      res.json(chargeType);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event charge type" });
+    }
+  });
+
+  app.delete("/api/events/charge-types/:id", async (req, res) => {
+    try {
+      await storage.deleteEventChargeType(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event charge type" });
+    }
+  });
+
   // Events
   app.get("/api/events", async (req, res) => {
     try {
@@ -2483,44 +2521,6 @@ Only respond with the JSON object.`;
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting event" });
-    }
-  });
-
-  // Event Charge Types
-  app.get("/api/events/charge-types", async (req, res) => {
-    try {
-      const chargeTypes = await storage.getEventChargeTypes();
-      res.json(chargeTypes);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching event charge types" });
-    }
-  });
-
-  app.post("/api/events/charge-types", async (req, res) => {
-    try {
-      const chargeType = await storage.createEventChargeType(req.body);
-      res.status(201).json(chargeType);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating event charge type" });
-    }
-  });
-
-  app.patch("/api/events/charge-types/:id", async (req, res) => {
-    try {
-      const chargeType = await storage.updateEventChargeType(req.params.id, req.body);
-      if (!chargeType) return res.status(404).json({ error: "Event charge type not found" });
-      res.json(chargeType);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating event charge type" });
-    }
-  });
-
-  app.delete("/api/events/charge-types/:id", async (req, res) => {
-    try {
-      await storage.deleteEventChargeType(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting event charge type" });
     }
   });
 
