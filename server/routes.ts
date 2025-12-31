@@ -2731,5 +2731,148 @@ Only respond with the JSON object.`;
     }
   });
 
+  // ============== ADMINISTRATION ==============
+
+  // Admin Dashboard
+  app.get("/api/admin/dashboard", async (req, res) => {
+    try {
+      const stats = await storage.getAdminDashboardStats();
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching admin dashboard" });
+    }
+  });
+
+  // System Users
+  app.get("/api/admin/users", async (req, res) => {
+    try {
+      const users = await storage.getSystemUsers();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching users" });
+    }
+  });
+
+  app.get("/api/admin/users/:id", async (req, res) => {
+    try {
+      const user = await storage.getSystemUser(req.params.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching user" });
+    }
+  });
+
+  app.post("/api/admin/users", async (req, res) => {
+    try {
+      const user = await storage.createSystemUser({
+        ...req.body,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating user" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id", async (req, res) => {
+    try {
+      const user = await storage.updateSystemUser(req.params.id, req.body);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating user" });
+    }
+  });
+
+  app.delete("/api/admin/users/:id", async (req, res) => {
+    try {
+      await storage.deleteSystemUser(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting user" });
+    }
+  });
+
+  // System Settings
+  app.get("/api/admin/settings", async (req, res) => {
+    try {
+      const category = req.query.category as string | undefined;
+      if (category) {
+        const settings = await storage.getSystemSettingsByCategory(category);
+        res.json(settings);
+      } else {
+        const settings = await storage.getSystemSettings();
+        res.json(settings);
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching settings" });
+    }
+  });
+
+  app.get("/api/admin/settings/:key", async (req, res) => {
+    try {
+      const setting = await storage.getSystemSetting(req.params.key);
+      if (!setting) return res.status(404).json({ error: "Setting not found" });
+      res.json(setting);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching setting" });
+    }
+  });
+
+  app.put("/api/admin/settings", async (req, res) => {
+    try {
+      const setting = await storage.upsertSystemSetting({
+        ...req.body,
+        updatedAt: new Date().toISOString(),
+      });
+      res.json(setting);
+    } catch (error) {
+      res.status(500).json({ error: "Error saving setting" });
+    }
+  });
+
+  app.delete("/api/admin/settings/:key", async (req, res) => {
+    try {
+      await storage.deleteSystemSetting(req.params.key);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting setting" });
+    }
+  });
+
+  // Audit Logs
+  app.get("/api/admin/audit-logs", async (req, res) => {
+    try {
+      const module = req.query.module as string | undefined;
+      const userId = req.query.userId as string | undefined;
+      
+      if (module) {
+        const logs = await storage.getAuditLogsByModule(module);
+        res.json(logs);
+      } else if (userId) {
+        const logs = await storage.getAuditLogsByUser(userId);
+        res.json(logs);
+      } else {
+        const logs = await storage.getAuditLogs();
+        res.json(logs);
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching audit logs" });
+    }
+  });
+
+  app.post("/api/admin/audit-logs", async (req, res) => {
+    try {
+      const log = await storage.createAuditLog({
+        ...req.body,
+        timestamp: new Date().toISOString(),
+      });
+      res.status(201).json(log);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating audit log" });
+    }
+  });
+
   return httpServer;
 }
