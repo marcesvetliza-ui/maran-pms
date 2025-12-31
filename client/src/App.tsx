@@ -26,6 +26,7 @@ import RestaurantPage from "@/pages/restaurant";
 import InventoryPage from "@/pages/inventory";
 import SpaPage from "@/pages/spa";
 import EventsPage from "@/pages/events";
+import MaintenancePage from "@/pages/maintenance";
 
 function Router() {
   return (
@@ -48,6 +49,7 @@ function Router() {
       <Route path="/inventory" component={InventoryPage} />
       <Route path="/spa" component={SpaPage} />
       <Route path="/events" component={EventsPage} />
+      <Route path="/maintenance" component={MaintenancePage} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -19,6 +19,7 @@ import {
   Package,
   Flower2,
   PartyPopper,
+  Wrench,
 } from "lucide-react";
 import {
   Sidebar,
@@ -121,6 +122,11 @@ const operationsMenuItems = [
     title: "Eventos",
     url: "/events",
     icon: PartyPopper,
+  },
+  {
+    title: "Mantenimiento",
+    url: "/maintenance",
+    icon: Wrench,
   },
 ];
 
