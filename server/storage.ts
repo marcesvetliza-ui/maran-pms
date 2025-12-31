@@ -123,6 +123,15 @@ import {
   type WorkOrderWithDetails,
   type WorkOrderStatus,
   type WorkOrderPriority,
+  // Administration
+  type SystemUser,
+  type InsertSystemUser,
+  type SystemUserRole,
+  type SystemSetting,
+  type InsertSystemSetting,
+  type AuditLog,
+  type InsertAuditLog,
+  type AuditAction,
   type WorkOrderCategory,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
@@ -465,6 +474,34 @@ export interface IStorage {
   updateWorkOrder(id: string, order: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: string): Promise<boolean>;
   generateWorkOrderCode(): string;
+
+  // Administration - System Users
+  getSystemUsers(): Promise<SystemUser[]>;
+  getSystemUser(id: string): Promise<SystemUser | undefined>;
+  getSystemUserByUsername(username: string): Promise<SystemUser | undefined>;
+  createSystemUser(user: InsertSystemUser): Promise<SystemUser>;
+  updateSystemUser(id: string, user: Partial<InsertSystemUser>): Promise<SystemUser | undefined>;
+  deleteSystemUser(id: string): Promise<boolean>;
+
+  // Administration - System Settings
+  getSystemSettings(): Promise<SystemSetting[]>;
+  getSystemSetting(key: string): Promise<SystemSetting | undefined>;
+  getSystemSettingsByCategory(category: string): Promise<SystemSetting[]>;
+  upsertSystemSetting(setting: InsertSystemSetting): Promise<SystemSetting>;
+  deleteSystemSetting(key: string): Promise<boolean>;
+
+  // Administration - Audit Logs
+  getAuditLogs(): Promise<AuditLog[]>;
+  getAuditLogsByModule(module: string): Promise<AuditLog[]>;
+  getAuditLogsByUser(userId: string): Promise<AuditLog[]>;
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+  getAdminDashboardStats(): Promise<{
+    totalUsers: number;
+    activeUsers: number;
+    recentLogins: number;
+    totalSettings: number;
+    recentAuditLogs: AuditLog[];
+  }>;
 }
 
 export class MemStorage implements IStorage {
@@ -512,6 +549,10 @@ export class MemStorage implements IStorage {
   // Maintenance
   private maintenanceStaff: Map<string, MaintenanceStaff>;
   private workOrders: Map<string, WorkOrder>;
+  // Administration
+  private systemUsers: Map<string, SystemUser>;
+  private systemSettings: Map<string, SystemSetting>;
+  private auditLogs: Map<string, AuditLog>;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
@@ -565,6 +606,10 @@ export class MemStorage implements IStorage {
     // Maintenance
     this.maintenanceStaff = new Map();
     this.workOrders = new Map();
+    // Administration
+    this.systemUsers = new Map();
+    this.systemSettings = new Map();
+    this.auditLogs = new Map();
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
@@ -910,6 +955,40 @@ export class MemStorage implements IStorage {
       { id: "ms4", name: "Roberto Sanchez", phone: "+54 343 456-7893", email: "roberto.sanchez@maransuites.com", specialty: "General", isActive: "true" },
     ];
     maintenanceStaffData.forEach((s) => this.maintenanceStaff.set(s.id, s));
+
+    // System Users (Usuarios del Sistema)
+    const now = new Date().toISOString();
+    const systemUsersData: SystemUser[] = [
+      { id: "su1", username: "admin", email: "admin@maransuites.com", fullName: "Administrador Sistema", role: "admin" as SystemUserRole, department: "Sistemas", phone: "+54 343 400-0001", isActive: "true", lastLogin: now, createdAt: now },
+      { id: "su2", username: "gerencia", email: "gerencia@maransuites.com", fullName: "Gerente General", role: "manager" as SystemUserRole, department: "Gerencia", phone: "+54 343 400-0002", isActive: "true", lastLogin: null, createdAt: now },
+      { id: "su3", username: "recepcion1", email: "recepcion1@maransuites.com", fullName: "Maria Garcia", role: "reception" as SystemUserRole, department: "Recepcion", phone: "+54 343 400-0003", isActive: "true", lastLogin: now, createdAt: now },
+      { id: "su4", username: "housekeeping1", email: "housekeeping@maransuites.com", fullName: "Ana Martinez", role: "housekeeping" as SystemUserRole, department: "Housekeeping", phone: "+54 343 400-0004", isActive: "true", lastLogin: null, createdAt: now },
+      { id: "su5", username: "restaurante1", email: "restaurante@maransuites.com", fullName: "Carlos Lopez", role: "restaurant" as SystemUserRole, department: "Restaurante", phone: "+54 343 400-0005", isActive: "true", lastLogin: null, createdAt: now },
+      { id: "su6", username: "spa1", email: "spa@maransuites.com", fullName: "Laura Fernandez", role: "spa" as SystemUserRole, department: "SPA", phone: "+54 343 400-0006", isActive: "true", lastLogin: null, createdAt: now },
+    ];
+    systemUsersData.forEach((u) => this.systemUsers.set(u.id, u));
+
+    // System Settings (Configuracion del Sistema)
+    const systemSettingsData: SystemSetting[] = [
+      { id: "ss1", key: "hotel_name", value: "Maran Suites & Towers", category: "general", description: "Nombre del hotel", updatedAt: now, updatedBy: "admin" },
+      { id: "ss2", key: "hotel_address", value: "Alameda de la Federacion 343, Parana, Entre Rios", category: "general", description: "Direccion del hotel", updatedAt: now, updatedBy: "admin" },
+      { id: "ss3", key: "hotel_phone", value: "+54 343 400-0000", category: "general", description: "Telefono principal", updatedAt: now, updatedBy: "admin" },
+      { id: "ss4", key: "hotel_email", value: "info@maransuites.com", category: "general", description: "Email de contacto", updatedAt: now, updatedBy: "admin" },
+      { id: "ss5", key: "check_in_time", value: "15:00", category: "reservations", description: "Hora de check-in", updatedAt: now, updatedBy: "admin" },
+      { id: "ss6", key: "check_out_time", value: "11:00", category: "reservations", description: "Hora de check-out", updatedAt: now, updatedBy: "admin" },
+      { id: "ss7", key: "default_currency", value: "ARS", category: "billing", description: "Moneda predeterminada", updatedAt: now, updatedBy: "admin" },
+      { id: "ss8", key: "tax_rate", value: "21", category: "billing", description: "Tasa de IVA (%)", updatedAt: now, updatedBy: "admin" },
+      { id: "ss9", key: "breakfast_included", value: "true", category: "amenities", description: "Desayuno incluido por defecto", updatedAt: now, updatedBy: "admin" },
+      { id: "ss10", key: "wifi_password", value: "MaranGuest2025", category: "amenities", description: "Contrasena WiFi huespedes", updatedAt: now, updatedBy: "admin" },
+    ];
+    systemSettingsData.forEach((s) => this.systemSettings.set(s.id, s));
+
+    // Sample Audit Logs
+    const auditLogsData: AuditLog[] = [
+      { id: "al1", userId: "su1", userName: "Administrador Sistema", action: "login" as AuditAction, module: "system", entityType: null, entityId: null, description: "Inicio de sesion", details: null, ipAddress: "192.168.1.1", timestamp: now },
+      { id: "al2", userId: "su3", userName: "Maria Garcia", action: "create" as AuditAction, module: "reservations", entityType: "reservation", entityId: "r1001", description: "Nueva reserva creada", details: "Huesped: Juan Perez, Habitacion 301", ipAddress: "192.168.1.10", timestamp: now },
+    ];
+    auditLogsData.forEach((l) => this.auditLogs.set(l.id, l));
   }
 
   // Users
@@ -3493,6 +3572,166 @@ export class MemStorage implements IStorage {
   generateWorkOrderCode(): string {
     this.workOrderCounter++;
     return `OT-${this.workOrderCounter}`;
+  }
+
+  // ============== ADMINISTRATION ==============
+
+  // System Users
+  async getSystemUsers(): Promise<SystemUser[]> {
+    return Array.from(this.systemUsers.values());
+  }
+
+  async getSystemUser(id: string): Promise<SystemUser | undefined> {
+    return this.systemUsers.get(id);
+  }
+
+  async getSystemUserByUsername(username: string): Promise<SystemUser | undefined> {
+    return Array.from(this.systemUsers.values()).find((u) => u.username === username);
+  }
+
+  async createSystemUser(user: InsertSystemUser): Promise<SystemUser> {
+    const id = randomUUID();
+    const newUser: SystemUser = {
+      id,
+      username: user.username,
+      email: user.email,
+      fullName: user.fullName,
+      role: (user.role ?? "reception") as SystemUserRole,
+      department: user.department ?? null,
+      phone: user.phone ?? null,
+      isActive: user.isActive ?? "true",
+      lastLogin: user.lastLogin ?? null,
+      createdAt: user.createdAt,
+    };
+    this.systemUsers.set(id, newUser);
+    return newUser;
+  }
+
+  async updateSystemUser(id: string, user: Partial<InsertSystemUser>): Promise<SystemUser | undefined> {
+    const existing = this.systemUsers.get(id);
+    if (!existing) return undefined;
+    const updated: SystemUser = {
+      ...existing,
+      ...user,
+      role: (user.role ?? existing.role) as SystemUserRole,
+    };
+    this.systemUsers.set(id, updated);
+    return updated;
+  }
+
+  async deleteSystemUser(id: string): Promise<boolean> {
+    return this.systemUsers.delete(id);
+  }
+
+  // System Settings
+  async getSystemSettings(): Promise<SystemSetting[]> {
+    return Array.from(this.systemSettings.values());
+  }
+
+  async getSystemSetting(key: string): Promise<SystemSetting | undefined> {
+    return Array.from(this.systemSettings.values()).find((s) => s.key === key);
+  }
+
+  async getSystemSettingsByCategory(category: string): Promise<SystemSetting[]> {
+    return Array.from(this.systemSettings.values()).filter((s) => s.category === category);
+  }
+
+  async upsertSystemSetting(setting: InsertSystemSetting): Promise<SystemSetting> {
+    const existing = Array.from(this.systemSettings.values()).find((s) => s.key === setting.key);
+    if (existing) {
+      const updated: SystemSetting = {
+        ...existing,
+        value: setting.value,
+        description: setting.description ?? existing.description,
+        updatedAt: setting.updatedAt,
+        updatedBy: setting.updatedBy ?? existing.updatedBy,
+      };
+      this.systemSettings.set(existing.id, updated);
+      return updated;
+    }
+    const id = randomUUID();
+    const newSetting: SystemSetting = {
+      id,
+      key: setting.key,
+      value: setting.value,
+      category: setting.category ?? "general",
+      description: setting.description ?? null,
+      updatedAt: setting.updatedAt,
+      updatedBy: setting.updatedBy ?? null,
+    };
+    this.systemSettings.set(id, newSetting);
+    return newSetting;
+  }
+
+  async deleteSystemSetting(key: string): Promise<boolean> {
+    const setting = Array.from(this.systemSettings.values()).find((s) => s.key === key);
+    if (!setting) return false;
+    return this.systemSettings.delete(setting.id);
+  }
+
+  // Audit Logs
+  async getAuditLogs(): Promise<AuditLog[]> {
+    return Array.from(this.auditLogs.values()).sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
+
+  async getAuditLogsByModule(module: string): Promise<AuditLog[]> {
+    return Array.from(this.auditLogs.values())
+      .filter((l) => l.module === module)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
+  async getAuditLogsByUser(userId: string): Promise<AuditLog[]> {
+    return Array.from(this.auditLogs.values())
+      .filter((l) => l.userId === userId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const id = randomUUID();
+    const newLog: AuditLog = {
+      id,
+      userId: log.userId ?? null,
+      userName: log.userName ?? null,
+      action: log.action as AuditAction,
+      module: log.module,
+      entityType: log.entityType ?? null,
+      entityId: log.entityId ?? null,
+      description: log.description,
+      details: log.details ?? null,
+      ipAddress: log.ipAddress ?? null,
+      timestamp: log.timestamp,
+    };
+    this.auditLogs.set(id, newLog);
+    return newLog;
+  }
+
+  async getAdminDashboardStats(): Promise<{
+    totalUsers: number;
+    activeUsers: number;
+    recentLogins: number;
+    totalSettings: number;
+    recentAuditLogs: AuditLog[];
+  }> {
+    const users = Array.from(this.systemUsers.values());
+    const logs = Array.from(this.auditLogs.values());
+    const today = new Date().toISOString().split("T")[0];
+    
+    const recentLogins = users.filter((u) => {
+      if (!u.lastLogin) return false;
+      return u.lastLogin.startsWith(today);
+    }).length;
+
+    return {
+      totalUsers: users.length,
+      activeUsers: users.filter((u) => u.isActive === "true").length,
+      recentLogins,
+      totalSettings: this.systemSettings.size,
+      recentAuditLogs: logs
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 10),
+    };
   }
 }
 

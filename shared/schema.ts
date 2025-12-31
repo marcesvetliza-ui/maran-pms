@@ -998,8 +998,8 @@ export type WorkOrderWithDetails = WorkOrder & {
 
 // ============== ADMINISTRATION MODULE ==============
 
-// User Roles
-export type UserRole = "admin" | "manager" | "receptionist" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events";
+// System User Roles (extends existing UserRole with admin roles)
+export type SystemUserRole = "admin" | "manager" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events";
 
 // System Users (Usuarios del Sistema)
 export const systemUsers = pgTable("system_users", {
@@ -1007,7 +1007,7 @@ export const systemUsers = pgTable("system_users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull(),
   fullName: text("full_name").notNull(),
-  role: text("role").$type<UserRole>().notNull().default("receptionist"),
+  role: text("role").$type<SystemUserRole>().notNull().default("reception"),
   department: text("department"),
   phone: text("phone"),
   isActive: text("is_active").default("true"),
