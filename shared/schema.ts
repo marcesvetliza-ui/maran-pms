@@ -995,3 +995,62 @@ export type WorkOrderWithDetails = WorkOrder & {
   room?: Room;
   assignedTo?: MaintenanceStaff;
 };
+
+// ============== ADMINISTRATION MODULE ==============
+
+// User Roles
+export type UserRole = "admin" | "manager" | "receptionist" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events";
+
+// System Users (Usuarios del Sistema)
+export const systemUsers = pgTable("system_users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  username: text("username").notNull().unique(),
+  email: text("email").notNull(),
+  fullName: text("full_name").notNull(),
+  role: text("role").$type<UserRole>().notNull().default("receptionist"),
+  department: text("department"),
+  phone: text("phone"),
+  isActive: text("is_active").default("true"),
+  lastLogin: text("last_login"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertSystemUserSchema = createInsertSchema(systemUsers).omit({ id: true });
+export type InsertSystemUser = z.infer<typeof insertSystemUserSchema>;
+export type SystemUser = typeof systemUsers.$inferSelect;
+
+// System Settings (Configuracion del Sistema)
+export const systemSettings = pgTable("system_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  value: text("value").notNull(),
+  category: text("category").notNull().default("general"),
+  description: text("description"),
+  updatedAt: text("updated_at").notNull(),
+  updatedBy: text("updated_by"),
+});
+
+export const insertSystemSettingSchema = createInsertSchema(systemSettings).omit({ id: true });
+export type InsertSystemSetting = z.infer<typeof insertSystemSettingSchema>;
+export type SystemSetting = typeof systemSettings.$inferSelect;
+
+// Audit Logs (Registro de Auditoria)
+export type AuditAction = "create" | "update" | "delete" | "login" | "logout" | "view" | "export";
+
+export const auditLogs = pgTable("audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id"),
+  userName: text("user_name"),
+  action: text("action").$type<AuditAction>().notNull(),
+  module: text("module").notNull(),
+  entityType: text("entity_type"),
+  entityId: varchar("entity_id"),
+  description: text("description").notNull(),
+  details: text("details"),
+  ipAddress: text("ip_address"),
+  timestamp: text("timestamp").notNull(),
+});
+
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true });
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
