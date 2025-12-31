@@ -943,3 +943,55 @@ export type SpaAccountWithItems = SpaAccount & {
   items: SpaAccountItem[];
   appointment?: SpaAppointmentWithDetails;
 };
+
+// ============== MAINTENANCE MODULE ==============
+
+// Maintenance Staff (Personal de Mantenimiento)
+export const maintenanceStaff = pgTable("maintenance_staff", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  phone: text("phone"),
+  email: text("email"),
+  specialty: text("specialty"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertMaintenanceStaffSchema = createInsertSchema(maintenanceStaff).omit({ id: true });
+export type InsertMaintenanceStaff = z.infer<typeof insertMaintenanceStaffSchema>;
+export type MaintenanceStaff = typeof maintenanceStaff.$inferSelect;
+
+// Work Order types
+export type WorkOrderPriority = "low" | "medium" | "high" | "urgent";
+export type WorkOrderStatus = "pending" | "assigned" | "in_progress" | "completed" | "cancelled";
+export type WorkOrderCategory = "plumbing" | "electrical" | "hvac" | "furniture" | "cleaning" | "appliances" | "structure" | "general";
+
+// Work Orders (Ordenes de Trabajo)
+export const workOrders = pgTable("work_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderCode: text("order_code").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  roomId: varchar("room_id"),
+  location: text("location"),
+  category: text("category").$type<WorkOrderCategory>().notNull().default("general"),
+  priority: text("priority").$type<WorkOrderPriority>().notNull().default("medium"),
+  status: text("status").$type<WorkOrderStatus>().notNull().default("pending"),
+  assignedToId: varchar("assigned_to_id"),
+  reportedBy: text("reported_by"),
+  reportedAt: text("reported_at").notNull(),
+  scheduledDate: text("scheduled_date"),
+  completedAt: text("completed_at"),
+  completedBy: text("completed_by"),
+  estimatedCost: decimal("estimated_cost", { precision: 10, scale: 2 }),
+  actualCost: decimal("actual_cost", { precision: 10, scale: 2 }),
+  notes: text("notes"),
+});
+
+export const insertWorkOrderSchema = createInsertSchema(workOrders).omit({ id: true });
+export type InsertWorkOrder = z.infer<typeof insertWorkOrderSchema>;
+export type WorkOrder = typeof workOrders.$inferSelect;
+
+export type WorkOrderWithDetails = WorkOrder & {
+  room?: Room;
+  assignedTo?: MaintenanceStaff;
+};
