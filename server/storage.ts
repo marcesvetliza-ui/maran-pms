@@ -115,6 +115,15 @@ import {
   type EventChargeWithType,
   type EventPlanningData,
   type EventPlanningCellStatus,
+  // Maintenance
+  type MaintenanceStaff,
+  type InsertMaintenanceStaff,
+  type WorkOrder,
+  type InsertWorkOrder,
+  type WorkOrderWithDetails,
+  type WorkOrderStatus,
+  type WorkOrderPriority,
+  type WorkOrderCategory,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -438,6 +447,24 @@ export interface IStorage {
 
   // Event Planning
   getEventPlanningData(startDate: string, endDate: string): Promise<EventPlanningData>;
+
+  // ==================== MAINTENANCE ====================
+  // Maintenance Staff
+  getMaintenanceStaff(): Promise<MaintenanceStaff[]>;
+  getMaintenanceStaffMember(id: string): Promise<MaintenanceStaff | undefined>;
+  createMaintenanceStaff(staff: InsertMaintenanceStaff): Promise<MaintenanceStaff>;
+  updateMaintenanceStaff(id: string, staff: Partial<InsertMaintenanceStaff>): Promise<MaintenanceStaff | undefined>;
+  deleteMaintenanceStaff(id: string): Promise<boolean>;
+
+  // Work Orders
+  getWorkOrders(): Promise<WorkOrderWithDetails[]>;
+  getWorkOrder(id: string): Promise<WorkOrderWithDetails | undefined>;
+  getWorkOrdersByRoom(roomId: string): Promise<WorkOrderWithDetails[]>;
+  getWorkOrdersByStatus(status: WorkOrderStatus): Promise<WorkOrderWithDetails[]>;
+  createWorkOrder(order: InsertWorkOrder): Promise<WorkOrder>;
+  updateWorkOrder(id: string, order: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
+  deleteWorkOrder(id: string): Promise<boolean>;
+  generateWorkOrderCode(): string;
 }
 
 export class MemStorage implements IStorage {
@@ -482,12 +509,16 @@ export class MemStorage implements IStorage {
   private events: Map<string, HotelEvent>;
   private eventChargeTypes: Map<string, EventChargeType>;
   private eventCharges: Map<string, EventCharge>;
+  // Maintenance
+  private maintenanceStaff: Map<string, MaintenanceStaff>;
+  private workOrders: Map<string, WorkOrder>;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
   private groupCounter: number;
   private orderCounter: number;
   private eventCounter: number;
+  private workOrderCounter: number;
 
   constructor() {
     this.users = new Map();
@@ -531,12 +562,16 @@ export class MemStorage implements IStorage {
     this.events = new Map();
     this.eventChargeTypes = new Map();
     this.eventCharges = new Map();
+    // Maintenance
+    this.maintenanceStaff = new Map();
+    this.workOrders = new Map();
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
     this.groupCounter = 0;
     this.orderCounter = 1000;
     this.eventCounter = 1000;
+    this.workOrderCounter = 1000;
 
     // Seed with demo data
     this.seedData();
@@ -866,6 +901,15 @@ export class MemStorage implements IStorage {
       { id: "ect8", code: "SOC3", name: "Social 3", defaultPrice: "38000.00", isActive: "true" },
     ];
     eventChargeTypes.forEach((ct) => this.eventChargeTypes.set(ct.id, ct));
+
+    // Maintenance Staff (Personal de Mantenimiento)
+    const maintenanceStaffData: MaintenanceStaff[] = [
+      { id: "ms1", name: "Carlos Rodriguez", phone: "+54 343 456-7890", email: "carlos.rodriguez@maransuites.com", specialty: "Plomeria y Electricidad", isActive: "true" },
+      { id: "ms2", name: "Miguel Fernandez", phone: "+54 343 456-7891", email: "miguel.fernandez@maransuites.com", specialty: "Climatizacion", isActive: "true" },
+      { id: "ms3", name: "Jorge Martinez", phone: "+54 343 456-7892", email: "jorge.martinez@maransuites.com", specialty: "Mobiliario y Carpinteria", isActive: "true" },
+      { id: "ms4", name: "Roberto Sanchez", phone: "+54 343 456-7893", email: "roberto.sanchez@maransuites.com", specialty: "General", isActive: "true" },
+    ];
+    maintenanceStaffData.forEach((s) => this.maintenanceStaff.set(s.id, s));
   }
 
   // Users
@@ -3334,6 +3378,121 @@ export class MemStorage implements IStorage {
     });
 
     return { rooms, days, occupancy, events: eventsMap, cellEvents };
+  }
+
+  // ==================== MAINTENANCE ====================
+
+  // Maintenance Staff
+  async getMaintenanceStaff(): Promise<MaintenanceStaff[]> {
+    return Array.from(this.maintenanceStaff.values());
+  }
+
+  async getMaintenanceStaffMember(id: string): Promise<MaintenanceStaff | undefined> {
+    return this.maintenanceStaff.get(id);
+  }
+
+  async createMaintenanceStaff(staff: InsertMaintenanceStaff): Promise<MaintenanceStaff> {
+    const id = randomUUID();
+    const newStaff: MaintenanceStaff = {
+      id,
+      name: staff.name,
+      phone: staff.phone ?? null,
+      email: staff.email ?? null,
+      specialty: staff.specialty ?? null,
+      isActive: staff.isActive ?? "true",
+    };
+    this.maintenanceStaff.set(id, newStaff);
+    return newStaff;
+  }
+
+  async updateMaintenanceStaff(id: string, staff: Partial<InsertMaintenanceStaff>): Promise<MaintenanceStaff | undefined> {
+    const existing = this.maintenanceStaff.get(id);
+    if (!existing) return undefined;
+    const updated: MaintenanceStaff = { ...existing, ...staff };
+    this.maintenanceStaff.set(id, updated);
+    return updated;
+  }
+
+  async deleteMaintenanceStaff(id: string): Promise<boolean> {
+    return this.maintenanceStaff.delete(id);
+  }
+
+  // Work Orders
+  private enrichWorkOrder(order: WorkOrder): WorkOrderWithDetails {
+    const room = order.roomId ? this.rooms.get(order.roomId) : undefined;
+    const assignedTo = order.assignedToId ? this.maintenanceStaff.get(order.assignedToId) : undefined;
+    return { ...order, room, assignedTo };
+  }
+
+  async getWorkOrders(): Promise<WorkOrderWithDetails[]> {
+    return Array.from(this.workOrders.values()).map(order => this.enrichWorkOrder(order));
+  }
+
+  async getWorkOrder(id: string): Promise<WorkOrderWithDetails | undefined> {
+    const order = this.workOrders.get(id);
+    if (!order) return undefined;
+    return this.enrichWorkOrder(order);
+  }
+
+  async getWorkOrdersByRoom(roomId: string): Promise<WorkOrderWithDetails[]> {
+    return Array.from(this.workOrders.values())
+      .filter(order => order.roomId === roomId)
+      .map(order => this.enrichWorkOrder(order));
+  }
+
+  async getWorkOrdersByStatus(status: WorkOrderStatus): Promise<WorkOrderWithDetails[]> {
+    return Array.from(this.workOrders.values())
+      .filter(order => order.status === status)
+      .map(order => this.enrichWorkOrder(order));
+  }
+
+  async createWorkOrder(order: InsertWorkOrder): Promise<WorkOrder> {
+    const id = randomUUID();
+    const newOrder: WorkOrder = {
+      id,
+      orderCode: order.orderCode,
+      title: order.title,
+      description: order.description ?? null,
+      roomId: order.roomId ?? null,
+      location: order.location ?? null,
+      category: (order.category ?? "general") as WorkOrderCategory,
+      priority: (order.priority ?? "medium") as WorkOrderPriority,
+      status: (order.status ?? "pending") as WorkOrderStatus,
+      assignedToId: order.assignedToId ?? null,
+      reportedBy: order.reportedBy ?? null,
+      reportedAt: order.reportedAt,
+      scheduledDate: order.scheduledDate ?? null,
+      completedAt: order.completedAt ?? null,
+      completedBy: order.completedBy ?? null,
+      estimatedCost: order.estimatedCost ?? null,
+      actualCost: order.actualCost ?? null,
+      notes: order.notes ?? null,
+    };
+    this.workOrders.set(id, newOrder);
+    return newOrder;
+  }
+
+  async updateWorkOrder(id: string, order: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined> {
+    const existing = this.workOrders.get(id);
+    if (!existing) return undefined;
+    const updated: WorkOrder = { 
+      ...existing, 
+      ...order,
+      category: (order.category ?? existing.category) as WorkOrderCategory,
+      priority: (order.priority ?? existing.priority) as WorkOrderPriority,
+      status: (order.status ?? existing.status) as WorkOrderStatus,
+    };
+    this.workOrders.set(id, updated);
+    return updated;
+  }
+
+  async deleteWorkOrder(id: string): Promise<boolean> {
+    return this.workOrders.delete(id);
+  }
+
+  generateWorkOrderCode(): string {
+    this.workOrderCounter++;
+    return `OT-${this.workOrderCounter}`;
   }
 }
 
