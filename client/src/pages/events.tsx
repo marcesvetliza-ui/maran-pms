@@ -254,9 +254,15 @@ export default function EventsPage() {
   const createChargeMutation = useMutation({
     mutationFn: ({ eventId, data }: { eventId: string; data: ChargeFormValues }) =>
       apiRequest("POST", `/api/events/${eventId}/charges`, data),
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["/api/events/planning"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/events", selectedEvent?.id, "charges"] });
+      if (selectedEvent) {
+        const response = await fetch(`/api/events/${selectedEvent.id}`);
+        if (response.ok) {
+          const updatedEvent = await response.json();
+          setSelectedEvent(updatedEvent);
+        }
+      }
       setIsChargeDialogOpen(false);
       chargeForm.reset();
       toast({ title: "Cargo agregado" });
@@ -268,8 +274,15 @@ export default function EventsPage() {
 
   const deleteChargeMutation = useMutation({
     mutationFn: (chargeId: string) => apiRequest("DELETE", `/api/events/charges/${chargeId}`),
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["/api/events/planning"] });
+      if (selectedEvent) {
+        const response = await fetch(`/api/events/${selectedEvent.id}`);
+        if (response.ok) {
+          const updatedEvent = await response.json();
+          setSelectedEvent(updatedEvent);
+        }
+      }
       toast({ title: "Cargo eliminado" });
     },
     onError: () => {
@@ -352,46 +365,50 @@ export default function EventsPage() {
   return (
     <div className="flex flex-col h-full p-4 gap-4">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
-          <CardTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5" />
-            Eventos - Planificacion Semanal
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setWeekStart(subWeeks(weekStart, 1))}
-              data-testid="button-prev-week"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-medium min-w-[200px] text-center">
-              {format(weekStart, "d MMM", { locale: es })} - {format(addDays(weekStart, 6), "d MMM yyyy", { locale: es })}
-            </span>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setWeekStart(addWeeks(weekStart, 1))}
-              data-testid="button-next-week"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button onClick={() => setWeekStart(startOfDay(new Date()))} variant="outline" data-testid="button-today">
-              Hoy
-            </Button>
-            <Button
-              onClick={() => {
-                eventForm.reset();
-                setPrefilledRoomId("");
-                setPrefilledDate("");
-                setIsNewDialogOpen(true);
-              }}
-              data-testid="button-new-event"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Nuevo Evento
-            </Button>
+        <CardHeader className="pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Eventos - Planificacion Semanal
+            </CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setWeekStart(subWeeks(weekStart, 1))}
+                  data-testid="button-prev-week"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm font-medium min-w-[180px] text-center">
+                  {format(weekStart, "d MMM", { locale: es })} - {format(addDays(weekStart, 6), "d MMM yyyy", { locale: es })}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setWeekStart(addWeeks(weekStart, 1))}
+                  data-testid="button-next-week"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button onClick={() => setWeekStart(startOfDay(new Date()))} variant="outline" data-testid="button-today">
+                Hoy
+              </Button>
+              <Button
+                onClick={() => {
+                  eventForm.reset();
+                  setPrefilledRoomId("");
+                  setPrefilledDate("");
+                  setIsNewDialogOpen(true);
+                }}
+                data-testid="button-new-event"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Nuevo Evento
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
