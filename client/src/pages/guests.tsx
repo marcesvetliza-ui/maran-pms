@@ -76,7 +76,7 @@ function GuestFormDialog({
     documentType: guest?.documentType || "dni",
     documentNumber: guest?.documentNumber || "",
     nationality: guest?.nationality || "",
-    address: guest?.address || "",
+    localidad: guest?.localidad || "",
   });
 
   const mutation = useMutation({
@@ -208,13 +208,13 @@ function GuestFormDialog({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="address">Dirección</Label>
+              <Label htmlFor="localidad">Ciudad / Localidad</Label>
               <Input
-                id="address"
-                value={formData.address || ""}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                placeholder="Av. Corrientes 1234, CABA"
-                data-testid="input-address"
+                id="localidad"
+                value={formData.localidad || ""}
+                onChange={(e) => setFormData({ ...formData, localidad: e.target.value })}
+                placeholder="Buenos Aires"
+                data-testid="input-localidad"
               />
             </div>
           </div>
@@ -235,6 +235,7 @@ function GuestFormDialog({
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
     pending: { label: "Pendiente", variant: "secondary" },
+    tentative: { label: "Tentativa", variant: "secondary" },
     confirmed: { label: "Confirmada", variant: "default" },
     checked_in: { label: "Hospedado", variant: "outline" },
     checked_out: { label: "Finalizada", variant: "secondary" },
@@ -330,12 +331,12 @@ function GuestDetailDialog({
                   </div>
                 </div>
               )}
-              {guest.address && (
+              {guest.localidad && (
                 <div className="flex items-center gap-3 p-3 border rounded-lg">
                   <MapPin className="h-4 w-4 text-muted-foreground" />
                   <div className="overflow-hidden">
-                    <p className="text-xs text-muted-foreground">Dirección</p>
-                    <p className="font-medium text-sm truncate">{guest.address}</p>
+                    <p className="text-xs text-muted-foreground">Ciudad</p>
+                    <p className="font-medium text-sm truncate">{guest.localidad}</p>
                   </div>
                 </div>
               )}

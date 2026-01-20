@@ -637,13 +637,12 @@ function ReservationDetailDialog({
               <Badge variant="outline">{reservation.source}</Badge>
             </div>
 
-            {reservation.guest?.direccion && (
+            {reservation.guest?.localidad && (
               <div className="p-3 border rounded-lg">
-                <p className="text-sm text-muted-foreground mb-1">Dirección</p>
+                <p className="text-sm text-muted-foreground mb-1">Ciudad</p>
                 <p className="text-sm">
-                  {reservation.guest.direccion}
-                  {reservation.guest.localidad && `, ${reservation.guest.localidad}`}
-                  {reservation.guest.codigoPostal && ` (${reservation.guest.codigoPostal})`}
+                  {reservation.guest.localidad}
+                  {reservation.guest.nationality && ` - ${reservation.guest.nationality}`}
                 </p>
               </div>
             )}
