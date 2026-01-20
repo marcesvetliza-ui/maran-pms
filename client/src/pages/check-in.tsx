@@ -112,10 +112,11 @@ export default function CheckInPage() {
       setConfirmDialogOpen(false);
       setSelectedReservation(null);
     },
-    onError: () => {
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo realizar el check-in. Intente nuevamente.";
       toast({
-        title: "Error",
-        description: "No se pudo realizar el check-in. Intente nuevamente.",
+        title: "Check-in no permitido",
+        description: message,
         variant: "destructive",
       });
     },

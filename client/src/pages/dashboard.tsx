@@ -189,8 +189,9 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({ title: "Check-in realizado", description: "El huesped ha sido registrado." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo realizar el check-in.", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo realizar el check-in.";
+      toast({ title: "Check-in no permitido", description: message, variant: "destructive" });
     },
   });
 
@@ -340,31 +341,43 @@ export default function Dashboard() {
               </div>
             ) : arrivals.length > 0 ? (
               <div className="space-y-3">
-                {arrivals.slice(0, 5).map((reservation) => (
-                  <div
-                    key={reservation.id}
-                    className="flex items-center justify-between gap-3 p-3 rounded-md border bg-green-50/50 dark:bg-green-900/10"
-                    data-testid={`arrival-${reservation.id}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">
-                        {reservation.guest?.firstName} {reservation.guest?.lastName}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        Hab. {reservation.room?.roomNumber} | {reservation.nights} noche(s)
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => checkInMutation.mutate(reservation.id)}
-                      disabled={checkInMutation.isPending}
-                      data-testid={`checkin-btn-${reservation.id}`}
+                {arrivals.slice(0, 5).map((reservation) => {
+                  const roomStatus = reservation.room?.status;
+                  const isRoomReady = roomStatus === "available";
+                  return (
+                    <div
+                      key={reservation.id}
+                      className="flex items-center justify-between gap-3 p-3 rounded-md border bg-green-50/50 dark:bg-green-900/10"
+                      data-testid={`arrival-${reservation.id}`}
                     >
-                      <LogIn className="h-4 w-4 mr-1" />
-                      Check-in
-                    </Button>
-                  </div>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">
+                          {reservation.guest?.firstName} {reservation.guest?.lastName}
+                        </p>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span>Hab. {reservation.room?.roomNumber}</span>
+                          {!isRoomReady && (
+                            <Badge variant="secondary" className="text-xs">
+                              {roomStatus === "cleaning" ? "En limpieza" : 
+                               roomStatus === "maintenance" ? "Mantenimiento" : 
+                               roomStatus === "occupied" ? "Ocupada" : roomStatus}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => checkInMutation.mutate(reservation.id)}
+                        disabled={checkInMutation.isPending || !isRoomReady}
+                        variant={isRoomReady ? "default" : "secondary"}
+                        data-testid={`checkin-btn-${reservation.id}`}
+                      >
+                        <LogIn className="h-4 w-4 mr-1" />
+                        {isRoomReady ? "Check-in" : "No lista"}
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-6 text-center">

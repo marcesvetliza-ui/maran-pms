@@ -561,6 +561,23 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Reservation not found" });
       }
       
+      // Validate room is available (clean) before check-in
+      const room = await storage.getRoom(reservation.roomId);
+      if (!room) {
+        return res.status(400).json({ error: "Habitación no encontrada" });
+      }
+      
+      if (room.status !== "available") {
+        const statusMessages: Record<string, string> = {
+          occupied: "La habitación está ocupada",
+          cleaning: "La habitación está en limpieza",
+          maintenance: "La habitación está en mantenimiento", 
+          out_of_service: "La habitación está fuera de servicio",
+        };
+        const message = statusMessages[room.status] || `La habitación no está disponible (estado: ${room.status})`;
+        return res.status(400).json({ error: message });
+      }
+      
       // Update reservation status
       await storage.updateReservation(req.params.id, { status: "checked_in" });
       
