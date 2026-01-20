@@ -285,7 +285,7 @@ function AssignRoomDialog({
 }) {
   const { toast } = useToast();
   const [selectedRoomId, setSelectedRoomId] = useState("");
-  const [guestFirstName, setGuestFirstName] = useState("Grupo");
+  const [guestFirstName, setGuestFirstName] = useState("Sin Asignar");
   const [guestLastName, setGuestLastName] = useState("");
   
   // Get default dates from block or group
@@ -325,7 +325,7 @@ function AssignRoomDialog({
       onSuccess();
       onOpenChange(false);
       setSelectedRoomId("");
-      setGuestFirstName("Grupo");
+      setGuestFirstName("Sin Asignar");
       setGuestLastName("");
       setUseCustomDates(false);
       setUseCustomRate(false);
@@ -369,7 +369,7 @@ function AssignRoomDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Nombre Huésped</Label>
+              <Label>Nombre Ocupante</Label>
               <Input
                 value={guestFirstName}
                 onChange={(e) => setGuestFirstName(e.target.value)}
@@ -378,7 +378,7 @@ function AssignRoomDialog({
               />
             </div>
             <div>
-              <Label>Apellido Huésped</Label>
+              <Label>Apellido Ocupante</Label>
               <Input
                 value={guestLastName}
                 onChange={(e) => setGuestLastName(e.target.value)}
@@ -723,7 +723,7 @@ export default function GroupDetailPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Código</TableHead>
-                      <TableHead>Huésped</TableHead>
+                      <TableHead>Ocupante</TableHead>
                       <TableHead>Habitación</TableHead>
                       <TableHead>Fechas</TableHead>
                       <TableHead>Estado</TableHead>

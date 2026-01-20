@@ -85,7 +85,7 @@ const mainMenuItems = [
 
 const operationsMenuItems = [
   {
-    title: "Nueva Reserva",
+    title: "Reserva Rápida",
     url: "/new-reservation",
     icon: CalendarPlus,
   },
