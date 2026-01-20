@@ -427,7 +427,7 @@ export default function NewReservationPage() {
           </div>
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setLocation("/reservations")} data-testid="button-cancel">
-              Cancelar
+              Volver
             </Button>
             <Button
               onClick={() => createReservationMutation.mutate()}

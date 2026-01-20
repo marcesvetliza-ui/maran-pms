@@ -512,7 +512,7 @@ function ReservationFormDialog({
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancelar
+              Volver
             </Button>
             <Button type="submit" disabled={mutation.isPending} data-testid="button-submit-reservation">
               {mutation.isPending ? "Guardando..." : isEditing ? "Guardar Cambios" : "Crear Reserva"}
@@ -974,7 +974,8 @@ function CancelReservationDialog({
             Anular Reserva
           </DialogTitle>
           <DialogDescription>
-            Esta acción anulará la reserva y quedará registrada. Por favor indique el motivo.
+            <strong>Anular</strong> cambia el estado a "Cancelada" y registra el motivo en el historial. 
+            La reserva NO se elimina del sistema.
           </DialogDescription>
         </DialogHeader>
 

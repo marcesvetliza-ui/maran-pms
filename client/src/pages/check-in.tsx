@@ -748,7 +748,7 @@ export default function CheckInPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel data-testid="button-cancel-checkin">Cancelar</AlertDialogCancel>
+            <AlertDialogCancel data-testid="button-cancel-checkin">Volver</AlertDialogCancel>
             <AlertDialogAction
               onClick={performCheckIn}
               disabled={checkInMutation.isPending}
