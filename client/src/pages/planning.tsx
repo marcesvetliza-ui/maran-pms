@@ -1,7 +1,9 @@
 import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -582,6 +584,18 @@ export default function PlanningPage() {
     });
   };
 
+  const goToDate = (date: Date | undefined) => {
+    if (!date) return;
+    const start = new Date(date);
+    start.setDate(start.getDate() - 1);
+    const end = new Date(date);
+    end.setDate(end.getDate() + 14);
+    setDateRange({
+      start: start.toISOString().split("T")[0],
+      end: end.toISOString().split("T")[0],
+    });
+  };
+
   const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
     if (status === "available") {
       setSelectedCell({
@@ -615,7 +629,7 @@ export default function PlanningPage() {
           </h1>
           <p className="text-muted-foreground">Vista de disponibilidad por habitación y fecha (15 días)</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
             variant="outline"
             size="icon"
@@ -631,6 +645,22 @@ export default function PlanningPage() {
           >
             Hoy
           </Button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" data-testid="button-date-picker">
+                <CalendarSearch className="h-4 w-4 mr-2" />
+                Ir a fecha
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <CalendarPicker
+                mode="single"
+                selected={new Date(dateRange.start)}
+                onSelect={goToDate}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
           <Button
             variant="outline"
             size="icon"
