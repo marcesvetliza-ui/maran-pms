@@ -30,6 +30,7 @@ import {
   type ReservationWithDetails,
   type RoomStatus,
   type ReservationStatus,
+  type ReservationSource,
   type PlanningData,
   type PlanningCellStatus,
   type Group,
@@ -1611,7 +1612,7 @@ export class MemStorage implements IStorage {
     const occupancy: Record<string, PlanningCellStatus[]> = {};
     const cellReservations: Record<string, Record<string, string>> = {};
     const cellGroupBlocks: Record<string, Record<string, string>> = {};
-    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; isGroup?: boolean; groupName?: string }> = {};
+    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string }> = {};
     const groupBlocksMap: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }> = {};
 
     // Filter active reservations (not cancelled or checked_out)
@@ -1642,6 +1643,7 @@ export class MemStorage implements IStorage {
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,
+          source: res.source as ReservationSource,
           isGroup: isGroupReservation,
           groupName,
         };
