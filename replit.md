@@ -89,3 +89,26 @@ Preferred communication style: Simple, everyday language.
 - **Vite**: Build tool and dev server
 - **esbuild**: Production server bundling
 - **TypeScript**: Type checking across the stack
+
+## Recent Changes (January 2026)
+
+### Planning Calendar - Source Colors
+- Reservations now display different colors based on their source (origin):
+  - directo (blue), telefono (sky), web (cyan), booking (indigo), expedia (yellow)
+  - airbnb (rose), despegar (orange), hotelbeds (purple), agoda (red)
+  - ota (violet), empresa (emerald)
+- Legend updated to show both status colors and source colors
+- Tooltip displays the reservation source when hovering over cells
+
+### Rate Editing
+- Manual override of baseRatePerNight in reservation creation/edit forms
+- Automatic calculation of finalRatePerNight based on discounts
+- Discount types: none, percent, fixed
+
+### Payments Section
+- Separate payment tracking from charges in the folio modal
+- Payment methods: efectivo, tarjeta débito, tarjeta crédito, transferencia, MercadoPago, cuenta corriente
+
+### Vehicle Data for Guests
+- Optional vehicle fields: patente (auto-uppercase), marca, modelo, color
+- Displayed in guest detail views and forms
