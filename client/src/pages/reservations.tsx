@@ -18,6 +18,7 @@ import {
   LogIn,
   LogOut,
   Copy,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -568,6 +569,8 @@ function ReservationDetailDialog({
   const { toast } = useToast();
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [showAddPayment, setShowAddPayment] = useState(false);
+  const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
+  const [targetReservationId, setTargetReservationId] = useState<string>("");
   const [newCharge, setNewCharge] = useState({
     description: "",
     amount: "",
@@ -578,6 +581,21 @@ function ReservationDetailDialog({
     method: "efectivo" as PaymentMethod,
     reference: "",
     notes: "",
+  });
+
+  // Fetch active reservations for transfer target selection
+  const { data: activeReservations, isError: isActiveReservationsError, isLoading: isActiveReservationsLoading } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/reservations", "transfer-targets"],
+    queryFn: async () => {
+      const res = await fetch("/api/reservations");
+      if (!res.ok) throw new Error("Failed to fetch reservations");
+      const all = await res.json();
+      // Filter to only show checked_in or confirmed reservations, excluding current
+      return all.filter((r: ReservationWithDetails) => 
+        (r.status === "checked_in" || r.status === "confirmed") && r.id !== reservation.id
+      );
+    },
+    enabled: transferringChargeId !== null,
   });
 
   const { data: charges, refetch: refetchCharges } = useQuery<Charge[]>({
@@ -639,6 +657,26 @@ function ReservationDetailDialog({
       toast({ title: "Pago eliminado", description: "El pago ha sido eliminado del registro." });
     },
   });
+
+  const transferChargeMutation = useMutation({
+    mutationFn: async ({ chargeId, targetReservationId }: { chargeId: string; targetReservationId: string }) => {
+      return apiRequest("POST", `/api/charges/${chargeId}/transfer`, { targetReservationId });
+    },
+    onSuccess: () => {
+      refetchCharges();
+      setTransferringChargeId(null);
+      setTargetReservationId("");
+      toast({ title: "Cargo transferido", description: "El cargo ha sido transferido a la otra habitación." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo transferir el cargo.", variant: "destructive" });
+    },
+  });
+
+  const handleTransferCharge = () => {
+    if (!transferringChargeId || !targetReservationId) return;
+    transferChargeMutation.mutate({ chargeId: transferringChargeId, targetReservationId });
+  };
 
   const handleAddCharge = () => {
     if (!newCharge.description || !newCharge.amount) return;
@@ -870,6 +908,16 @@ function ReservationDetailDialog({
                         size="icon" 
                         variant="ghost" 
                         className="h-6 w-6"
+                        onClick={() => setTransferringChargeId(charge.id)}
+                        title="Transferir a otra habitación"
+                        data-testid={`button-transfer-charge-${charge.id}`}
+                      >
+                        <ArrowRightLeft className="h-3 w-3 text-blue-600" />
+                      </Button>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-6 w-6"
                         onClick={() => deleteChargeMutation.mutate(charge.id)}
                         data-testid={`button-delete-charge-${charge.id}`}
                       >
@@ -1033,6 +1081,85 @@ function ReservationDetailDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* Transfer Charge Dialog */}
+      <Dialog open={transferringChargeId !== null} onOpenChange={(open) => {
+        if (!open) {
+          setTransferringChargeId(null);
+          setTargetReservationId("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5" />
+              Transferir Cargo
+            </DialogTitle>
+            <DialogDescription>
+              Seleccione la habitación destino para transferir este cargo
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {transferringChargeId && (() => {
+              const chargeToTransfer = consumptionCharges.find(c => c.id === transferringChargeId);
+              if (!chargeToTransfer) return null;
+              return (
+                <div className="p-3 bg-muted rounded-lg">
+                  <p className="text-sm font-medium mb-1">Cargo a transferir:</p>
+                  <div className="flex justify-between text-sm">
+                    <span>{chargeToTransfer.description}</span>
+                    <span className="font-semibold">${chargeToTransfer.amount}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Habitación destino</label>
+              {isActiveReservationsError ? (
+                <div className="p-3 border border-destructive/50 bg-destructive/10 rounded-lg text-sm text-destructive">
+                  Error al cargar las habitaciones disponibles. Por favor, intente nuevamente.
+                </div>
+              ) : (
+                <Select value={targetReservationId} onValueChange={setTargetReservationId} disabled={isActiveReservationsLoading}>
+                  <SelectTrigger data-testid="select-target-reservation">
+                    <SelectValue placeholder={isActiveReservationsLoading ? "Cargando..." : "Seleccionar habitación..."} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeReservations?.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        Hab. {r.room?.roomNumber} - {r.guest?.firstName} {r.guest?.lastName}
+                      </SelectItem>
+                    ))}
+                    {(!activeReservations || activeReservations.length === 0) && !isActiveReservationsLoading && (
+                      <div className="p-2 text-sm text-muted-foreground text-center">
+                        No hay otras habitaciones activas
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setTransferringChargeId(null);
+              setTargetReservationId("");
+            }}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleTransferCharge}
+              disabled={!targetReservationId || transferChargeMutation.isPending}
+              data-testid="button-confirm-transfer"
+            >
+              {transferChargeMutation.isPending ? "Transfiriendo..." : "Transferir Cargo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

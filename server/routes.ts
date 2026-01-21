@@ -796,6 +796,49 @@ export async function registerRoutes(
     }
   });
 
+  // Transfer charge to another reservation
+  app.post("/api/charges/:id/transfer", async (req, res) => {
+    try {
+      const { targetReservationId } = req.body;
+      
+      // Validate input - only targetReservationId is accepted
+      if (!targetReservationId || typeof targetReservationId !== "string") {
+        return res.status(400).json({ error: "Target reservation ID is required" });
+      }
+      
+      // Verify the charge exists
+      const charge = await storage.getCharge(req.params.id);
+      if (!charge) {
+        return res.status(404).json({ error: "Charge not found" });
+      }
+      
+      // Prevent transferring to same reservation
+      if (charge.reservationId === targetReservationId) {
+        return res.status(400).json({ error: "Cannot transfer to the same reservation" });
+      }
+      
+      // Verify the target reservation exists and is in transferable state
+      const targetReservation = await storage.getReservation(targetReservationId);
+      if (!targetReservation) {
+        return res.status(404).json({ error: "Target reservation not found" });
+      }
+      
+      // Only allow transfer to active reservations (checked_in or confirmed)
+      if (targetReservation.status !== "checked_in" && targetReservation.status !== "confirmed") {
+        return res.status(400).json({ error: "Target reservation must be active (checked-in or confirmed)" });
+      }
+      
+      // Update ONLY the reservationId field - explicitly whitelist
+      const updatedCharge = await storage.updateCharge(req.params.id, {
+        reservationId: targetReservationId,
+      });
+      
+      res.json(updatedCharge);
+    } catch (error) {
+      res.status(500).json({ error: "Error transferring charge" });
+    }
+  });
+
   // Payments
   app.get("/api/reservations/:reservationId/payments", async (req, res) => {
     try {

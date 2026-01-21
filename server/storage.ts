@@ -199,6 +199,7 @@ export interface IStorage {
 
   // Charges
   getCharges(reservationId: string): Promise<Charge[]>;
+  getCharge(id: string): Promise<Charge | undefined>;
   createCharge(charge: InsertCharge): Promise<Charge>;
   updateCharge(id: string, charge: Partial<InsertCharge>): Promise<Charge | undefined>;
   deleteCharge(id: string): Promise<boolean>;
@@ -1424,6 +1425,10 @@ export class MemStorage implements IStorage {
   // Charges
   async getCharges(reservationId: string): Promise<Charge[]> {
     return Array.from(this.charges.values()).filter((c) => c.reservationId === reservationId);
+  }
+
+  async getCharge(id: string): Promise<Charge | undefined> {
+    return this.charges.get(id);
   }
 
   async createCharge(charge: InsertCharge): Promise<Charge> {
