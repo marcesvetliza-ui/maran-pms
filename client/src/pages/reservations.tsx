@@ -59,7 +59,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { ReservationWithDetails, Guest, RoomWithType, RoomType, RatePlan, InsertReservation, ReservationStatus, DiscountType, ReservationSource, Charge } from "@shared/schema";
+import type { ReservationWithDetails, Guest, RoomWithType, RoomType, RatePlan, InsertReservation, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod } from "@shared/schema";
 
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -216,6 +216,21 @@ function ReservationFormDialog({
       ...formData, 
       ...(discountType !== undefined && { discountType }),
       ...(discountValue !== undefined && { discountValue }),
+      ...totals,
+    });
+  };
+
+  const handleBaseRateChange = (newBaseRate: string) => {
+    const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+    const totals = calculateTotals(
+      newBaseRate,
+      formData.discountType as DiscountType,
+      formData.discountValue || "0",
+      nights
+    );
+    setFormData({ 
+      ...formData, 
+      baseRatePerNight: newBaseRate,
       ...totals,
     });
   };
@@ -475,14 +490,20 @@ function ReservationFormDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="baseRate">Tarifa Base/Noche</Label>
-                <Input
-                  id="baseRate"
-                  type="text"
-                  value={formData.baseRatePerNight ? `$${formData.baseRatePerNight}` : "-"}
-                  readOnly
-                  className="bg-muted"
-                  data-testid="input-base-rate"
-                />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                  <Input
+                    id="baseRate"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={formData.baseRatePerNight || ""}
+                    onChange={(e) => handleBaseRateChange(e.target.value)}
+                    placeholder="0.00"
+                    className="pl-7"
+                    data-testid="input-base-rate"
+                  />
+                </div>
               </div>
             </div>
 
@@ -524,6 +545,15 @@ function ReservationFormDialog({
   );
 }
 
+const paymentMethodLabels: Record<PaymentMethod, string> = {
+  efectivo: "Efectivo",
+  tarjeta_debito: "Tarjeta Débito",
+  tarjeta_credito: "Tarjeta Crédito",
+  transferencia: "Transferencia",
+  mercadopago: "MercadoPago",
+  cuenta_corriente: "Cuenta Corriente",
+};
+
 function ReservationDetailDialog({
   reservation,
   open,
@@ -537,16 +567,31 @@ function ReservationDetailDialog({
 }) {
   const { toast } = useToast();
   const [showAddCharge, setShowAddCharge] = useState(false);
+  const [showAddPayment, setShowAddPayment] = useState(false);
   const [newCharge, setNewCharge] = useState({
     description: "",
     amount: "",
     category: "otros" as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
+  });
+  const [newPayment, setNewPayment] = useState({
+    amount: "",
+    method: "efectivo" as PaymentMethod,
+    reference: "",
+    notes: "",
   });
 
   const { data: charges, refetch: refetchCharges } = useQuery<Charge[]>({
     queryKey: ["/api/reservations", reservation.id, "charges"],
     queryFn: async () => {
       const res = await fetch(`/api/reservations/${reservation.id}/charges`);
+      return res.json();
+    },
+  });
+
+  const { data: payments, refetch: refetchPayments } = useQuery<Payment[]>({
+    queryKey: ["/api/reservations", reservation.id, "payments"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservation.id}/payments`);
       return res.json();
     },
   });
@@ -573,6 +618,28 @@ function ReservationDetailDialog({
     },
   });
 
+  const addPaymentMutation = useMutation({
+    mutationFn: async (paymentData: { amount: string; method: PaymentMethod; reference?: string; notes?: string; reservationId: string; date: string }) => {
+      return apiRequest("POST", "/api/payments", paymentData);
+    },
+    onSuccess: () => {
+      refetchPayments();
+      setShowAddPayment(false);
+      setNewPayment({ amount: "", method: "efectivo", reference: "", notes: "" });
+      toast({ title: "Pago registrado", description: "El pago ha sido registrado exitosamente." });
+    },
+  });
+
+  const deletePaymentMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      return apiRequest("DELETE", `/api/payments/${paymentId}`, undefined);
+    },
+    onSuccess: () => {
+      refetchPayments();
+      toast({ title: "Pago eliminado", description: "El pago ha sido eliminado del registro." });
+    },
+  });
+
   const handleAddCharge = () => {
     if (!newCharge.description || !newCharge.amount) return;
     addChargeMutation.mutate({
@@ -582,8 +649,14 @@ function ReservationDetailDialog({
     });
   };
 
-  const totalCharges = charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
-  const grandTotal = parseFloat(reservation.totalRoomAmount || "0") + totalCharges;
+  const handleAddPayment = () => {
+    if (!newPayment.amount) return;
+    addPaymentMutation.mutate({
+      ...newPayment,
+      reservationId: reservation.id,
+      date: new Date().toISOString().split("T")[0],
+    });
+  };
 
   const categoryLabels: Record<string, string> = {
     room: "Habitación",
@@ -592,13 +665,11 @@ function ReservationDetailDialog({
     minibar: "Minibar",
     otros: "Otros",
     adjustment: "Ajuste",
-    payment: "Pago/Anticipo",
   };
 
   const consumptionCharges = charges?.filter((c) => c.category !== "payment") || [];
-  const paymentCharges = charges?.filter((c) => c.category === "payment") || [];
   const totalConsumptions = consumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
-  const totalPayments = paymentCharges.reduce((sum, c) => sum + Math.abs(parseFloat(c.amount)), 0);
+  const totalPayments = payments?.reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
   const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0");
   const totalToPay = subtotalRoom + totalConsumptions;
   const balance = totalToPay - totalPayments;
@@ -766,7 +837,6 @@ function ReservationDetailDialog({
                         <SelectItem value="minibar">Minibar</SelectItem>
                         <SelectItem value="otros">Otros</SelectItem>
                         <SelectItem value="adjustment">Ajuste</SelectItem>
-                        <SelectItem value="payment">Pago/Anticipo</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -821,31 +891,91 @@ function ReservationDetailDialog({
             </div>
 
             <div className="border rounded-lg">
-              <div className="p-3 border-b bg-muted/50">
+              <div className="flex items-center justify-between p-3 border-b bg-muted/50">
                 <h4 className="font-semibold">Pagos / Anticipos</h4>
+                <Button size="sm" variant="outline" onClick={() => setShowAddPayment(!showAddPayment)} data-testid="button-add-payment">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Registrar Pago
+                </Button>
               </div>
-              <div className="divide-y max-h-[100px] overflow-y-auto">
-                {paymentCharges.map((charge) => (
-                  <div key={charge.id} className="flex items-center justify-between p-3 text-sm" data-testid={`payment-row-${charge.id}`}>
+
+              {showAddPayment && (
+                <div className="p-3 border-b bg-muted/30">
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                      <Input
+                        type="number"
+                        placeholder="Monto"
+                        value={newPayment.amount}
+                        onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
+                        className="pl-7"
+                        data-testid="input-payment-amount"
+                      />
+                    </div>
+                    <Select
+                      value={newPayment.method}
+                      onValueChange={(value) => setNewPayment({ ...newPayment, method: value as PaymentMethod })}
+                    >
+                      <SelectTrigger data-testid="select-payment-method">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="efectivo">Efectivo</SelectItem>
+                        <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                        <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                        <SelectItem value="transferencia">Transferencia</SelectItem>
+                        <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                        <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    placeholder="Referencia (Nº comprobante, tarjeta, etc.)"
+                    value={newPayment.reference}
+                    onChange={(e) => setNewPayment({ ...newPayment, reference: e.target.value })}
+                    className="mb-2"
+                    data-testid="input-payment-reference"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setShowAddPayment(false)}>
+                      Cancelar
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      onClick={handleAddPayment} 
+                      disabled={addPaymentMutation.isPending}
+                      data-testid="button-confirm-payment"
+                    >
+                      Confirmar Pago
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="divide-y max-h-[120px] overflow-y-auto">
+                {payments?.map((payment) => (
+                  <div key={payment.id} className="flex items-center justify-between p-3 text-sm" data-testid={`payment-row-${payment.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span>{charge.description}</span>
-                      <span className="text-muted-foreground text-xs">({charge.date})</span>
+                      <Badge variant="outline" className="text-xs">{paymentMethodLabels[payment.method]}</Badge>
+                      {payment.reference && <span className="text-muted-foreground">{payment.reference}</span>}
+                      <span className="text-muted-foreground text-xs">({payment.date})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-green-600">-${Math.abs(parseFloat(charge.amount)).toFixed(2)}</span>
+                      <span className="font-medium text-green-600">${parseFloat(payment.amount).toFixed(2)}</span>
                       <Button 
                         size="icon" 
                         variant="ghost" 
                         className="h-6 w-6"
-                        onClick={() => deleteChargeMutation.mutate(charge.id)}
-                        data-testid={`button-delete-payment-${charge.id}`}
+                        onClick={() => deletePaymentMutation.mutate(payment.id)}
+                        data-testid={`button-delete-payment-${payment.id}`}
                       >
                         <Trash2 className="h-3 w-3 text-destructive" />
                       </Button>
                     </div>
                   </div>
                 ))}
-                {paymentCharges.length === 0 && (
+                {(!payments || payments.length === 0) && (
                   <div className="p-3 text-sm text-muted-foreground text-center">
                     Sin pagos registrados
                   </div>

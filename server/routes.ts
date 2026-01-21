@@ -796,6 +796,58 @@ export async function registerRoutes(
     }
   });
 
+  // Payments
+  app.get("/api/reservations/:reservationId/payments", async (req, res) => {
+    try {
+      const payments = await storage.getPayments(req.params.reservationId);
+      res.json(payments);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching payments" });
+    }
+  });
+
+  app.get("/api/reservations/:reservationId/payments/total", async (req, res) => {
+    try {
+      const total = await storage.getPaymentsTotal(req.params.reservationId);
+      res.json({ total });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching payments total" });
+    }
+  });
+
+  app.post("/api/payments", async (req, res) => {
+    try {
+      const payment = await storage.createPayment(req.body);
+      res.status(201).json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating payment" });
+    }
+  });
+
+  app.patch("/api/payments/:id", async (req, res) => {
+    try {
+      const payment = await storage.updatePayment(req.params.id, req.body);
+      if (!payment) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+      res.json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating payment" });
+    }
+  });
+
+  app.delete("/api/payments/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deletePayment(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting payment" });
+    }
+  });
+
   // OTA Channels
   app.get("/api/ota-channels", async (req, res) => {
     try {

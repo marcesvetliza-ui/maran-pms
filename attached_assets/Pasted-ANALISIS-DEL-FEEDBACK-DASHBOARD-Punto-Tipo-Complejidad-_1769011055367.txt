@@ -1,0 +1,69 @@
+ANALISIS DEL FEEDBACK
+DASHBOARD
+Punto	Tipo	Complejidad	Mi Propuesta
+Check-in sin verificar habitacion limpia	Corregir	Media	Agregar validacion que bloquee check-in si habitacion no esta "available"
+Ver Habitaciones y Estados duplicados	Corregir	Baja	Consolidar en un solo widget con info de solicitudes especiales
+Check-out rapido solo si saldo = 0	Mantener	-	Ya funciona bien
+PLANNING
+Punto	Tipo	Complejidad	Mi Propuesta
+Busqueda de fecha	Corregir	Baja	Agregar selector de fecha (date picker) para saltar a fechas especificas
+Check-in en dia incorrecto	Corregir	Media	Validar que check-in solo sea en fecha actual o futura
+Colores para individuales vs grupales	Avanzar	Media	Usar colores distintos: azul individual, verde grupal
+RESERVAS
+Punto	Tipo	Complejidad	Mi Propuesta
+Eliminar domicilio, agregar ciudad/notas	Corregir	Baja	Reemplazar campo en vista de reservas
+Anular vs Eliminar confuso	Corregir	Baja	Aclarar: "Anular" = cancelar con motivo, "Eliminar" = borrar permanente. Agregar confirmacion
+Renombrar a "Nueva Reserva Rapida"	Corregir	Baja	Cambiar etiqueta del boton
+Transferir gastos entre habitaciones	Avanzar	Alta	Agregar funcion de mover cargos entre folios
+Pagos adelantados separados	Corregir	Media	Crear seccion separada "Pagos" en el folio
+Editar tarifas en reservas existentes	Corregir	Media	Habilitar edicion de tarifa en modal de reserva
+HABITACIONES
+Punto	Tipo	Complejidad	Mi Propuesta
+Graficos de camas	Mantener	-	Funciona bien
+Editar camaje de habitaciones	Corregir	Media	Agregar opcion para cambiar configuracion de cama temporalmente
+HUESPEDES
+Punto	Tipo	Complejidad	Mi Propuesta
+Eliminar domicilio, agregar empresa	Corregir	Baja	Cambiar campos mostrados
+Eliminar sexo	Corregir	Baja	Remover campo de la vista
+Datos de vehiculos	Avanzar	Media	Agregar pestana/seccion para patente, marca, modelo
+TARIFAS
+Punto	Tipo	Complejidad	Mi Propuesta
+Planes tarifarios	Mantener	-	Funciona bien
+Crear paquetes (escapada relax, 3x2)	Avanzar	Alta	Nuevo modulo de paquetes con noches, servicios incluidos
+Tarifas manuales en reservas	Corregir	Media	Permitir override de tarifa al crear/editar reserva
+GRUPOS
+Punto	Tipo	Complejidad	Mi Propuesta
+Facilidad de creacion	Mantener	-	Funciona bien
+Check-in/out/facturar grupal	Avanzar	Alta	Agregar botones de accion masiva en vista de grupo
+Agregar salon del evento	Corregir	Baja	Vincular con modulo de Eventos existente
+Liberacion automatica en fecha release	Avanzar	Media	Crear tarea programada que libere habitaciones
+"Sin asignar" en lugar de "GRUPO"	Corregir	Baja	Cambiar etiqueta por defecto
+Imprimir rooming list	Avanzar	Media	Agregar boton exportar PDF/imprimir
+HOUSEKEEPING
+Punto	Tipo	Complejidad	Mi Propuesta
+No permite check-out desde pestana	Corregir	Media	Agregar accion de check-out en vista de housekeeping
+Modificar camaje	Corregir	Media	Igual que en Habitaciones
+EVENTOS
+Punto	Tipo	Complejidad	Mi Propuesta
+Detalla "huesped" pero no es huesped	Corregir	Baja	Cambiar etiqueta a "Cliente" o "Contratante"
+Marcar No Show y reutilizar evento	Avanzar	Media	Agregar estado "No Show" y opcion de reprogramar
+RESUMEN PRIORIZADO
+Rapidos de implementar (1-2 horas c/u):
+
+Cambiar etiquetas (reserva rapida, cliente en eventos, sin asignar)
+Eliminar/reemplazar campos (domicilio por ciudad, sexo)
+Agregar validacion check-in habitacion limpia
+Agregar date picker en planning
+Aclarar Anular vs Eliminar
+Medianos (medio dia c/u):
+
+Edicion de tarifas en reservas existentes
+Seccion separada de Pagos
+Datos de vehiculos
+Colores por tipo de reserva
+Complejos (1+ dias c/u):
+
+Transferencia de gastos entre habitaciones
+Check-in/out/facturacion grupal
+Creacion de paquetes
+Rooming list imprimible

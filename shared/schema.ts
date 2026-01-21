@@ -109,6 +109,10 @@ export const guests = pgTable("guests", {
   cuilCuit: text("cuil_cuit"),
   companyId: varchar("company_id"),
   fechaAlta: text("fecha_alta"),
+  vehiculoPatente: text("vehiculo_patente"),
+  vehiculoMarca: text("vehiculo_marca"),
+  vehiculoModelo: text("vehiculo_modelo"),
+  vehiculoColor: text("vehiculo_color"),
 });
 
 export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, codigo: true, fechaAlta: true });
@@ -166,6 +170,25 @@ export const charges = pgTable("charges", {
 export const insertChargeSchema = createInsertSchema(charges).omit({ id: true });
 export type InsertCharge = z.infer<typeof insertChargeSchema>;
 export type Charge = typeof charges.$inferSelect;
+
+// Payment methods
+export type PaymentMethod = "efectivo" | "tarjeta_debito" | "tarjeta_credito" | "transferencia" | "mercadopago" | "cuenta_corriente";
+
+// Payments table (pagos adelantados y durante estadía)
+export const payments = pgTable("payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reservationId: varchar("reservation_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  method: text("method").$type<PaymentMethod>().notNull(),
+  date: text("date").notNull(),
+  reference: text("reference"),
+  receivedBy: varchar("received_by"),
+  notes: text("notes"),
+});
+
+export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true });
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+export type Payment = typeof payments.$inferSelect;
 
 // Cancelled Reservation Log (registro de cancelaciones)
 export const cancelledReservationLogs = pgTable("cancelled_reservation_logs", {
@@ -228,6 +251,7 @@ export type ReservationWithDetails = Reservation & {
   room: Room & { roomType?: RoomType };
   ratePlan?: RatePlan;
   charges?: Charge[];
+  payments?: Payment[];
 };
 
 export type RoomWithType = Room & {

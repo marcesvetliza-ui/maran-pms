@@ -41,8 +41,9 @@ Preferred communication style: Simple, everyday language.
 ### Core Data Models
 - **Room Types**: Define room categories with pricing and capacity
 - **Rooms**: Individual rooms with status tracking (available, occupied, cleaning, maintenance)
-- **Guests**: Customer information with identity documents
+- **Guests**: Customer information with identity documents and optional vehicle data (patente, marca, modelo, color)
 - **Reservations**: Booking records linking guests to rooms with status workflow
+- **Payments**: Separate payment tracking with multiple payment methods (efectivo, tarjeta débito/crédito, transferencia, MercadoPago, cuenta corriente)
 
 ### Project Structure
 ```

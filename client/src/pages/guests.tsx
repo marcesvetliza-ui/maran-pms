@@ -12,6 +12,7 @@ import {
   Phone,
   MapPin,
   FileText,
+  Car,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,6 +78,10 @@ function GuestFormDialog({
     documentNumber: guest?.documentNumber || "",
     nationality: guest?.nationality || "",
     localidad: guest?.localidad || "",
+    vehiculoPatente: guest?.vehiculoPatente || "",
+    vehiculoMarca: guest?.vehiculoMarca || "",
+    vehiculoModelo: guest?.vehiculoModelo || "",
+    vehiculoColor: guest?.vehiculoColor || "",
   });
 
   const mutation = useMutation({
@@ -112,7 +117,7 @@ function GuestFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Huésped" : "Nuevo Huésped"}</DialogTitle>
           <DialogDescription>
@@ -216,6 +221,58 @@ function GuestFormDialog({
                 placeholder="Buenos Aires"
                 data-testid="input-localidad"
               />
+            </div>
+
+            <div className="pt-2 border-t">
+              <Label className="text-sm font-medium text-muted-foreground">Datos del Vehículo (opcional)</Label>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="vehiculoPatente">Patente</Label>
+                <Input
+                  id="vehiculoPatente"
+                  name="vehiculoPatente"
+                  value={formData.vehiculoPatente || ""}
+                  onChange={(e) => setFormData({ ...formData, vehiculoPatente: e.target.value.toUpperCase() })}
+                  placeholder="ABC 123"
+                  data-testid="input-vehiculo-patente"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="vehiculoMarca">Marca</Label>
+                <Input
+                  id="vehiculoMarca"
+                  name="vehiculoMarca"
+                  value={formData.vehiculoMarca || ""}
+                  onChange={(e) => setFormData({ ...formData, vehiculoMarca: e.target.value })}
+                  placeholder="Toyota"
+                  data-testid="input-vehiculo-marca"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="vehiculoModelo">Modelo</Label>
+                <Input
+                  id="vehiculoModelo"
+                  name="vehiculoModelo"
+                  value={formData.vehiculoModelo || ""}
+                  onChange={(e) => setFormData({ ...formData, vehiculoModelo: e.target.value })}
+                  placeholder="Corolla"
+                  data-testid="input-vehiculo-modelo"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="vehiculoColor">Color</Label>
+                <Input
+                  id="vehiculoColor"
+                  name="vehiculoColor"
+                  value={formData.vehiculoColor || ""}
+                  onChange={(e) => setFormData({ ...formData, vehiculoColor: e.target.value })}
+                  placeholder="Blanco"
+                  data-testid="input-vehiculo-color"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -342,6 +399,39 @@ function GuestDetailDialog({
               )}
             </div>
           </div>
+
+          {guest.vehiculoPatente && (
+            <div className="border rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Car className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium text-sm">Vehículo</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Patente</p>
+                  <p className="font-medium">{guest.vehiculoPatente}</p>
+                </div>
+                {guest.vehiculoMarca && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Marca</p>
+                    <p className="font-medium">{guest.vehiculoMarca}</p>
+                  </div>
+                )}
+                {guest.vehiculoModelo && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Modelo</p>
+                    <p className="font-medium">{guest.vehiculoModelo}</p>
+                  </div>
+                )}
+                {guest.vehiculoColor && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Color</p>
+                    <p className="font-medium">{guest.vehiculoColor}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="border rounded-lg">
             <div className="p-3 border-b bg-muted/50">

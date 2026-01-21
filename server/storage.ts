@@ -16,6 +16,8 @@ import {
   type InsertReservation,
   type Charge,
   type InsertCharge,
+  type Payment,
+  type InsertPayment,
   type CancelledReservationLog,
   type InsertCancelledReservationLog,
   type OTAChannel,
@@ -200,6 +202,13 @@ export interface IStorage {
   updateCharge(id: string, charge: Partial<InsertCharge>): Promise<Charge | undefined>;
   deleteCharge(id: string): Promise<boolean>;
   getChargesTotal(reservationId: string): Promise<number>;
+
+  // Payments
+  getPayments(reservationId: string): Promise<Payment[]>;
+  createPayment(payment: InsertPayment): Promise<Payment>;
+  updatePayment(id: string, payment: Partial<InsertPayment>): Promise<Payment | undefined>;
+  deletePayment(id: string): Promise<boolean>;
+  getPaymentsTotal(reservationId: string): Promise<number>;
 
   // Cancelled Reservation Logs
   getCancelledReservationLogs(): Promise<CancelledReservationLog[]>;
@@ -513,6 +522,7 @@ export class MemStorage implements IStorage {
   private guests: Map<string, Guest>;
   private reservations: Map<string, Reservation>;
   private charges: Map<string, Charge>;
+  private payments: Map<string, Payment>;
   private cancelledReservationLogs: Map<string, CancelledReservationLog>;
   private otaChannels: Map<string, OTAChannel>;
   private otaReservationLogs: Map<string, OTAReservationLog>;
@@ -570,6 +580,7 @@ export class MemStorage implements IStorage {
     this.guests = new Map();
     this.reservations = new Map();
     this.charges = new Map();
+    this.payments = new Map();
     this.cancelledReservationLogs = new Map();
     this.otaChannels = new Map();
     this.otaReservationLogs = new Map();
@@ -702,14 +713,14 @@ export class MemStorage implements IStorage {
     // Create guests
     const guestSeedDate = new Date().toISOString().split("T")[0];
     const guests: Guest[] = [
-      { id: "g1", codigo: "H-2025-0001", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", direccion: "Av. Corrientes 1234", localidad: "CABA", codigoPostal: "1043", fechaNacimiento: "1985-03-15", sexo: "masculino", segment: "LEISURE", cuilCuit: "20-30456789-3", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g2", codigo: "H-2025-0002", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", direccion: "Calle Florida 567", localidad: "CABA", codigoPostal: "1005", fechaNacimiento: "1990-07-22", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-28765432-4", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g3", codigo: "H-2025-0003", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", direccion: "123 Main St", localidad: "New York", codigoPostal: "10001", fechaNacimiento: "1978-11-30", sexo: "masculino", segment: "LEISURE", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
-      { id: "g4", codigo: "H-2025-0004", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", direccion: "Av. Santa Fe 890", localidad: "CABA", codigoPostal: "1059", fechaNacimiento: "1995-01-10", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-35678901-9", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g5", codigo: "H-2025-0005", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", direccion: "Callao 456", localidad: "CABA", codigoPostal: "1022", fechaNacimiento: "1982-05-20", sexo: "masculino", segment: "CORP", cuilCuit: "20-32109876-5", companyId: "comp1", fechaAlta: guestSeedDate },
-      { id: "g6", codigo: "H-2025-0006", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", direccion: "Av. Libertador 123", localidad: "CABA", codigoPostal: "1426", fechaNacimiento: "1988-09-08", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-29876543-2", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g7", codigo: "H-2025-0007", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", direccion: "Av. Belgrano 456", localidad: "CABA", codigoPostal: "1092", fechaNacimiento: "1992-12-25", sexo: "masculino", segment: "LEISURE", cuilCuit: "20-31234567-8", companyId: null, fechaAlta: guestSeedDate },
-      { id: "g8", codigo: "H-2025-0008", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", direccion: "15 Rue de Paris", localidad: "Lyon", codigoPostal: "69001", fechaNacimiento: "1987-04-18", sexo: "femenino", segment: "LEISURE", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate },
+      { id: "g1", codigo: "H-2025-0001", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", direccion: "Av. Corrientes 1234", localidad: "CABA", codigoPostal: "1043", fechaNacimiento: "1985-03-15", sexo: "masculino", segment: "LEISURE", cuilCuit: "20-30456789-3", companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: "AB 123 CD", vehiculoMarca: "Toyota", vehiculoModelo: "Corolla", vehiculoColor: "Blanco" },
+      { id: "g2", codigo: "H-2025-0002", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", direccion: "Calle Florida 567", localidad: "CABA", codigoPostal: "1005", fechaNacimiento: "1990-07-22", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-28765432-4", companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: null, vehiculoMarca: null, vehiculoModelo: null, vehiculoColor: null },
+      { id: "g3", codigo: "H-2025-0003", firstName: "John", lastName: "Smith", email: "john.smith@email.com", phone: "+1 555 123-4567", documentType: "passport", documentNumber: "US123456", nationality: "Estados Unidos", direccion: "123 Main St", localidad: "New York", codigoPostal: "10001", fechaNacimiento: "1978-11-30", sexo: "masculino", segment: "LEISURE", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: null, vehiculoMarca: null, vehiculoModelo: null, vehiculoColor: null },
+      { id: "g4", codigo: "H-2025-0004", firstName: "Ana", lastName: "Martínez", email: "ana.martinez@email.com", phone: "+54 11 6789-0123", documentType: "dni", documentNumber: "35678901", nationality: "Argentina", direccion: "Av. Santa Fe 890", localidad: "CABA", codigoPostal: "1059", fechaNacimiento: "1995-01-10", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-35678901-9", companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: "XY 456 ZW", vehiculoMarca: "Ford", vehiculoModelo: "Focus", vehiculoColor: "Negro" },
+      { id: "g5", codigo: "H-2025-0005", firstName: "Roberto", lastName: "Fernández", email: "roberto.f@email.com", phone: "+54 11 7890-1234", documentType: "dni", documentNumber: "32109876", nationality: "Argentina", direccion: "Callao 456", localidad: "CABA", codigoPostal: "1022", fechaNacimiento: "1982-05-20", sexo: "masculino", segment: "CORP", cuilCuit: "20-32109876-5", companyId: "comp1", fechaAlta: guestSeedDate, vehiculoPatente: null, vehiculoMarca: null, vehiculoModelo: null, vehiculoColor: null },
+      { id: "g6", codigo: "H-2025-0006", firstName: "Laura", lastName: "Pérez", email: "laura.p@email.com", phone: "+54 11 8901-2345", documentType: "dni", documentNumber: "29876543", nationality: "Argentina", direccion: "Av. Libertador 123", localidad: "CABA", codigoPostal: "1426", fechaNacimiento: "1988-09-08", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-29876543-2", companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: null, vehiculoMarca: null, vehiculoModelo: null, vehiculoColor: null },
+      { id: "g7", codigo: "H-2025-0007", firstName: "Diego", lastName: "Ramírez", email: "diego.r@email.com", phone: "+54 11 9012-3456", documentType: "dni", documentNumber: "31234567", nationality: "Argentina", direccion: "Av. Belgrano 456", localidad: "CABA", codigoPostal: "1092", fechaNacimiento: "1992-12-25", sexo: "masculino", segment: "LEISURE", cuilCuit: "20-31234567-8", companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: "MN 789 OP", vehiculoMarca: "Chevrolet", vehiculoModelo: "Cruze", vehiculoColor: "Gris" },
+      { id: "g8", codigo: "H-2025-0008", firstName: "Sophie", lastName: "Martin", email: "sophie.m@email.com", phone: "+33 1 2345 6789", documentType: "passport", documentNumber: "FR789012", nationality: "Francia", direccion: "15 Rue de Paris", localidad: "Lyon", codigoPostal: "69001", fechaNacimiento: "1987-04-18", sexo: "femenino", segment: "LEISURE", cuilCuit: null, companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: null, vehiculoMarca: null, vehiculoModelo: null, vehiculoColor: null },
     ];
     guests.forEach((g) => this.guests.set(g.id, g));
     this.guestCounter = 8;
@@ -1266,6 +1277,10 @@ export class MemStorage implements IStorage {
       cuilCuit: insertGuest.cuilCuit ?? null,
       companyId: insertGuest.companyId ?? null,
       fechaAlta: new Date().toISOString().split("T")[0],
+      vehiculoPatente: insertGuest.vehiculoPatente ?? null,
+      vehiculoMarca: insertGuest.vehiculoMarca ?? null,
+      vehiculoModelo: insertGuest.vehiculoModelo ?? null,
+      vehiculoColor: insertGuest.vehiculoColor ?? null,
     };
     this.guests.set(id, guest);
     return guest;
@@ -1444,6 +1459,50 @@ export class MemStorage implements IStorage {
   async getChargesTotal(reservationId: string): Promise<number> {
     const charges = await this.getCharges(reservationId);
     return charges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+  }
+
+  // Payments
+  async getPayments(reservationId: string): Promise<Payment[]> {
+    return Array.from(this.payments.values())
+      .filter((p) => p.reservationId === reservationId)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+
+  async createPayment(payment: InsertPayment): Promise<Payment> {
+    const id = randomUUID();
+    const newPayment: Payment = {
+      id,
+      reservationId: payment.reservationId,
+      amount: payment.amount,
+      method: payment.method as Payment["method"],
+      date: payment.date,
+      reference: payment.reference ?? null,
+      receivedBy: payment.receivedBy ?? null,
+      notes: payment.notes ?? null,
+    };
+    this.payments.set(id, newPayment);
+    return newPayment;
+  }
+
+  async updatePayment(id: string, payment: Partial<InsertPayment>): Promise<Payment | undefined> {
+    const existing = this.payments.get(id);
+    if (!existing) return undefined;
+    const updatedPayment: Payment = { 
+      ...existing, 
+      ...payment,
+      method: (payment.method ?? existing.method) as Payment["method"],
+    };
+    this.payments.set(id, updatedPayment);
+    return updatedPayment;
+  }
+
+  async deletePayment(id: string): Promise<boolean> {
+    return this.payments.delete(id);
+  }
+
+  async getPaymentsTotal(reservationId: string): Promise<number> {
+    const payments = await this.getPayments(reservationId);
+    return payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
   }
 
   // Cancelled Reservation Logs
