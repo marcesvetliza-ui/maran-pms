@@ -28,6 +28,7 @@ import SpaPage from "@/pages/spa";
 import EventsPage from "@/pages/events";
 import MaintenancePage from "@/pages/maintenance";
 import AdministrationPage from "@/pages/administration";
+import PackagesPage from "@/pages/packages";
 
 function Router() {
   return (
@@ -52,6 +53,7 @@ function Router() {
       <Route path="/events" component={EventsPage} />
       <Route path="/maintenance" component={MaintenancePage} />
       <Route path="/administration" component={AdministrationPage} />
+      <Route path="/packages" component={PackagesPage} />
       <Route component={NotFound} />
     </Switch>
   );

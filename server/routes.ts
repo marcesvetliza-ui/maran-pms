@@ -1211,6 +1211,171 @@ export async function registerRoutes(
     }
   });
 
+  // Group Mass Actions - Check-in all group reservations
+  app.post("/api/groups/:groupId/check-in-all", async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+
+      const results = { success: 0, failed: 0, errors: [] as string[] };
+      
+      for (const reservation of group.reservations) {
+        if (reservation.status === "confirmed") {
+          // Verify room is available for check-in
+          const room = await storage.getRoom(reservation.roomId);
+          if (room && room.status === "available") {
+            await storage.updateReservation(reservation.id, { status: "checked_in" });
+            await storage.updateRoom(reservation.roomId, { status: "occupied" });
+            results.success++;
+          } else {
+            results.failed++;
+            results.errors.push(`Hab. ${room?.roomNumber || reservation.roomId}: no disponible para check-in`);
+          }
+        } else if (reservation.status === "checked_in") {
+          // Already checked in, count as success
+          results.success++;
+        }
+      }
+
+      // Update group status to inhouse if any successful check-ins
+      if (results.success > 0) {
+        await storage.updateGroup(req.params.groupId, { status: "inhouse" });
+      }
+
+      res.json(results);
+    } catch (error) {
+      res.status(500).json({ error: "Error processing group check-in" });
+    }
+  });
+
+  // Group Mass Actions - Check-out all group reservations
+  app.post("/api/groups/:groupId/check-out-all", async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+
+      const results = { success: 0, failed: 0, errors: [] as string[] };
+      
+      for (const reservation of group.reservations) {
+        if (reservation.status === "checked_in") {
+          // Check balance before checkout
+          const charges = await storage.getCharges(reservation.id);
+          const payments = await storage.getPayments(reservation.id);
+          const totalCharges = charges.reduce((sum: number, c) => sum + parseFloat(c.amount), 0);
+          const totalPayments = payments.reduce((sum: number, p) => sum + parseFloat(p.amount), 0);
+          const balance = totalCharges - totalPayments;
+
+          if (balance > 0) {
+            results.failed++;
+            results.errors.push(`Hab. ${reservation.room?.roomNumber}: saldo pendiente $${balance.toFixed(2)}`);
+          } else {
+            await storage.updateReservation(reservation.id, { status: "checked_out" });
+            await storage.updateRoom(reservation.roomId, { status: "cleaning" });
+            results.success++;
+          }
+        } else if (reservation.status === "checked_out") {
+          results.success++;
+        }
+      }
+
+      // Update group status to finished if all checked out
+      const allCheckedOut = group.reservations.every(r => 
+        r.status === "checked_out" || r.status === "cancelled"
+      ) || (results.success === group.reservations.length);
+      
+      if (allCheckedOut && group.reservations.length > 0) {
+        await storage.updateGroup(req.params.groupId, { status: "finished" });
+      }
+
+      res.json(results);
+    } catch (error) {
+      res.status(500).json({ error: "Error processing group check-out" });
+    }
+  });
+
+  // Group Invoice - Get consolidated invoice data for the group
+  app.get("/api/groups/:groupId/invoice", async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+
+      const invoiceData = {
+        group: {
+          code: group.groupCode,
+          name: group.name,
+          contactName: group.contactName,
+          contactPhone: group.contactPhone,
+          contactEmail: group.contactEmail,
+          checkInDate: group.checkInDate,
+          checkOutDate: group.checkOutDate,
+        },
+        reservations: [] as any[],
+        totals: {
+          accommodation: 0,
+          charges: 0,
+          payments: 0,
+          balance: 0,
+        }
+      };
+
+      for (const reservation of group.reservations) {
+        const charges = await storage.getCharges(reservation.id);
+        const payments = await storage.getPayments(reservation.id);
+        
+        // Calculate nights and accommodation cost
+        const checkIn = new Date(reservation.checkInDate);
+        const checkOut = new Date(reservation.checkOutDate);
+        const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+        const rate = parseFloat(reservation.finalRatePerNight || reservation.baseRatePerNight || "0");
+        const accommodationTotal = nights * rate;
+        
+        const chargesTotal = charges.reduce((sum: number, c) => sum + parseFloat(c.amount), 0);
+        const paymentsTotal = payments.reduce((sum: number, p) => sum + parseFloat(p.amount), 0);
+        const totalCost = accommodationTotal + chargesTotal;
+
+        invoiceData.reservations.push({
+          reservationCode: reservation.reservationCode,
+          guest: `${reservation.guest?.firstName} ${reservation.guest?.lastName}`,
+          room: reservation.room?.roomNumber,
+          nights,
+          ratePerNight: rate,
+          accommodationTotal,
+          charges: charges.map(c => ({
+            description: c.description,
+            amount: parseFloat(c.amount),
+            category: c.category,
+            date: c.date,
+          })),
+          chargesTotal,
+          payments: payments.map(p => ({
+            method: p.method,
+            amount: parseFloat(p.amount),
+            date: p.date,
+            reference: p.reference,
+          })),
+          paymentsTotal,
+          balance: totalCost - paymentsTotal,
+        });
+
+        invoiceData.totals.accommodation += accommodationTotal;
+        invoiceData.totals.charges += chargesTotal;
+        invoiceData.totals.payments += paymentsTotal;
+      }
+
+      invoiceData.totals.balance = invoiceData.totals.accommodation + invoiceData.totals.charges - invoiceData.totals.payments;
+
+      res.json(invoiceData);
+    } catch (error) {
+      res.status(500).json({ error: "Error generating group invoice" });
+    }
+  });
+
   // Guest Reviews
   app.get("/api/reviews", async (req, res) => {
     try {
@@ -2983,6 +3148,135 @@ Only respond with the JSON object.`;
       res.status(201).json(log);
     } catch (error) {
       res.status(500).json({ error: "Error creating audit log" });
+    }
+  });
+
+  // ==================== PACKAGES ====================
+  app.get("/api/packages", async (req, res) => {
+    try {
+      const packages = await storage.getPackages();
+      res.json(packages);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching packages" });
+    }
+  });
+
+  app.get("/api/packages/active", async (req, res) => {
+    try {
+      const packages = await storage.getActivePackages();
+      res.json(packages);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching active packages" });
+    }
+  });
+
+  app.get("/api/packages/:id", async (req, res) => {
+    try {
+      const pkg = await storage.getPackage(req.params.id);
+      if (!pkg) return res.status(404).json({ error: "Package not found" });
+      res.json(pkg);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching package" });
+    }
+  });
+
+  app.post("/api/packages", async (req, res) => {
+    try {
+      const { name, description, roomTypeId, nights, basePrice, discountPercent, validFrom, validUntil, status, includedServices, terms } = req.body;
+      if (!name || !basePrice) {
+        return res.status(400).json({ error: "Name and base price are required" });
+      }
+      const code = storage.generatePackageCode();
+      const pkg = await storage.createPackage({
+        code,
+        name,
+        description,
+        roomTypeId,
+        nights: nights || 1,
+        basePrice: String(basePrice),
+        discountPercent: discountPercent ? String(discountPercent) : null,
+        validFrom,
+        validUntil,
+        status: status || "active",
+        includedServices,
+        terms,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(pkg);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating package" });
+    }
+  });
+
+  app.patch("/api/packages/:id", async (req, res) => {
+    try {
+      const updates = { ...req.body };
+      if (updates.basePrice) updates.basePrice = String(updates.basePrice);
+      if (updates.discountPercent) updates.discountPercent = String(updates.discountPercent);
+      const pkg = await storage.updatePackage(req.params.id, updates);
+      if (!pkg) return res.status(404).json({ error: "Package not found" });
+      res.json(pkg);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating package" });
+    }
+  });
+
+  app.delete("/api/packages/:id", async (req, res) => {
+    try {
+      await storage.deletePackage(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting package" });
+    }
+  });
+
+  // Package Items
+  app.get("/api/packages/:packageId/items", async (req, res) => {
+    try {
+      const items = await storage.getPackageItems(req.params.packageId);
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching package items" });
+    }
+  });
+
+  app.post("/api/packages/:packageId/items", async (req, res) => {
+    try {
+      const { itemType, description, quantity, unitValue } = req.body;
+      if (!itemType || !description) {
+        return res.status(400).json({ error: "Item type and description are required" });
+      }
+      const item = await storage.createPackageItem({
+        packageId: req.params.packageId,
+        itemType,
+        description,
+        quantity: quantity || 1,
+        unitValue: unitValue ? String(unitValue) : null,
+      });
+      res.status(201).json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating package item" });
+    }
+  });
+
+  app.patch("/api/package-items/:id", async (req, res) => {
+    try {
+      const updates = { ...req.body };
+      if (updates.unitValue) updates.unitValue = String(updates.unitValue);
+      const item = await storage.updatePackageItem(req.params.id, updates);
+      if (!item) return res.status(404).json({ error: "Package item not found" });
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating package item" });
+    }
+  });
+
+  app.delete("/api/package-items/:id", async (req, res) => {
+    try {
+      await storage.deletePackageItem(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting package item" });
     }
   });
 

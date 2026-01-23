@@ -136,6 +136,13 @@ import {
   type InsertAuditLog,
   type AuditAction,
   type WorkOrderCategory,
+  // Packages
+  type Package,
+  type InsertPackage,
+  type PackageItem,
+  type InsertPackageItem,
+  type PackageWithDetails,
+  type PackageStatus,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -513,6 +520,21 @@ export interface IStorage {
     totalSettings: number;
     recentAuditLogs: AuditLog[];
   }>;
+
+  // ==================== PACKAGES ====================
+  getPackages(): Promise<PackageWithDetails[]>;
+  getPackage(id: string): Promise<PackageWithDetails | undefined>;
+  getActivePackages(): Promise<PackageWithDetails[]>;
+  createPackage(pkg: InsertPackage): Promise<Package>;
+  updatePackage(id: string, pkg: Partial<InsertPackage>): Promise<Package | undefined>;
+  deletePackage(id: string): Promise<boolean>;
+  generatePackageCode(): string;
+  
+  // Package Items
+  getPackageItems(packageId: string): Promise<PackageItem[]>;
+  createPackageItem(item: InsertPackageItem): Promise<PackageItem>;
+  updatePackageItem(id: string, item: Partial<InsertPackageItem>): Promise<PackageItem | undefined>;
+  deletePackageItem(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -565,6 +587,9 @@ export class MemStorage implements IStorage {
   private systemUsers: Map<string, SystemUser>;
   private systemSettings: Map<string, SystemSetting>;
   private auditLogs: Map<string, AuditLog>;
+  // Packages
+  private packages: Map<string, Package>;
+  private packageItems: Map<string, PackageItem>;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
@@ -572,6 +597,7 @@ export class MemStorage implements IStorage {
   private orderCounter: number;
   private eventCounter: number;
   private workOrderCounter: number;
+  private packageCounter: number;
 
   constructor() {
     this.users = new Map();
@@ -623,6 +649,9 @@ export class MemStorage implements IStorage {
     this.systemUsers = new Map();
     this.systemSettings = new Map();
     this.auditLogs = new Map();
+    // Packages
+    this.packages = new Map();
+    this.packageItems = new Map();
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
@@ -630,6 +659,7 @@ export class MemStorage implements IStorage {
     this.orderCounter = 1000;
     this.eventCounter = 1000;
     this.workOrderCounter = 1000;
+    this.packageCounter = 0;
 
     // Seed with demo data
     this.seedData();
@@ -3798,6 +3828,106 @@ export class MemStorage implements IStorage {
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
         .slice(0, 10),
     };
+  }
+
+  // ==================== PACKAGES ====================
+  private enrichPackage(pkg: Package): PackageWithDetails {
+    const roomType = pkg.roomTypeId ? this.roomTypes.get(pkg.roomTypeId) : undefined;
+    const items = Array.from(this.packageItems.values()).filter(i => i.packageId === pkg.id);
+    return { ...pkg, roomType, items };
+  }
+
+  async getPackages(): Promise<PackageWithDetails[]> {
+    return Array.from(this.packages.values()).map(p => this.enrichPackage(p));
+  }
+
+  async getPackage(id: string): Promise<PackageWithDetails | undefined> {
+    const pkg = this.packages.get(id);
+    return pkg ? this.enrichPackage(pkg) : undefined;
+  }
+
+  async getActivePackages(): Promise<PackageWithDetails[]> {
+    const today = new Date().toISOString().split("T")[0];
+    return Array.from(this.packages.values())
+      .filter(p => {
+        if (p.status !== "active") return false;
+        if (p.validFrom && p.validFrom > today) return false;
+        if (p.validUntil && p.validUntil < today) return false;
+        return true;
+      })
+      .map(p => this.enrichPackage(p));
+  }
+
+  async createPackage(pkg: InsertPackage): Promise<Package> {
+    const id = randomUUID();
+    const newPkg: Package = {
+      id,
+      code: pkg.code,
+      name: pkg.name,
+      description: pkg.description ?? null,
+      roomTypeId: pkg.roomTypeId ?? null,
+      nights: pkg.nights ?? 1,
+      basePrice: pkg.basePrice,
+      discountPercent: pkg.discountPercent ?? null,
+      validFrom: pkg.validFrom ?? null,
+      validUntil: pkg.validUntil ?? null,
+      status: (pkg.status as PackageStatus) ?? "active",
+      includedServices: pkg.includedServices ?? null,
+      terms: pkg.terms ?? null,
+      createdAt: pkg.createdAt,
+    };
+    this.packages.set(id, newPkg);
+    return newPkg;
+  }
+
+  async updatePackage(id: string, pkg: Partial<InsertPackage>): Promise<Package | undefined> {
+    const existing = this.packages.get(id);
+    if (!existing) return undefined;
+    const updated: Package = { ...existing, ...pkg } as Package;
+    this.packages.set(id, updated);
+    return updated;
+  }
+
+  async deletePackage(id: string): Promise<boolean> {
+    // Delete package items first
+    const itemsToDelete = Array.from(this.packageItems.values()).filter(i => i.packageId === id);
+    itemsToDelete.forEach(i => this.packageItems.delete(i.id));
+    return this.packages.delete(id);
+  }
+
+  generatePackageCode(): string {
+    this.packageCounter++;
+    return `PKG-${this.packageCounter.toString().padStart(4, "0")}`;
+  }
+
+  async getPackageItems(packageId: string): Promise<PackageItem[]> {
+    return Array.from(this.packageItems.values()).filter(i => i.packageId === packageId);
+  }
+
+  async createPackageItem(item: InsertPackageItem): Promise<PackageItem> {
+    const id = randomUUID();
+    const newItem: PackageItem = {
+      id,
+      packageId: item.packageId,
+      itemType: item.itemType as any,
+      description: item.description,
+      quantity: item.quantity ?? 1,
+      unitValue: item.unitValue ?? null,
+    };
+    this.packageItems.set(id, newItem);
+    return newItem;
+  }
+
+  async updatePackageItem(id: string, item: Partial<InsertPackageItem>): Promise<PackageItem | undefined> {
+    const existing = this.packageItems.get(id);
+    if (!existing) return undefined;
+    const updated: PackageItem = { ...existing, ...item } as PackageItem;
+    this.packageItems.set(id, updated);
+    return updated;
+  }
+
+  async deletePackageItem(id: string): Promise<boolean> {
+    return this.packageItems.delete(id);
   }
 }
 

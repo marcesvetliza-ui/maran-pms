@@ -1078,3 +1078,49 @@ export const auditLogs = pgTable("audit_logs", {
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true });
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
+
+// Packages (Paquetes Turisticos)
+export type PackageStatus = "active" | "inactive" | "expired";
+
+export const packages = pgTable("packages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  roomTypeId: varchar("room_type_id"),
+  nights: integer("nights").notNull().default(1),
+  basePrice: decimal("base_price", { precision: 12, scale: 2 }).notNull(),
+  discountPercent: decimal("discount_percent", { precision: 5, scale: 2 }),
+  validFrom: text("valid_from"),
+  validUntil: text("valid_until"),
+  status: text("status").$type<PackageStatus>().notNull().default("active"),
+  includedServices: text("included_services").array(),
+  terms: text("terms"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertPackageSchema = createInsertSchema(packages).omit({ id: true });
+export type InsertPackage = z.infer<typeof insertPackageSchema>;
+export type Package = typeof packages.$inferSelect;
+
+// Package Included Items (Items incluidos en paquetes)
+export type PackageItemType = "accommodation" | "breakfast" | "dinner" | "spa" | "restaurant" | "event" | "transfer" | "other";
+
+export const packageItems = pgTable("package_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  packageId: varchar("package_id").notNull(),
+  itemType: text("item_type").$type<PackageItemType>().notNull(),
+  description: text("description").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitValue: decimal("unit_value", { precision: 10, scale: 2 }),
+});
+
+export const insertPackageItemSchema = createInsertSchema(packageItems).omit({ id: true });
+export type InsertPackageItem = z.infer<typeof insertPackageItemSchema>;
+export type PackageItem = typeof packageItems.$inferSelect;
+
+// Package with details
+export type PackageWithDetails = Package & {
+  roomType?: RoomType;
+  items: PackageItem[];
+};

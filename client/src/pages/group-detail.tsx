@@ -12,6 +12,12 @@ import {
   Trash2,
   User,
   Hotel,
+  LogIn,
+  LogOut,
+  FileText,
+  Printer,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -486,6 +492,10 @@ export default function GroupDetailPage() {
   const [showAddBlockDialog, setShowAddBlockDialog] = useState(false);
   const [assigningBlock, setAssigningBlock] = useState<GroupRoomBlockWithDetails | null>(null);
   const [deleteBlockId, setDeleteBlockId] = useState<string | null>(null);
+  const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
+  const [invoiceData, setInvoiceData] = useState<any>(null);
+  const [isLoadingInvoice, setIsLoadingInvoice] = useState(false);
+  const [showRoomingListDialog, setShowRoomingListDialog] = useState(false);
 
   const { data: group, isLoading } = useQuery<GroupWithDetails>({
     queryKey: ["/api/groups", groupId],
@@ -502,6 +512,85 @@ export default function GroupDetailPage() {
       toast({ title: "Error al eliminar bloque", variant: "destructive" });
     },
   });
+
+  // Group mass actions
+  const checkInAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/groups/${groupId}/check-in-all`);
+      return res.json() as Promise<{ success: number; failed: number; errors: string[] }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      if (data.success > 0 && data.failed === 0) {
+        toast({ title: `Check-in grupal exitoso`, description: `${data.success} habitaciones procesadas` });
+      } else if (data.success > 0 && data.failed > 0) {
+        toast({ 
+          title: `Check-in parcial`, 
+          description: `${data.success} exitosos, ${data.failed} fallidos`,
+          variant: "destructive"
+        });
+      } else if (data.failed > 0) {
+        toast({ 
+          title: `Error en check-in grupal`, 
+          description: data.errors.join(", "),
+          variant: "destructive"
+        });
+      }
+    },
+    onError: () => {
+      toast({ title: "Error en check-in grupal", variant: "destructive" });
+    },
+  });
+
+  const checkOutAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/groups/${groupId}/check-out-all`);
+      return res.json() as Promise<{ success: number; failed: number; errors: string[] }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      if (data.success > 0 && data.failed === 0) {
+        toast({ title: `Check-out grupal exitoso`, description: `${data.success} habitaciones procesadas` });
+      } else if (data.success > 0 && data.failed > 0) {
+        toast({ 
+          title: `Check-out parcial`, 
+          description: `${data.success} exitosos, ${data.failed} con saldo pendiente`,
+          variant: "destructive"
+        });
+      } else if (data.failed > 0) {
+        toast({ 
+          title: `Check-out bloqueado`, 
+          description: data.errors.join(", "),
+          variant: "destructive"
+        });
+      }
+    },
+    onError: () => {
+      toast({ title: "Error en check-out grupal", variant: "destructive" });
+    },
+  });
+
+  const loadInvoice = async () => {
+    setIsLoadingInvoice(true);
+    try {
+      const res = await fetch(`/api/groups/${groupId}/invoice`);
+      if (res.ok) {
+        const data = await res.json();
+        setInvoiceData(data);
+        setShowInvoiceDialog(true);
+      } else {
+        toast({ title: "Error al cargar factura", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error al cargar factura", variant: "destructive" });
+    } finally {
+      setIsLoadingInvoice(false);
+    }
+  };
+
+  const printInvoice = () => {
+    window.print();
+  };
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString("es-AR", {
@@ -533,11 +622,11 @@ export default function GroupDetailPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => navigate("/groups")} data-testid="button-back">
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div className="flex-1">
+        <div className="flex-1 min-w-[200px]">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight" data-testid="text-group-name">
               {group.name}
@@ -546,6 +635,58 @@ export default function GroupDetailPage() {
           </div>
           <p className="text-muted-foreground font-mono">{group.groupCode}</p>
         </div>
+        
+        {/* Mass Action Buttons */}
+        {group.reservations.length > 0 && (
+          <div className="flex gap-2 flex-wrap">
+            {/* Check-in All Button - Show when there are confirmed reservations */}
+            {group.reservations.some(r => r.status === "confirmed") && (
+              <Button
+                variant="default"
+                onClick={() => checkInAllMutation.mutate()}
+                disabled={checkInAllMutation.isPending}
+                data-testid="button-check-in-all"
+              >
+                <LogIn className="mr-2 h-4 w-4" />
+                {checkInAllMutation.isPending ? "Procesando..." : "Check-in Grupal"}
+              </Button>
+            )}
+            
+            {/* Check-out All Button - Show when there are checked-in reservations */}
+            {group.reservations.some(r => r.status === "checked_in") && (
+              <Button
+                variant="secondary"
+                onClick={() => checkOutAllMutation.mutate()}
+                disabled={checkOutAllMutation.isPending}
+                data-testid="button-check-out-all"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                {checkOutAllMutation.isPending ? "Procesando..." : "Check-out Grupal"}
+              </Button>
+            )}
+            
+            {/* Invoice Button */}
+            <Button
+              variant="outline"
+              onClick={loadInvoice}
+              disabled={isLoadingInvoice}
+              data-testid="button-group-invoice"
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              {isLoadingInvoice ? "Cargando..." : "Factura Grupal"}
+            </Button>
+            
+            {/* Rooming List Button */}
+            <Button
+              variant="outline"
+              onClick={() => setShowRoomingListDialog(true)}
+              data-testid="button-rooming-list"
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Rooming List
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -798,6 +939,256 @@ export default function GroupDetailPage() {
               disabled={deleteBlockMutation.isPending}
             >
               {deleteBlockMutation.isPending ? "Eliminando..." : "Eliminar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Group Invoice Dialog */}
+      <Dialog open={showInvoiceDialog} onOpenChange={setShowInvoiceDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto print:max-w-none print:max-h-none print:overflow-visible">
+          <DialogHeader className="print:mb-4">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Factura Grupal - {invoiceData?.group?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Código: {invoiceData?.group?.code} | {invoiceData?.group?.checkInDate} - {invoiceData?.group?.checkOutDate}
+            </DialogDescription>
+          </DialogHeader>
+
+          {invoiceData && (
+            <div className="space-y-6 print:text-sm" id="invoice-content">
+              {/* Group Info */}
+              <div className="p-4 bg-muted rounded-lg print:bg-transparent print:border print:p-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Contacto</p>
+                    <p className="font-medium">{invoiceData.group.contactName || "-"}</p>
+                    <p className="text-sm">{invoiceData.group.contactPhone}</p>
+                    <p className="text-sm">{invoiceData.group.contactEmail}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-muted-foreground">Período</p>
+                    <p className="font-medium">{invoiceData.group.checkInDate} - {invoiceData.group.checkOutDate}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Reservations Detail */}
+              <div className="space-y-4">
+                <h3 className="font-semibold">Detalle por Habitación</h3>
+                {invoiceData.reservations.map((res: any, idx: number) => (
+                  <Card key={idx} className="print:border print:shadow-none">
+                    <CardHeader className="pb-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <CardTitle className="text-base">Hab. {res.room} - {res.guest}</CardTitle>
+                          <CardDescription>{res.reservationCode} | {res.nights} noches</CardDescription>
+                        </div>
+                        <Badge variant={res.balance > 0 ? "destructive" : "default"}>
+                          {res.balance > 0 ? `Pendiente: $${res.balance.toFixed(2)}` : "Pagado"}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>Alojamiento ({res.nights} x ${res.ratePerNight.toFixed(2)})</span>
+                        <span className="font-medium">${res.accommodationTotal.toFixed(2)}</span>
+                      </div>
+                      
+                      {res.charges.length > 0 && (
+                        <div className="pl-4 border-l-2 border-muted space-y-1">
+                          <p className="text-muted-foreground">Consumos:</p>
+                          {res.charges.map((c: any, i: number) => (
+                            <div key={i} className="flex justify-between">
+                              <span>{c.description}</span>
+                              <span>${c.amount.toFixed(2)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between font-medium">
+                            <span>Subtotal consumos</span>
+                            <span>${res.chargesTotal.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {res.payments.length > 0 && (
+                        <div className="pl-4 border-l-2 border-green-500 space-y-1">
+                          <p className="text-muted-foreground">Pagos:</p>
+                          {res.payments.map((p: any, i: number) => (
+                            <div key={i} className="flex justify-between text-green-600">
+                              <span>{p.method} {p.reference && `(${p.reference})`}</span>
+                              <span>-${p.amount.toFixed(2)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between font-medium text-green-600">
+                            <span>Total pagos</span>
+                            <span>-${res.paymentsTotal.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Totals */}
+              <Card className="bg-muted print:bg-transparent print:border-2">
+                <CardContent className="pt-4">
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>Total Alojamiento</span>
+                      <span className="font-medium">${invoiceData.totals.accommodation.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Total Consumos</span>
+                      <span className="font-medium">${invoiceData.totals.charges.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-green-600">
+                      <span>Total Pagos</span>
+                      <span className="font-medium">-${invoiceData.totals.payments.toFixed(2)}</span>
+                    </div>
+                    <div className="border-t pt-2 mt-2">
+                      <div className="flex justify-between text-lg font-bold">
+                        <span>Saldo Total</span>
+                        <span className={invoiceData.totals.balance > 0 ? "text-destructive" : "text-green-600"}>
+                          ${invoiceData.totals.balance.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <DialogFooter className="print:hidden gap-2">
+            <Button variant="outline" onClick={() => setShowInvoiceDialog(false)}>
+              Cerrar
+            </Button>
+            <Button onClick={printInvoice} data-testid="button-print-invoice">
+              <Printer className="mr-2 h-4 w-4" />
+              Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rooming List Dialog */}
+      <Dialog open={showRoomingListDialog} onOpenChange={setShowRoomingListDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto print:max-w-none print:max-h-none print:overflow-visible">
+          <DialogHeader className="print:mb-4">
+            <DialogTitle className="flex items-center gap-2">
+              <Users2 className="h-5 w-5" />
+              Rooming List - {group.name}
+            </DialogTitle>
+            <DialogDescription>
+              {group.groupCode} | {new Date(group.checkInDate).toLocaleDateString("es-AR")} - {new Date(group.checkOutDate).toLocaleDateString("es-AR")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 print:text-sm" id="rooming-list-content">
+            {/* Group Header */}
+            <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg print:bg-transparent print:border print:p-2">
+              <div>
+                <p className="text-sm text-muted-foreground">Grupo</p>
+                <p className="font-bold text-lg">{group.name}</p>
+                <p className="font-mono text-sm">{group.groupCode}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">Contacto</p>
+                <p className="font-medium">{group.contactName || "-"}</p>
+                <p className="text-sm">{group.contactPhone}</p>
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div className="flex gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span>Check-in: <strong>{new Date(group.checkInDate).toLocaleDateString("es-AR")}</strong></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span>Check-out: <strong>{new Date(group.checkOutDate).toLocaleDateString("es-AR")}</strong></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <DoorOpen className="h-4 w-4 text-muted-foreground" />
+                <span><strong>{group.reservations.length}</strong> habitaciones</span>
+              </div>
+            </div>
+
+            {/* Rooming List Table */}
+            {group.reservations.length > 0 ? (
+              <Table className="print:text-xs">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">#</TableHead>
+                    <TableHead>Habitación</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Huésped</TableHead>
+                    <TableHead>Check-in</TableHead>
+                    <TableHead>Check-out</TableHead>
+                    <TableHead>Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {group.reservations
+                    .sort((a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || ""))
+                    .map((res, idx) => (
+                      <TableRow key={res.id} data-testid={`row-rooming-${res.id}`}>
+                        <TableCell className="font-medium">{idx + 1}</TableCell>
+                        <TableCell className="font-bold">{res.room?.roomNumber}</TableCell>
+                        <TableCell>{res.room?.roomType?.name || "-"}</TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{res.guest?.firstName} {res.guest?.lastName}</p>
+                            {res.guest?.documentNumber && (
+                              <p className="text-xs text-muted-foreground">
+                                {res.guest?.documentType}: {res.guest?.documentNumber}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{new Date(res.checkInDate).toLocaleDateString("es-AR")}</TableCell>
+                        <TableCell>{new Date(res.checkOutDate).toLocaleDateString("es-AR")}</TableCell>
+                        <TableCell>
+                          <Badge 
+                            variant={
+                              res.status === "checked_in" ? "default" :
+                              res.status === "confirmed" ? "secondary" :
+                              res.status === "checked_out" ? "outline" : "destructive"
+                            }
+                          >
+                            {res.status === "checked_in" ? "En Casa" :
+                             res.status === "confirmed" ? "Confirmado" :
+                             res.status === "checked_out" ? "Salió" : res.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No hay habitaciones asignadas en este grupo
+              </div>
+            )}
+
+            {/* Footer for print */}
+            <div className="text-xs text-muted-foreground text-center pt-4 border-t print:mt-8">
+              Generado el {new Date().toLocaleString("es-AR")} | Maran Suites & Towers
+            </div>
+          </div>
+
+          <DialogFooter className="print:hidden gap-2">
+            <Button variant="outline" onClick={() => setShowRoomingListDialog(false)}>
+              Cerrar
+            </Button>
+            <Button onClick={() => window.print()} data-testid="button-print-rooming-list">
+              <Printer className="mr-2 h-4 w-4" />
+              Imprimir
             </Button>
           </DialogFooter>
         </DialogContent>

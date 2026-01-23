@@ -21,6 +21,7 @@ import {
   PartyPopper,
   Wrench,
   Shield,
+  Gift,
 } from "lucide-react";
 import {
   Sidebar,
@@ -65,6 +66,11 @@ const mainMenuItems = [
     title: "Tarifas",
     url: "/rate-plans",
     icon: DollarSign,
+  },
+  {
+    title: "Paquetes",
+    url: "/packages",
+    icon: Gift,
   },
   {
     title: "Canales OTA",
