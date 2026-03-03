@@ -69,6 +69,13 @@ import {
   type TableReservation,
   type InsertTableReservation,
   type TableReservationWithTable,
+  type RestaurantTimeSlot,
+  type InsertRestaurantTimeSlot,
+  type Recipe,
+  type InsertRecipe,
+  type RecipeIngredient,
+  type InsertRecipeIngredient,
+  type RecipeWithIngredients,
   // Inventory
   type ItemCategory,
   type InsertItemCategory,
@@ -369,6 +376,26 @@ export interface IStorage {
   updateTableReservation(id: string, reservation: Partial<InsertTableReservation>): Promise<TableReservation | undefined>;
   deleteTableReservation(id: string): Promise<boolean>;
 
+  // Restaurant Time Slots
+  getRestaurantTimeSlots(): Promise<RestaurantTimeSlot[]>;
+  createRestaurantTimeSlot(slot: InsertRestaurantTimeSlot): Promise<RestaurantTimeSlot>;
+  updateRestaurantTimeSlot(id: string, slot: Partial<InsertRestaurantTimeSlot>): Promise<RestaurantTimeSlot | undefined>;
+  deleteRestaurantTimeSlot(id: string): Promise<boolean>;
+
+  // Recipes
+  getRecipes(): Promise<RecipeWithIngredients[]>;
+  getRecipe(id: string): Promise<RecipeWithIngredients | undefined>;
+  getRecipeByMenuItem(menuItemId: string): Promise<RecipeWithIngredients | undefined>;
+  createRecipe(recipe: InsertRecipe): Promise<Recipe>;
+  updateRecipe(id: string, recipe: Partial<InsertRecipe>): Promise<Recipe | undefined>;
+  deleteRecipe(id: string): Promise<boolean>;
+
+  // Recipe Ingredients
+  getRecipeIngredients(recipeId: string): Promise<RecipeIngredient[]>;
+  createRecipeIngredient(ingredient: InsertRecipeIngredient): Promise<RecipeIngredient>;
+  updateRecipeIngredient(id: string, ingredient: Partial<InsertRecipeIngredient>): Promise<RecipeIngredient | undefined>;
+  deleteRecipeIngredient(id: string): Promise<boolean>;
+
   // ==================== INVENTORY ====================
   // Item Categories
   getItemCategories(): Promise<ItemCategory[]>;
@@ -563,6 +590,9 @@ export class MemStorage implements IStorage {
   private restaurantOrders: Map<string, RestaurantOrder>;
   private orderItems: Map<string, OrderItem>;
   private tableReservations: Map<string, TableReservation>;
+  private restaurantTimeSlots: Map<string, RestaurantTimeSlot>;
+  private recipesMap: Map<string, Recipe>;
+  private recipeIngredientsMap: Map<string, RecipeIngredient>;
   // Inventory
   private itemCategories: Map<string, ItemCategory>;
   private suppliers: Map<string, Supplier>;
@@ -625,6 +655,9 @@ export class MemStorage implements IStorage {
     this.restaurantOrders = new Map();
     this.orderItems = new Map();
     this.tableReservations = new Map();
+    this.restaurantTimeSlots = new Map();
+    this.recipesMap = new Map();
+    this.recipeIngredientsMap = new Map();
     // Inventory
     this.itemCategories = new Map();
     this.suppliers = new Map();
@@ -2764,6 +2797,125 @@ export class MemStorage implements IStorage {
 
   async deleteTableReservation(id: string): Promise<boolean> {
     return this.tableReservations.delete(id);
+  }
+
+  // Restaurant Time Slots
+  async getRestaurantTimeSlots(): Promise<RestaurantTimeSlot[]> {
+    return Array.from(this.restaurantTimeSlots.values())
+      .filter(s => s.isActive === "true")
+      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  }
+
+  async createRestaurantTimeSlot(slot: InsertRestaurantTimeSlot): Promise<RestaurantTimeSlot> {
+    const id = randomUUID();
+    const newSlot: RestaurantTimeSlot = {
+      id,
+      time: slot.time,
+      label: slot.label ?? null,
+      isActive: slot.isActive ?? "true",
+      displayOrder: slot.displayOrder ?? 0,
+    };
+    this.restaurantTimeSlots.set(id, newSlot);
+    return newSlot;
+  }
+
+  async updateRestaurantTimeSlot(id: string, slot: Partial<InsertRestaurantTimeSlot>): Promise<RestaurantTimeSlot | undefined> {
+    const existing = this.restaurantTimeSlots.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...slot } as RestaurantTimeSlot;
+    this.restaurantTimeSlots.set(id, updated);
+    return updated;
+  }
+
+  async deleteRestaurantTimeSlot(id: string): Promise<boolean> {
+    return this.restaurantTimeSlots.delete(id);
+  }
+
+  // Recipes
+  async getRecipes(): Promise<RecipeWithIngredients[]> {
+    return Array.from(this.recipesMap.values()).map(recipe => {
+      const menuItem = this.menuItems.get(recipe.menuItemId);
+      const ingredients = Array.from(this.recipeIngredientsMap.values())
+        .filter(i => i.recipeId === recipe.id);
+      return { ...recipe, menuItem, ingredients };
+    });
+  }
+
+  async getRecipe(id: string): Promise<RecipeWithIngredients | undefined> {
+    const recipe = this.recipesMap.get(id);
+    if (!recipe) return undefined;
+    const menuItem = this.menuItems.get(recipe.menuItemId);
+    const ingredients = Array.from(this.recipeIngredientsMap.values())
+      .filter(i => i.recipeId === recipe.id);
+    return { ...recipe, menuItem, ingredients };
+  }
+
+  async getRecipeByMenuItem(menuItemId: string): Promise<RecipeWithIngredients | undefined> {
+    const recipe = Array.from(this.recipesMap.values()).find(r => r.menuItemId === menuItemId);
+    if (!recipe) return undefined;
+    const menuItem = this.menuItems.get(recipe.menuItemId);
+    const ingredients = Array.from(this.recipeIngredientsMap.values())
+      .filter(i => i.recipeId === recipe.id);
+    return { ...recipe, menuItem, ingredients };
+  }
+
+  async createRecipe(recipe: InsertRecipe): Promise<Recipe> {
+    const id = randomUUID();
+    const newRecipe: Recipe = {
+      id,
+      menuItemId: recipe.menuItemId,
+      notes: recipe.notes ?? null,
+    };
+    this.recipesMap.set(id, newRecipe);
+    return newRecipe;
+  }
+
+  async updateRecipe(id: string, recipe: Partial<InsertRecipe>): Promise<Recipe | undefined> {
+    const existing = this.recipesMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...recipe } as Recipe;
+    this.recipesMap.set(id, updated);
+    return updated;
+  }
+
+  async deleteRecipe(id: string): Promise<boolean> {
+    Array.from(this.recipeIngredientsMap.entries())
+      .filter(([_, i]) => i.recipeId === id)
+      .forEach(([key]) => this.recipeIngredientsMap.delete(key));
+    return this.recipesMap.delete(id);
+  }
+
+  // Recipe Ingredients
+  async getRecipeIngredients(recipeId: string): Promise<RecipeIngredient[]> {
+    return Array.from(this.recipeIngredientsMap.values())
+      .filter(i => i.recipeId === recipeId);
+  }
+
+  async createRecipeIngredient(ingredient: InsertRecipeIngredient): Promise<RecipeIngredient> {
+    const id = randomUUID();
+    const newIngredient: RecipeIngredient = {
+      id,
+      recipeId: ingredient.recipeId,
+      inventoryItemId: ingredient.inventoryItemId ?? null,
+      ingredientName: ingredient.ingredientName,
+      quantity: ingredient.quantity,
+      unit: ingredient.unit,
+      unitCost: ingredient.unitCost ?? "0",
+    };
+    this.recipeIngredientsMap.set(id, newIngredient);
+    return newIngredient;
+  }
+
+  async updateRecipeIngredient(id: string, ingredient: Partial<InsertRecipeIngredient>): Promise<RecipeIngredient | undefined> {
+    const existing = this.recipeIngredientsMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...ingredient } as RecipeIngredient;
+    this.recipeIngredientsMap.set(id, updated);
+    return updated;
+  }
+
+  async deleteRecipeIngredient(id: string): Promise<boolean> {
+    return this.recipeIngredientsMap.delete(id);
   }
 
   // ==================== INVENTORY ====================

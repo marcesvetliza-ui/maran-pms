@@ -598,6 +598,7 @@ export const restaurantTables = pgTable("restaurant_tables", {
   status: text("status").$type<TableStatus>().notNull().default("available"),
   positionX: integer("position_x").default(0),
   positionY: integer("position_y").default(0),
+  hasWindow: text("has_window").default("false"),
   isActive: text("is_active").default("true"),
 });
 
@@ -673,6 +674,9 @@ export type MenuItemWithCategory = MenuItem & {
 export type OrderStatus = "open" | "in_progress" | "served" | "closed" | "cancelled";
 export type OrderType = "dine_in" | "room_service" | "takeaway";
 
+export type ReceiptType = "ticket" | "factura_a" | "factura_b" | "factura_c" | "nota_credito";
+export type RestaurantPaymentMethod = "efectivo" | "tarjeta_debito" | "tarjeta_credito" | "transferencia" | "cuenta_habitacion" | "mercadopago";
+
 export const restaurantOrders = pgTable("restaurant_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull(),
@@ -690,6 +694,8 @@ export const restaurantOrders = pgTable("restaurant_orders", {
   closedAt: text("closed_at"),
   chargedToRoom: text("charged_to_room").default("false"),
   roomNumber: text("room_number"),
+  receiptType: text("receipt_type").$type<ReceiptType>(),
+  paymentMethod: text("payment_method").$type<RestaurantPaymentMethod>(),
 });
 
 export const insertRestaurantOrderSchema = createInsertSchema(restaurantOrders).omit({ id: true });
@@ -723,6 +729,50 @@ export type RestaurantOrderWithDetails = RestaurantOrder & {
   table?: RestaurantTableWithArea;
   guest?: Guest;
   items: OrderItemWithMenuItem[];
+};
+
+// Restaurant Time Slots (configurable reservation turns)
+export const restaurantTimeSlots = pgTable("restaurant_time_slots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  time: text("time").notNull(),
+  label: text("label"),
+  isActive: text("is_active").default("true"),
+  displayOrder: integer("display_order").default(0),
+});
+
+export const insertRestaurantTimeSlotSchema = createInsertSchema(restaurantTimeSlots).omit({ id: true });
+export type InsertRestaurantTimeSlot = z.infer<typeof insertRestaurantTimeSlotSchema>;
+export type RestaurantTimeSlot = typeof restaurantTimeSlots.$inferSelect;
+
+// Recipes (ingredients per dish)
+export const recipes = pgTable("recipes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  menuItemId: varchar("menu_item_id").notNull(),
+  notes: text("notes"),
+});
+
+export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true });
+export type InsertRecipe = z.infer<typeof insertRecipeSchema>;
+export type Recipe = typeof recipes.$inferSelect;
+
+// Recipe Ingredients
+export const recipeIngredients = pgTable("recipe_ingredients", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  recipeId: varchar("recipe_id").notNull(),
+  inventoryItemId: varchar("inventory_item_id"),
+  ingredientName: text("ingredient_name").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
+  unit: text("unit").notNull(),
+  unitCost: decimal("unit_cost", { precision: 10, scale: 2 }).default("0"),
+});
+
+export const insertRecipeIngredientSchema = createInsertSchema(recipeIngredients).omit({ id: true });
+export type InsertRecipeIngredient = z.infer<typeof insertRecipeIngredientSchema>;
+export type RecipeIngredient = typeof recipeIngredients.$inferSelect;
+
+export type RecipeWithIngredients = Recipe & {
+  menuItem?: MenuItem;
+  ingredients: RecipeIngredient[];
 };
 
 // ==================== INVENTORY MODULE ====================

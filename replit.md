@@ -90,7 +90,27 @@ Preferred communication style: Simple, everyday language.
 - **esbuild**: Production server bundling
 - **TypeScript**: Type checking across the stack
 
-## Recent Changes (January 2026)
+## Recent Changes (March 2026)
+
+### Restaurant Module Adjustments (PDF-driven)
+- **Floor Plan Editor**: Drag & drop table positioning on 8x6 grid, edit mode toggle, add/delete tables
+- **Window Attribute**: `hasWindow` boolean on tables, visible as sky-blue badge in floor plan and reservation selectors
+- **Configurable Time Slots**: Admin dialog to define reservation turns (e.g., 20:00, 20:15, 22:00); when configured, reservations show a dropdown instead of free-form time input
+- **Reservation Search & Sort**: Search by guest name + alphabetical sorting in reservations tab
+- **Editable Covers**: Guest count field is now free-form when opening a table
+- **Opening Time in Folio**: Order dialog header shows opened-at time and cover count
+- **Menu CRUD**: Full create/edit/delete for categories and menu items with display order
+- **Category Ordering**: Categories sorted by configurable `displayOrder` (suggested: 1-Bebidas, 2-Entradas, 3-Principales, 4-Postres)
+- **Billing at Close**: Close dialog now requires receipt type (Ticket/Factura A/B/C/Nota Credito) and payment method (Efectivo/Tarjeta Debito/Credito/Transferencia/Cuenta Habitacion/MercadoPago)
+- **ARCA Integration Prep**: `receiptType` and `paymentMethod` fields stored on orders for future external billing integration
+- **Recipes & Costs Tab**: New tab for loading recipes per dish (ingredients with quantities and unit costs), automatic cost calculation, gross margin report per product
+
+### Schema Changes
+- `restaurant_tables`: Added `has_window` column
+- `restaurant_orders`: Added `receipt_type` and `payment_method` columns
+- New tables: `restaurant_time_slots`, `recipes`, `recipe_ingredients`
+
+## Previous Changes (January 2026)
 
 ### Planning Calendar - Source Colors
 - Reservations now display different colors based on their source (origin):

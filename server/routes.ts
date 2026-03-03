@@ -1920,7 +1920,7 @@ Only respond with the JSON object.`;
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
       
-      const { chargeToRoom, roomNumber, reservationId } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, receiptType, paymentMethod } = req.body;
       
       // Update order as closed
       const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
@@ -1928,6 +1928,8 @@ Only respond with the JSON object.`;
         closedAt: new Date().toISOString(),
         chargedToRoom: chargeToRoom ? "true" : "false",
         roomNumber: roomNumber || null,
+        receiptType: receiptType || null,
+        paymentMethod: paymentMethod || null,
       });
       
       // If charging to room, create a charge on the reservation
@@ -2061,6 +2063,142 @@ Only respond with the JSON object.`;
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting table reservation" });
+    }
+  });
+
+  // Restaurant Time Slots
+  app.get("/api/restaurant/time-slots", async (req, res) => {
+    try {
+      const slots = await storage.getRestaurantTimeSlots();
+      res.json(slots);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching time slots" });
+    }
+  });
+
+  app.post("/api/restaurant/time-slots", async (req, res) => {
+    try {
+      const slot = await storage.createRestaurantTimeSlot(req.body);
+      res.status(201).json(slot);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating time slot" });
+    }
+  });
+
+  app.patch("/api/restaurant/time-slots/:id", async (req, res) => {
+    try {
+      const slot = await storage.updateRestaurantTimeSlot(req.params.id, req.body);
+      if (!slot) return res.status(404).json({ error: "Time slot not found" });
+      res.json(slot);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating time slot" });
+    }
+  });
+
+  app.delete("/api/restaurant/time-slots/:id", async (req, res) => {
+    try {
+      await storage.deleteRestaurantTimeSlot(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting time slot" });
+    }
+  });
+
+  // Recipes
+  app.get("/api/restaurant/recipes", async (req, res) => {
+    try {
+      const recipes = await storage.getRecipes();
+      res.json(recipes);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching recipes" });
+    }
+  });
+
+  app.get("/api/restaurant/recipes/:id", async (req, res) => {
+    try {
+      const recipe = await storage.getRecipe(req.params.id);
+      if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+      res.json(recipe);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching recipe" });
+    }
+  });
+
+  app.get("/api/restaurant/recipes/by-menu-item/:menuItemId", async (req, res) => {
+    try {
+      const recipe = await storage.getRecipeByMenuItem(req.params.menuItemId);
+      res.json(recipe || null);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching recipe" });
+    }
+  });
+
+  app.post("/api/restaurant/recipes", async (req, res) => {
+    try {
+      const recipe = await storage.createRecipe(req.body);
+      res.status(201).json(recipe);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating recipe" });
+    }
+  });
+
+  app.patch("/api/restaurant/recipes/:id", async (req, res) => {
+    try {
+      const recipe = await storage.updateRecipe(req.params.id, req.body);
+      if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+      res.json(recipe);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating recipe" });
+    }
+  });
+
+  app.delete("/api/restaurant/recipes/:id", async (req, res) => {
+    try {
+      await storage.deleteRecipe(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting recipe" });
+    }
+  });
+
+  // Recipe Ingredients
+  app.get("/api/restaurant/recipes/:recipeId/ingredients", async (req, res) => {
+    try {
+      const ingredients = await storage.getRecipeIngredients(req.params.recipeId);
+      res.json(ingredients);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching ingredients" });
+    }
+  });
+
+  app.post("/api/restaurant/recipes/:recipeId/ingredients", async (req, res) => {
+    try {
+      const ingredient = await storage.createRecipeIngredient({
+        ...req.body,
+        recipeId: req.params.recipeId,
+      });
+      res.status(201).json(ingredient);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating ingredient" });
+    }
+  });
+
+  app.patch("/api/restaurant/recipe-ingredients/:id", async (req, res) => {
+    try {
+      const ingredient = await storage.updateRecipeIngredient(req.params.id, req.body);
+      if (!ingredient) return res.status(404).json({ error: "Ingredient not found" });
+      res.json(ingredient);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating ingredient" });
+    }
+  });
+
+  app.delete("/api/restaurant/recipe-ingredients/:id", async (req, res) => {
+    try {
+      await storage.deleteRecipeIngredient(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting ingredient" });
     }
   });
 
