@@ -1,15 +1,32 @@
-# HotelPro - Hotel Management System
+# Maran Suite System - Hotel Management System
 
 ## Overview
 
-HotelPro is a full-stack hotel management system built for managing reservations, rooms, guests, and daily operations like check-in/check-out. The application is designed in Spanish (es) and follows Material Design principles for efficient data handling and clear information hierarchy.
+Maran Suite System is a full-stack hospitality management suite for Maran Suites & Towers (35 rooms, 5 floors). The application is designed in Spanish (es) and follows Material Design principles for efficient data handling and clear information hierarchy. It is being developed as a modular commercial product.
 
 The system provides:
 - Dashboard with occupancy metrics and quick actions
 - Room and room type management
-- Guest registration and management
+- Guest and company registration and management
 - Reservation workflow (create, modify, check-in, check-out)
 - Visual planning calendar for room availability
+- Restaurant POS with floor plan, menu, orders, recipes & costs
+- SPA management with services, agenda, products
+- Events management with quotation, BEO, liquidation
+- Coworking spaces, memberships, daily passes, meeting rooms
+- Housekeeping and Maintenance modules
+- Inventory management (transversal across areas)
+- Administration module
+
+## Sidebar Navigation Structure
+
+- **Dashboard** (top level)
+- **Hotel** (collapsible): Planning, Reservas, Reserva Rápida, Check-in, Check-out, Habitaciones, Tarifas, Paquetes, OTAs, Grupos, Reseñas
+- **Base de Datos**: Huéspedes, Empresas (shared across all modules)
+- **Servicios**: Restaurante, SPA, Eventos, Coworking
+- **Operaciones**: Housekeeping, Mantenimiento, Inventario
+- **Administración**: Admin module
+- **Footer**: Configuración
 
 ## User Preferences
 
