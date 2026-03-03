@@ -836,8 +836,8 @@ export class MemStorage implements IStorage {
 
     // Restaurant Areas - Dos secciones del plano
     const restaurantAreas: RestaurantArea[] = [
-      { id: "area1", name: "Sector Rectangular (Mesas 1-18)", areaType: "indoor", capacity: 72, isActive: "true", notes: "Mesas cuadradas" },
-      { id: "area2", name: "Sector Curvo (Mesas 19-32)", areaType: "indoor", capacity: 56, isActive: "true", notes: "Mesas redondas" },
+      { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor", capacity: 72, isActive: "true", notes: "Mesas cuadradas" },
+      { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor", capacity: 56, isActive: "true", notes: "Mesas redondas" },
     ];
     restaurantAreas.forEach((a) => this.restaurantAreas.set(a.id, a));
 
@@ -894,12 +894,13 @@ export class MemStorage implements IStorage {
     ];
     restaurantTables.forEach((t) => this.restaurantTables.set(t.id, t));
 
-    // Menu Categories
+    // Menu Categories (orden: 1-Bebidas sin alcohol, 2-Bebidas con alcohol, 3-Entradas, 4-Principales, 5-Postres)
     const menuCategories: MenuCategory[] = [
-      { id: "mc1", name: "Entradas", description: "Para comenzar", displayOrder: 1, isActive: "true" },
-      { id: "mc2", name: "Platos Principales", description: "Carnes, pastas y pescados", displayOrder: 2, isActive: "true" },
-      { id: "mc3", name: "Postres", description: "Dulces y helados", displayOrder: 3, isActive: "true" },
-      { id: "mc4", name: "Bebidas", description: "Refrescos, vinos y cocktails", displayOrder: 4, isActive: "true" },
+      { id: "mc5", name: "Bebidas sin Alcohol", description: "Aguas, gaseosas y jugos", displayOrder: 1, isActive: "true" },
+      { id: "mc6", name: "Bebidas con Alcohol", description: "Vinos, cervezas y cocktails", displayOrder: 2, isActive: "true" },
+      { id: "mc1", name: "Entradas", description: "Para comenzar", displayOrder: 3, isActive: "true" },
+      { id: "mc2", name: "Platos Principales", description: "Carnes, pastas y pescados", displayOrder: 4, isActive: "true" },
+      { id: "mc3", name: "Postres", description: "Dulces y helados", displayOrder: 5, isActive: "true" },
     ];
     menuCategories.forEach((c) => this.menuCategories.set(c.id, c));
 
@@ -915,10 +916,12 @@ export class MemStorage implements IStorage {
       { id: "mi8", categoryId: "mc3", name: "Flan con Dulce de Leche", description: "Casero", price: "2800.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: ["lacteos", "huevo"], displayOrder: 1 },
       { id: "mi9", categoryId: "mc3", name: "Helado (3 bochas)", description: "Sabores a eleccion", price: "3200.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: ["lacteos"], displayOrder: 2 },
       { id: "mi10", categoryId: "mc3", name: "Tiramisu", description: "Postre italiano clasico", price: "4500.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: ["gluten", "lacteos", "huevo"], displayOrder: 3 },
-      { id: "mi11", categoryId: "mc4", name: "Agua Mineral", description: "Con o sin gas 500ml", price: "1200.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
-      { id: "mi12", categoryId: "mc4", name: "Gaseosa", description: "Coca-Cola, Sprite, Fanta", price: "1500.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 2 },
-      { id: "mi13", categoryId: "mc4", name: "Copa de Vino Malbec", description: "Bodega Luigi Bosca", price: "3500.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
-      { id: "mi14", categoryId: "mc4", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: ["gluten"], displayOrder: 4 },
+      { id: "mi11", categoryId: "mc5", name: "Agua Mineral", description: "Con o sin gas 500ml", price: "1200.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
+      { id: "mi12", categoryId: "mc5", name: "Gaseosa", description: "Coca-Cola, Sprite, Fanta", price: "1500.00", preparationTime: 1, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 2 },
+      { id: "mi15", categoryId: "mc5", name: "Jugo de Naranja", description: "Exprimido natural", price: "1800.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
+      { id: "mi13", categoryId: "mc6", name: "Copa de Vino Malbec", description: "Bodega Luigi Bosca", price: "3500.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
+      { id: "mi14", categoryId: "mc6", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: ["gluten"], displayOrder: 2 },
+      { id: "mi16", categoryId: "mc6", name: "Fernet con Cola", description: "Branca con Coca-Cola", price: "3000.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
     ];
     menuItems.forEach((i) => this.menuItems.set(i.id, i));
 
