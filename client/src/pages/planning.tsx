@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -151,6 +151,26 @@ function getSourceLabel(source: ReservationSource): string {
       return source;
   }
 }
+
+const featureIconMap: Record<string, { icon: typeof Accessibility; label: string }> = {
+  accessible: { icon: Accessibility, label: "Accesible" },
+  balcony: { icon: Mountain, label: "Balcón" },
+  sofa_bed: { icon: Sofa, label: "Sofá cama" },
+  living_room: { icon: Armchair, label: "Living" },
+  twin_config: { icon: BedDouble, label: "Config. twin" },
+  separable_bed: { icon: ArrowLeftRight, label: "Camas separables" },
+  extra_bed: { icon: BedSingle, label: "Cama extra" },
+  shower_only: { icon: Droplets, label: "Solo ducha" },
+};
+
+const bedConfigLabels: Record<string, string> = {
+  MAT: "Matrimonial",
+  TWIN: "Twin",
+  MAT_CC: "Matrimonial + Cama cucheta",
+  TWIN_CC: "Twin + Cama cucheta",
+  MAT_EXTRA: "Matrimonial + Extra",
+  MAT_CC_EXTRA: "Matrimonial + CC + Extra",
+};
 
 function Legend() {
   const statusItems: { status: PlanningCellStatus; label: string }[] = [
@@ -812,10 +832,52 @@ export default function PlanningPage() {
                         {groupedRooms[floor]?.map((room) => (
                           <tr key={room.id} className="hover:bg-muted/20" data-testid={`row-room-${room.id}`}>
                             <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r">
-                              <div className="flex flex-col">
-                                <span className="font-medium text-sm">{room.roomNumber}</span>
-                                <span className="text-xs text-muted-foreground">{room.roomType.name}</span>
-                              </div>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex flex-col cursor-default" data-testid={`room-header-${room.id}`}>
+                                    <span className="font-medium text-sm">{room.roomNumber}</span>
+                                    <span className="text-xs text-muted-foreground">{room.roomType.name}</span>
+                                    {room.bedConfig && (
+                                      <span className="text-[10px] text-muted-foreground">{room.bedConfig}</span>
+                                    )}
+                                    {room.features && room.features.length > 0 && (
+                                      <div className="flex flex-row items-center gap-0.5 mt-0.5">
+                                        {room.features.map((feature) => {
+                                          const mapped = featureIconMap[feature];
+                                          if (!mapped) return null;
+                                          const IconComp = mapped.icon;
+                                          return <span key={feature} title={mapped.label}><IconComp className="h-3 w-3 text-muted-foreground" /></span>;
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-[220px]">
+                                  <div className="text-xs space-y-1">
+                                    <div className="font-semibold">{room.roomNumber} - {room.roomType.name}</div>
+                                    <div>Piso: {room.floor}</div>
+                                    {room.bedConfig && (
+                                      <div>Camaje: {bedConfigLabels[room.bedConfig] || room.bedConfig}</div>
+                                    )}
+                                    {room.maxOccupancy && (
+                                      <div>Ocupación máx: {room.maxOccupancy} personas</div>
+                                    )}
+                                    {room.features && room.features.length > 0 && (
+                                      <div>
+                                        <span className="font-medium">Características:</span>
+                                        <ul className="list-disc pl-3 mt-0.5">
+                                          {room.features.map((f) => (
+                                            <li key={f}>{featureIconMap[f]?.label || f}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                    {room.notes && (
+                                      <div className="border-t pt-1 mt-1 text-muted-foreground">{room.notes}</div>
+                                    )}
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
                             </td>
                             {data.days.map((day, dayIndex) => {
                               const status = data.occupancy[room.id]?.[dayIndex] || "available";
@@ -843,8 +905,14 @@ export default function PlanningPage() {
                                         data-testid={`cell-${room.id}-${day}`}
                                       >
                                         {reservation ? (
-                                          <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
+                                          <span className="text-[10px] font-medium truncate px-1 max-w-[56px] inline-flex items-center gap-0.5">
+                                            {reservation.earlyCheckIn && day === reservation.checkIn && (
+                                              <Sunrise className="h-3 w-3 text-orange-400 flex-shrink-0" data-testid="icon-early-checkin" />
+                                            )}
                                             {reservation.isGroup ? "GRP" : reservation.guestName.split(" ")[0]}
+                                            {reservation.lateCheckOut && day === reservation.checkOut && (
+                                              <Sunset className="h-3 w-3 text-purple-400 flex-shrink-0" data-testid="icon-late-checkout" />
+                                            )}
                                           </span>
                                         ) : isClickable ? (
                                           <Plus className="h-3 w-3 text-green-600 dark:text-green-400 opacity-0 group-hover:opacity-100" />
@@ -869,6 +937,16 @@ export default function PlanningPage() {
                                             <div className="text-muted-foreground">
                                               Origen: {getSourceLabel(reservation.source)}
                                             </div>
+                                            {reservation.earlyCheckIn && (
+                                              <div className="text-orange-400 font-medium">
+                                                Early Check-in: {reservation.earlyCheckInTime || "--"} hs
+                                              </div>
+                                            )}
+                                            {reservation.lateCheckOut && (
+                                              <div className="text-purple-400 font-medium">
+                                                Late Check-out: {reservation.lateCheckOutTime || "--"} hs
+                                              </div>
+                                            )}
                                             <div className="border-t pt-1 mt-1 text-primary">
                                               Clic para ver detalle
                                             </div>

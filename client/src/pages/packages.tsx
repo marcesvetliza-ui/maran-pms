@@ -101,7 +101,7 @@ function PackageFormDialog({
       const res = await apiRequest("POST", "/api/packages", {
         name,
         description,
-        roomTypeId: roomTypeId || null,
+        roomTypeId: roomTypeId && roomTypeId !== "any" ? roomTypeId : null,
         nights,
         basePrice: parseFloat(basePrice).toFixed(2),
         discountPercent: discountPercent ? parseFloat(discountPercent).toFixed(2) : null,
@@ -132,7 +132,7 @@ function PackageFormDialog({
       await apiRequest("PATCH", `/api/packages/${pkg!.id}`, {
         name,
         description,
-        roomTypeId: roomTypeId || null,
+        roomTypeId: roomTypeId && roomTypeId !== "any" ? roomTypeId : null,
         nights,
         basePrice: parseFloat(basePrice).toFixed(2),
         discountPercent: discountPercent ? parseFloat(discountPercent).toFixed(2) : null,
@@ -225,7 +225,7 @@ function PackageFormDialog({
                   <SelectValue placeholder="Cualquier tipo" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Cualquier tipo</SelectItem>
+                  <SelectItem value="any">Cualquier tipo</SelectItem>
                   {roomTypes?.map((rt) => (
                     <SelectItem key={rt.id} value={rt.id}>
                       {rt.name}

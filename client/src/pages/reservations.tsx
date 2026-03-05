@@ -19,6 +19,8 @@ import {
   LogOut,
   Copy,
   ArrowRightLeft,
+  Sunrise,
+  Sunset,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -57,10 +59,12 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { ReservationWithDetails, Guest, RoomWithType, RoomType, RatePlan, InsertReservation, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod } from "@shared/schema";
+import { GuestSelector, CompanySelector } from "@/components/entity-selector";
+import type { ReservationWithDetails, Guest, Company, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType } from "@shared/schema";
 
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -100,11 +104,19 @@ function ReservationFormDialog({
   const today = new Date().toISOString().split("T")[0];
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
 
+  const [selectedGuest, setSelectedGuest] = useState<Guest | null>(
+    reservation?.guest || null
+  );
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(
+    reservation?.company || null
+  );
+
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || "");
   
   const [formData, setFormData] = useState<Partial<InsertReservation>>({
     reservationCode: reservation?.reservationCode || "",
     guestId: reservation?.guestId || "",
+    companyId: reservation?.companyId || "",
     roomTypeId: reservation?.roomTypeId || "",
     roomId: reservation?.roomId || "",
     ratePlanId: reservation?.ratePlanId || "",
@@ -119,8 +131,62 @@ function ReservationFormDialog({
     baseRatePerNight: reservation?.baseRatePerNight || "",
     finalRatePerNight: reservation?.finalRatePerNight || "",
     totalRoomAmount: reservation?.totalRoomAmount || "",
+    bedTypeId: reservation?.bedTypeId || null,
+    bedTypeNotes: reservation?.bedTypeNotes || "",
+    earlyCheckIn: reservation?.earlyCheckIn || false,
+    earlyCheckInTime: reservation?.earlyCheckInTime || "",
+    earlyCheckInCharge: reservation?.earlyCheckInCharge || "",
+    lateCheckOut: reservation?.lateCheckOut || false,
+    lateCheckOutTime: reservation?.lateCheckOutTime || "",
+    lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
     notes: reservation?.notes || "",
     createdAt: reservation?.createdAt || new Date().toISOString(),
+  });
+
+  const createGuestMutation = useMutation({
+    mutationFn: async (guest: InsertGuest): Promise<Guest> => {
+      const res = await apiRequest("POST", "/api/guests", guest);
+      return res.json();
+    },
+    onSuccess: (newGuest: Guest) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+      setSelectedGuest(newGuest);
+      setFormData((prev) => ({ ...prev, guestId: newGuest.id }));
+      toast({
+        title: "Huesped creado",
+        description: `${newGuest.firstName} ${newGuest.lastName} ha sido registrado.`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo crear el huesped.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const createCompanyMutation = useMutation({
+    mutationFn: async (company: InsertCompany): Promise<Company> => {
+      const res = await apiRequest("POST", "/api/companies", company);
+      return res.json();
+    },
+    onSuccess: (newCompany: Company) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      setSelectedCompany(newCompany);
+      setFormData((prev) => ({ ...prev, companyId: newCompany.id }));
+      toast({
+        title: "Empresa creada",
+        description: `${newCompany.razonSocial} ha sido registrada.`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo crear la empresa.",
+        variant: "destructive",
+      });
+    },
   });
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
@@ -131,6 +197,10 @@ function ReservationFormDialog({
       return res.json();
     },
     enabled: !!selectedRoomTypeId,
+  });
+
+  const { data: bedTypes } = useQuery<BedType[]>({
+    queryKey: ["/api/bed-types"],
   });
 
   const { data: generatedCode } = useQuery<{ code: string }>({
@@ -292,43 +362,49 @@ function ReservationFormDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="guest">Huésped</Label>
-                <Select
-                  value={formData.guestId}
-                  onValueChange={(value) => setFormData({ ...formData, guestId: value })}
-                >
-                  <SelectTrigger data-testid="select-guest">
-                    <SelectValue placeholder="Seleccionar huésped" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {guests.map((guest) => (
-                      <SelectItem key={guest.id} value={guest.id}>
-                        {guest.firstName} {guest.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="source">Origen</Label>
-                <Select
-                  value={formData.source}
-                  onValueChange={(value) => setFormData({ ...formData, source: value as ReservationSource })}
-                >
-                  <SelectTrigger data-testid="select-source">
-                    <SelectValue placeholder="Origen" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="directo">Directo</SelectItem>
-                    <SelectItem value="web">Web</SelectItem>
-                    <SelectItem value="ota">OTA (Booking, etc.)</SelectItem>
-                    <SelectItem value="empresa">Empresa</SelectItem>
-                    <SelectItem value="telefono">Teléfono</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <GuestSelector
+              selectedGuest={selectedGuest}
+              onSelect={(guest) => {
+                setSelectedGuest(guest);
+                setFormData((prev) => ({ ...prev, guestId: guest.id }));
+              }}
+              onCreateNew={(guest) => createGuestMutation.mutate(guest)}
+              onClear={() => {
+                setSelectedGuest(null);
+                setFormData((prev) => ({ ...prev, guestId: "" }));
+              }}
+            />
+
+            <CompanySelector
+              selectedCompany={selectedCompany}
+              onSelect={(company) => {
+                setSelectedCompany(company);
+                setFormData((prev) => ({ ...prev, companyId: company.id }));
+              }}
+              onCreateNew={(company) => createCompanyMutation.mutate(company)}
+              onClear={() => {
+                setSelectedCompany(null);
+                setFormData((prev) => ({ ...prev, companyId: "" }));
+              }}
+            />
+
+            <div className="grid gap-2">
+              <Label htmlFor="source">Origen</Label>
+              <Select
+                value={formData.source}
+                onValueChange={(value) => setFormData({ ...formData, source: value as ReservationSource })}
+              >
+                <SelectTrigger data-testid="select-source">
+                  <SelectValue placeholder="Origen" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="directo">Directo</SelectItem>
+                  <SelectItem value="web">Web</SelectItem>
+                  <SelectItem value="ota">OTA (Booking, etc.)</SelectItem>
+                  <SelectItem value="empresa">Empresa</SelectItem>
+                  <SelectItem value="telefono">Teléfono</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -518,6 +594,127 @@ function ReservationFormDialog({
                   <p className="text-sm text-muted-foreground">Total Habitación</p>
                   <p className="text-2xl font-bold text-primary">${formData.totalRoomAmount || "0.00"}</p>
                 </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4">
+              <Label className="text-sm font-semibold">Preferencias de camaje</Label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="bedType">Tipo de camaje</Label>
+                  <Select
+                    value={formData.bedTypeId ? String(formData.bedTypeId) : ""}
+                    onValueChange={(value) => setFormData({ ...formData, bedTypeId: parseInt(value) })}
+                  >
+                    <SelectTrigger data-testid="select-bed-type">
+                      <SelectValue placeholder="Seleccionar tipo de camaje" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bedTypes?.filter(bt => bt.isActive).map((bt) => (
+                        <SelectItem key={bt.id} value={String(bt.id)}>
+                          {bt.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="bedTypeNotes">Notas de camaje</Label>
+                  <Input
+                    id="bedTypeNotes"
+                    value={formData.bedTypeNotes || ""}
+                    onChange={(e) => setFormData({ ...formData, bedTypeNotes: e.target.value })}
+                    placeholder="Preferencias especiales..."
+                    data-testid="input-bed-type-notes"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 border rounded-lg p-3">
+              <Label className="text-sm font-semibold">Servicios especiales</Label>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sunrise className="h-4 w-4 text-orange-500" />
+                    <Label htmlFor="earlyCheckIn" className="cursor-pointer">Early Check-in</Label>
+                    <span className="text-xs text-muted-foreground">(Estándar: 12:00 hs)</span>
+                  </div>
+                  <Switch
+                    id="earlyCheckIn"
+                    checked={!!formData.earlyCheckIn}
+                    onCheckedChange={(checked) => setFormData({ ...formData, earlyCheckIn: checked, ...(!checked && { earlyCheckInTime: "", earlyCheckInCharge: "" }) })}
+                    data-testid="switch-early-checkin"
+                  />
+                </div>
+                {formData.earlyCheckIn && (
+                  <div className="grid grid-cols-2 gap-2 pl-6">
+                    <div>
+                      <Label htmlFor="earlyCheckInTime" className="text-xs">Hora acordada</Label>
+                      <Input
+                        id="earlyCheckInTime"
+                        type="time"
+                        value={formData.earlyCheckInTime || ""}
+                        onChange={(e) => setFormData({ ...formData, earlyCheckInTime: e.target.value })}
+                        data-testid="input-early-checkin-time"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="earlyCheckInCharge" className="text-xs">Cargo (vacío = cortesía)</Label>
+                      <Input
+                        id="earlyCheckInCharge"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={formData.earlyCheckInCharge || ""}
+                        onChange={(e) => setFormData({ ...formData, earlyCheckInCharge: e.target.value })}
+                        data-testid="input-early-checkin-charge"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sunset className="h-4 w-4 text-purple-500" />
+                    <Label htmlFor="lateCheckOut" className="cursor-pointer">Late Check-out</Label>
+                    <span className="text-xs text-muted-foreground">(Estándar: 11:00 hs)</span>
+                  </div>
+                  <Switch
+                    id="lateCheckOut"
+                    checked={!!formData.lateCheckOut}
+                    onCheckedChange={(checked) => setFormData({ ...formData, lateCheckOut: checked, ...(!checked && { lateCheckOutTime: "", lateCheckOutCharge: "" }) })}
+                    data-testid="switch-late-checkout"
+                  />
+                </div>
+                {formData.lateCheckOut && (
+                  <div className="grid grid-cols-2 gap-2 pl-6">
+                    <div>
+                      <Label htmlFor="lateCheckOutTime" className="text-xs">Hora acordada</Label>
+                      <Input
+                        id="lateCheckOutTime"
+                        type="time"
+                        value={formData.lateCheckOutTime || ""}
+                        onChange={(e) => setFormData({ ...formData, lateCheckOutTime: e.target.value })}
+                        data-testid="input-late-checkout-time"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="lateCheckOutCharge" className="text-xs">Cargo (vacío = cortesía)</Label>
+                      <Input
+                        id="lateCheckOutCharge"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={formData.lateCheckOutCharge || ""}
+                        onChange={(e) => setFormData({ ...formData, lateCheckOutCharge: e.target.value })}
+                        data-testid="input-late-checkout-charge"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

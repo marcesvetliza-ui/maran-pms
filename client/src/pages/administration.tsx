@@ -8,6 +8,7 @@ import { es } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -30,7 +31,8 @@ import {
   Save,
   History,
 } from "lucide-react";
-import type { SystemUser, SystemSetting, AuditLog, SystemUserRole } from "@shared/schema";
+import { Bed, Check } from "lucide-react";
+import type { SystemUser, SystemSetting, AuditLog, SystemUserRole, BedType } from "@shared/schema";
 
 type DashboardStats = {
   totalUsers: number;
@@ -97,6 +99,9 @@ export default function AdministrationPage() {
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [editingSetting, setEditingSetting] = useState<SystemSetting | null>(null);
   const [filterModule, setFilterModule] = useState<string>("all");
+  const [isBedTypeDialogOpen, setIsBedTypeDialogOpen] = useState(false);
+  const [editingBedType, setEditingBedType] = useState<BedType | null>(null);
+  const [bedTypeForm, setBedTypeForm] = useState({ code: "", name: "", description: "" });
 
   const { data: dashboardStats, isLoading: loadingStats } = useQuery<DashboardStats>({
     queryKey: ["/api/admin/dashboard"],
@@ -112,6 +117,55 @@ export default function AdministrationPage() {
 
   const { data: auditLogs = [], isLoading: loadingLogs } = useQuery<AuditLog[]>({
     queryKey: ["/api/admin/audit-logs"],
+  });
+
+  const { data: bedTypesData = [], isLoading: loadingBedTypes } = useQuery<BedType[]>({
+    queryKey: ["/api/bed-types"],
+  });
+
+  const createBedTypeMutation = useMutation({
+    mutationFn: async (data: { code: string; name: string; description: string }) => {
+      return apiRequest("POST", "/api/bed-types", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bed-types"] });
+      setIsBedTypeDialogOpen(false);
+      setBedTypeForm({ code: "", name: "", description: "" });
+      toast({ title: "Tipo de camaje creado correctamente" });
+    },
+    onError: () => {
+      toast({ title: "Error al crear tipo de camaje", variant: "destructive" });
+    },
+  });
+
+  const updateBedTypeMutation = useMutation({
+    mutationFn: async (data: { id: number; code: string; name: string; description: string }) => {
+      const { id, ...rest } = data;
+      return apiRequest("PATCH", `/api/bed-types/${id}`, rest);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bed-types"] });
+      setIsBedTypeDialogOpen(false);
+      setEditingBedType(null);
+      setBedTypeForm({ code: "", name: "", description: "" });
+      toast({ title: "Tipo de camaje actualizado correctamente" });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar tipo de camaje", variant: "destructive" });
+    },
+  });
+
+  const toggleBedTypeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("DELETE", `/api/bed-types/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bed-types"] });
+      toast({ title: "Estado del tipo de camaje actualizado" });
+    },
+    onError: () => {
+      toast({ title: "Error al cambiar estado", variant: "destructive" });
+    },
   });
 
   const userForm = useForm<UserFormValues>({
@@ -313,6 +367,10 @@ export default function AdministrationPage() {
           <TabsTrigger value="settings" data-testid="tab-admin-settings">
             <Settings className="w-4 h-4 mr-2" />
             Configuracion
+          </TabsTrigger>
+          <TabsTrigger value="bed-types" data-testid="tab-admin-bed-types">
+            <Bed className="w-4 h-4 mr-2" />
+            Tipos de Camaje
           </TabsTrigger>
           <TabsTrigger value="audit" data-testid="tab-admin-audit">
             <History className="w-4 h-4 mr-2" />
@@ -599,6 +657,96 @@ export default function AdministrationPage() {
               </Card>
             ))
           )}
+        </TabsContent>
+
+        <TabsContent value="bed-types" className="space-y-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <h2 className="text-lg font-semibold">Tipos de Camaje</h2>
+            <Button
+              onClick={() => {
+                setEditingBedType(null);
+                setBedTypeForm({ code: "", name: "", description: "" });
+                setIsBedTypeDialogOpen(true);
+              }}
+              data-testid="button-new-bed-type"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Nuevo Tipo de Camaje
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="pt-6">
+              {loadingBedTypes ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Codigo</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Descripcion</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {bedTypesData.map((bt) => (
+                      <TableRow key={bt.id} data-testid={`row-bed-type-${bt.id}`}>
+                        <TableCell className="font-mono text-sm">{bt.code}</TableCell>
+                        <TableCell className="font-medium">{bt.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{bt.description || "-"}</TableCell>
+                        <TableCell>
+                          <Badge variant={bt.isActive ? "default" : "secondary"}>
+                            {bt.isActive ? "Activo" : "Inactivo"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => {
+                                setEditingBedType(bt);
+                                setBedTypeForm({
+                                  code: bt.code,
+                                  name: bt.name,
+                                  description: bt.description || "",
+                                });
+                                setIsBedTypeDialogOpen(true);
+                              }}
+                              data-testid={`button-edit-bed-type-${bt.id}`}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => toggleBedTypeMutation.mutate(bt.id)}
+                              data-testid={`button-toggle-bed-type-${bt.id}`}
+                            >
+                              {bt.isActive ? <Trash2 className="w-4 h-4" /> : <Check className="w-4 h-4" />}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {bedTypesData.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                          No hay tipos de camaje registrados
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="audit" className="space-y-4">
@@ -937,6 +1085,72 @@ export default function AdministrationPage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBedTypeDialogOpen} onOpenChange={setIsBedTypeDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingBedType ? "Editar Tipo de Camaje" : "Nuevo Tipo de Camaje"}
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (editingBedType) {
+                updateBedTypeMutation.mutate({ id: editingBedType.id, ...bedTypeForm });
+              } else {
+                createBedTypeMutation.mutate(bedTypeForm);
+              }
+            }}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label>Codigo</Label>
+              <Input
+                value={bedTypeForm.code}
+                onChange={(e) => setBedTypeForm({ ...bedTypeForm, code: e.target.value })}
+                placeholder="MAT, TWIN, etc."
+                data-testid="input-bed-type-code"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Nombre</Label>
+              <Input
+                value={bedTypeForm.name}
+                onChange={(e) => setBedTypeForm({ ...bedTypeForm, name: e.target.value })}
+                placeholder="Matrimonial, Twin, etc."
+                data-testid="input-bed-type-name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Descripcion</Label>
+              <Input
+                value={bedTypeForm.description}
+                onChange={(e) => setBedTypeForm({ ...bedTypeForm, description: e.target.value })}
+                placeholder="Descripcion del tipo de camaje"
+                data-testid="input-bed-type-description"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsBedTypeDialogOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={createBedTypeMutation.isPending || updateBedTypeMutation.isPending}
+                data-testid="button-save-bed-type"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {editingBedType ? "Guardar Cambios" : "Crear"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

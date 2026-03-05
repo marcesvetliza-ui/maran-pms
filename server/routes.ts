@@ -357,6 +357,51 @@ export async function registerRoutes(
     }
   });
 
+  // Bed Types
+  app.get("/api/bed-types", async (req, res) => {
+    try {
+      const bedTypes = await storage.getBedTypes();
+      res.json(bedTypes);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching bed types" });
+    }
+  });
+
+  app.post("/api/bed-types", async (req, res) => {
+    try {
+      const bedType = await storage.createBedType(req.body);
+      res.status(201).json(bedType);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating bed type" });
+    }
+  });
+
+  app.patch("/api/bed-types/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const bedType = await storage.updateBedType(id, req.body);
+      if (!bedType) {
+        return res.status(404).json({ error: "Bed type not found" });
+      }
+      res.json(bedType);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating bed type" });
+    }
+  });
+
+  app.delete("/api/bed-types/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await storage.deleteBedType(id);
+      if (!result) {
+        return res.status(404).json({ error: "Bed type not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting bed type" });
+    }
+  });
+
   // Reservations
   app.get("/api/reservations", async (req, res) => {
     try {
@@ -427,6 +472,27 @@ export async function registerRoutes(
         createdAt: req.body.createdAt || new Date().toISOString(),
       };
       const reservation = await storage.createReservation(data);
+
+      const today = new Date().toISOString().split("T")[0];
+      if (data.earlyCheckIn && data.earlyCheckInCharge && parseFloat(data.earlyCheckInCharge) > 0) {
+        await storage.createCharge({
+          reservationId: reservation.id,
+          description: `Early Check-in ${data.earlyCheckInTime || ""}`.trim(),
+          amount: data.earlyCheckInCharge,
+          date: today,
+          category: "otros",
+        });
+      }
+      if (data.lateCheckOut && data.lateCheckOutCharge && parseFloat(data.lateCheckOutCharge) > 0) {
+        await storage.createCharge({
+          reservationId: reservation.id,
+          description: `Late Check-out ${data.lateCheckOutTime || ""}`.trim(),
+          amount: data.lateCheckOutCharge,
+          date: today,
+          category: "otros",
+        });
+      }
+
       res.status(201).json(reservation);
     } catch (error) {
       res.status(500).json({ error: "Error creating reservation" });
@@ -435,10 +501,35 @@ export async function registerRoutes(
 
   app.patch("/api/reservations/:id", async (req, res) => {
     try {
+      const existing = await storage.getReservation(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Reservation not found" });
+      }
       const reservation = await storage.updateReservation(req.params.id, req.body);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+
+      const today = new Date().toISOString().split("T")[0];
+      if (req.body.earlyCheckIn && req.body.earlyCheckInCharge && parseFloat(req.body.earlyCheckInCharge) > 0 && !existing.earlyCheckIn) {
+        await storage.createCharge({
+          reservationId: reservation.id,
+          description: `Early Check-in ${req.body.earlyCheckInTime || ""}`.trim(),
+          amount: req.body.earlyCheckInCharge,
+          date: today,
+          category: "otros",
+        });
+      }
+      if (req.body.lateCheckOut && req.body.lateCheckOutCharge && parseFloat(req.body.lateCheckOutCharge) > 0 && !existing.lateCheckOut) {
+        await storage.createCharge({
+          reservationId: reservation.id,
+          description: `Late Check-out ${req.body.lateCheckOutTime || ""}`.trim(),
+          amount: req.body.lateCheckOutCharge,
+          date: today,
+          category: "otros",
+        });
+      }
+
       res.json(reservation);
     } catch (error) {
       res.status(500).json({ error: "Error updating reservation" });
@@ -604,9 +695,12 @@ export async function registerRoutes(
       }
       
       const charges = await storage.getCharges(req.params.id);
+      const payments = await storage.getPayments(req.params.id);
       const totalCharges = charges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+      const totalPayments = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
       const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
       const grandTotal = roomTotal + totalCharges;
+      const balance = grandTotal - totalPayments;
       
       res.json({
         reservationCode: reservation.reservationCode,
@@ -619,8 +713,10 @@ export async function registerRoutes(
         roomTotal,
         charges,
         totalCharges,
+        payments,
+        totalPayments,
         grandTotal,
-        balance: grandTotal,
+        balance,
       });
     } catch (error) {
       res.status(500).json({ error: "Error fetching folio" });
@@ -635,18 +731,23 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Reservation not found" });
       }
       
+      if (reservation.status !== "checked_in") {
+        return res.status(400).json({ error: "Solo se puede hacer check-out de reservas con estado checked_in" });
+      }
+
       // Get balance - if forceCheckout is true, skip balance check
       const forceCheckout = req.body.forceCheckout === true;
       if (!forceCheckout) {
         const chargesTotal = await storage.getChargesTotal(req.params.id);
+        const paymentsTotal = await storage.getPaymentsTotal(req.params.id);
         const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
-        const totalOwed = roomTotal + chargesTotal;
+        const balance = roomTotal + chargesTotal - paymentsTotal;
         
-        if (totalOwed > 0) {
+        if (balance > 0.01) {
           return res.status(400).json({ 
             error: "Saldo pendiente",
-            message: `La reserva tiene un saldo pendiente de $${totalOwed.toFixed(2)}. Liquide antes de hacer check-out.`,
-            balance: totalOwed
+            message: `La reserva tiene un saldo pendiente de $${balance.toFixed(2)}. Liquide antes de hacer check-out.`,
+            balance
           });
         }
       }
@@ -654,8 +755,8 @@ export async function registerRoutes(
       // Update reservation status
       await storage.updateReservation(req.params.id, { status: "checked_out" });
       
-      // Update room status to dirty (housekeeping will clean it)
-      await storage.updateRoom(reservation.roomId, { status: "dirty" });
+      // Update room status to cleaning
+      await storage.updateRoom(reservation.roomId, { status: "cleaning" });
       
       // Create housekeeping task for the room
       await storage.createCheckoutCleaningTask(reservation.roomId);
@@ -1267,19 +1368,29 @@ export async function registerRoutes(
       
       for (const reservation of group.reservations) {
         if (reservation.status === "checked_in") {
-          // Check balance before checkout
           const charges = await storage.getCharges(reservation.id);
           const payments = await storage.getPayments(reservation.id);
           const totalCharges = charges.reduce((sum: number, c) => sum + parseFloat(c.amount), 0);
           const totalPayments = payments.reduce((sum: number, p) => sum + parseFloat(p.amount), 0);
-          const balance = totalCharges - totalPayments;
+          const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+          const grandTotal = roomTotal + totalCharges;
+          const balance = grandTotal - totalPayments;
 
-          if (balance > 0) {
+          if (balance > 0.01) {
             results.failed++;
             results.errors.push(`Hab. ${reservation.room?.roomNumber}: saldo pendiente $${balance.toFixed(2)}`);
           } else {
             await storage.updateReservation(reservation.id, { status: "checked_out" });
             await storage.updateRoom(reservation.roomId, { status: "cleaning" });
+            try {
+              await storage.createHousekeepingTask({
+                roomId: reservation.roomId,
+                type: "checkout",
+                status: "pending",
+                priority: "high",
+                notes: `Check-out grupal - ${group.name}`,
+              });
+            } catch {}
             results.success++;
           }
         } else if (reservation.status === "checked_out") {
@@ -1378,6 +1489,83 @@ export async function registerRoutes(
       res.json(invoiceData);
     } catch (error) {
       res.status(500).json({ error: "Error generating group invoice" });
+    }
+  });
+
+  app.post("/api/groups/:groupId/payment", async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+
+      const { amount, method, reference, receiptType, distribution } = req.body;
+      if (!amount || !method) {
+        return res.status(400).json({ error: "amount and method are required" });
+      }
+
+      const totalAmount = parseFloat(amount);
+      if (totalAmount <= 0) {
+        return res.status(400).json({ error: "Amount must be positive" });
+      }
+
+      const checkedInReservations = group.reservations.filter(
+        r => r.status === "checked_in"
+      );
+
+      if (checkedInReservations.length === 0) {
+        return res.status(400).json({ error: "No hay reservas en casa para registrar pagos" });
+      }
+
+      if (distribution === "equal") {
+        const perRoom = totalAmount / checkedInReservations.length;
+        for (const reservation of checkedInReservations) {
+          await storage.createPayment({
+            reservationId: reservation.id,
+            amount: perRoom.toFixed(2),
+            method,
+            reference: reference || `Pago grupal - ${group.name}`,
+            date: new Date().toISOString().split("T")[0],
+          });
+        }
+      } else if (distribution === "proportional") {
+        let totalCost = 0;
+        const costs: { id: string; cost: number }[] = [];
+        for (const reservation of checkedInReservations) {
+          const charges = await storage.getCharges(reservation.id);
+          const chargesTotal = charges.reduce((sum: number, c) => sum + parseFloat(c.amount), 0);
+          const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+          const cost = roomTotal + chargesTotal;
+          costs.push({ id: reservation.id, cost });
+          totalCost += cost;
+        }
+        for (const item of costs) {
+          const proportion = totalCost > 0 ? item.cost / totalCost : 1 / costs.length;
+          const paymentAmount = (totalAmount * proportion).toFixed(2);
+          await storage.createPayment({
+            reservationId: item.id,
+            amount: paymentAmount,
+            method,
+            reference: reference || `Pago grupal - ${group.name}`,
+            date: new Date().toISOString().split("T")[0],
+          });
+        }
+      } else {
+        const perRoom = totalAmount / checkedInReservations.length;
+        for (const reservation of checkedInReservations) {
+          await storage.createPayment({
+            reservationId: reservation.id,
+            amount: perRoom.toFixed(2),
+            method,
+            reference: reference || `Pago grupal - ${group.name}`,
+            date: new Date().toISOString().split("T")[0],
+          });
+        }
+      }
+
+      res.json({ success: true, distributed: checkedInReservations.length });
+    } catch (error) {
+      res.status(500).json({ error: "Error processing group payment" });
     }
   });
 

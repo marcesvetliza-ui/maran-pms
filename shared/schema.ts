@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, date, timestamp, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -119,6 +119,21 @@ export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, cod
 export type InsertGuest = z.infer<typeof insertGuestSchema>;
 export type Guest = typeof guests.$inferSelect;
 
+// Bed Types (Tipos de Camaje)
+export const bedTypes = pgTable("bed_types", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  displayOrder: integer("display_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertBedTypeSchema = createInsertSchema(bedTypes).omit({ id: true, createdAt: true });
+export type InsertBedType = z.infer<typeof insertBedTypeSchema>;
+export type BedType = typeof bedTypes.$inferSelect;
+
 // Reservations
 export type ReservationStatus = "tentative" | "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
 export type DiscountType = "none" | "percent" | "fixed";
@@ -145,6 +160,14 @@ export const reservations = pgTable("reservations", {
   otaChannelId: varchar("ota_channel_id"),
   externalReservationId: text("external_reservation_id"),
   numberOfGuests: integer("number_of_guests").notNull().default(1),
+  bedTypeId: integer("bed_type_id"),
+  bedTypeNotes: text("bed_type_notes"),
+  earlyCheckIn: boolean("early_check_in").default(false),
+  earlyCheckInTime: text("early_check_in_time"),
+  earlyCheckInCharge: numeric("early_check_in_charge", { precision: 10, scale: 2 }),
+  lateCheckOut: boolean("late_check_out").default(false),
+  lateCheckOutTime: text("late_check_out_time"),
+  lateCheckOutCharge: numeric("late_check_out_charge", { precision: 10, scale: 2 }),
   notes: text("notes"),
   createdAt: text("created_at").notNull(),
   lastModifiedBy: varchar("last_modified_by"),
@@ -265,7 +288,7 @@ export type PlanningData = {
   rooms: RoomWithType[];
   days: string[];
   occupancy: Record<string, PlanningCellStatus[]>;
-  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string }>;
+  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null }>;
   cellReservations: Record<string, Record<string, string>>; // roomId -> date -> reservationId
   groupBlocks: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }>;
   cellGroupBlocks: Record<string, Record<string, string>>; // roomId -> date -> groupBlockId

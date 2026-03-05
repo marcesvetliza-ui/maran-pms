@@ -18,6 +18,8 @@ import {
   Printer,
   AlertCircle,
   CheckCircle,
+  CreditCard,
+  DollarSign,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,6 +51,16 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { 
@@ -496,6 +508,14 @@ export default function GroupDetailPage() {
   const [invoiceData, setInvoiceData] = useState<any>(null);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(false);
   const [showRoomingListDialog, setShowRoomingListDialog] = useState(false);
+  const [showCheckInConfirm, setShowCheckInConfirm] = useState(false);
+  const [showCheckOutConfirm, setShowCheckOutConfirm] = useState(false);
+  const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
+  const [groupPaymentAmount, setGroupPaymentAmount] = useState("");
+  const [groupPaymentMethod, setGroupPaymentMethod] = useState("");
+  const [groupPaymentReference, setGroupPaymentReference] = useState("");
+  const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
+  const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
 
   const { data: group, isLoading } = useQuery<GroupWithDetails>({
     queryKey: ["/api/groups", groupId],
@@ -567,6 +587,34 @@ export default function GroupDetailPage() {
     },
     onError: () => {
       toast({ title: "Error en check-out grupal", variant: "destructive" });
+    },
+  });
+
+  const groupPaymentMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/groups/${groupId}/payment`, {
+        amount: groupPaymentAmount,
+        method: groupPaymentMethod,
+        reference: groupPaymentReference,
+        receiptType: groupPaymentReceiptType,
+        distribution: groupPaymentDistribution,
+      });
+    },
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      toast({ title: "Pago grupal registrado exitosamente" });
+      setShowGroupPaymentDialog(false);
+      setGroupPaymentAmount("");
+      setGroupPaymentMethod("");
+      setGroupPaymentReference("");
+      setGroupPaymentReceiptType("");
+      setGroupPaymentDistribution("equal");
+      if (showInvoiceDialog) {
+        loadInvoice();
+      }
+    },
+    onError: () => {
+      toast({ title: "Error al registrar pago grupal", variant: "destructive" });
     },
   });
 
@@ -643,7 +691,7 @@ export default function GroupDetailPage() {
             {group.reservations.some(r => r.status === "confirmed") && (
               <Button
                 variant="default"
-                onClick={() => checkInAllMutation.mutate()}
+                onClick={() => setShowCheckInConfirm(true)}
                 disabled={checkInAllMutation.isPending}
                 data-testid="button-check-in-all"
               >
@@ -652,11 +700,10 @@ export default function GroupDetailPage() {
               </Button>
             )}
             
-            {/* Check-out All Button - Show when there are checked-in reservations */}
             {group.reservations.some(r => r.status === "checked_in") && (
               <Button
                 variant="secondary"
-                onClick={() => checkOutAllMutation.mutate()}
+                onClick={() => setShowCheckOutConfirm(true)}
                 disabled={checkOutAllMutation.isPending}
                 data-testid="button-check-out-all"
               >
@@ -1067,6 +1114,19 @@ export default function GroupDetailPage() {
             <Button variant="outline" onClick={() => setShowInvoiceDialog(false)}>
               Cerrar
             </Button>
+            {invoiceData?.totals?.balance > 0.01 && (
+              <Button
+                variant="default"
+                onClick={() => {
+                  setGroupPaymentAmount(invoiceData.totals.balance.toFixed(2));
+                  setShowGroupPaymentDialog(true);
+                }}
+                data-testid="button-group-payment"
+              >
+                <CreditCard className="mr-2 h-4 w-4" />
+                Registrar Pago Grupal
+              </Button>
+            )}
             <Button onClick={printInvoice} data-testid="button-print-invoice">
               <Printer className="mr-2 h-4 w-4" />
               Imprimir
@@ -1189,6 +1249,153 @@ export default function GroupDetailPage() {
             <Button onClick={() => window.print()} data-testid="button-print-rooming-list">
               <Printer className="mr-2 h-4 w-4" />
               Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={showCheckInConfirm} onOpenChange={setShowCheckInConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Check-in Grupal</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se realizará el check-in de {group.reservations.filter(r => r.status === "confirmed").length} habitación(es) confirmadas.
+              Las habitaciones pasarán a estado "ocupado".
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => checkInAllMutation.mutate()}
+              data-testid="button-confirm-check-in-all"
+            >
+              <LogIn className="mr-2 h-4 w-4" />
+              Sí, realizar check-in
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showCheckOutConfirm} onOpenChange={setShowCheckOutConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Check-out Grupal</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se realizará el check-out de {group.reservations.filter(r => r.status === "checked_in").length} habitación(es) en casa.
+              Las habitaciones con saldo pendiente no serán procesadas. Las habitaciones irán a limpieza.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => checkOutAllMutation.mutate()}
+              data-testid="button-confirm-check-out-all"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Sí, realizar check-out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={showGroupPaymentDialog} onOpenChange={setShowGroupPaymentDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Pago Grupal
+            </DialogTitle>
+            <DialogDescription>
+              Registre un pago que se distribuirá entre las reservas activas del grupo
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Monto Total *</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={groupPaymentAmount}
+                onChange={(e) => setGroupPaymentAmount(e.target.value)}
+                placeholder="0.00"
+                data-testid="input-group-payment-amount"
+              />
+            </div>
+
+            <div>
+              <Label>Método de Pago *</Label>
+              <Select value={groupPaymentMethod} onValueChange={setGroupPaymentMethod}>
+                <SelectTrigger data-testid="select-group-payment-method">
+                  <SelectValue placeholder="Seleccionar método" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="efectivo">Efectivo</SelectItem>
+                  <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                  <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                  <SelectItem value="transferencia">Transferencia</SelectItem>
+                  <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                  <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Tipo de Comprobante</Label>
+              <Select value={groupPaymentReceiptType} onValueChange={setGroupPaymentReceiptType}>
+                <SelectTrigger data-testid="select-group-payment-receipt">
+                  <SelectValue placeholder="Seleccionar comprobante" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ticket">Ticket</SelectItem>
+                  <SelectItem value="factura_a">Factura A</SelectItem>
+                  <SelectItem value="factura_b">Factura B</SelectItem>
+                  <SelectItem value="factura_c">Factura C</SelectItem>
+                  <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Distribución</Label>
+              <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
+                <SelectTrigger data-testid="select-group-payment-distribution">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="equal">Partes iguales</SelectItem>
+                  <SelectItem value="proportional">Proporcional al costo</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {groupPaymentDistribution === "equal"
+                  ? "El monto se divide en partes iguales entre las reservas activas"
+                  : "El monto se distribuye proporcionalmente al costo total de cada reserva"}
+              </p>
+            </div>
+
+            <div>
+              <Label>Referencia</Label>
+              <Input
+                value={groupPaymentReference}
+                onChange={(e) => setGroupPaymentReference(e.target.value)}
+                placeholder="Número de comprobante, nota..."
+                data-testid="input-group-payment-reference"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowGroupPaymentDialog(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => groupPaymentMutation.mutate()}
+              disabled={!groupPaymentAmount || !groupPaymentMethod || groupPaymentMutation.isPending}
+              data-testid="button-confirm-group-payment"
+            >
+              <CreditCard className="mr-2 h-4 w-4" />
+              {groupPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
             </Button>
           </DialogFooter>
         </DialogContent>

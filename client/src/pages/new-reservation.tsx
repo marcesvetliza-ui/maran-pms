@@ -9,6 +9,8 @@ import {
   Calendar,
   DollarSign,
   Check,
+  Sunrise,
+  Sunset,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,10 +19,11 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
-import type { Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany } from "@shared/schema";
+import type { Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, BedType } from "@shared/schema";
 
 export default function NewReservationPage() {
   const { toast } = useToast();
@@ -44,6 +47,14 @@ export default function NewReservationPage() {
   const [notes, setNotes] = useState<string>("");
   const [discountType, setDiscountType] = useState<string>("none");
   const [discountValue, setDiscountValue] = useState<string>("0");
+  const [bedTypeId, setBedTypeId] = useState<number | null>(null);
+  const [bedTypeNotes, setBedTypeNotes] = useState<string>("");
+  const [earlyCheckIn, setEarlyCheckIn] = useState(false);
+  const [earlyCheckInTime, setEarlyCheckInTime] = useState("");
+  const [earlyCheckInCharge, setEarlyCheckInCharge] = useState("");
+  const [lateCheckOut, setLateCheckOut] = useState(false);
+  const [lateCheckOutTime, setLateCheckOutTime] = useState("");
+  const [lateCheckOutCharge, setLateCheckOutCharge] = useState("");
 
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
@@ -55,6 +66,10 @@ export default function NewReservationPage() {
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
     queryKey: ["/api/rate-plans"],
+  });
+
+  const { data: bedTypes } = useQuery<BedType[]>({
+    queryKey: ["/api/bed-types"],
   });
 
   const nights = useMemo(() => {
@@ -154,6 +169,14 @@ export default function NewReservationPage() {
         source: selectedCompany ? "empresa" : "directo",
         numberOfGuests,
         notes: notes || null,
+        bedTypeId: bedTypeId || null,
+        bedTypeNotes: bedTypeNotes || null,
+        earlyCheckIn,
+        earlyCheckInTime: earlyCheckInTime || null,
+        earlyCheckInCharge: earlyCheckInCharge || null,
+        lateCheckOut,
+        lateCheckOutTime: lateCheckOutTime || null,
+        lateCheckOutCharge: lateCheckOutCharge || null,
       });
       return res.json();
     },
@@ -321,6 +344,35 @@ export default function NewReservationPage() {
                   data-testid="input-guests"
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label>Tipo de camaje</Label>
+                <Select
+                  value={bedTypeId ? String(bedTypeId) : ""}
+                  onValueChange={(v) => setBedTypeId(parseInt(v))}
+                >
+                  <SelectTrigger data-testid="select-bed-type">
+                    <SelectValue placeholder="Seleccionar tipo de camaje..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bedTypes?.filter(bt => bt.isActive).map((bt) => (
+                      <SelectItem key={bt.id} value={String(bt.id)}>
+                        {bt.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Notas de camaje</Label>
+                <Input
+                  value={bedTypeNotes}
+                  onChange={(e) => setBedTypeNotes(e.target.value)}
+                  placeholder="Preferencias especiales..."
+                  data-testid="input-bed-type-notes"
+                />
+              </div>
             </CardContent>
           </Card>
 
@@ -379,6 +431,64 @@ export default function NewReservationPage() {
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Servicios especiales</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sunrise className="h-4 w-4 text-orange-500" />
+                  <Label htmlFor="nr-earlyCheckIn" className="cursor-pointer">Early Check-in</Label>
+                  <span className="text-xs text-muted-foreground">(Estándar: 12:00 hs)</span>
+                </div>
+                <Switch
+                  id="nr-earlyCheckIn"
+                  checked={earlyCheckIn}
+                  onCheckedChange={(checked) => { setEarlyCheckIn(checked); if (!checked) { setEarlyCheckInTime(""); setEarlyCheckInCharge(""); } }}
+                  data-testid="switch-early-checkin"
+                />
+              </div>
+              {earlyCheckIn && (
+                <div className="grid grid-cols-2 gap-2 pl-6">
+                  <div>
+                    <Label className="text-xs">Hora acordada</Label>
+                    <Input type="time" value={earlyCheckInTime} onChange={(e) => setEarlyCheckInTime(e.target.value)} data-testid="input-early-checkin-time" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Cargo (vacío = cortesía)</Label>
+                    <Input type="number" step="0.01" min="0" placeholder="0.00" value={earlyCheckInCharge} onChange={(e) => setEarlyCheckInCharge(e.target.value)} data-testid="input-early-checkin-charge" />
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sunset className="h-4 w-4 text-purple-500" />
+                  <Label htmlFor="nr-lateCheckOut" className="cursor-pointer">Late Check-out</Label>
+                  <span className="text-xs text-muted-foreground">(Estándar: 11:00 hs)</span>
+                </div>
+                <Switch
+                  id="nr-lateCheckOut"
+                  checked={lateCheckOut}
+                  onCheckedChange={(checked) => { setLateCheckOut(checked); if (!checked) { setLateCheckOutTime(""); setLateCheckOutCharge(""); } }}
+                  data-testid="switch-late-checkout"
+                />
+              </div>
+              {lateCheckOut && (
+                <div className="grid grid-cols-2 gap-2 pl-6">
+                  <div>
+                    <Label className="text-xs">Hora acordada</Label>
+                    <Input type="time" value={lateCheckOutTime} onChange={(e) => setLateCheckOutTime(e.target.value)} data-testid="input-late-checkout-time" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Cargo (vacío = cortesía)</Label>
+                    <Input type="number" step="0.01" min="0" placeholder="0.00" value={lateCheckOutCharge} onChange={(e) => setLateCheckOutCharge(e.target.value)} data-testid="input-late-checkout-charge" />
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

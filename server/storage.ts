@@ -12,6 +12,8 @@ import {
   type InsertCompany,
   type Guest,
   type InsertGuest,
+  type BedType,
+  type InsertBedType,
   type Reservation,
   type InsertReservation,
   type Charge,
@@ -210,6 +212,13 @@ export interface IStorage {
   createGuest(guest: InsertGuest): Promise<Guest>;
   updateGuest(id: string, guest: Partial<InsertGuest>): Promise<Guest | undefined>;
   deleteGuest(id: string): Promise<boolean>;
+
+  // Bed Types
+  getBedTypes(): Promise<BedType[]>;
+  getBedType(id: number): Promise<BedType | undefined>;
+  createBedType(bedType: InsertBedType): Promise<BedType>;
+  updateBedType(id: number, bedType: Partial<InsertBedType>): Promise<BedType | undefined>;
+  deleteBedType(id: number): Promise<boolean>;
 
   // Reservations
   getReservations(): Promise<ReservationWithDetails[]>;
@@ -618,6 +627,8 @@ export class MemStorage implements IStorage {
   private rooms: Map<string, Room>;
   private companies: Map<string, Company>;
   private guests: Map<string, Guest>;
+  private bedTypesMap: Map<number, BedType>;
+  private bedTypeCounter: number;
   private reservations: Map<string, Reservation>;
   private charges: Map<string, Charge>;
   private payments: Map<string, Payment>;
@@ -689,6 +700,8 @@ export class MemStorage implements IStorage {
     this.rooms = new Map();
     this.companies = new Map();
     this.guests = new Map();
+    this.bedTypesMap = new Map();
+    this.bedTypeCounter = 0;
     this.reservations = new Map();
     this.charges = new Map();
     this.payments = new Map();
@@ -766,6 +779,18 @@ export class MemStorage implements IStorage {
       { id: "rt4", code: "SPRES", name: "Suite Presidencial", description: "La suite mas exclusiva del hotel", baseOccupancy: 2, maxOccupancy: 4 },
     ];
     roomTypes.forEach((rt) => this.roomTypes.set(rt.id, rt));
+
+    // Create bed types
+    const defaultBedTypes: BedType[] = [
+      { id: 1, code: "SGL", name: "Simple", description: "Cama simple individual", isActive: true, displayOrder: 1, createdAt: new Date() },
+      { id: 2, code: "DBL", name: "Doble", description: "Cama doble matrimonial", isActive: true, displayOrder: 2, createdAt: new Date() },
+      { id: 3, code: "TWN", name: "Twin — 2 camas separadas", description: "Dos camas individuales separadas", isActive: true, displayOrder: 3, createdAt: new Date() },
+      { id: 4, code: "TPL", name: "Triple", description: "Configuración triple (matrimonial + individual)", isActive: true, displayOrder: 4, createdAt: new Date() },
+      { id: 5, code: "MAT_LIV", name: "Matrimonial con Living", description: "Cama matrimonial con living separado", isActive: true, displayOrder: 5, createdAt: new Date() },
+      { id: 6, code: "STE_SOFA", name: "Suite con Sofá Cama", description: "Suite con sofá cama adicional", isActive: true, displayOrder: 6, createdAt: new Date() },
+    ];
+    defaultBedTypes.forEach((bt) => this.bedTypesMap.set(bt.id, bt));
+    this.bedTypeCounter = 6;
 
     // Create rate plans
     const ratePlans: RatePlan[] = [
@@ -1434,6 +1459,46 @@ export class MemStorage implements IStorage {
     return this.guests.delete(id);
   }
 
+  // Bed Types
+  async getBedTypes(): Promise<BedType[]> {
+    return Array.from(this.bedTypesMap.values()).sort((a, b) => a.displayOrder - b.displayOrder);
+  }
+
+  async getBedType(id: number): Promise<BedType | undefined> {
+    return this.bedTypesMap.get(id);
+  }
+
+  async createBedType(bedType: InsertBedType): Promise<BedType> {
+    this.bedTypeCounter++;
+    const newBedType: BedType = {
+      id: this.bedTypeCounter,
+      code: bedType.code,
+      name: bedType.name,
+      description: bedType.description ?? null,
+      isActive: bedType.isActive ?? true,
+      displayOrder: bedType.displayOrder ?? 0,
+      createdAt: new Date(),
+    };
+    this.bedTypesMap.set(newBedType.id, newBedType);
+    return newBedType;
+  }
+
+  async updateBedType(id: number, bedType: Partial<InsertBedType>): Promise<BedType | undefined> {
+    const existing = this.bedTypesMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...bedType };
+    this.bedTypesMap.set(id, updated);
+    return updated;
+  }
+
+  async deleteBedType(id: number): Promise<boolean> {
+    const existing = this.bedTypesMap.get(id);
+    if (!existing) return false;
+    const updated = { ...existing, isActive: false };
+    this.bedTypesMap.set(id, updated);
+    return true;
+  }
+
   // Reservations
   private enrichReservation(reservation: Reservation): ReservationWithDetails {
     const guest = this.guests.get(reservation.guestId);
@@ -1746,7 +1811,7 @@ export class MemStorage implements IStorage {
     const occupancy: Record<string, PlanningCellStatus[]> = {};
     const cellReservations: Record<string, Record<string, string>> = {};
     const cellGroupBlocks: Record<string, Record<string, string>> = {};
-    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string }> = {};
+    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null }> = {};
     const groupBlocksMap: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }> = {};
 
     // Filter active reservations (not cancelled or checked_out)
@@ -1780,6 +1845,10 @@ export class MemStorage implements IStorage {
           source: res.source as ReservationSource,
           isGroup: isGroupReservation,
           groupName,
+          earlyCheckIn: res.earlyCheckIn ?? false,
+          earlyCheckInTime: res.earlyCheckInTime ?? null,
+          lateCheckOut: res.lateCheckOut ?? false,
+          lateCheckOutTime: res.lateCheckOutTime ?? null,
         };
       }
     }
