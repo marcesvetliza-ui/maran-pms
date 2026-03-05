@@ -12,8 +12,10 @@ declare module "http" {
   }
 }
 
+app.use("/api/public/web-checkin", express.json({ limit: "5mb" }));
 app.use(
   express.json({
+    limit: "1mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },

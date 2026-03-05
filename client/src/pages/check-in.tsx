@@ -11,6 +11,15 @@ import {
   Plus,
   UserPlus,
   CalendarDays,
+  Smartphone,
+  Link2,
+  Copy,
+  ExternalLink,
+  CheckCircle2,
+  Send,
+  FileText,
+  Image,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,14 +40,31 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
-import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany } from "@shared/schema";
+import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, WebCheckin } from "@shared/schema";
+
+interface WebCheckinListItem extends WebCheckin {
+  reservation?: {
+    reservationCode: string;
+    guestName: string;
+    roomNumber: string;
+    checkInDate: string;
+    checkOutDate: string;
+    status: string;
+  } | null;
+}
 
 export default function CheckInPage() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"reservations" | "walkin" | "history">("reservations");
+  const [activeTab, setActiveTab] = useState<"reservations" | "walkin" | "webcheckin" | "history">("reservations");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
@@ -56,6 +82,11 @@ export default function CheckInPage() {
   const [historyDate, setHistoryDate] = useState<string>(() => {
     return new Date().toISOString().split("T")[0];
   });
+
+  const [webCheckinDialogOpen, setWebCheckinDialogOpen] = useState(false);
+  const [webCheckinReservation, setWebCheckinReservation] = useState<ReservationWithDetails | null>(null);
+  const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+  const [webCheckinDetailId, setWebCheckinDetailId] = useState<string | null>(null);
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations/check-in"],
@@ -80,6 +111,37 @@ export default function CheckInPage() {
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
     queryKey: ["/api/rate-plans"],
+  });
+
+  const { data: webCheckinList } = useQuery<WebCheckinListItem[]>({
+    queryKey: ["/api/web-checkin/list"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/web-checkin/list");
+      return res.json();
+    },
+    enabled: activeTab === "webcheckin",
+  });
+
+  const generateLinkMutation = useMutation({
+    mutationFn: async (reservationId: string) => {
+      const res = await apiRequest("POST", `/api/web-checkin/generate/${reservationId}`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setGeneratedLink(data.link);
+      queryClient.invalidateQueries({ queryKey: ["/api/web-checkin/list"] });
+      toast({
+        title: "Link generado",
+        description: "El enlace de web check-in ha sido generado exitosamente.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo generar el enlace de web check-in.",
+        variant: "destructive",
+      });
+    },
   });
 
   const availableRooms = rooms?.filter((room) => 
@@ -274,8 +336,8 @@ export default function CheckInPage() {
         <p className="text-muted-foreground capitalize">{today}</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "reservations" | "walkin" | "history")}>
-        <TabsList className="grid w-full max-w-2xl grid-cols-3">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "reservations" | "walkin" | "webcheckin" | "history")}>
+        <TabsList className="grid w-full max-w-3xl grid-cols-4">
           <TabsTrigger value="reservations" data-testid="tab-reservations">
             <LogIn className="h-4 w-4 mr-2" />
             Reservas
@@ -284,9 +346,13 @@ export default function CheckInPage() {
             <UserPlus className="h-4 w-4 mr-2" />
             Walk-in
           </TabsTrigger>
+          <TabsTrigger value="webcheckin" data-testid="tab-webcheckin">
+            <Smartphone className="h-4 w-4 mr-2" />
+            Web Check-in
+          </TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">
             <CalendarDays className="h-4 w-4 mr-2" />
-            Check-ins del Dia
+            Historial
           </TabsTrigger>
         </TabsList>
 
@@ -612,6 +678,174 @@ export default function CheckInPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="webcheckin" className="space-y-6 mt-6">
+          <Card className="bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800">
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
+                <Smartphone className="h-6 w-6 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Web Check-in</h3>
+                <p className="text-sm text-muted-foreground">
+                  Genera links para que los huéspedes completen su check-in desde el celular
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Generar Link de Web Check-in</CardTitle>
+              <CardDescription>Seleccioná una reserva confirmada para generar el enlace</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {reservations && reservations.length > 0 ? (
+                <div className="space-y-2">
+                  {reservations.map((res) => (
+                    <div
+                      key={res.id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                      data-testid={`webcheckin-res-${res.id}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
+                          {res.guest?.firstName?.[0]}{res.guest?.lastName?.[0]}
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">{res.guest?.firstName} {res.guest?.lastName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Hab. {res.room?.roomNumber} | {res.checkInDate} - {res.checkOutDate}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setWebCheckinReservation(res);
+                          setGeneratedLink(null);
+                          setWebCheckinDialogOpen(true);
+                          generateLinkMutation.mutate(res.id);
+                        }}
+                        disabled={generateLinkMutation.isPending}
+                        data-testid={`button-generate-link-${res.id}`}
+                      >
+                        <Link2 className="h-4 w-4 mr-1" />
+                        Generar Link
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-6">
+                  No hay reservas confirmadas pendientes de check-in
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Web Check-ins Enviados</CardTitle>
+              <CardDescription>Estado de los web check-ins generados</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {webCheckinList && webCheckinList.length > 0 ? (
+                <div className="space-y-2">
+                  {webCheckinList.map((wc) => (
+                    <div
+                      key={wc.id}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                      data-testid={`webcheckin-item-${wc.id}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`h-9 w-9 rounded-full flex items-center justify-center ${
+                          wc.status === "completed" ? "bg-green-100 dark:bg-green-900" :
+                          wc.status === "expired" ? "bg-red-100 dark:bg-red-900" :
+                          "bg-amber-100 dark:bg-amber-900"
+                        }`}>
+                          {wc.status === "completed" ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          ) : wc.status === "expired" ? (
+                            <Clock className="h-4 w-4 text-red-600 dark:text-red-400" />
+                          ) : (
+                            <Send className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">{wc.reservation?.guestName || "Huésped"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {wc.reservation?.roomNumber ? `Hab. ${wc.reservation.roomNumber} | ` : ""}
+                            {wc.reservation?.checkInDate || ""} - {wc.reservation?.checkOutDate || ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={
+                          wc.status === "completed" ? "default" :
+                          wc.status === "expired" ? "destructive" :
+                          "secondary"
+                        } data-testid={`badge-wc-status-${wc.id}`}>
+                          {wc.status === "completed" ? "Completado" :
+                           wc.status === "expired" ? "Expirado" :
+                           "Pendiente"}
+                        </Badge>
+                        {wc.status === "completed" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setWebCheckinDetailId(webCheckinDetailId === String(wc.id) ? null : String(wc.id))}
+                            data-testid={`button-wc-detail-${wc.id}`}
+                          >
+                            <FileText className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {webCheckinList.filter(wc => wc.status === "completed" && webCheckinDetailId === String(wc.id)).map((wc) => (
+                    <Card key={`detail-${wc.id}`} className="border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20">
+                      <CardContent className="p-4 space-y-3">
+                        <h4 className="font-semibold text-sm flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          Datos confirmados por el huésped
+                        </h4>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                          <div><span className="text-muted-foreground">Nombre:</span> {wc.confirmedFirstName} {wc.confirmedLastName}</div>
+                          <div><span className="text-muted-foreground">Documento:</span> {wc.confirmedDocumentType} {wc.confirmedDocumentNumber}</div>
+                          <div><span className="text-muted-foreground">Nacionalidad:</span> {wc.confirmedNationality || "—"}</div>
+                          <div><span className="text-muted-foreground">Teléfono:</span> {wc.confirmedPhone || "—"}</div>
+                          <div><span className="text-muted-foreground">Email:</span> {wc.confirmedEmail || "—"}</div>
+                          <div><span className="text-muted-foreground">Llegada:</span> {wc.estimatedArrivalTime || "No especificada"}</div>
+                          {wc.requestEarlyCheckIn && (
+                            <div className="col-span-2">
+                              <Badge variant="outline" className="text-amber-600 border-amber-300">
+                                Early check-in solicitado{wc.earlyCheckInTime ? `: ${wc.earlyCheckInTime}` : ""}
+                              </Badge>
+                            </div>
+                          )}
+                        </div>
+                        {wc.documentPhotoUrl && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                              <Image className="h-3 w-3" /> Foto del documento
+                            </p>
+                            <img src={wc.documentPhotoUrl} alt="Documento" className="max-w-xs rounded border" data-testid={`img-wc-doc-${wc.id}`} />
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-6">
+                  No se han generado web check-ins aún
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="history" className="space-y-6 mt-6">
           <Card className="bg-accent/30 border-accent">
             <CardContent className="flex items-center gap-4 p-4">
@@ -713,6 +947,89 @@ export default function CheckInPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog open={webCheckinDialogOpen} onOpenChange={setWebCheckinDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Smartphone className="h-5 w-5 text-green-600" />
+              Web Check-in
+            </DialogTitle>
+          </DialogHeader>
+          {webCheckinReservation && (
+            <div className="space-y-4">
+              <div className="bg-muted/50 rounded-lg p-3 text-sm">
+                <p className="font-medium">{webCheckinReservation.guest?.firstName} {webCheckinReservation.guest?.lastName}</p>
+                <p className="text-muted-foreground">
+                  Hab. {webCheckinReservation.room?.roomNumber} | {webCheckinReservation.checkInDate} - {webCheckinReservation.checkOutDate}
+                </p>
+              </div>
+              {generateLinkMutation.isError ? (
+                <div className="space-y-3 text-center py-4">
+                  <AlertCircle className="h-10 w-10 text-destructive mx-auto" />
+                  <p className="text-sm text-destructive">No se pudo generar el enlace</p>
+                  <Button
+                    variant="outline"
+                    onClick={() => generateLinkMutation.mutate(webCheckinReservation!.id)}
+                    data-testid="button-retry-generate"
+                  >
+                    Reintentar
+                  </Button>
+                </div>
+              ) : generatedLink ? (
+                <div className="space-y-3">
+                  <Label>Enlace generado</Label>
+                  <div className="flex gap-2">
+                    <Input value={generatedLink} readOnly className="text-xs" data-testid="input-generated-link" />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => {
+                        navigator.clipboard.writeText(generatedLink);
+                        toast({ title: "Copiado", description: "Link copiado al portapapeles" });
+                      }}
+                      data-testid="button-copy-link"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex gap-2">
+                    {webCheckinReservation.guest?.phone && (
+                      <Button
+                        className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                        onClick={() => {
+                          const phone = webCheckinReservation.guest?.phone?.replace(/\D/g, "") || "";
+                          const msg = encodeURIComponent(
+                            `Hola ${webCheckinReservation.guest?.firstName}! Desde Maran Suites & Towers te invitamos a completar tu web check-in antes de tu llegada: ${generatedLink}`
+                          );
+                          window.open(`https://wa.me/${phone}?text=${msg}`, "_blank");
+                        }}
+                        data-testid="button-whatsapp"
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Abrir WhatsApp
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => window.open(generatedLink, "_blank")}
+                      data-testid="button-open-link"
+                    >
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Abrir Link
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-6">
+                  <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
         <AlertDialogContent>

@@ -1322,3 +1322,58 @@ export type PackageWithDetails = Package & {
   roomType?: RoomType;
   items: PackageItem[];
 };
+
+// System Notifications (base for chatbot + web check-in)
+export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa";
+export type NotificationArea = "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "all";
+export type NotificationPriority = "low" | "normal" | "high" | "urgent";
+
+export const systemNotifications = pgTable("system_notifications", {
+  id: serial("id").primaryKey(),
+  type: text("type").$type<NotificationType>().notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  targetArea: text("target_area").$type<NotificationArea>().notNull(),
+  relatedEntityType: text("related_entity_type"),
+  relatedEntityId: text("related_entity_id"),
+  isRead: boolean("is_read").default(false),
+  readAt: timestamp("read_at"),
+  readBy: text("read_by"),
+  priority: text("priority").$type<NotificationPriority>().notNull().default("normal"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertSystemNotificationSchema = createInsertSchema(systemNotifications).omit({ id: true, createdAt: true, isRead: true, readAt: true, readBy: true });
+export type InsertSystemNotification = z.infer<typeof insertSystemNotificationSchema>;
+export type SystemNotification = typeof systemNotifications.$inferSelect;
+
+// Web Check-in
+export type WebCheckinStatus = "pending" | "completed" | "expired";
+
+export const webCheckins = pgTable("web_checkins", {
+  id: serial("id").primaryKey(),
+  reservationId: varchar("reservation_id").notNull(),
+  token: text("token").notNull().unique(),
+  status: text("status").$type<WebCheckinStatus>().notNull().default("pending"),
+  confirmedFirstName: text("confirmed_first_name"),
+  confirmedLastName: text("confirmed_last_name"),
+  confirmedDocumentType: text("confirmed_document_type"),
+  confirmedDocumentNumber: text("confirmed_document_number"),
+  confirmedNationality: text("confirmed_nationality"),
+  confirmedPhone: text("confirmed_phone"),
+  confirmedEmail: text("confirmed_email"),
+  documentPhotoUrl: text("document_photo_url"),
+  estimatedArrivalTime: text("estimated_arrival_time"),
+  requestEarlyCheckIn: boolean("request_early_check_in").default(false),
+  earlyCheckInTime: text("early_check_in_time"),
+  termsAccepted: boolean("terms_accepted").default(false),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
+  ipAddress: text("ip_address"),
+  completedAt: timestamp("completed_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertWebCheckinSchema = createInsertSchema(webCheckins).omit({ id: true, createdAt: true });
+export type InsertWebCheckin = z.infer<typeof insertWebCheckinSchema>;
+export type WebCheckin = typeof webCheckins.$inferSelect;

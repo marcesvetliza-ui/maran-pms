@@ -166,6 +166,12 @@ import {
   type InsertPackageItem,
   type PackageWithDetails,
   type PackageStatus,
+  // Notifications & Web Check-in
+  type SystemNotification,
+  type InsertSystemNotification,
+  type NotificationArea,
+  type WebCheckin,
+  type InsertWebCheckin,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -618,6 +624,20 @@ export interface IStorage {
   createPackageItem(item: InsertPackageItem): Promise<PackageItem>;
   updatePackageItem(id: string, item: Partial<InsertPackageItem>): Promise<PackageItem | undefined>;
   deletePackageItem(id: string): Promise<boolean>;
+
+  // System Notifications
+  getNotifications(area?: NotificationArea, limit?: number): Promise<SystemNotification[]>;
+  createNotification(notification: InsertSystemNotification): Promise<SystemNotification>;
+  markNotificationRead(id: number): Promise<SystemNotification | undefined>;
+  markAllNotificationsRead(area?: NotificationArea): Promise<number>;
+  getUnreadNotificationCount(area?: NotificationArea): Promise<number>;
+
+  // Web Check-in
+  createWebCheckin(data: InsertWebCheckin): Promise<WebCheckin>;
+  getWebCheckinByToken(token: string): Promise<WebCheckin | undefined>;
+  getWebCheckinByReservation(reservationId: string): Promise<WebCheckin | undefined>;
+  updateWebCheckin(id: number, data: Partial<InsertWebCheckin>): Promise<WebCheckin | undefined>;
+  listWebCheckins(): Promise<WebCheckin[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -684,6 +704,11 @@ export class MemStorage implements IStorage {
   // Packages
   private packages: Map<string, Package>;
   private packageItems: Map<string, PackageItem>;
+  // Notifications & Web Check-in
+  private notificationsMap: Map<number, SystemNotification>;
+  private notificationCounter: number;
+  private webCheckinsMap: Map<number, WebCheckin>;
+  private webCheckinCounter: number;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
@@ -757,6 +782,11 @@ export class MemStorage implements IStorage {
     // Packages
     this.packages = new Map();
     this.packageItems = new Map();
+    // Notifications & Web Check-in
+    this.notificationsMap = new Map();
+    this.notificationCounter = 0;
+    this.webCheckinsMap = new Map();
+    this.webCheckinCounter = 0;
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
@@ -4458,6 +4488,133 @@ export class MemStorage implements IStorage {
 
   async deletePackageItem(id: string): Promise<boolean> {
     return this.packageItems.delete(id);
+  }
+
+  // System Notifications
+  async getNotifications(area?: NotificationArea, limit?: number): Promise<SystemNotification[]> {
+    let notifications = Array.from(this.notificationsMap.values());
+    if (area) {
+      notifications = notifications.filter(n => n.targetArea === area || n.targetArea === "all");
+    }
+    notifications.sort((a, b) => {
+      if (a.isRead !== b.isRead) return a.isRead ? 1 : -1;
+      return new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime();
+    });
+    if (limit) {
+      notifications = notifications.slice(0, limit);
+    }
+    return notifications;
+  }
+
+  async createNotification(notification: InsertSystemNotification): Promise<SystemNotification> {
+    const id = ++this.notificationCounter;
+    const newNotification: SystemNotification = {
+      id,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      targetArea: notification.targetArea,
+      relatedEntityType: notification.relatedEntityType ?? null,
+      relatedEntityId: notification.relatedEntityId ?? null,
+      isRead: false,
+      readAt: null,
+      readBy: null,
+      priority: notification.priority ?? "normal",
+      createdAt: new Date(),
+    };
+    this.notificationsMap.set(id, newNotification);
+    return newNotification;
+  }
+
+  async markNotificationRead(id: number): Promise<SystemNotification | undefined> {
+    const notification = this.notificationsMap.get(id);
+    if (!notification) return undefined;
+    const updated = { ...notification, isRead: true, readAt: new Date() };
+    this.notificationsMap.set(id, updated);
+    return updated;
+  }
+
+  async markAllNotificationsRead(area?: NotificationArea): Promise<number> {
+    let count = 0;
+    for (const [id, notification] of this.notificationsMap) {
+      if (!notification.isRead) {
+        if (!area || notification.targetArea === area || notification.targetArea === "all") {
+          this.notificationsMap.set(id, { ...notification, isRead: true, readAt: new Date() });
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  async getUnreadNotificationCount(area?: NotificationArea): Promise<number> {
+    let count = 0;
+    for (const notification of this.notificationsMap.values()) {
+      if (!notification.isRead) {
+        if (!area || notification.targetArea === area || notification.targetArea === "all") {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  // Web Check-in
+  async createWebCheckin(data: InsertWebCheckin): Promise<WebCheckin> {
+    const id = ++this.webCheckinCounter;
+    const newCheckin: WebCheckin = {
+      id,
+      reservationId: data.reservationId,
+      token: data.token,
+      status: data.status ?? "pending",
+      confirmedFirstName: data.confirmedFirstName ?? null,
+      confirmedLastName: data.confirmedLastName ?? null,
+      confirmedDocumentType: data.confirmedDocumentType ?? null,
+      confirmedDocumentNumber: data.confirmedDocumentNumber ?? null,
+      confirmedNationality: data.confirmedNationality ?? null,
+      confirmedPhone: data.confirmedPhone ?? null,
+      confirmedEmail: data.confirmedEmail ?? null,
+      documentPhotoUrl: data.documentPhotoUrl ?? null,
+      estimatedArrivalTime: data.estimatedArrivalTime ?? null,
+      requestEarlyCheckIn: data.requestEarlyCheckIn ?? false,
+      earlyCheckInTime: data.earlyCheckInTime ?? null,
+      termsAccepted: data.termsAccepted ?? false,
+      termsAcceptedAt: data.termsAcceptedAt ?? null,
+      ipAddress: data.ipAddress ?? null,
+      completedAt: data.completedAt ?? null,
+      expiresAt: data.expiresAt ?? null,
+      createdAt: new Date(),
+    };
+    this.webCheckinsMap.set(id, newCheckin);
+    return newCheckin;
+  }
+
+  async getWebCheckinByToken(token: string): Promise<WebCheckin | undefined> {
+    for (const checkin of this.webCheckinsMap.values()) {
+      if (checkin.token === token) return checkin;
+    }
+    return undefined;
+  }
+
+  async getWebCheckinByReservation(reservationId: string): Promise<WebCheckin | undefined> {
+    for (const checkin of this.webCheckinsMap.values()) {
+      if (checkin.reservationId === reservationId) return checkin;
+    }
+    return undefined;
+  }
+
+  async updateWebCheckin(id: number, data: Partial<InsertWebCheckin>): Promise<WebCheckin | undefined> {
+    const existing = this.webCheckinsMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...data } as WebCheckin;
+    this.webCheckinsMap.set(id, updated);
+    return updated;
+  }
+
+  async listWebCheckins(): Promise<WebCheckin[]> {
+    return Array.from(this.webCheckinsMap.values()).sort(
+      (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
+    );
   }
 }
 

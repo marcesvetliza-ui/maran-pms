@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import OpenAI from "openai";
+import { randomUUID } from "crypto";
 import { storage } from "./storage";
 import { insertGuestReviewSchema } from "@shared/schema";
 
@@ -4293,6 +4294,357 @@ Only respond with the JSON object.`;
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting package item" });
+    }
+  });
+
+  // ==================== SYSTEM NOTIFICATIONS ====================
+
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const area = req.query.area as string | undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      const notifications = await storage.getNotifications(area as any, limit);
+      res.json(notifications);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching notifications" });
+    }
+  });
+
+  app.post("/api/notifications", async (req, res) => {
+    try {
+      const notification = await storage.createNotification(req.body);
+      res.status(201).json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating notification" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const notification = await storage.markNotificationRead(id);
+      if (!notification) return res.status(404).json({ error: "Notification not found" });
+      res.json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Error marking notification as read" });
+    }
+  });
+
+  app.patch("/api/notifications/read-all", async (req, res) => {
+    try {
+      const area = req.query.area as string | undefined;
+      const count = await storage.markAllNotificationsRead(area as any);
+      res.json({ markedRead: count });
+    } catch (error) {
+      res.status(500).json({ error: "Error marking notifications as read" });
+    }
+  });
+
+  app.get("/api/notifications/unread-count", async (req, res) => {
+    try {
+      const area = req.query.area as string | undefined;
+      const count = await storage.getUnreadNotificationCount(area as any);
+      res.json({ count });
+    } catch (error) {
+      res.status(500).json({ error: "Error getting unread count" });
+    }
+  });
+
+  // ==================== CHATBOT WEBHOOK ====================
+
+  app.post("/api/webhook/chatbot", async (req, res) => {
+    try {
+      const secret = req.headers["x-chatbot-secret"] as string;
+      const expectedSecret = process.env.CHATBOT_WEBHOOK_SECRET;
+      if (!expectedSecret || secret !== expectedSecret) {
+        return res.status(401).json({ error: "Invalid or missing webhook secret" });
+      }
+
+      const { eventType, area, priority, guestName, roomNumber, reservationId, message, timestamp } = req.body;
+
+      const validAreas = ["housekeeping", "maintenance", "restaurant", "spa", "reception", "all"];
+      const validPriorities = ["normal", "high", "urgent"];
+
+      if (!area || !message) {
+        return res.status(400).json({ error: "area and message are required" });
+      }
+      if (!validAreas.includes(area)) {
+        return res.status(400).json({ error: `Invalid area. Must be one of: ${validAreas.join(", ")}` });
+      }
+      if (priority && !validPriorities.includes(priority)) {
+        return res.status(400).json({ error: `Invalid priority. Must be one of: ${validPriorities.join(", ")}` });
+      }
+
+      const areaLabels: Record<string, string> = {
+        housekeeping: "Housekeeping",
+        maintenance: "Mantenimiento",
+        restaurant: "Restaurante",
+        spa: "SPA",
+        reception: "Recepción",
+        all: "General",
+      };
+
+      const typeMap: Record<string, string> = {
+        housekeeping: "chatbot_housekeeping",
+        maintenance: "chatbot_maintenance",
+        restaurant: "chatbot_restaurant",
+        spa: "chatbot_spa",
+        reception: "chatbot_request",
+        all: "chatbot_request",
+      };
+
+      const notification = await storage.createNotification({
+        type: (typeMap[area] || "chatbot_request") as any,
+        title: `Solicitud de ${guestName || "Huésped"} - Hab. ${roomNumber || "N/A"}`,
+        message,
+        targetArea: area,
+        relatedEntityType: reservationId ? "reservation" : "room",
+        relatedEntityId: reservationId ? String(reservationId) : roomNumber,
+        priority: priority || "normal",
+      });
+
+      if (area === "housekeeping" && roomNumber) {
+        const rooms = await storage.getRooms();
+        const room = rooms.find(r => r.roomNumber === roomNumber);
+        if (room) {
+          try {
+            await storage.createHousekeepingTask({
+              roomId: room.id,
+              type: "guest_request",
+              status: "pending",
+              priority: priority === "urgent" ? "urgent" : "normal",
+              notes: `Chatbot: ${message} (${guestName || "Huésped"})`,
+            });
+          } catch {}
+        }
+      }
+
+      res.json({ success: true, notificationId: notification.id });
+    } catch (error) {
+      res.status(500).json({ error: "Error processing webhook" });
+    }
+  });
+
+  // ==================== WEB CHECK-IN ====================
+
+  app.post("/api/web-checkin/generate/:reservationId", async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.reservationId);
+      if (!reservation) {
+        return res.status(404).json({ error: "Reservation not found" });
+      }
+
+      const existing = await storage.getWebCheckinByReservation(req.params.reservationId);
+      if (existing && existing.status !== "expired") {
+        const protocol = req.headers["x-forwarded-proto"] || "https";
+        const host = req.headers.host;
+        const link = `${protocol}://${host}/web-checkin/${existing.token}`;
+        return res.json({ token: existing.token, link, webCheckin: existing });
+      }
+
+      const token = randomUUID();
+      const checkInDate = new Date(reservation.checkInDate);
+      const expiresAt = new Date(checkInDate.getTime() + 24 * 60 * 60 * 1000);
+
+      const webCheckin = await storage.createWebCheckin({
+        reservationId: req.params.reservationId,
+        token,
+        status: "pending",
+        confirmedFirstName: reservation.guest?.firstName || null,
+        confirmedLastName: reservation.guest?.lastName || null,
+        confirmedDocumentType: reservation.guest?.documentType || null,
+        confirmedDocumentNumber: reservation.guest?.documentNumber || null,
+        confirmedNationality: reservation.guest?.nationality || null,
+        confirmedPhone: reservation.guest?.phone || null,
+        confirmedEmail: reservation.guest?.email || null,
+        expiresAt,
+      });
+
+      const protocol = req.headers["x-forwarded-proto"] || "https";
+      const host = req.headers.host;
+      const link = `${protocol}://${host}/web-checkin/${token}`;
+
+      res.status(201).json({ token, link, webCheckin });
+    } catch (error) {
+      res.status(500).json({ error: "Error generating web check-in" });
+    }
+  });
+
+  app.get("/api/web-checkin/list", async (req, res) => {
+    try {
+      const webCheckins = await storage.listWebCheckins();
+      const enriched = [];
+      for (const wc of webCheckins) {
+        const reservation = await storage.getReservation(wc.reservationId);
+        enriched.push({
+          ...wc,
+          reservation: reservation ? {
+            reservationCode: reservation.reservationCode,
+            guestName: `${reservation.guest?.firstName} ${reservation.guest?.lastName}`,
+            roomNumber: reservation.room?.roomNumber,
+            checkInDate: reservation.checkInDate,
+            checkOutDate: reservation.checkOutDate,
+            status: reservation.status,
+          } : null,
+        });
+      }
+      res.json(enriched);
+    } catch (error) {
+      res.status(500).json({ error: "Error listing web check-ins" });
+    }
+  });
+
+  app.get("/api/web-checkin/:reservationId/status", async (req, res) => {
+    try {
+      const webCheckin = await storage.getWebCheckinByReservation(req.params.reservationId);
+      if (!webCheckin) {
+        return res.json({ status: "not_generated" });
+      }
+      res.json(webCheckin);
+    } catch (error) {
+      res.status(500).json({ error: "Error getting web check-in status" });
+    }
+  });
+
+  // Public endpoints (no auth required)
+  app.get("/api/public/web-checkin/:token", async (req, res) => {
+    try {
+      const webCheckin = await storage.getWebCheckinByToken(req.params.token);
+      if (!webCheckin) {
+        return res.status(404).json({ error: "Web check-in no encontrado" });
+      }
+
+      if (webCheckin.status === "completed") {
+        return res.status(400).json({ error: "Este web check-in ya fue completado" });
+      }
+
+      if (webCheckin.expiresAt && new Date() > new Date(webCheckin.expiresAt)) {
+        await storage.updateWebCheckin(webCheckin.id, { status: "expired" } as any);
+        return res.status(400).json({ error: "Este enlace ha expirado" });
+      }
+
+      const reservation = await storage.getReservation(webCheckin.reservationId);
+
+      res.json({
+        webCheckin: {
+          id: webCheckin.id,
+          status: webCheckin.status,
+          confirmedFirstName: webCheckin.confirmedFirstName,
+          confirmedLastName: webCheckin.confirmedLastName,
+          confirmedDocumentType: webCheckin.confirmedDocumentType,
+          confirmedDocumentNumber: webCheckin.confirmedDocumentNumber,
+          confirmedNationality: webCheckin.confirmedNationality,
+          confirmedPhone: webCheckin.confirmedPhone,
+          confirmedEmail: webCheckin.confirmedEmail,
+        },
+        reservation: reservation ? {
+          checkInDate: reservation.checkInDate,
+          checkOutDate: reservation.checkOutDate,
+          roomType: reservation.room?.roomType?.name,
+          nights: reservation.nights,
+        } : null,
+        hotel: {
+          name: "Maran Suites & Towers",
+          address: "Alameda de la Federación 497, Paraná, Entre Ríos",
+          phone: "+54 343 423-5444",
+        },
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error loading web check-in" });
+    }
+  });
+
+  app.post("/api/public/web-checkin/:token", async (req, res) => {
+    try {
+      const webCheckin = await storage.getWebCheckinByToken(req.params.token);
+      if (!webCheckin) {
+        return res.status(404).json({ error: "Web check-in no encontrado" });
+      }
+
+      if (webCheckin.status === "completed") {
+        return res.status(400).json({ error: "Este web check-in ya fue completado" });
+      }
+
+      if (webCheckin.expiresAt && new Date() > new Date(webCheckin.expiresAt)) {
+        await storage.updateWebCheckin(webCheckin.id, { status: "expired" } as any);
+        return res.status(400).json({ error: "Este enlace ha expirado" });
+      }
+
+      const {
+        confirmedFirstName, confirmedLastName,
+        confirmedDocumentType, confirmedDocumentNumber,
+        confirmedNationality, confirmedPhone, confirmedEmail,
+        documentPhotoUrl, estimatedArrivalTime,
+        requestEarlyCheckIn, earlyCheckInTime,
+        termsAccepted,
+      } = req.body;
+
+      if (!termsAccepted) {
+        return res.status(400).json({ error: "Debe aceptar los términos y condiciones" });
+      }
+
+      if (!confirmedFirstName?.trim() || !confirmedLastName?.trim()) {
+        return res.status(400).json({ error: "Nombre y apellido son obligatorios" });
+      }
+
+      if (documentPhotoUrl && typeof documentPhotoUrl === "string" && documentPhotoUrl.length > 5 * 1024 * 1024) {
+        return res.status(400).json({ error: "La imagen del documento es demasiado grande" });
+      }
+
+      const ipAddress = req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "";
+
+      await storage.updateWebCheckin(webCheckin.id, {
+        status: "completed",
+        confirmedFirstName,
+        confirmedLastName,
+        confirmedDocumentType,
+        confirmedDocumentNumber,
+        confirmedNationality,
+        confirmedPhone,
+        confirmedEmail,
+        documentPhotoUrl,
+        estimatedArrivalTime,
+        requestEarlyCheckIn: requestEarlyCheckIn || false,
+        earlyCheckInTime: earlyCheckInTime || null,
+        termsAccepted: true,
+        termsAcceptedAt: new Date(),
+        ipAddress,
+        completedAt: new Date(),
+      } as any);
+
+      const reservation = await storage.getReservation(webCheckin.reservationId);
+      if (reservation && reservation.guest) {
+        await storage.updateGuest(reservation.guest.id, {
+          firstName: confirmedFirstName || reservation.guest.firstName,
+          lastName: confirmedLastName || reservation.guest.lastName,
+          documentType: confirmedDocumentType || reservation.guest.documentType,
+          documentNumber: confirmedDocumentNumber || reservation.guest.documentNumber,
+          nationality: confirmedNationality || reservation.guest.nationality,
+          phone: confirmedPhone || reservation.guest.phone,
+          email: confirmedEmail || reservation.guest.email,
+        });
+      }
+
+      if (requestEarlyCheckIn && reservation) {
+        await storage.updateReservation(webCheckin.reservationId, {
+          earlyCheckIn: true,
+          earlyCheckInTime: earlyCheckInTime || null,
+        } as any);
+      }
+
+      await storage.createNotification({
+        type: "web_checkin",
+        title: `Web Check-in completado - ${confirmedFirstName} ${confirmedLastName}`,
+        message: `El huésped completó el web check-in. Llegada estimada: ${estimatedArrivalTime || "No especificada"}${requestEarlyCheckIn ? `. Solicita early check-in: ${earlyCheckInTime}` : ""}`,
+        targetArea: "reception",
+        relatedEntityType: "reservation",
+        relatedEntityId: webCheckin.reservationId,
+        priority: requestEarlyCheckIn ? "high" : "normal",
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error processing web check-in" });
     }
   });
 

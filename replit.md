@@ -74,6 +74,9 @@ Preferred communication style: Simple, everyday language.
 - **Rate Editing**: Allows manual override of `baseRatePerNight` and automatic `finalRatePerNight` calculation based on discount types (percent, fixed).
 - **Payments Section**: Separate tracking of payments and charges in the folio, supporting multiple payment methods.
 - **Guest Vehicle Data**: Optional fields for vehicle details (plate, make, model, color).
+- **System Notifications**: Internal notification system with bell icon in sidebar, real-time unread count polling (30s), support for chatbot and web check-in notification types, area-based filtering (reception, housekeeping, maintenance, restaurant, spa, all), priority levels (normal, high, urgent).
+- **Chatbot Webhook Integration**: POST `/api/webhook/chatbot` endpoint validated by `X-Chatbot-Secret` header (env: `CHATBOT_WEBHOOK_SECRET`). Creates notifications and optionally housekeeping tasks. Supports areas: housekeeping, maintenance, restaurant, spa, reception.
+- **Web Check-in**: Public mobile-first 4-step wizard at `/web-checkin/:token` (rendered without sidebar). Generates unique token links per reservation. Steps: personal data, document photo (camera/gallery with canvas compression to 800px), arrival details with early check-in request, confirmation. Integrates with check-in page (new "Web Check-in" tab) for link generation, WhatsApp sharing, and status tracking. Public API routes under `/api/public/web-checkin/:token`.
 
 ## External Dependencies
 
