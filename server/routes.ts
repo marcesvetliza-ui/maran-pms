@@ -427,7 +427,7 @@ export async function registerRoutes(
 
   app.patch("/api/bed-types/:id", async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = req.params.id;
       const bedType = await storage.updateBedType(id, req.body);
       if (!bedType) {
         return res.status(404).json({ error: "Bed type not found" });
@@ -440,7 +440,7 @@ export async function registerRoutes(
 
   app.delete("/api/bed-types/:id", async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = req.params.id;
       const result = await storage.deleteBedType(id);
       if (!result) {
         return res.status(404).json({ error: "Bed type not found" });
@@ -4458,7 +4458,7 @@ Only respond with the JSON object.`;
 
   app.patch("/api/notifications/:id/read", async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = req.params.id;
       const notification = await storage.markNotificationRead(id);
       if (!notification) return res.status(404).json({ error: "Notification not found" });
       res.json(notification);
@@ -4811,7 +4811,7 @@ Only respond with the JSON object.`;
 
   app.patch("/api/guests/:guestId/preferences/:prefId", async (req, res) => {
     try {
-      const pref = await storage.updateGuestPreference(parseInt(req.params.prefId), req.body);
+      const pref = await storage.updateGuestPreference(req.params.prefId, req.body);
       if (!pref) return res.status(404).json({ error: "Preference not found" });
       res.json(pref);
     } catch (error) {
@@ -4821,7 +4821,7 @@ Only respond with the JSON object.`;
 
   app.patch("/api/guests/:guestId/preferences/:prefId/toggle", async (req, res) => {
     try {
-      const pref = await storage.toggleGuestPreference(parseInt(req.params.prefId));
+      const pref = await storage.toggleGuestPreference(req.params.prefId);
       if (!pref) return res.status(404).json({ error: "Preference not found" });
       res.json(pref);
     } catch (error) {
@@ -4831,7 +4831,7 @@ Only respond with the JSON object.`;
 
   app.delete("/api/guests/:guestId/preferences/:prefId", async (req, res) => {
     try {
-      const deleted = await storage.deleteGuestPreference(parseInt(req.params.prefId));
+      const deleted = await storage.deleteGuestPreference(req.params.prefId);
       if (!deleted) return res.status(404).json({ error: "Preference not found" });
       res.json({ success: true });
     } catch (error) {
@@ -4882,7 +4882,7 @@ Only respond with the JSON object.`;
 
   app.patch("/api/hospitality/stay-notes/:noteId", async (req, res) => {
     try {
-      const note = await storage.updateStayNote(parseInt(req.params.noteId), req.body);
+      const note = await storage.updateStayNote(req.params.noteId, req.body);
       if (!note) return res.status(404).json({ error: "Note not found" });
       res.json(note);
     } catch (error) {
@@ -4893,7 +4893,7 @@ Only respond with the JSON object.`;
   app.patch("/api/hospitality/stay-notes/:noteId/resolve", async (req, res) => {
     try {
       const { resolvedBy } = req.body;
-      const note = await storage.resolveStayNote(parseInt(req.params.noteId), resolvedBy || "Sistema");
+      const note = await storage.resolveStayNote(req.params.noteId, resolvedBy || "Sistema");
       if (!note) return res.status(404).json({ error: "Note not found" });
       res.json(note);
     } catch (error) {
@@ -4903,7 +4903,7 @@ Only respond with the JSON object.`;
 
   app.delete("/api/hospitality/stay-notes/:noteId", async (req, res) => {
     try {
-      const deleted = await storage.deleteStayNote(parseInt(req.params.noteId));
+      const deleted = await storage.deleteStayNote(req.params.noteId);
       if (!deleted) return res.status(404).json({ error: "Note not found" });
       res.json({ success: true });
     } catch (error) {
@@ -4934,7 +4934,7 @@ Only respond with the JSON object.`;
   app.patch("/api/hospitality/alerts/:alertId/acknowledge", async (req, res) => {
     try {
       const { acknowledgedBy } = req.body;
-      const alert = await storage.acknowledgeHospitalityAlert(parseInt(req.params.alertId), acknowledgedBy || "Sistema");
+      const alert = await storage.acknowledgeHospitalityAlert(req.params.alertId, acknowledgedBy || "Sistema");
       if (!alert) return res.status(404).json({ error: "Alert not found" });
       res.json(alert);
     } catch (error) {

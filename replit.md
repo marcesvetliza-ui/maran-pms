@@ -40,6 +40,7 @@ Preferred communication style: Simple, everyday language.
 - **Migrations**: Managed with Drizzle Kit via `db:push`.
 
 ### Core Data Models
+- **ID Strategy**: All tables use `varchar` primary keys with UUID generation (`gen_random_uuid()`). No `serial` IDs remain.
 - **Room Types**: Defines categories, pricing, and capacity.
 - **Rooms**: Tracks individual room status (available, occupied, cleaning, maintenance).
 - **Guests**: Stores customer details, including identity and optional vehicle information.

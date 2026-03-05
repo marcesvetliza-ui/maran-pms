@@ -121,7 +121,7 @@ export type Guest = typeof guests.$inferSelect;
 
 // Bed Types (Tipos de Camaje)
 export const bedTypes = pgTable("bed_types", {
-  id: serial("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   code: text("code").notNull().unique(),
   name: text("name").notNull(),
   description: text("description"),
@@ -160,7 +160,7 @@ export const reservations = pgTable("reservations", {
   otaChannelId: varchar("ota_channel_id"),
   externalReservationId: text("external_reservation_id"),
   numberOfGuests: integer("number_of_guests").notNull().default(1),
-  bedTypeId: integer("bed_type_id"),
+  bedTypeId: varchar("bed_type_id"),
   bedTypeNotes: text("bed_type_notes"),
   earlyCheckIn: boolean("early_check_in").default(false),
   earlyCheckInTime: text("early_check_in_time"),
@@ -1329,7 +1329,7 @@ export type NotificationArea = "reception" | "housekeeping" | "maintenance" | "r
 export type NotificationPriority = "low" | "normal" | "high" | "urgent";
 
 export const systemNotifications = pgTable("system_notifications", {
-  id: serial("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   type: text("type").$type<NotificationType>().notNull(),
   title: text("title").notNull(),
   message: text("message").notNull(),
@@ -1351,7 +1351,7 @@ export type SystemNotification = typeof systemNotifications.$inferSelect;
 export type WebCheckinStatus = "pending" | "completed" | "expired";
 
 export const webCheckins = pgTable("web_checkins", {
-  id: serial("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   reservationId: varchar("reservation_id").notNull(),
   token: text("token").notNull().unique(),
   status: text("status").$type<WebCheckinStatus>().notNull().default("pending"),
@@ -1383,7 +1383,7 @@ export type PreferenceCategory = "habitacion" | "alimentacion" | "amenities" | "
 export type PreferencePriority = "low" | "normal" | "high" | "critical";
 
 export const guestPreferences = pgTable("guest_preferences", {
-  id: serial("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   guestId: varchar("guest_id").notNull(),
   category: text("category").$type<PreferenceCategory>().notNull(),
   subcategory: text("subcategory"),
@@ -1403,7 +1403,7 @@ export type InsertGuestPreference = z.infer<typeof insertGuestPreferenceSchema>;
 export type GuestPreference = typeof guestPreferences.$inferSelect;
 
 export const stayNotes = pgTable("stay_notes", {
-  id: serial("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   reservationId: varchar("reservation_id").notNull(),
   guestId: varchar("guest_id"),
   category: text("category").$type<PreferenceCategory>().notNull(),
@@ -1423,10 +1423,10 @@ export type InsertStayNote = z.infer<typeof insertStayNoteSchema>;
 export type StayNote = typeof stayNotes.$inferSelect;
 
 export const hospitalityAlerts = pgTable("hospitality_alerts", {
-  id: serial("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   reservationId: varchar("reservation_id").notNull(),
   guestId: varchar("guest_id").notNull(),
-  preferenceId: integer("preference_id"),
+  preferenceId: varchar("preference_id"),
   alertMessage: text("alert_message").notNull(),
   targetArea: text("target_area").notNull(),
   priority: text("priority").$type<PreferencePriority>().notNull().default("normal"),

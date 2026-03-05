@@ -228,10 +228,10 @@ export interface IStorage {
 
   // Bed Types
   getBedTypes(): Promise<BedType[]>;
-  getBedType(id: number): Promise<BedType | undefined>;
+  getBedType(id: string): Promise<BedType | undefined>;
   createBedType(bedType: InsertBedType): Promise<BedType>;
-  updateBedType(id: number, bedType: Partial<InsertBedType>): Promise<BedType | undefined>;
-  deleteBedType(id: number): Promise<boolean>;
+  updateBedType(id: string, bedType: Partial<InsertBedType>): Promise<BedType | undefined>;
+  deleteBedType(id: string): Promise<boolean>;
 
   // Reservations
   getReservations(): Promise<ReservationWithDetails[]>;
@@ -635,7 +635,7 @@ export interface IStorage {
   // System Notifications
   getNotifications(area?: NotificationArea, limit?: number): Promise<SystemNotification[]>;
   createNotification(notification: InsertSystemNotification): Promise<SystemNotification>;
-  markNotificationRead(id: number): Promise<SystemNotification | undefined>;
+  markNotificationRead(id: string): Promise<SystemNotification | undefined>;
   markAllNotificationsRead(area?: NotificationArea): Promise<number>;
   getUnreadNotificationCount(area?: NotificationArea): Promise<number>;
 
@@ -643,31 +643,31 @@ export interface IStorage {
   createWebCheckin(data: InsertWebCheckin): Promise<WebCheckin>;
   getWebCheckinByToken(token: string): Promise<WebCheckin | undefined>;
   getWebCheckinByReservation(reservationId: string): Promise<WebCheckin | undefined>;
-  updateWebCheckin(id: number, data: Partial<InsertWebCheckin>): Promise<WebCheckin | undefined>;
+  updateWebCheckin(id: string, data: Partial<InsertWebCheckin>): Promise<WebCheckin | undefined>;
   listWebCheckins(): Promise<WebCheckin[]>;
 
   // Hospitality - Guest Preferences
   getGuestPreferences(guestId: string): Promise<GuestPreference[]>;
   getActiveGuestPreferences(guestId: string): Promise<GuestPreference[]>;
-  getGuestPreference(id: number): Promise<GuestPreference | undefined>;
+  getGuestPreference(id: string): Promise<GuestPreference | undefined>;
   createGuestPreference(pref: InsertGuestPreference): Promise<GuestPreference>;
-  updateGuestPreference(id: number, pref: Partial<InsertGuestPreference>): Promise<GuestPreference | undefined>;
-  toggleGuestPreference(id: number): Promise<GuestPreference | undefined>;
-  deleteGuestPreference(id: number): Promise<boolean>;
+  updateGuestPreference(id: string, pref: Partial<InsertGuestPreference>): Promise<GuestPreference | undefined>;
+  toggleGuestPreference(id: string): Promise<GuestPreference | undefined>;
+  deleteGuestPreference(id: string): Promise<boolean>;
 
   // Hospitality - Stay Notes
   getStayNotes(reservationId: string): Promise<StayNote[]>;
   getActiveStayNotes(): Promise<StayNote[]>;
   createStayNote(note: InsertStayNote): Promise<StayNote>;
-  updateStayNote(id: number, note: Partial<InsertStayNote>): Promise<StayNote | undefined>;
-  resolveStayNote(id: number, resolvedBy: string): Promise<StayNote | undefined>;
-  deleteStayNote(id: number): Promise<boolean>;
+  updateStayNote(id: string, note: Partial<InsertStayNote>): Promise<StayNote | undefined>;
+  resolveStayNote(id: string, resolvedBy: string): Promise<StayNote | undefined>;
+  deleteStayNote(id: string): Promise<boolean>;
 
   // Hospitality - Alerts
   getHospitalityAlerts(area?: string): Promise<HospitalityAlert[]>;
   getHospitalityAlertsByReservation(reservationId: string): Promise<HospitalityAlert[]>;
   createHospitalityAlert(alert: InsertHospitalityAlert): Promise<HospitalityAlert>;
-  acknowledgeHospitalityAlert(id: number, acknowledgedBy: string): Promise<HospitalityAlert | undefined>;
+  acknowledgeHospitalityAlert(id: string, acknowledgedBy: string): Promise<HospitalityAlert | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -677,8 +677,7 @@ export class MemStorage implements IStorage {
   private rooms: Map<string, Room>;
   private companies: Map<string, Company>;
   private guests: Map<string, Guest>;
-  private bedTypesMap: Map<number, BedType>;
-  private bedTypeCounter: number;
+  private bedTypesMap: Map<string, BedType>;
   private reservations: Map<string, Reservation>;
   private charges: Map<string, Charge>;
   private payments: Map<string, Payment>;
@@ -735,17 +734,12 @@ export class MemStorage implements IStorage {
   private packages: Map<string, Package>;
   private packageItems: Map<string, PackageItem>;
   // Notifications & Web Check-in
-  private notificationsMap: Map<number, SystemNotification>;
-  private notificationCounter: number;
-  private webCheckinsMap: Map<number, WebCheckin>;
-  private webCheckinCounter: number;
+  private notificationsMap: Map<string, SystemNotification>;
+  private webCheckinsMap: Map<string, WebCheckin>;
   // Hospitality
-  private guestPreferencesMap: Map<number, GuestPreference>;
-  private guestPreferenceCounter: number;
-  private stayNotesMap: Map<number, StayNote>;
-  private stayNoteCounter: number;
-  private hospitalityAlertsMap: Map<number, HospitalityAlert>;
-  private hospitalityAlertCounter: number;
+  private guestPreferencesMap: Map<string, GuestPreference>;
+  private stayNotesMap: Map<string, StayNote>;
+  private hospitalityAlertsMap: Map<string, HospitalityAlert>;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
@@ -763,7 +757,6 @@ export class MemStorage implements IStorage {
     this.companies = new Map();
     this.guests = new Map();
     this.bedTypesMap = new Map();
-    this.bedTypeCounter = 0;
     this.reservations = new Map();
     this.charges = new Map();
     this.payments = new Map();
@@ -821,16 +814,11 @@ export class MemStorage implements IStorage {
     this.packageItems = new Map();
     // Notifications & Web Check-in
     this.notificationsMap = new Map();
-    this.notificationCounter = 0;
     this.webCheckinsMap = new Map();
-    this.webCheckinCounter = 0;
     // Hospitality
     this.guestPreferencesMap = new Map();
-    this.guestPreferenceCounter = 0;
     this.stayNotesMap = new Map();
-    this.stayNoteCounter = 0;
     this.hospitalityAlertsMap = new Map();
-    this.hospitalityAlertCounter = 0;
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
@@ -856,15 +844,14 @@ export class MemStorage implements IStorage {
 
     // Create bed types
     const defaultBedTypes: BedType[] = [
-      { id: 1, code: "SGL", name: "Simple", description: "Cama simple individual", isActive: true, displayOrder: 1, createdAt: new Date() },
-      { id: 2, code: "DBL", name: "Doble", description: "Cama doble matrimonial", isActive: true, displayOrder: 2, createdAt: new Date() },
-      { id: 3, code: "TWN", name: "Twin — 2 camas separadas", description: "Dos camas individuales separadas", isActive: true, displayOrder: 3, createdAt: new Date() },
-      { id: 4, code: "TPL", name: "Triple", description: "Configuración triple (matrimonial + individual)", isActive: true, displayOrder: 4, createdAt: new Date() },
-      { id: 5, code: "MAT_LIV", name: "Matrimonial con Living", description: "Cama matrimonial con living separado", isActive: true, displayOrder: 5, createdAt: new Date() },
-      { id: 6, code: "STE_SOFA", name: "Suite con Sofá Cama", description: "Suite con sofá cama adicional", isActive: true, displayOrder: 6, createdAt: new Date() },
+      { id: randomUUID(), code: "SGL", name: "Simple", description: "Cama simple individual", isActive: true, displayOrder: 1, createdAt: new Date() },
+      { id: randomUUID(), code: "DBL", name: "Doble", description: "Cama doble matrimonial", isActive: true, displayOrder: 2, createdAt: new Date() },
+      { id: randomUUID(), code: "TWN", name: "Twin — 2 camas separadas", description: "Dos camas individuales separadas", isActive: true, displayOrder: 3, createdAt: new Date() },
+      { id: randomUUID(), code: "TPL", name: "Triple", description: "Configuración triple (matrimonial + individual)", isActive: true, displayOrder: 4, createdAt: new Date() },
+      { id: randomUUID(), code: "MAT_LIV", name: "Matrimonial con Living", description: "Cama matrimonial con living separado", isActive: true, displayOrder: 5, createdAt: new Date() },
+      { id: randomUUID(), code: "STE_SOFA", name: "Suite con Sofá Cama", description: "Suite con sofá cama adicional", isActive: true, displayOrder: 6, createdAt: new Date() },
     ];
     defaultBedTypes.forEach((bt) => this.bedTypesMap.set(bt.id, bt));
-    this.bedTypeCounter = 6;
 
     // Create rate plans
     const ratePlans: RatePlan[] = [
@@ -1235,41 +1222,41 @@ export class MemStorage implements IStorage {
     const seedNow = new Date();
     const chatbotNotifications: SystemNotification[] = [
       {
-        id: 1, type: "chatbot_housekeeping" as any, title: "Solicitud de Carlos García - Hab. 201",
+        id: randomUUID(), type: "chatbot_housekeeping" as any, title: "Solicitud de Carlos García - Hab. 201",
         message: "Solicita toallas adicionales para la habitación", targetArea: "housekeeping" as any,
         relatedEntityType: "room", relatedEntityId: "201", isRead: false, readAt: null, readBy: null,
         priority: "normal" as any, createdAt: new Date(seedNow.getTime() - 45 * 60000),
       },
       {
-        id: 2, type: "chatbot_restaurant" as any, title: "Solicitud de María López - Hab. 305",
+        id: randomUUID(), type: "chatbot_restaurant" as any, title: "Solicitud de María López - Hab. 305",
         message: "Consulta horario de desayuno para mañana y si tienen opciones sin gluten",
         targetArea: "restaurant" as any, relatedEntityType: "room", relatedEntityId: "305",
         isRead: false, readAt: null, readBy: null, priority: "normal" as any,
         createdAt: new Date(seedNow.getTime() - 30 * 60000),
       },
       {
-        id: 3, type: "chatbot_maintenance" as any, title: "Solicitud de John Smith - Hab. 505",
+        id: randomUUID(), type: "chatbot_maintenance" as any, title: "Solicitud de John Smith - Hab. 505",
         message: "El aire acondicionado no enfría correctamente, la habitación está muy calurosa",
         targetArea: "maintenance" as any, relatedEntityType: "room", relatedEntityId: "505",
         isRead: false, readAt: null, readBy: null, priority: "urgent" as any,
         createdAt: new Date(seedNow.getTime() - 15 * 60000),
       },
       {
-        id: 4, type: "chatbot_spa" as any, title: "Solicitud de Ana Martínez - Hab. 401",
+        id: randomUUID(), type: "chatbot_spa" as any, title: "Solicitud de Ana Martínez - Hab. 401",
         message: "Quiere reservar un masaje relajante para las 16:00 de hoy",
         targetArea: "spa" as any, relatedEntityType: "room", relatedEntityId: "401",
         isRead: false, readAt: null, readBy: null, priority: "normal" as any,
         createdAt: new Date(seedNow.getTime() - 10 * 60000),
       },
       {
-        id: 5, type: "chatbot_housekeeping" as any, title: "Solicitud de Diego Ramírez - Hab. 307",
+        id: randomUUID(), type: "chatbot_housekeeping" as any, title: "Solicitud de Diego Ramírez - Hab. 307",
         message: "Necesita almohada extra y una manta adicional por favor",
         targetArea: "housekeeping" as any, relatedEntityType: "room", relatedEntityId: "307",
         isRead: true, readAt: new Date(seedNow.getTime() - 60 * 60000), readBy: "reception",
         priority: "normal" as any, createdAt: new Date(seedNow.getTime() - 120 * 60000),
       },
       {
-        id: 6, type: "chatbot_request" as any, title: "Solicitud de Sophie Martin - Hab. 405",
+        id: randomUUID(), type: "chatbot_request" as any, title: "Solicitud de Sophie Martin - Hab. 405",
         message: "Consulta sobre el horario de check-out y si es posible late check-out",
         targetArea: "reception" as any, relatedEntityType: "room", relatedEntityId: "405",
         isRead: true, readAt: new Date(seedNow.getTime() - 90 * 60000), readBy: "reception",
@@ -1277,21 +1264,19 @@ export class MemStorage implements IStorage {
       },
     ];
     chatbotNotifications.forEach((n) => this.notificationsMap.set(n.id, n));
-    this.notificationCounter = chatbotNotifications.length;
 
     const prefNow = new Date();
     const seedPreferences: GuestPreference[] = [
-      { id: 1, guestId: "g1", category: "alimentacion", subcategory: "alergias", title: "Alergia al maní", description: "Alergia severa al maní y derivados. Riesgo de anafilaxia.", isActive: true, priority: "critical", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 30 * 86400000), updatedAt: new Date(prefNow.getTime() - 30 * 86400000) },
-      { id: 2, guestId: "g1", category: "habitacion", subcategory: "ubicacion", title: "Piso alto", description: "Prefiere habitaciones en pisos altos con vista a la ciudad", isActive: true, priority: "normal", visibleTo: ["reception"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 30 * 86400000), updatedAt: new Date(prefNow.getTime() - 30 * 86400000) },
-      { id: 3, guestId: "g1", category: "amenities", subcategory: "almohadas", title: "Almohadas extra", description: "Solicita 2 almohadas adicionales firmes", isActive: true, priority: "normal", visibleTo: ["housekeeping"], recordedBy: "Housekeeping", sourceStay: null, createdAt: new Date(prefNow.getTime() - 20 * 86400000), updatedAt: new Date(prefNow.getTime() - 20 * 86400000) },
-      { id: 4, guestId: "g2", category: "fecha_especial", subcategory: "cumpleanos", title: "Cumpleaños 22 de julio", description: "Fecha de nacimiento: 22/07. Huésped frecuente, considerar detalle especial.", isActive: true, priority: "high", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 60 * 86400000), updatedAt: new Date(prefNow.getTime() - 60 * 86400000) },
-      { id: 5, guestId: "g2", category: "alimentacion", subcategory: "dieta", title: "Vegetariana", description: "Dieta vegetariana estricta. No consume carnes ni pescados.", isActive: true, priority: "high", visibleTo: ["restaurant", "reception"], recordedBy: "Restaurant", sourceStay: null, createdAt: new Date(prefNow.getTime() - 45 * 86400000), updatedAt: new Date(prefNow.getTime() - 45 * 86400000) },
-      { id: 6, guestId: "g3", category: "habitacion", subcategory: "almohadas", title: "Almohada hipoalergénica", description: "Requiere almohadas hipoalergénicas por sensibilidad", isActive: true, priority: "high", visibleTo: ["housekeeping"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
-      { id: 7, guestId: "g3", category: "servicio", subcategory: "idioma", title: "Idioma inglés", description: "Prefiere comunicación en inglés", isActive: true, priority: "normal", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
-      { id: 8, guestId: "g4", category: "alimentacion", subcategory: "alergias", title: "Intolerancia a lactosa", description: "Intolerancia a la lactosa. Solicitar opciones sin lácteos.", isActive: true, priority: "high", visibleTo: ["restaurant", "reception"], recordedBy: "Restaurant", sourceStay: null, createdAt: new Date(prefNow.getTime() - 10 * 86400000), updatedAt: new Date(prefNow.getTime() - 10 * 86400000) },
+      { id: randomUUID(), guestId: "g1", category: "alimentacion", subcategory: "alergias", title: "Alergia al maní", description: "Alergia severa al maní y derivados. Riesgo de anafilaxia.", isActive: true, priority: "critical", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 30 * 86400000), updatedAt: new Date(prefNow.getTime() - 30 * 86400000) },
+      { id: randomUUID(), guestId: "g1", category: "habitacion", subcategory: "ubicacion", title: "Piso alto", description: "Prefiere habitaciones en pisos altos con vista a la ciudad", isActive: true, priority: "normal", visibleTo: ["reception"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 30 * 86400000), updatedAt: new Date(prefNow.getTime() - 30 * 86400000) },
+      { id: randomUUID(), guestId: "g1", category: "amenities", subcategory: "almohadas", title: "Almohadas extra", description: "Solicita 2 almohadas adicionales firmes", isActive: true, priority: "normal", visibleTo: ["housekeeping"], recordedBy: "Housekeeping", sourceStay: null, createdAt: new Date(prefNow.getTime() - 20 * 86400000), updatedAt: new Date(prefNow.getTime() - 20 * 86400000) },
+      { id: randomUUID(), guestId: "g2", category: "fecha_especial", subcategory: "cumpleanos", title: "Cumpleaños 22 de julio", description: "Fecha de nacimiento: 22/07. Huésped frecuente, considerar detalle especial.", isActive: true, priority: "high", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 60 * 86400000), updatedAt: new Date(prefNow.getTime() - 60 * 86400000) },
+      { id: randomUUID(), guestId: "g2", category: "alimentacion", subcategory: "dieta", title: "Vegetariana", description: "Dieta vegetariana estricta. No consume carnes ni pescados.", isActive: true, priority: "high", visibleTo: ["restaurant", "reception"], recordedBy: "Restaurant", sourceStay: null, createdAt: new Date(prefNow.getTime() - 45 * 86400000), updatedAt: new Date(prefNow.getTime() - 45 * 86400000) },
+      { id: randomUUID(), guestId: "g3", category: "habitacion", subcategory: "almohadas", title: "Almohada hipoalergénica", description: "Requiere almohadas hipoalergénicas por sensibilidad", isActive: true, priority: "high", visibleTo: ["housekeeping"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
+      { id: randomUUID(), guestId: "g3", category: "servicio", subcategory: "idioma", title: "Idioma inglés", description: "Prefiere comunicación en inglés", isActive: true, priority: "normal", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
+      { id: randomUUID(), guestId: "g4", category: "alimentacion", subcategory: "alergias", title: "Intolerancia a lactosa", description: "Intolerancia a la lactosa. Solicitar opciones sin lácteos.", isActive: true, priority: "high", visibleTo: ["restaurant", "reception"], recordedBy: "Restaurant", sourceStay: null, createdAt: new Date(prefNow.getTime() - 10 * 86400000), updatedAt: new Date(prefNow.getTime() - 10 * 86400000) },
     ];
     seedPreferences.forEach((p) => this.guestPreferencesMap.set(p.id, p));
-    this.guestPreferenceCounter = seedPreferences.length;
   }
 
   // Users
@@ -1600,14 +1585,13 @@ export class MemStorage implements IStorage {
     return Array.from(this.bedTypesMap.values()).sort((a, b) => a.displayOrder - b.displayOrder);
   }
 
-  async getBedType(id: number): Promise<BedType | undefined> {
+  async getBedType(id: string): Promise<BedType | undefined> {
     return this.bedTypesMap.get(id);
   }
 
   async createBedType(bedType: InsertBedType): Promise<BedType> {
-    this.bedTypeCounter++;
     const newBedType: BedType = {
-      id: this.bedTypeCounter,
+      id: randomUUID(),
       code: bedType.code,
       name: bedType.name,
       description: bedType.description ?? null,
@@ -1619,7 +1603,7 @@ export class MemStorage implements IStorage {
     return newBedType;
   }
 
-  async updateBedType(id: number, bedType: Partial<InsertBedType>): Promise<BedType | undefined> {
+  async updateBedType(id: string, bedType: Partial<InsertBedType>): Promise<BedType | undefined> {
     const existing = this.bedTypesMap.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, ...bedType };
@@ -1627,7 +1611,7 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async deleteBedType(id: number): Promise<boolean> {
+  async deleteBedType(id: string): Promise<boolean> {
     const existing = this.bedTypesMap.get(id);
     if (!existing) return false;
     const updated = { ...existing, isActive: false };
@@ -4613,7 +4597,7 @@ export class MemStorage implements IStorage {
   }
 
   async createNotification(notification: InsertSystemNotification): Promise<SystemNotification> {
-    const id = ++this.notificationCounter;
+    const id = randomUUID();
     const newNotification: SystemNotification = {
       id,
       type: notification.type,
@@ -4632,7 +4616,7 @@ export class MemStorage implements IStorage {
     return newNotification;
   }
 
-  async markNotificationRead(id: number): Promise<SystemNotification | undefined> {
+  async markNotificationRead(id: string): Promise<SystemNotification | undefined> {
     const notification = this.notificationsMap.get(id);
     if (!notification) return undefined;
     const updated = { ...notification, isRead: true, readAt: new Date() };
@@ -4667,7 +4651,7 @@ export class MemStorage implements IStorage {
 
   // Web Check-in
   async createWebCheckin(data: InsertWebCheckin): Promise<WebCheckin> {
-    const id = ++this.webCheckinCounter;
+    const id = randomUUID();
     const newCheckin: WebCheckin = {
       id,
       reservationId: data.reservationId,
@@ -4709,7 +4693,7 @@ export class MemStorage implements IStorage {
     return undefined;
   }
 
-  async updateWebCheckin(id: number, data: Partial<InsertWebCheckin>): Promise<WebCheckin | undefined> {
+  async updateWebCheckin(id: string, data: Partial<InsertWebCheckin>): Promise<WebCheckin | undefined> {
     const existing = this.webCheckinsMap.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, ...data } as WebCheckin;
@@ -4739,12 +4723,12 @@ export class MemStorage implements IStorage {
       });
   }
 
-  async getGuestPreference(id: number): Promise<GuestPreference | undefined> {
+  async getGuestPreference(id: string): Promise<GuestPreference | undefined> {
     return this.guestPreferencesMap.get(id);
   }
 
   async createGuestPreference(pref: InsertGuestPreference): Promise<GuestPreference> {
-    const id = ++this.guestPreferenceCounter;
+    const id = randomUUID();
     const now = new Date();
     const preference: GuestPreference = {
       id,
@@ -4765,7 +4749,7 @@ export class MemStorage implements IStorage {
     return preference;
   }
 
-  async updateGuestPreference(id: number, pref: Partial<InsertGuestPreference>): Promise<GuestPreference | undefined> {
+  async updateGuestPreference(id: string, pref: Partial<InsertGuestPreference>): Promise<GuestPreference | undefined> {
     const existing = this.guestPreferencesMap.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, ...pref, updatedAt: new Date() } as GuestPreference;
@@ -4773,7 +4757,7 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async toggleGuestPreference(id: number): Promise<GuestPreference | undefined> {
+  async toggleGuestPreference(id: string): Promise<GuestPreference | undefined> {
     const existing = this.guestPreferencesMap.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, isActive: !existing.isActive, updatedAt: new Date() };
@@ -4781,7 +4765,7 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async deleteGuestPreference(id: number): Promise<boolean> {
+  async deleteGuestPreference(id: string): Promise<boolean> {
     return this.guestPreferencesMap.delete(id);
   }
 
@@ -4799,7 +4783,7 @@ export class MemStorage implements IStorage {
   }
 
   async createStayNote(note: InsertStayNote): Promise<StayNote> {
-    const id = ++this.stayNoteCounter;
+    const id = randomUUID();
     const stayNote: StayNote = {
       id,
       reservationId: note.reservationId,
@@ -4819,7 +4803,7 @@ export class MemStorage implements IStorage {
     return stayNote;
   }
 
-  async updateStayNote(id: number, note: Partial<InsertStayNote>): Promise<StayNote | undefined> {
+  async updateStayNote(id: string, note: Partial<InsertStayNote>): Promise<StayNote | undefined> {
     const existing = this.stayNotesMap.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, ...note } as StayNote;
@@ -4827,7 +4811,7 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async resolveStayNote(id: number, resolvedBy: string): Promise<StayNote | undefined> {
+  async resolveStayNote(id: string, resolvedBy: string): Promise<StayNote | undefined> {
     const existing = this.stayNotesMap.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, isResolved: true, resolvedAt: new Date(), resolvedBy };
@@ -4835,7 +4819,7 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async deleteStayNote(id: number): Promise<boolean> {
+  async deleteStayNote(id: string): Promise<boolean> {
     return this.stayNotesMap.delete(id);
   }
 
@@ -4855,7 +4839,7 @@ export class MemStorage implements IStorage {
   }
 
   async createHospitalityAlert(alert: InsertHospitalityAlert): Promise<HospitalityAlert> {
-    const id = ++this.hospitalityAlertCounter;
+    const id = randomUUID();
     const hospitalityAlert: HospitalityAlert = {
       id,
       reservationId: alert.reservationId,
@@ -4873,7 +4857,7 @@ export class MemStorage implements IStorage {
     return hospitalityAlert;
   }
 
-  async acknowledgeHospitalityAlert(id: number, acknowledgedBy: string): Promise<HospitalityAlert | undefined> {
+  async acknowledgeHospitalityAlert(id: string, acknowledgedBy: string): Promise<HospitalityAlert | undefined> {
     const existing = this.hospitalityAlertsMap.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, isAcknowledged: true, acknowledgedAt: new Date(), acknowledgedBy };
