@@ -52,6 +52,7 @@ type RestaurantArea = {
   name: string;
   areaType: "indoor" | "outdoor" | "terrace" | "bar" | "private";
   capacity: number;
+  hasTables: string | null;
   isActive: string;
   notes: string | null;
 };
@@ -92,12 +93,28 @@ type MenuItem = {
   category?: MenuCategory;
 };
 
+type OrderSplit = {
+  id: string;
+  orderId: string;
+  splitNumber: number;
+  amount: string;
+  method: string | null;
+  receiptType: string | null;
+  isPaid: string | null;
+  paidAt: string | null;
+  createdAt: string | null;
+};
+
 type RestaurantOrder = {
   id: string;
   orderNumber: string;
   tableId: string | null;
+  areaId: string | null;
   status: "open" | "in_progress" | "served" | "closed" | "cancelled";
   covers: number;
+  waiterName: string | null;
+  orderLabel: string | null;
+  activeCourse: number | null;
   subtotal: string;
   tax: string;
   total: string;
@@ -105,6 +122,7 @@ type RestaurantOrder = {
   receiptType: string | null;
   paymentMethod: string | null;
   table?: RestaurantTable;
+  area?: RestaurantArea;
   items?: Array<{
     id: string;
     menuItemId: string;
@@ -114,6 +132,7 @@ type RestaurantOrder = {
     menuItem?: MenuItem;
     notes?: string | null;
     status?: string;
+    course?: number | null;
   }>;
 };
 
@@ -288,6 +307,19 @@ export default function RestaurantPage() {
   const [newTableShape, setNewTableShape] = useState("square");
   const [newTableArea, setNewTableArea] = useState("");
   const [newTableWindow, setNewTableWindow] = useState(false);
+  const [newWaiterName, setNewWaiterName] = useState("");
+  const [newOrderLabel, setNewOrderLabel] = useState("");
+  const [isDirectOrderDialogOpen, setIsDirectOrderDialogOpen] = useState(false);
+  const [directOrderAreaId, setDirectOrderAreaId] = useState("");
+  const [itemCourse, setItemCourse] = useState(1);
+  const [isSplitMode, setIsSplitMode] = useState(false);
+  const [splitParts, setSplitParts] = useState(2);
+  const [splitReceiptType, setSplitReceiptType] = useState("ticket");
+  const [splitPayMethod, setSplitPayMethod] = useState("efectivo");
+  const [splitPayMethods, setSplitPayMethods] = useState<Record<string, string>>({});
+  const [splitReceiptTypes, setSplitReceiptTypes] = useState<Record<string, string>>({});
+
+  const courseLabels: Record<number, string> = { 1: "Entradas", 2: "Platos Principales", 3: "Postres" };
 
   const reservationForm = useForm<ReservationFormValues>({
     resolver: zodResolver(reservationFormSchema),
@@ -395,7 +427,7 @@ export default function RestaurantPage() {
   });
 
   const createOrderMutation = useMutation({
-    mutationFn: async (data: { tableId: string; covers: number }) => {
+    mutationFn: async (data: { tableId?: string; areaId?: string; covers: number; waiterName: string; orderLabel?: string }) => {
       const res = await apiRequest("POST", "/api/restaurant/orders", data);
       return res.json();
     },
@@ -404,6 +436,9 @@ export default function RestaurantPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       setCurrentOrder(order);
       setIsNewOrderDialogOpen(false);
+      setIsDirectOrderDialogOpen(false);
+      setNewWaiterName("");
+      setNewOrderLabel("");
       setOrderView("menu");
       setSelectedCategory(null);
       setIsOrderDialogOpen(true);
@@ -412,11 +447,12 @@ export default function RestaurantPage() {
   });
 
   const addItemMutation = useMutation({
-    mutationFn: async (data: { orderId: string; menuItemId: string; quantity: number; notes?: string }) => {
+    mutationFn: async (data: { orderId: string; menuItemId: string; quantity: number; notes?: string; course?: number }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/items`, {
         menuItemId: data.menuItemId,
         quantity: data.quantity,
         notes: data.notes,
+        course: data.course || 1,
       });
       return res.json();
     },
@@ -425,6 +461,61 @@ export default function RestaurantPage() {
       setPendingItem(null);
       setItemNotes("");
       toast({ title: "Item agregado" });
+    },
+  });
+
+  const advanceCourseMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/advance-course`);
+      return res.json();
+    },
+    onSuccess: (data: { activeCourse: number; activatedItems: number }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      toast({ title: `Curso activado: ${courseLabels[data.activeCourse]}`, description: `${data.activatedItems} items enviados a cocina` });
+    },
+  });
+
+  const createSplitMutation = useMutation({
+    mutationFn: async (data: { orderId: string; parts: number }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/split`, { parts: data.parts });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      toast({ title: "Cuenta dividida" });
+    },
+  });
+
+  const paySplitMutation = useMutation({
+    mutationFn: async (data: { orderId: string; splitId: string; method: string; receiptType: string }) => {
+      const res = await apiRequest("PATCH", `/api/restaurant/orders/${data.orderId}/split/${data.splitId}`, {
+        method: data.method,
+        receiptType: data.receiptType,
+      });
+      return res.json();
+    },
+    onSuccess: (data: { split: OrderSplit; allPaid: boolean }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+      if (data.allPaid) {
+        setCurrentOrder(null);
+        setIsCloseDialogOpen(false);
+        setIsSplitMode(false);
+        toast({ title: "Todas las partes pagadas — mesa cerrada" });
+      } else {
+        toast({ title: "Parte cobrada" });
+      }
+    },
+  });
+
+  const cancelSplitMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      await apiRequest("DELETE", `/api/restaurant/orders/${orderId}/split`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      setIsSplitMode(false);
+      toast({ title: "División cancelada" });
     },
   });
 
@@ -641,6 +732,7 @@ export default function RestaurantPage() {
     setSelectedTable(table);
     if (table.status === "available") {
       setNewCovers(table.capacity);
+      setNewWaiterName("");
       setIsNewOrderDialogOpen(true);
     } else if (table.status === "occupied") {
       const tableOrder = orders.find((o) => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
@@ -660,6 +752,7 @@ export default function RestaurantPage() {
         menuItemId: pendingItem.id,
         quantity: 1,
         notes: itemNotes || undefined,
+        course: itemCourse,
       });
     }
   };
@@ -885,6 +978,73 @@ export default function RestaurantPage() {
           ) : (
             <div className="grid gap-6">
               {(selectedArea === "all" ? areas : areas.filter((a) => a.id === selectedArea)).map((area) => {
+                if (area.hasTables === "false") {
+                  const areaOrders = activeOrders.filter((o) => o.areaId === area.id);
+                  return (
+                    <Card key={area.id}>
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base">{area.name}</CardTitle>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setDirectOrderAreaId(area.id);
+                              setNewWaiterName("");
+                              setNewOrderLabel("");
+                              setNewCovers(1);
+                              setIsDirectOrderDialogOpen(true);
+                            }}
+                            data-testid={`button-new-direct-order-${area.id}`}
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Nueva Orden
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {areaOrders.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-4">Sin órdenes activas</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {areaOrders.map((order) => (
+                              <button
+                                key={order.id}
+                                className="w-full flex items-center justify-between p-3 border rounded-md hover-elevate text-left"
+                                onClick={() => {
+                                  setCurrentOrder(order);
+                                  setOrderView("menu");
+                                  setSelectedCategory(null);
+                                  setIsOrderDialogOpen(true);
+                                }}
+                                data-testid={`direct-order-${order.id}`}
+                              >
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{order.orderLabel || order.orderNumber}</span>
+                                    <Badge variant="outline" className="text-xs">{order.orderNumber}</Badge>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-0.5">
+                                    Mozo: {order.waiterName || "—"} | {new Date(order.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+                                    {order.items && order.items.length > 0 && ` | ${order.items.length} items`}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-semibold">${parseFloat(order.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                  <div className="text-xs">
+                                    <Badge variant={order.status === "open" ? "default" : order.status === "in_progress" ? "secondary" : "outline"} className="text-xs">
+                                      {order.status === "open" ? "Abierto" : order.status === "in_progress" ? "En curso" : order.status}
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                }
+
                 const areaTables = filteredTables.filter((t) => t.areaId === area.id);
                 const gridCols = 8;
                 const gridRows = 6;
@@ -944,6 +1104,12 @@ export default function RestaurantPage() {
                                   <Users className="h-2.5 w-2.5" />
                                   {table.capacity}
                                 </div>
+                                {table.status === "occupied" && (() => {
+                                  const tableOrder = activeOrders.find(o => o.tableId === table.id);
+                                  return tableOrder?.waiterName ? (
+                                    <span className="text-[9px] truncate max-w-full opacity-80">{tableOrder.waiterName}</span>
+                                  ) : null;
+                                })()}
                                 {isEditMode && (
                                   <GripVertical className="h-3 w-3 opacity-50" />
                                 )}
@@ -1031,7 +1197,7 @@ export default function RestaurantPage() {
                 <Card key={order.id} data-testid={`order-card-${order.orderNumber}`}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-base">{order.orderNumber}</CardTitle>
+                      <CardTitle className="text-base">{order.orderLabel || order.orderNumber}</CardTitle>
                       <Badge variant={order.status === "open" ? "default" : "secondary"}>
                         {order.status === "open" ? "Abierto" : order.status === "in_progress" ? "En Proceso" : "Servido"}
                       </Badge>
@@ -1042,6 +1208,18 @@ export default function RestaurantPage() {
                       <div className="flex items-center gap-2 text-sm">
                         <MapPin className="h-4 w-4 text-muted-foreground" />
                         Mesa {order.table.tableNumber}
+                      </div>
+                    )}
+                    {!order.tableId && order.areaId && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <MapPin className="h-4 w-4 text-muted-foreground" />
+                        {areas.find(a => a.id === order.areaId)?.name}
+                      </div>
+                    )}
+                    {order.waiterName && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        Mozo: {order.waiterName}
                       </div>
                     )}
                     <div className="flex items-center gap-2 text-sm">
@@ -1421,13 +1599,23 @@ export default function RestaurantPage() {
 
       {/* ==================== DIALOGS ==================== */}
 
-      {/* New Order Dialog */}
+      {/* New Order Dialog (table-based) */}
       <Dialog open={isNewOrderDialogOpen} onOpenChange={setIsNewOrderDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Nuevo Pedido - Mesa {selectedTable?.tableNumber}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="waiter-name">Mozo *</Label>
+              <Input
+                id="waiter-name"
+                value={newWaiterName}
+                onChange={(e) => setNewWaiterName(e.target.value)}
+                placeholder="Nombre del mozo"
+                data-testid="input-waiter-name"
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="covers">Cantidad de comensales</Label>
               <Input
@@ -1447,8 +1635,10 @@ export default function RestaurantPage() {
             </Button>
             <Button
               onClick={() => {
-                if (selectedTable) {
-                  createOrderMutation.mutate({ tableId: selectedTable.id, covers: newCovers });
+                if (selectedTable && newWaiterName.trim()) {
+                  createOrderMutation.mutate({ tableId: selectedTable.id, covers: newCovers, waiterName: newWaiterName.trim() });
+                } else {
+                  toast({ title: "Mozo requerido", description: "Ingrese el nombre del mozo", variant: "destructive" });
                 }
               }}
               disabled={createOrderMutation.isPending}
@@ -1456,6 +1646,72 @@ export default function RestaurantPage() {
             >
               {createOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Crear Pedido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Direct Order Dialog (tableless areas) */}
+      <Dialog open={isDirectOrderDialogOpen} onOpenChange={setIsDirectOrderDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nueva Orden - {areas.find(a => a.id === directOrderAreaId)?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="order-label">Etiqueta de orden *</Label>
+              <Input
+                id="order-label"
+                value={newOrderLabel}
+                onChange={(e) => setNewOrderLabel(e.target.value)}
+                placeholder="Ej: Hab. 305, Mesa Solarium 2"
+                data-testid="input-order-label"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="direct-waiter">Mozo *</Label>
+              <Input
+                id="direct-waiter"
+                value={newWaiterName}
+                onChange={(e) => setNewWaiterName(e.target.value)}
+                placeholder="Nombre del mozo"
+                data-testid="input-direct-waiter"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="direct-covers">Comensales (opcional)</Label>
+              <Input
+                id="direct-covers"
+                type="number"
+                min={1}
+                value={newCovers}
+                onChange={(e) => setNewCovers(parseInt(e.target.value) || 1)}
+                data-testid="input-direct-covers"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDirectOrderDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (newOrderLabel.trim() && newWaiterName.trim()) {
+                  createOrderMutation.mutate({
+                    areaId: directOrderAreaId,
+                    covers: newCovers,
+                    waiterName: newWaiterName.trim(),
+                    orderLabel: newOrderLabel.trim(),
+                  });
+                } else {
+                  toast({ title: "Campos requeridos", description: "Ingrese etiqueta y mozo", variant: "destructive" });
+                }
+              }}
+              disabled={createOrderMutation.isPending}
+              data-testid="button-create-direct-order"
+            >
+              {createOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Crear Orden
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1475,22 +1731,39 @@ export default function RestaurantPage() {
             <div className="flex items-center justify-between gap-4">
               <div>
                 <DialogTitle>
-                  {currentOrder?.orderNumber} - Mesa {currentOrder?.table?.tableNumber || selectedTable?.tableNumber}
+                  {getUpdatedOrder()?.orderLabel || getUpdatedOrder()?.orderNumber} - {getUpdatedOrder()?.tableId ? `Mesa ${getUpdatedOrder()?.table?.tableNumber || selectedTable?.tableNumber}` : (areas.find(a => a.id === getUpdatedOrder()?.areaId)?.name || "")}
                 </DialogTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Abierto: {currentOrder ? new Date(currentOrder.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : ""} | {getUpdatedOrder()?.covers} comensales
+                  Mozo: {getUpdatedOrder()?.waiterName || "—"} | Abierto: {currentOrder ? new Date(currentOrder.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : ""} | {getUpdatedOrder()?.covers} comensales
+                  {(getUpdatedOrder()?.activeCourse || 1) > 1 && ` | Curso: ${courseLabels[getUpdatedOrder()?.activeCourse || 1] || `Curso ${getUpdatedOrder()?.activeCourse}`}`}
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setOrderView("folio")}
-                className={orderView === "folio" ? "bg-muted" : ""}
-                data-testid="button-view-folio"
-              >
-                <CircleDollarSign className="h-4 w-4 mr-1" />
-                Ver Folio
-              </Button>
+              <div className="flex items-center gap-1">
+                {getUpdatedOrder() && (getUpdatedOrder()?.activeCourse || 1) < 3 && getOrderItems().some(i => i.course && i.course > (getUpdatedOrder()?.activeCourse || 1)) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (currentOrder) advanceCourseMutation.mutate(currentOrder.id);
+                    }}
+                    disabled={advanceCourseMutation.isPending}
+                    data-testid="button-advance-course"
+                  >
+                    {advanceCourseMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUpDown className="h-4 w-4 mr-1" />}
+                    Sig. Curso
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setOrderView("folio")}
+                  className={orderView === "folio" ? "bg-muted" : ""}
+                  data-testid="button-view-folio"
+                >
+                  <CircleDollarSign className="h-4 w-4 mr-1" />
+                  Folio
+                </Button>
+              </div>
             </div>
           </DialogHeader>
 
@@ -1501,17 +1774,32 @@ export default function RestaurantPage() {
                 <p className="text-muted-foreground text-center py-8">No hay items en este pedido</p>
               ) : (
                 <div className="space-y-2">
-                  {getOrderItems().map((item) => (
-                    <div key={item.id} className="flex items-center justify-between p-3 border rounded-md">
-                      <div>
-                        <span className="font-medium">{item.menuItem?.name || "Item"}</span>
-                        <span className="text-muted-foreground ml-2">x{item.quantity}</span>
+                  {[1, 2, 3].map(course => {
+                    const courseItems = getOrderItems().filter(i => (i.course || 1) === course);
+                    if (courseItems.length === 0) return null;
+                    return (
+                      <div key={course}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-semibold uppercase text-muted-foreground">{courseLabels[course]}</span>
+                          {course === (getUpdatedOrder()?.activeCourse || 1) && (
+                            <Badge variant="default" className="text-[10px] h-4">Activo</Badge>
+                          )}
+                        </div>
+                        {courseItems.map((item) => (
+                          <div key={item.id} className={`flex items-center justify-between p-3 border rounded-md mb-1 ${item.status === "waiting_course" ? "opacity-50 border-dashed" : ""}`}>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{item.menuItem?.name || "Item"}</span>
+                              <span className="text-muted-foreground">x{item.quantity}</span>
+                              {item.status === "waiting_course" && <Badge variant="outline" className="text-[10px]">Esperando</Badge>}
+                            </div>
+                            <span className="font-semibold">
+                              ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                      <span className="font-semibold">
-                        ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div className="pt-4 border-t flex items-center justify-between text-lg font-bold">
                     <span>Total:</span>
                     <span>
@@ -1636,6 +1924,22 @@ export default function RestaurantPage() {
                 )}
               </div>
               <div className="space-y-2">
+                <Label>Curso</Label>
+                <div className="flex gap-2">
+                  {[1, 2, 3].map(c => (
+                    <Button
+                      key={c}
+                      variant={itemCourse === c ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setItemCourse(c)}
+                      data-testid={`button-course-${c}`}
+                    >
+                      {courseLabels[c]}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="item-notes">Observaciones (opcional)</Label>
                 <Textarea
                   id="item-notes"
@@ -1696,13 +2000,13 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Close Order Dialog with Receipt Type and Payment Method */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={setIsCloseDialogOpen}>
+      {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) setIsSplitMode(false); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
-              Cerrar Mesa - {currentOrder?.orderNumber}
+              Cerrar - {getUpdatedOrder()?.orderLabel || currentOrder?.orderNumber}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
@@ -1716,6 +2020,7 @@ export default function RestaurantPage() {
                     <div>
                       <span>{item.menuItem?.name || "Item"}</span>
                       <span className="text-muted-foreground ml-2">x{item.quantity}</span>
+                      {item.course && item.course > 1 && <Badge variant="outline" className="ml-1 text-[10px]">{courseLabels[item.course]}</Badge>}
                     </div>
                     <span>
                       ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
@@ -1739,67 +2044,236 @@ export default function RestaurantPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-              <div className="space-y-2">
-                <Label>Tipo de Comprobante</Label>
-                <Select value={closeReceiptType} onValueChange={setCloseReceiptType}>
-                  <SelectTrigger data-testid="select-receipt-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(receiptTypeLabels).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Forma de Pago</Label>
-                <Select value={closePaymentMethod} onValueChange={setClosePaymentMethod}>
-                  <SelectTrigger data-testid="select-payment-method">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(paymentMethodLabels).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            {!isSplitMode ? (
+              <>
+                <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                  <div className="space-y-2">
+                    <Label>Tipo de Comprobante</Label>
+                    <Select value={closeReceiptType} onValueChange={setCloseReceiptType}>
+                      <SelectTrigger data-testid="select-receipt-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(receiptTypeLabels).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Forma de Pago</Label>
+                    <Select value={closePaymentMethod} onValueChange={setClosePaymentMethod}>
+                      <SelectTrigger data-testid="select-payment-method">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(paymentMethodLabels).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-            {closePaymentMethod === "cuenta_habitacion" && (
-              <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-md text-sm text-blue-700 dark:text-blue-400">
-                El consumo se cargara a la cuenta de la habitacion del huesped
+                {closePaymentMethod === "cuenta_habitacion" && (
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-md text-sm text-blue-700 dark:text-blue-400">
+                    El consumo se cargara a la cuenta de la habitacion del huesped
+                  </div>
+                )}
+
+                <div className="pt-2 border-t">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => setIsSplitMode(true)}
+                    data-testid="button-split-bill"
+                  >
+                    <Banknote className="h-4 w-4 mr-2" />
+                    Dividir Cuenta
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="pt-4 border-t space-y-4">
+                <h4 className="font-semibold flex items-center gap-2">
+                  <Banknote className="h-4 w-4" />
+                  Dividir Cuenta
+                </h4>
+                {(() => {
+                  const updatedOrder = orders?.find((o: RestaurantOrder) => o.id === currentOrder?.id);
+                  const splits: OrderSplit[] = (updatedOrder as any)?.splits || [];
+                  if (splits.length === 0) {
+                    return (
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <Label>Cantidad de partes</Label>
+                          <div className="flex gap-2">
+                            {[2, 3, 4].map(n => (
+                              <Button
+                                key={n}
+                                variant={splitParts === n ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setSplitParts(n)}
+                                data-testid={`button-split-${n}`}
+                              >
+                                {n} partes
+                              </Button>
+                            ))}
+                            <Input
+                              type="number"
+                              min={2}
+                              max={10}
+                              value={splitParts}
+                              onChange={(e) => setSplitParts(Math.max(2, parseInt(e.target.value) || 2))}
+                              className="w-20"
+                              data-testid="input-split-parts"
+                            />
+                          </div>
+                        </div>
+                        <div className="p-3 bg-muted rounded-md text-sm">
+                          Cada parte: <strong>${(parseFloat(getUpdatedOrder()?.total || "0") / splitParts).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => setIsSplitMode(false)}
+                            className="flex-1"
+                          >
+                            Cancelar
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              if (currentOrder) createSplitMutation.mutate({ orderId: currentOrder.id, parts: splitParts });
+                            }}
+                            disabled={createSplitMutation.isPending}
+                            className="flex-1"
+                            data-testid="button-confirm-split"
+                          >
+                            {createSplitMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                            Dividir
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-3">
+                      {splits.map((split) => (
+                        <div key={split.id} className={`p-3 border rounded-md ${split.isPaid === "true" ? "bg-green-500/10 border-green-500/30" : ""}`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium">Parte {split.splitNumber}</span>
+                            <span className="font-bold">${parseFloat(split.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          {split.isPaid === "true" ? (
+                            <Badge variant="default" className="bg-green-600">Pagado - {paymentMethodLabels[split.method || ""] || split.method}</Badge>
+                          ) : (
+                            <div className="flex gap-2 items-end">
+                              <div className="flex-1 space-y-1">
+                                <Select value={splitPayMethods[split.id] || "efectivo"} onValueChange={(v) => setSplitPayMethods(prev => ({ ...prev, [split.id]: v }))}>
+                                  <SelectTrigger className="h-8" data-testid={`select-split-method-${split.splitNumber}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {Object.entries(paymentMethodLabels).map(([v, l]) => (
+                                      <SelectItem key={v} value={v}>{l}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="flex-1 space-y-1">
+                                <Select value={splitReceiptTypes[split.id] || "ticket"} onValueChange={(v) => setSplitReceiptTypes(prev => ({ ...prev, [split.id]: v }))}>
+                                  <SelectTrigger className="h-8" data-testid={`select-split-receipt-${split.splitNumber}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {Object.entries(receiptTypeLabels).map(([v, l]) => (
+                                      <SelectItem key={v} value={v}>{l}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  if (currentOrder) {
+                                    paySplitMutation.mutate({
+                                      orderId: currentOrder.id,
+                                      splitId: split.id,
+                                      method: splitPayMethods[split.id] || "efectivo",
+                                      receiptType: splitReceiptTypes[split.id] || "ticket",
+                                    });
+                                  }
+                                }}
+                                disabled={paySplitMutation.isPending}
+                                data-testid={`button-pay-split-${split.splitNumber}`}
+                              >
+                                Cobrar
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (currentOrder) cancelSplitMutation.mutate(currentOrder.id);
+                          }}
+                          disabled={cancelSplitMutation.isPending || splits.some(s => s.isPaid === "true")}
+                          data-testid="button-cancel-split"
+                        >
+                          Cancelar División
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
-              onClick={() => setIsCloseDialogOpen(false)}
+              onClick={() => { setIsCloseDialogOpen(false); setIsSplitMode(false); }}
               className="w-full sm:w-auto"
             >
               Volver
             </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (currentOrder) {
-                  closeOrderMutation.mutate({
-                    orderId: currentOrder.id,
-                    receiptType: closeReceiptType,
-                    paymentMethod: closePaymentMethod,
-                  });
-                }
-              }}
-              disabled={closeOrderMutation.isPending}
-              className="w-full sm:w-auto"
-              data-testid="button-confirm-close"
-            >
-              {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Confirmar Cierre
-            </Button>
+            {!isSplitMode && (() => {
+              const updatedOrder = orders?.find((o: RestaurantOrder) => o.id === currentOrder?.id);
+              const hasSplits = ((updatedOrder as any)?.splits || []).length > 0;
+              return !hasSplits ? (
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (currentOrder) {
+                      closeOrderMutation.mutate({
+                        orderId: currentOrder.id,
+                        receiptType: closeReceiptType,
+                        paymentMethod: closePaymentMethod,
+                      });
+                    }
+                  }}
+                  disabled={closeOrderMutation.isPending}
+                  className="w-full sm:w-auto"
+                  data-testid="button-confirm-close"
+                >
+                  {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Confirmar Cierre
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => setIsSplitMode(true)}
+                  className="w-full sm:w-auto"
+                  data-testid="button-view-splits"
+                >
+                  Ver División ({((updatedOrder as any)?.splits || []).filter((s: OrderSplit) => s.isPaid === "true").length}/{((updatedOrder as any)?.splits || []).length} pagadas)
+                </Button>
+              );
+            })()}
           </DialogFooter>
         </DialogContent>
       </Dialog>

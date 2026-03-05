@@ -71,6 +71,8 @@ import {
   type TableReservationWithTable,
   type RestaurantTimeSlot,
   type InsertRestaurantTimeSlot,
+  type OrderSplit,
+  type InsertOrderSplit,
   type Recipe,
   type InsertRecipe,
   type RecipeIngredient,
@@ -408,6 +410,12 @@ export interface IStorage {
   updateRecipeIngredient(id: string, ingredient: Partial<InsertRecipeIngredient>): Promise<RecipeIngredient | undefined>;
   deleteRecipeIngredient(id: string): Promise<boolean>;
 
+  // Order Splits
+  getOrderSplits(orderId: string): Promise<OrderSplit[]>;
+  createOrderSplit(split: InsertOrderSplit): Promise<OrderSplit>;
+  updateOrderSplit(id: string, split: Partial<InsertOrderSplit>): Promise<OrderSplit | undefined>;
+  deleteOrderSplitsByOrder(orderId: string): Promise<boolean>;
+
   // ==================== INVENTORY ====================
   // Item Categories
   getItemCategories(): Promise<ItemCategory[]>;
@@ -630,6 +638,7 @@ export class MemStorage implements IStorage {
   private orderItems: Map<string, OrderItem>;
   private tableReservations: Map<string, TableReservation>;
   private restaurantTimeSlots: Map<string, RestaurantTimeSlot>;
+  private orderSplitsMap: Map<string, OrderSplit>;
   private recipesMap: Map<string, Recipe>;
   private recipeIngredientsMap: Map<string, RecipeIngredient>;
   // Inventory
@@ -700,6 +709,7 @@ export class MemStorage implements IStorage {
     this.orderItems = new Map();
     this.tableReservations = new Map();
     this.restaurantTimeSlots = new Map();
+    this.orderSplitsMap = new Map();
     this.recipesMap = new Map();
     this.recipeIngredientsMap = new Map();
     // Inventory
@@ -883,10 +893,14 @@ export class MemStorage implements IStorage {
 
     this.reservationCounter = 1008;
 
-    // Restaurant Areas - Dos secciones del plano
+    // Restaurant Areas - Dos secciones del plano + areas sin mesas
     const restaurantAreas: RestaurantArea[] = [
-      { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor", capacity: 72, isActive: "true", notes: "Mesas cuadradas" },
-      { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor", capacity: 56, isActive: "true", notes: "Mesas redondas" },
+      { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor", capacity: 72, hasTables: "true", isActive: "true", notes: "Mesas cuadradas" },
+      { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor", capacity: 56, hasTables: "true", isActive: "true", notes: "Mesas redondas" },
+      { id: "area-rs", name: "Room Service", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
+      { id: "area-delivery", name: "Delivery", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
+      { id: "area-solarium", name: "Solarium", areaType: "outdoor", capacity: 0, hasTables: "false", isActive: "true", notes: null },
+      { id: "area-spa", name: "SPA", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
     ];
     restaurantAreas.forEach((a) => this.restaurantAreas.set(a.id, a));
 
@@ -2663,7 +2677,8 @@ export class MemStorage implements IStorage {
     }
     return orders.map(order => {
       const table = order.tableId ? this.restaurantTables.get(order.tableId) : undefined;
-      const area = table ? this.restaurantAreas.get(table.areaId) : undefined;
+      const tableArea = table ? this.restaurantAreas.get(table.areaId) : undefined;
+      const area = order.areaId ? this.restaurantAreas.get(order.areaId) : tableArea;
       const guest = order.guestId ? this.guests.get(order.guestId) : undefined;
       const items = Array.from(this.orderItems.values())
         .filter(i => i.orderId === order.id)
@@ -2673,7 +2688,8 @@ export class MemStorage implements IStorage {
         }));
       return {
         ...order,
-        table: table ? { ...table, area: area! } : undefined,
+        table: table ? { ...table, area: tableArea! } : undefined,
+        area,
         guest,
         items,
       };
@@ -2684,7 +2700,8 @@ export class MemStorage implements IStorage {
     const order = this.restaurantOrders.get(id);
     if (!order) return undefined;
     const table = order.tableId ? this.restaurantTables.get(order.tableId) : undefined;
-    const area = table ? this.restaurantAreas.get(table.areaId) : undefined;
+    const tableArea = table ? this.restaurantAreas.get(table.areaId) : undefined;
+    const area = order.areaId ? this.restaurantAreas.get(order.areaId) : tableArea;
     const guest = order.guestId ? this.guests.get(order.guestId) : undefined;
     const items = Array.from(this.orderItems.values())
       .filter(i => i.orderId === order.id)
@@ -2694,7 +2711,8 @@ export class MemStorage implements IStorage {
       }));
     return {
       ...order,
-      table: table ? { ...table, area: area! } : undefined,
+      table: table ? { ...table, area: tableArea! } : undefined,
+      area,
       guest,
       items,
     };
@@ -2710,11 +2728,15 @@ export class MemStorage implements IStorage {
       id,
       orderNumber: order.orderNumber,
       tableId: order.tableId ?? null,
+      areaId: order.areaId ?? null,
       reservationId: order.reservationId ?? null,
       guestId: order.guestId ?? null,
       orderType: (order.orderType ?? "dine_in") as "dine_in" | "room_service" | "takeaway",
       status: (order.status ?? "open") as "open" | "in_progress" | "served" | "closed" | "cancelled",
       covers: order.covers ?? 1,
+      waiterName: order.waiterName ?? null,
+      orderLabel: order.orderLabel ?? null,
+      activeCourse: order.activeCourse ?? 1,
       subtotal: order.subtotal ?? "0",
       tax: order.tax ?? "0",
       total: order.total ?? "0",
@@ -2723,6 +2745,8 @@ export class MemStorage implements IStorage {
       closedAt: order.closedAt ?? null,
       chargedToRoom: order.chargedToRoom ?? "false",
       roomNumber: order.roomNumber ?? null,
+      receiptType: order.receiptType ?? null,
+      paymentMethod: order.paymentMethod ?? null,
     };
     this.restaurantOrders.set(id, newOrder);
     return newOrder;
@@ -2765,7 +2789,8 @@ export class MemStorage implements IStorage {
       quantity: item.quantity ?? 1,
       unitPrice: item.unitPrice,
       subtotal: item.subtotal,
-      status: (item.status ?? "pending") as "pending" | "preparing" | "ready" | "served" | "cancelled",
+      status: (item.status ?? "pending") as "pending" | "preparing" | "ready" | "served" | "cancelled" | "waiting_course",
+      course: item.course ?? 1,
       notes: item.notes ?? null,
       sentAt: item.sentAt ?? null,
     };
@@ -2779,7 +2804,7 @@ export class MemStorage implements IStorage {
     const updated: OrderItem = { 
       ...existing, 
       ...item,
-      status: (item.status ?? existing.status) as "pending" | "preparing" | "ready" | "served" | "cancelled",
+      status: (item.status ?? existing.status) as "pending" | "preparing" | "ready" | "served" | "cancelled" | "waiting_course",
     };
     this.orderItems.set(id, updated);
     return updated;
@@ -2968,6 +2993,44 @@ export class MemStorage implements IStorage {
 
   async deleteRecipeIngredient(id: string): Promise<boolean> {
     return this.recipeIngredientsMap.delete(id);
+  }
+
+  // Order Splits
+  async getOrderSplits(orderId: string): Promise<OrderSplit[]> {
+    return Array.from(this.orderSplitsMap.values())
+      .filter(s => s.orderId === orderId)
+      .sort((a, b) => a.splitNumber - b.splitNumber);
+  }
+
+  async createOrderSplit(split: InsertOrderSplit): Promise<OrderSplit> {
+    const id = randomUUID();
+    const newSplit: OrderSplit = {
+      id,
+      orderId: split.orderId,
+      splitNumber: split.splitNumber,
+      amount: split.amount,
+      method: split.method ?? null,
+      receiptType: split.receiptType ?? null,
+      isPaid: split.isPaid ?? "false",
+      paidAt: split.paidAt ?? null,
+      createdAt: split.createdAt ?? new Date().toISOString(),
+    };
+    this.orderSplitsMap.set(id, newSplit);
+    return newSplit;
+  }
+
+  async updateOrderSplit(id: string, split: Partial<InsertOrderSplit>): Promise<OrderSplit | undefined> {
+    const existing = this.orderSplitsMap.get(id);
+    if (!existing) return undefined;
+    const updated: OrderSplit = { ...existing, ...split };
+    this.orderSplitsMap.set(id, updated);
+    return updated;
+  }
+
+  async deleteOrderSplitsByOrder(orderId: string): Promise<boolean> {
+    const toDelete = Array.from(this.orderSplitsMap.values()).filter(s => s.orderId === orderId);
+    toDelete.forEach(s => this.orderSplitsMap.delete(s.id));
+    return true;
   }
 
   // ==================== INVENTORY ====================

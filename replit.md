@@ -147,10 +147,18 @@ Preferred communication style: Simple, everyday language.
 - New `EventType` value: "table_event"
 - New tables: `event_payments`, `event_tables`, `event_table_charges`, `event_table_payments`
 
+### Restaurant Module Extended (PDF-driven, 4 tasks)
+- **T001 - Waiter Name**: `waiterName` field required when opening a table. Shown on occupied tables in floor plan and in folio header.
+- **T002 - Tableless Areas**: Areas with `hasTables="false"` (Room Service, Delivery, Solarium, SPA) show direct orders list instead of floor plan. Orders have `orderLabel` for identification.
+- **T003 - Courses/Steps**: Items assigned to courses (1=Entradas, 2=Principales, 3=Postres). `activeCourse` on orders. `waiting_course` status for future-course items. "Sig. Curso" button advances active course.
+- **T004 - Bill Splitting**: `orderSplits` table. "Dividir Cuenta" button in close dialog with quick split (2/3/4 parts). Per-part payment with method and receipt type. Auto-close when all parts paid. Cancel split while unpaid.
+
 ### Schema Changes (Restaurant)
 - `restaurant_tables`: Added `has_window` column
-- `restaurant_orders`: Added `receipt_type` and `payment_method` columns
-- New tables: `restaurant_time_slots`, `recipes`, `recipe_ingredients`
+- `restaurant_orders`: Added `receipt_type`, `payment_method`, `waiter_name`, `order_label`, `active_course`, `area_id` columns
+- `order_items`: Added `course` column (integer, default 1)
+- `restaurant_areas`: Added `has_tables` column
+- New tables: `restaurant_time_slots`, `recipes`, `recipe_ingredients`, `order_splits`
 
 ## Previous Changes (January 2026)
 

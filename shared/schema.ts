@@ -654,6 +654,7 @@ export const restaurantAreas = pgTable("restaurant_areas", {
   name: text("name").notNull(),
   areaType: text("area_type").$type<RestaurantAreaType>().notNull().default("indoor"),
   capacity: integer("capacity").notNull().default(20),
+  hasTables: text("has_tables").default("true"),
   isActive: text("is_active").default("true"),
   notes: text("notes"),
 });
@@ -758,11 +759,15 @@ export const restaurantOrders = pgTable("restaurant_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull(),
   tableId: varchar("table_id"),
+  areaId: varchar("area_id"),
   reservationId: varchar("reservation_id"),
   guestId: varchar("guest_id"),
   orderType: text("order_type").$type<OrderType>().notNull().default("dine_in"),
   status: text("status").$type<OrderStatus>().notNull().default("open"),
   covers: integer("covers").default(1),
+  waiterName: text("waiter_name"),
+  orderLabel: text("order_label"),
+  activeCourse: integer("active_course").default(1),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0"),
   tax: decimal("tax", { precision: 10, scale: 2 }).default("0"),
   total: decimal("total", { precision: 10, scale: 2 }).default("0"),
@@ -780,7 +785,7 @@ export type InsertRestaurantOrder = z.infer<typeof insertRestaurantOrderSchema>;
 export type RestaurantOrder = typeof restaurantOrders.$inferSelect;
 
 // Order Items
-export type OrderItemStatus = "pending" | "preparing" | "ready" | "served" | "cancelled";
+export type OrderItemStatus = "pending" | "preparing" | "ready" | "served" | "cancelled" | "waiting_course";
 
 export const orderItems = pgTable("order_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -790,6 +795,7 @@ export const orderItems = pgTable("order_items", {
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
   status: text("status").$type<OrderItemStatus>().notNull().default("pending"),
+  course: integer("course").default(1),
   notes: text("notes"),
   sentAt: text("sent_at"),
 });
@@ -804,9 +810,27 @@ export type OrderItemWithMenuItem = OrderItem & {
 
 export type RestaurantOrderWithDetails = RestaurantOrder & {
   table?: RestaurantTableWithArea;
+  area?: RestaurantArea;
   guest?: Guest;
   items: OrderItemWithMenuItem[];
 };
+
+// Order Splits (bill splitting)
+export const orderSplits = pgTable("order_splits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull(),
+  splitNumber: integer("split_number").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  method: text("method").$type<RestaurantPaymentMethod>(),
+  receiptType: text("receipt_type").$type<ReceiptType>(),
+  isPaid: text("is_paid").default("false"),
+  paidAt: text("paid_at"),
+  createdAt: text("created_at"),
+});
+
+export const insertOrderSplitSchema = createInsertSchema(orderSplits).omit({ id: true });
+export type InsertOrderSplit = z.infer<typeof insertOrderSplitSchema>;
+export type OrderSplit = typeof orderSplits.$inferSelect;
 
 // Restaurant Time Slots (configurable reservation turns)
 export const restaurantTimeSlots = pgTable("restaurant_time_slots", {

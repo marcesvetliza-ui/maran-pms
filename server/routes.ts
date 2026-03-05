@@ -1875,7 +1875,13 @@ Only respond with the JSON object.`;
     try {
       const status = req.query.status as string | undefined;
       const orders = await storage.getRestaurantOrders(status as any);
-      res.json(orders);
+      const ordersWithSplits = await Promise.all(
+        orders.map(async (order: any) => {
+          const splits = await storage.getOrderSplits(order.id);
+          return { ...order, splits };
+        })
+      );
+      res.json(ordersWithSplits);
     } catch (error) {
       res.status(500).json({ error: "Error fetching orders" });
     }
@@ -1893,13 +1899,22 @@ Only respond with the JSON object.`;
 
   app.post("/api/restaurant/orders", async (req, res) => {
     try {
+      const { waiterName, tableId, areaId, orderLabel } = req.body;
+      if (!waiterName || !waiterName.trim()) {
+        return res.status(400).json({ error: "Mozo es requerido" });
+      }
+      if (!tableId && !areaId) {
+        return res.status(400).json({ error: "Se requiere mesa o area" });
+      }
+      if (!tableId && (!orderLabel || !orderLabel.trim())) {
+        return res.status(400).json({ error: "Etiqueta de orden es requerida para areas sin mesas" });
+      }
       const orderNumber = storage.generateOrderNumber();
       const order = await storage.createRestaurantOrder({
         ...req.body,
         orderNumber,
         openedAt: new Date().toISOString(),
       });
-      // Update table status if applicable
       if (order.tableId) {
         await storage.updateRestaurantTable(order.tableId, { status: "occupied" });
       }
@@ -1962,12 +1977,18 @@ Only respond with the JSON object.`;
   // Order Items
   app.post("/api/restaurant/orders/:orderId/items", async (req, res) => {
     try {
-      const { menuItemId, quantity, notes } = req.body;
+      const { menuItemId, quantity, notes, course } = req.body;
       const menuItem = await storage.getMenuItem(menuItemId);
       if (!menuItem) return res.status(404).json({ error: "Menu item not found" });
       
+      const order = await storage.getRestaurantOrder(req.params.orderId);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
       const unitPrice = menuItem.price;
       const subtotal = (parseFloat(unitPrice) * (quantity || 1)).toFixed(2);
+      const itemCourse = course || 1;
+      const activeCourse = order.activeCourse || 1;
+      const itemStatus = itemCourse <= activeCourse ? "pending" : "waiting_course";
       
       const item = await storage.createOrderItem({
         orderId: req.params.orderId,
@@ -1976,6 +1997,8 @@ Only respond with the JSON object.`;
         unitPrice,
         subtotal,
         notes,
+        course: itemCourse,
+        status: itemStatus,
       });
       
       // Update order totals
@@ -1992,6 +2015,33 @@ Only respond with the JSON object.`;
       res.status(201).json(item);
     } catch (error) {
       res.status(500).json({ error: "Error adding item to order" });
+    }
+  });
+
+  // Advance course
+  app.post("/api/restaurant/orders/:id/advance-course", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      
+      const currentCourse = order.activeCourse || 1;
+      if (currentCourse >= 3) return res.status(400).json({ error: "Ya se alcanzó el último curso" });
+      
+      const newCourse = currentCourse + 1;
+      await storage.updateRestaurantOrder(req.params.id, { activeCourse: newCourse });
+      
+      const orderItems = await storage.getOrderItems(req.params.id);
+      let activated = 0;
+      for (const item of orderItems) {
+        if (item.course === newCourse && item.status === "waiting_course") {
+          await storage.updateOrderItem(item.id, { status: "pending" });
+          activated++;
+        }
+      }
+      
+      res.json({ activeCourse: newCourse, activatedItems: activated });
+    } catch (error) {
+      res.status(500).json({ error: "Error advancing course" });
     }
   });
 
@@ -2106,6 +2156,94 @@ Only respond with the JSON object.`;
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting time slot" });
+    }
+  });
+
+  // Order Splits
+  app.post("/api/restaurant/orders/:id/split", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      if (order.status === "closed") return res.status(400).json({ error: "La orden ya está cerrada" });
+
+      const existingSplits = await storage.getOrderSplits(req.params.id);
+      if (existingSplits.length > 0) return res.status(400).json({ error: "La orden ya tiene una división activa" });
+
+      const { parts } = req.body;
+      if (!parts || parts < 2) return res.status(400).json({ error: "Se requieren al menos 2 partes" });
+
+      const total = parseFloat(order.total || "0");
+      const baseAmount = Math.floor(total / parts * 100) / 100;
+      const remainder = total - baseAmount * parts;
+
+      const splits = [];
+      for (let i = 1; i <= parts; i++) {
+        const amount = i === parts ? (baseAmount + remainder).toFixed(2) : baseAmount.toFixed(2);
+        const split = await storage.createOrderSplit({
+          orderId: req.params.id,
+          splitNumber: i,
+          amount,
+          createdAt: new Date().toISOString(),
+        });
+        splits.push(split);
+      }
+
+      res.status(201).json(splits);
+    } catch (error) {
+      res.status(500).json({ error: "Error splitting order" });
+    }
+  });
+
+  app.get("/api/restaurant/orders/:id/split", async (req, res) => {
+    try {
+      const splits = await storage.getOrderSplits(req.params.id);
+      res.json(splits);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching splits" });
+    }
+  });
+
+  app.patch("/api/restaurant/orders/:id/split/:splitId", async (req, res) => {
+    try {
+      const { method, receiptType } = req.body;
+      if (!method) return res.status(400).json({ error: "Método de pago requerido" });
+
+      const split = await storage.updateOrderSplit(req.params.splitId, {
+        method,
+        receiptType: receiptType || null,
+        isPaid: "true",
+        paidAt: new Date().toISOString(),
+      });
+      if (!split) return res.status(404).json({ error: "Split not found" });
+
+      const allSplits = await storage.getOrderSplits(req.params.id);
+      const allPaid = allSplits.every(s => s.isPaid === "true");
+
+      if (allPaid) {
+        const order = await storage.getRestaurantOrder(req.params.id);
+        await storage.updateRestaurantOrder(req.params.id, {
+          status: "closed",
+          closedAt: new Date().toISOString(),
+          paymentMethod: method,
+          receiptType: receiptType || null,
+        });
+        if (order?.tableId) {
+          await storage.updateRestaurantTable(order.tableId, { status: "available" });
+        }
+      }
+
+      res.json({ split, allPaid });
+    } catch (error) {
+      res.status(500).json({ error: "Error paying split" });
+    }
+  });
+
+  app.delete("/api/restaurant/orders/:id/split", async (req, res) => {
+    try {
+      await storage.deleteOrderSplitsByOrder(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error cancelling split" });
     }
   });
 
