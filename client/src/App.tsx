@@ -31,6 +31,7 @@ import AdministrationPage from "@/pages/administration";
 import PackagesPage from "@/pages/packages";
 import CompaniesPage from "@/pages/companies";
 import WebCheckinPublicPage from "@/pages/web-checkin-public";
+import ChatbotDashboardPage from "@/pages/chatbot-dashboard";
 
 function Router() {
   return (
@@ -57,6 +58,7 @@ function Router() {
       <Route path="/administration" component={AdministrationPage} />
       <Route path="/packages" component={PackagesPage} />
       <Route path="/companies" component={CompaniesPage} />
+      <Route path="/chatbot" component={ChatbotDashboardPage} />
       <Route component={NotFound} />
     </Switch>
   );

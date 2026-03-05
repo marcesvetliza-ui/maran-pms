@@ -1186,6 +1186,54 @@ export class MemStorage implements IStorage {
       { id: "al2", userId: "su3", userName: "Maria Garcia", action: "create" as AuditAction, module: "reservations", entityType: "reservation", entityId: "r1001", description: "Nueva reserva creada", details: "Huesped: Juan Perez, Habitacion 301", ipAddress: "192.168.1.10", timestamp: now },
     ];
     auditLogsData.forEach((l) => this.auditLogs.set(l.id, l));
+
+    // Seed chatbot notifications
+    const seedNow = new Date();
+    const chatbotNotifications: SystemNotification[] = [
+      {
+        id: 1, type: "chatbot_housekeeping" as any, title: "Solicitud de Carlos García - Hab. 201",
+        message: "Solicita toallas adicionales para la habitación", targetArea: "housekeeping" as any,
+        relatedEntityType: "room", relatedEntityId: "201", isRead: false, readAt: null, readBy: null,
+        priority: "normal" as any, createdAt: new Date(seedNow.getTime() - 45 * 60000),
+      },
+      {
+        id: 2, type: "chatbot_restaurant" as any, title: "Solicitud de María López - Hab. 305",
+        message: "Consulta horario de desayuno para mañana y si tienen opciones sin gluten",
+        targetArea: "restaurant" as any, relatedEntityType: "room", relatedEntityId: "305",
+        isRead: false, readAt: null, readBy: null, priority: "normal" as any,
+        createdAt: new Date(seedNow.getTime() - 30 * 60000),
+      },
+      {
+        id: 3, type: "chatbot_maintenance" as any, title: "Solicitud de John Smith - Hab. 505",
+        message: "El aire acondicionado no enfría correctamente, la habitación está muy calurosa",
+        targetArea: "maintenance" as any, relatedEntityType: "room", relatedEntityId: "505",
+        isRead: false, readAt: null, readBy: null, priority: "urgent" as any,
+        createdAt: new Date(seedNow.getTime() - 15 * 60000),
+      },
+      {
+        id: 4, type: "chatbot_spa" as any, title: "Solicitud de Ana Martínez - Hab. 401",
+        message: "Quiere reservar un masaje relajante para las 16:00 de hoy",
+        targetArea: "spa" as any, relatedEntityType: "room", relatedEntityId: "401",
+        isRead: false, readAt: null, readBy: null, priority: "normal" as any,
+        createdAt: new Date(seedNow.getTime() - 10 * 60000),
+      },
+      {
+        id: 5, type: "chatbot_housekeeping" as any, title: "Solicitud de Diego Ramírez - Hab. 307",
+        message: "Necesita almohada extra y una manta adicional por favor",
+        targetArea: "housekeeping" as any, relatedEntityType: "room", relatedEntityId: "307",
+        isRead: true, readAt: new Date(seedNow.getTime() - 60 * 60000), readBy: "reception",
+        priority: "normal" as any, createdAt: new Date(seedNow.getTime() - 120 * 60000),
+      },
+      {
+        id: 6, type: "chatbot_request" as any, title: "Solicitud de Sophie Martin - Hab. 405",
+        message: "Consulta sobre el horario de check-out y si es posible late check-out",
+        targetArea: "reception" as any, relatedEntityType: "room", relatedEntityId: "405",
+        isRead: true, readAt: new Date(seedNow.getTime() - 90 * 60000), readBy: "reception",
+        priority: "normal" as any, createdAt: new Date(seedNow.getTime() - 180 * 60000),
+      },
+    ];
+    chatbotNotifications.forEach((n) => this.notificationsMap.set(n.id, n));
+    this.notificationCounter = chatbotNotifications.length;
   }
 
   // Users

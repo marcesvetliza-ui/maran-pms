@@ -113,6 +113,7 @@ function getAreaLabel(area: string): string {
 
 function NotificationBell() {
   const [open, setOpen] = useState(false);
+  const [, navigate] = useLocation();
 
   const { data: countData } = useQuery<{ count: number }>({
     queryKey: ["/api/notifications/unread-count"],
@@ -193,6 +194,10 @@ function NotificationBell() {
                   }`}
                   onClick={() => {
                     if (!n.isRead) markReadMutation.mutate(n.id);
+                    if (n.type.startsWith("chatbot_")) {
+                      setOpen(false);
+                      navigate("/chatbot");
+                    }
                   }}
                   data-testid={`notification-item-${n.id}`}
                 >
@@ -424,6 +429,26 @@ export function AppSidebar() {
                   <Link href="/inventory">
                     <Boxes className="h-5 w-5" />
                     <span>Inventario</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Comunicaciones</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/chatbot"}
+                  data-testid="nav-chatbot"
+                >
+                  <Link href="/chatbot">
+                    <Bot className="h-5 w-5" />
+                    <span>MARA Chatbot</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
