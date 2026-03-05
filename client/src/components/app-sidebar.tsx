@@ -24,7 +24,6 @@ import {
   Shield,
   Gift,
   Building2,
-  Monitor,
   ChevronDown,
   Boxes,
 } from "lucide-react";
@@ -208,18 +207,6 @@ export function AppSidebar() {
                   <Link href="/events">
                     <PartyPopper className="h-5 w-5" />
                     <span>Eventos</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/coworking"}
-                  data-testid="nav-coworking"
-                >
-                  <Link href="/coworking">
-                    <Monitor className="h-5 w-5" />
-                    <span>Coworking</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

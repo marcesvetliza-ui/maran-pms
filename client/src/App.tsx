@@ -29,7 +29,6 @@ import EventsPage from "@/pages/events";
 import MaintenancePage from "@/pages/maintenance";
 import AdministrationPage from "@/pages/administration";
 import PackagesPage from "@/pages/packages";
-import CoworkingPage from "@/pages/coworking";
 import CompaniesPage from "@/pages/companies";
 
 function Router() {
@@ -56,7 +55,6 @@ function Router() {
       <Route path="/maintenance" component={MaintenancePage} />
       <Route path="/administration" component={AdministrationPage} />
       <Route path="/packages" component={PackagesPage} />
-      <Route path="/coworking" component={CoworkingPage} />
       <Route path="/companies" component={CompaniesPage} />
       <Route component={NotFound} />
     </Switch>

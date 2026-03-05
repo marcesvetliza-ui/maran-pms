@@ -13,7 +13,6 @@ The system provides:
 - Restaurant POS with floor plan, menu, orders, recipes & costs
 - SPA management with services, agenda, products
 - Events management with quotation, BEO, liquidation
-- Coworking spaces, memberships, daily passes, meeting rooms
 - Housekeeping and Maintenance modules
 - Inventory management (transversal across areas)
 - Administration module
@@ -23,7 +22,7 @@ The system provides:
 - **Dashboard** (top level)
 - **Hotel** (collapsible): Planning, Reservas, Reserva Rápida, Check-in, Check-out, Habitaciones, Tarifas, Paquetes, OTAs, Grupos, Reseñas
 - **Base de Datos**: Huéspedes, Empresas (shared across all modules)
-- **Servicios**: Restaurante, SPA, Eventos, Coworking
+- **Servicios**: Restaurante, SPA, Eventos
 - **Operaciones**: Housekeeping, Mantenimiento, Inventario
 - **Administración**: Admin module
 - **Footer**: Configuración

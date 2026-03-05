@@ -46,7 +46,6 @@ ota-channels.tsx   (482 líneas)  - Canales OTA
 new-reservation.tsx(451 líneas)  - Formulario reserva rápida
 companies.tsx      (441 líneas)  - Base de datos de empresas
 check-out.tsx      (255 líneas)  - Proceso de check-out
-coworking.tsx      (156 líneas)  - Placeholder con tabs
 ```
 
 ---
@@ -74,7 +73,6 @@ Servicios:
   ├── Restaurante
   ├── SPA
   ├── Eventos
-  └── Coworking
 Operaciones:
   ├── Housekeeping
   ├── Mantenimiento
@@ -483,7 +481,6 @@ CRUD packages + package-items
 - Administración con usuarios, settings y auditoría
 
 ### Pendiente de desarrollo operativo:
-- Coworking (solo placeholder, necesita backend completo)
 - Ajustes finos según documentos PDF por módulo (SPA, Eventos, Housekeeping, etc.)
 
 ### Pendiente de backend/infraestructura (Fase siguiente):
