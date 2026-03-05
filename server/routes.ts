@@ -35,8 +35,7 @@ export async function registerRoutes(
   app.get("/api/download/source-code-zip", async (_req, res) => {
     const { execSync } = await import("child_process");
     const fs = await import("fs");
-    const path = await import("path");
-    const zipPath = path.resolve("/tmp/maran-suite-source.zip");
+    const zipPath = "/tmp/maran-suite-source.zip";
     try {
       if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
       execSync(
