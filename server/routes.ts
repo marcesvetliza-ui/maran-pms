@@ -32,6 +32,18 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/download/source-code-pdf", async (_req, res) => {
+    const fs = await import("fs");
+    const filePath = "/home/runner/workspace/MARAN_SUITE_CODIGO_COMPLETO.pdf";
+    if (fs.existsSync(filePath)) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "attachment; filename=MARAN_SUITE_CODIGO_COMPLETO.pdf");
+      fs.createReadStream(filePath).pipe(res);
+    } else {
+      res.status(404).send("PDF no encontrado");
+    }
+  });
+
   app.get("/api/download/source-code-zip", async (_req, res) => {
     const { execSync } = await import("child_process");
     const fs = await import("fs");
