@@ -32,6 +32,30 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/download/source-code-zip", async (_req, res) => {
+    const { execSync } = await import("child_process");
+    const fs = await import("fs");
+    const path = await import("path");
+    const zipPath = path.resolve("/tmp/maran-suite-source.zip");
+    try {
+      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+      execSync(
+        `cd /home/runner/workspace && zip -r ${zipPath} ` +
+        `shared/ server/index.ts server/routes.ts server/storage.ts server/vite.ts server/static.ts ` +
+        `client/index.html client/src/ ` +
+        `package.json tsconfig.json vite.config.ts tailwind.config.ts drizzle.config.ts components.json ` +
+        `script/ replit.md MARAN_SUITE_CODIGO_COMPLETO.txt ` +
+        `-x "*/node_modules/*" -x "*/.git/*" -x "*/dist/*"`,
+        { timeout: 30000 }
+      );
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", "attachment; filename=maran-suite-source.zip");
+      fs.createReadStream(zipPath).pipe(res);
+    } catch (err) {
+      res.status(500).send("Error generando ZIP");
+    }
+  });
+
   // Dashboard
   app.get("/api/dashboard/stats", async (req, res) => {
     try {
