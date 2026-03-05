@@ -4334,6 +4334,56 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.post("/api/packages/:id/duplicate", async (req, res) => {
+    try {
+      const original = await storage.getPackage(req.params.id);
+      if (!original) return res.status(404).json({ error: "Package not found" });
+      const code = storage.generatePackageCode();
+      const pkg = await storage.createPackage({
+        code,
+        name: `${original.name} (Copia)`,
+        description: original.description,
+        roomTypeId: original.roomTypeId,
+        nights: original.nights,
+        basePrice: original.basePrice,
+        discountPercent: original.discountPercent,
+        validFrom: original.validFrom,
+        validUntil: original.validUntil,
+        status: "inactive",
+        includedServices: original.includedServices,
+        terms: original.terms,
+        createdAt: new Date().toISOString(),
+      });
+      if (original.items && original.items.length > 0) {
+        for (const item of original.items) {
+          await storage.createPackageItem({
+            packageId: pkg.id,
+            itemType: item.itemType,
+            description: item.description,
+            quantity: item.quantity,
+            unitValue: item.unitValue,
+          });
+        }
+      }
+      const duplicated = await storage.getPackage(pkg.id);
+      res.status(201).json(duplicated);
+    } catch (error) {
+      res.status(500).json({ error: "Error duplicating package" });
+    }
+  });
+
+  app.patch("/api/packages/:id/toggle-status", async (req, res) => {
+    try {
+      const pkg = await storage.getPackage(req.params.id);
+      if (!pkg) return res.status(404).json({ error: "Package not found" });
+      const newStatus = pkg.status === "active" ? "inactive" : "active";
+      const updated = await storage.updatePackage(req.params.id, { status: newStatus });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error toggling package status" });
+    }
+  });
+
   // Package Items
   app.get("/api/packages/:packageId/items", async (req, res) => {
     try {

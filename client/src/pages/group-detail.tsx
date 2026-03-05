@@ -541,6 +541,8 @@ export default function GroupDetailPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setShowCheckInConfirm(false);
       if (data.success > 0 && data.failed === 0) {
         toast({ title: `Check-in grupal exitoso`, description: `${data.success} habitaciones procesadas` });
       } else if (data.success > 0 && data.failed > 0) {
@@ -558,6 +560,7 @@ export default function GroupDetailPage() {
       }
     },
     onError: () => {
+      setShowCheckInConfirm(false);
       toast({ title: "Error en check-in grupal", variant: "destructive" });
     },
   });
@@ -569,6 +572,8 @@ export default function GroupDetailPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setShowCheckOutConfirm(false);
       if (data.success > 0 && data.failed === 0) {
         toast({ title: `Check-out grupal exitoso`, description: `${data.success} habitaciones procesadas` });
       } else if (data.success > 0 && data.failed > 0) {
@@ -586,6 +591,7 @@ export default function GroupDetailPage() {
       }
     },
     onError: () => {
+      setShowCheckOutConfirm(false);
       toast({ title: "Error en check-out grupal", variant: "destructive" });
     },
   });
@@ -638,6 +644,109 @@ export default function GroupDetailPage() {
 
   const printInvoice = () => {
     window.print();
+  };
+
+  const printRoomingList = () => {
+    if (!group) return;
+    const sortedReservations = [...group.reservations].sort(
+      (a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || "")
+    );
+
+    const statusLabel = (status: string) => {
+      switch (status) {
+        case "checked_in": return "En Casa";
+        case "confirmed": return "Confirmado";
+        case "checked_out": return "Salió";
+        case "cancelled": return "Cancelado";
+        default: return status;
+      }
+    };
+
+    const rows = sortedReservations.map((res, idx) => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;text-align:center;">${idx + 1}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-weight:bold;">${res.room?.roomNumber || "-"}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.room?.roomType?.name || "-"}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.guest?.firstName || ""} ${res.guest?.lastName || ""}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${new Date(res.checkInDate).toLocaleDateString("es-AR")}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${new Date(res.checkOutDate).toLocaleDateString("es-AR")}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${statusLabel(res.status)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-size:11px;max-width:120px;">${res.notes || ""}</td>
+      </tr>
+    `).join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Rooming List - ${group.name}</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 24px; color: #222; }
+    h1 { margin: 0 0 2px 0; font-size: 20px; }
+    h2 { margin: 0 0 16px 0; font-size: 15px; font-weight: normal; color: #555; }
+    .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 12px; }
+    .info-row { display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 13px; }
+    .info-block { }
+    .info-block p { margin: 2px 0; }
+    .info-label { color: #777; font-size: 11px; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #f5f5f5; padding: 8px; text-align: left; border-bottom: 2px solid #333; font-size: 11px; text-transform: uppercase; }
+    .footer { text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 10px; color: #999; }
+    @media print { body { padding: 12px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Maran Suites & Towers</h1>
+    <h2>Rooming List</h2>
+  </div>
+  <div class="info-row">
+    <div class="info-block">
+      <p class="info-label">Grupo</p>
+      <p><strong>${group.name}</strong></p>
+      <p style="font-family:monospace;font-size:12px;">${group.groupCode}</p>
+    </div>
+    <div class="info-block">
+      <p class="info-label">Contacto</p>
+      <p>${group.contactName || "-"}</p>
+      <p>${group.contactPhone || ""}</p>
+      <p>${group.contactEmail || ""}</p>
+    </div>
+    <div class="info-block" style="text-align:right;">
+      <p class="info-label">Fechas</p>
+      <p>Check-in: <strong>${new Date(group.checkInDate).toLocaleDateString("es-AR")}</strong></p>
+      <p>Check-out: <strong>${new Date(group.checkOutDate).toLocaleDateString("es-AR")}</strong></p>
+      <p>Habitaciones: <strong>${group.reservations.length}</strong></p>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Hab.</th>
+        <th>Tipo</th>
+        <th>Hu&eacute;sped</th>
+        <th>Documento</th>
+        <th>Check-in</th>
+        <th>Check-out</th>
+        <th>Estado</th>
+        <th>Notas</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="footer">
+    Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites &amp; Towers
+  </div>
+  <script>window.onload = function() { window.print(); };<\/script>
+</body>
+</html>`;
+
+    const printWindow = window.open("", "_blank");
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -712,6 +821,20 @@ export default function GroupDetailPage() {
               </Button>
             )}
             
+            {/* Group Payment Button */}
+            <Button
+              variant="default"
+              onClick={() => {
+                setGroupPaymentAmount("");
+                setShowGroupPaymentDialog(true);
+              }}
+              disabled={groupPaymentMutation.isPending}
+              data-testid="button-group-payment-action"
+            >
+              <DollarSign className="mr-2 h-4 w-4" />
+              Pago Grupal
+            </Button>
+            
             {/* Invoice Button */}
             <Button
               variant="outline"
@@ -730,7 +853,7 @@ export default function GroupDetailPage() {
               data-testid="button-rooming-list"
             >
               <Printer className="mr-2 h-4 w-4" />
-              Rooming List
+              Imprimir Rooming List
             </Button>
           </div>
         )}
@@ -1137,8 +1260,8 @@ export default function GroupDetailPage() {
 
       {/* Rooming List Dialog */}
       <Dialog open={showRoomingListDialog} onOpenChange={setShowRoomingListDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto print:max-w-none print:max-h-none print:overflow-visible">
-          <DialogHeader className="print:mb-4">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users2 className="h-5 w-5" />
               Rooming List - {group.name}
@@ -1148,9 +1271,8 @@ export default function GroupDetailPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 print:text-sm" id="rooming-list-content">
-            {/* Group Header */}
-            <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg print:bg-transparent print:border print:p-2">
+          <div className="space-y-4" id="rooming-list-content">
+            <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-md">
               <div>
                 <p className="text-sm text-muted-foreground">Grupo</p>
                 <p className="font-bold text-lg">{group.name}</p>
@@ -1160,11 +1282,11 @@ export default function GroupDetailPage() {
                 <p className="text-sm text-muted-foreground">Contacto</p>
                 <p className="font-medium">{group.contactName || "-"}</p>
                 <p className="text-sm">{group.contactPhone}</p>
+                <p className="text-sm">{group.contactEmail}</p>
               </div>
             </div>
 
-            {/* Summary */}
-            <div className="flex gap-4 text-sm">
+            <div className="flex gap-4 text-sm flex-wrap">
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
                 <span>Check-in: <strong>{new Date(group.checkInDate).toLocaleDateString("es-AR")}</strong></span>
@@ -1179,18 +1301,19 @@ export default function GroupDetailPage() {
               </div>
             </div>
 
-            {/* Rooming List Table */}
             {group.reservations.length > 0 ? (
-              <Table className="print:text-xs">
+              <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-12">#</TableHead>
+                    <TableHead className="w-10">#</TableHead>
                     <TableHead>Habitación</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Huésped</TableHead>
+                    <TableHead>Documento</TableHead>
                     <TableHead>Check-in</TableHead>
                     <TableHead>Check-out</TableHead>
                     <TableHead>Estado</TableHead>
+                    <TableHead>Notas</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1201,15 +1324,11 @@ export default function GroupDetailPage() {
                         <TableCell className="font-medium">{idx + 1}</TableCell>
                         <TableCell className="font-bold">{res.room?.roomNumber}</TableCell>
                         <TableCell>{res.room?.roomType?.name || "-"}</TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{res.guest?.firstName} {res.guest?.lastName}</p>
-                            {res.guest?.documentNumber && (
-                              <p className="text-xs text-muted-foreground">
-                                {res.guest?.documentType}: {res.guest?.documentNumber}
-                              </p>
-                            )}
-                          </div>
+                        <TableCell className="font-medium">{res.guest?.firstName} {res.guest?.lastName}</TableCell>
+                        <TableCell className="text-sm">
+                          {res.guest?.documentNumber
+                            ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}`
+                            : "-"}
                         </TableCell>
                         <TableCell>{new Date(res.checkInDate).toLocaleDateString("es-AR")}</TableCell>
                         <TableCell>{new Date(res.checkOutDate).toLocaleDateString("es-AR")}</TableCell>
@@ -1226,6 +1345,9 @@ export default function GroupDetailPage() {
                              res.status === "checked_out" ? "Salió" : res.status}
                           </Badge>
                         </TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-[120px] truncate">
+                          {res.notes || "-"}
+                        </TableCell>
                       </TableRow>
                     ))}
                 </TableBody>
@@ -1236,19 +1358,18 @@ export default function GroupDetailPage() {
               </div>
             )}
 
-            {/* Footer for print */}
-            <div className="text-xs text-muted-foreground text-center pt-4 border-t print:mt-8">
+            <div className="text-xs text-muted-foreground text-center pt-4 border-t">
               Generado el {new Date().toLocaleString("es-AR")} | Maran Suites & Towers
             </div>
           </div>
 
-          <DialogFooter className="print:hidden gap-2">
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setShowRoomingListDialog(false)}>
               Cerrar
             </Button>
-            <Button onClick={() => window.print()} data-testid="button-print-rooming-list">
+            <Button onClick={() => printRoomingList()} data-testid="button-print-rooming-list">
               <Printer className="mr-2 h-4 w-4" />
-              Imprimir
+              Imprimir Rooming List
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1257,20 +1378,34 @@ export default function GroupDetailPage() {
       <AlertDialog open={showCheckInConfirm} onOpenChange={setShowCheckInConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar Check-in Grupal</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se realizará el check-in de {group.reservations.filter(r => r.status === "confirmed").length} habitación(es) confirmadas.
-              Las habitaciones pasarán a estado "ocupado".
+            <AlertDialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5" />
+              Confirmar Check-in Grupal
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Se realizará el check-in de <strong>{group.reservations.filter(r => r.status === "confirmed").length}</strong> habitación(es) confirmadas.
+                  Las habitaciones pasarán a estado "ocupado".
+                </p>
+                <div className="rounded-md bg-muted p-3 text-sm space-y-1">
+                  <p className="font-medium text-foreground">Resumen del grupo:</p>
+                  <p>Confirmadas: {group.reservations.filter(r => r.status === "confirmed").length}</p>
+                  <p>Ya en casa: {group.reservations.filter(r => r.status === "checked_in").length}</p>
+                  <p>Otras: {group.reservations.filter(r => !["confirmed", "checked_in"].includes(r.status)).length}</p>
+                </div>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => checkInAllMutation.mutate()}
+              disabled={checkInAllMutation.isPending}
               data-testid="button-confirm-check-in-all"
             >
               <LogIn className="mr-2 h-4 w-4" />
-              Sí, realizar check-in
+              {checkInAllMutation.isPending ? "Procesando..." : "Sí, realizar check-in"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1279,20 +1414,33 @@ export default function GroupDetailPage() {
       <AlertDialog open={showCheckOutConfirm} onOpenChange={setShowCheckOutConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar Check-out Grupal</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se realizará el check-out de {group.reservations.filter(r => r.status === "checked_in").length} habitación(es) en casa.
-              Las habitaciones con saldo pendiente no serán procesadas. Las habitaciones irán a limpieza.
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5" />
+              Confirmar Check-out Grupal
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Se realizará el check-out de <strong>{group.reservations.filter(r => r.status === "checked_in").length}</strong> habitación(es) en casa.
+                </p>
+                <div className="rounded-md bg-muted p-3 text-sm space-y-1">
+                  <p className="font-medium text-foreground">Importante:</p>
+                  <p>Las habitaciones con saldo pendiente no serán procesadas.</p>
+                  <p>Las habitaciones procesadas irán a estado de limpieza.</p>
+                  <p>Si hay habitaciones con saldo, registre un pago grupal primero.</p>
+                </div>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => checkOutAllMutation.mutate()}
+              disabled={checkOutAllMutation.isPending}
               data-testid="button-confirm-check-out-all"
             >
               <LogOut className="mr-2 h-4 w-4" />
-              Sí, realizar check-out
+              {checkOutAllMutation.isPending ? "Procesando..." : "Sí, realizar check-out"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

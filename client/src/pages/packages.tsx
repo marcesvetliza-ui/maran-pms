@@ -10,6 +10,10 @@ import {
   DollarSign,
   Gift,
   Tag,
+  Copy,
+  ToggleLeft,
+  ToggleRight,
+  Percent,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -407,6 +411,28 @@ export default function PackagesPage() {
     },
   });
 
+  const duplicateMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/packages/${id}/duplicate`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/packages"] });
+      toast({ title: "Paquete duplicado exitosamente" });
+    },
+    onError: () => {
+      toast({ title: "Error al duplicar paquete", variant: "destructive" });
+    },
+  });
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("PATCH", `/api/packages/${id}/toggle-status`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/packages"] });
+      toast({ title: "Estado del paquete actualizado" });
+    },
+    onError: () => {
+      toast({ title: "Error al cambiar estado", variant: "destructive" });
+    },
+  });
+
   const handleEdit = (pkg: PackageWithDetails) => {
     setEditingPackage(pkg);
     setShowFormDialog(true);
@@ -473,10 +499,16 @@ export default function PackagesPage() {
                   <div className="flex items-center gap-1">
                     <DollarSign className="h-4 w-4 text-muted-foreground" />
                     <span className="font-semibold">${pkg.basePrice}</span>
-                    {pkg.discountPercent && parseFloat(pkg.discountPercent) > 0 && (
-                      <Badge variant="secondary" className="ml-1">-{pkg.discountPercent}%</Badge>
-                    )}
                   </div>
+                  {pkg.discountPercent && parseFloat(pkg.discountPercent) > 0 && (
+                    <div className="flex items-center gap-1">
+                      <Percent className="h-4 w-4 text-muted-foreground" />
+                      <Badge variant="secondary" data-testid={`badge-discount-${pkg.id}`}>-{pkg.discountPercent}%</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        (${(parseFloat(pkg.basePrice) * (1 - parseFloat(pkg.discountPercent) / 100)).toFixed(2)} final)
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {pkg.roomType && (
@@ -499,19 +531,45 @@ export default function PackagesPage() {
                   </div>
                 )}
 
-                {(pkg.validFrom || pkg.validUntil) && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Calendar className="h-3 w-3" />
-                    <span>
-                      {pkg.validFrom || "..."} - {pkg.validUntil || "..."}
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Calendar className="h-3 w-3" />
+                  {pkg.validFrom || pkg.validUntil ? (
+                    <span data-testid={`text-validity-${pkg.id}`}>
+                      {pkg.validFrom ? new Date(pkg.validFrom + "T12:00:00").toLocaleDateString("es-AR") : "Sin inicio"} - {pkg.validUntil ? new Date(pkg.validUntil + "T12:00:00").toLocaleDateString("es-AR") : "Sin fin"}
                     </span>
-                  </div>
-                )}
+                  ) : (
+                    <span data-testid={`text-validity-${pkg.id}`}>Sin restricción de fechas</span>
+                  )}
+                </div>
 
-                <div className="flex gap-2 pt-2 border-t">
+                <div className="flex flex-wrap gap-2 pt-2 border-t">
                   <Button variant="outline" size="sm" onClick={() => handleEdit(pkg)} data-testid={`button-edit-package-${pkg.id}`}>
                     <Edit className="mr-2 h-4 w-4" />
                     Editar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => duplicateMutation.mutate(pkg.id)}
+                    disabled={duplicateMutation.isPending}
+                    data-testid={`button-duplicate-package-${pkg.id}`}
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    Duplicar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => toggleStatusMutation.mutate(pkg.id)}
+                    disabled={toggleStatusMutation.isPending}
+                    data-testid={`button-toggle-status-${pkg.id}`}
+                  >
+                    {pkg.status === "active" ? (
+                      <ToggleRight className="mr-2 h-4 w-4" />
+                    ) : (
+                      <ToggleLeft className="mr-2 h-4 w-4" />
+                    )}
+                    {pkg.status === "active" ? "Desactivar" : "Activar"}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setDeletePackageId(pkg.id)} data-testid={`button-delete-package-${pkg.id}`}>
                     <Trash2 className="h-4 w-4 text-destructive" />
