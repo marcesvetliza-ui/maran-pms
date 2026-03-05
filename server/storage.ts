@@ -128,6 +128,15 @@ import {
   type EventChargeWithType,
   type EventPlanningData,
   type EventPlanningCellStatus,
+  type EventPayment,
+  type InsertEventPayment,
+  type EventTable,
+  type InsertEventTable,
+  type EventTableWithDetails,
+  type EventTableCharge,
+  type InsertEventTableCharge,
+  type EventTablePayment,
+  type InsertEventTablePayment,
   // Maintenance
   type MaintenanceStaff,
   type InsertMaintenanceStaff,
@@ -507,6 +516,28 @@ export interface IStorage {
   updateEventCharge(id: string, charge: Partial<InsertEventCharge>): Promise<EventCharge | undefined>;
   deleteEventCharge(id: string): Promise<boolean>;
 
+  // Event Payments
+  getEventPayments(eventId: string): Promise<EventPayment[]>;
+  createEventPayment(payment: InsertEventPayment): Promise<EventPayment>;
+  deleteEventPayment(id: string): Promise<boolean>;
+
+  // Event Tables (Evento por Mesa)
+  getEventTables(eventId: string): Promise<EventTableWithDetails[]>;
+  getEventTable(id: string): Promise<EventTableWithDetails | undefined>;
+  createEventTable(table: InsertEventTable): Promise<EventTable>;
+  updateEventTable(id: string, table: Partial<InsertEventTable>): Promise<EventTable | undefined>;
+  deleteEventTable(id: string): Promise<boolean>;
+
+  // Event Table Charges
+  getEventTableCharges(tableId: string): Promise<EventTableCharge[]>;
+  createEventTableCharge(charge: InsertEventTableCharge): Promise<EventTableCharge>;
+  deleteEventTableCharge(id: string): Promise<boolean>;
+
+  // Event Table Payments
+  getEventTablePayments(tableId: string): Promise<EventTablePayment[]>;
+  createEventTablePayment(payment: InsertEventTablePayment): Promise<EventTablePayment>;
+  deleteEventTablePayment(id: string): Promise<boolean>;
+
   // Event Planning
   getEventPlanningData(startDate: string, endDate: string): Promise<EventPlanningData>;
 
@@ -619,6 +650,10 @@ export class MemStorage implements IStorage {
   private events: Map<string, HotelEvent>;
   private eventChargeTypes: Map<string, EventChargeType>;
   private eventCharges: Map<string, EventCharge>;
+  private eventPayments: Map<string, EventPayment>;
+  private eventTablesMap: Map<string, EventTable>;
+  private eventTableCharges: Map<string, EventTableCharge>;
+  private eventTablePayments: Map<string, EventTablePayment>;
   // Maintenance
   private maintenanceStaff: Map<string, MaintenanceStaff>;
   private workOrders: Map<string, WorkOrder>;
@@ -685,6 +720,10 @@ export class MemStorage implements IStorage {
     this.events = new Map();
     this.eventChargeTypes = new Map();
     this.eventCharges = new Map();
+    this.eventPayments = new Map();
+    this.eventTablesMap = new Map();
+    this.eventTableCharges = new Map();
+    this.eventTablePayments = new Map();
     // Maintenance
     this.maintenanceStaff = new Map();
     this.workOrders = new Map();
@@ -3602,7 +3641,9 @@ export class MemStorage implements IStorage {
         const chargeType = charge.chargeTypeId ? this.eventChargeTypes.get(charge.chargeTypeId) : undefined;
         return { ...charge, chargeType };
       });
-    return { ...event, eventRoom, company, charges };
+    const payments = Array.from(this.eventPayments.values())
+      .filter(p => p.eventId === event.id);
+    return { ...event, eventRoom, company, charges, payments };
   }
 
   async createEvent(event: InsertEvent): Promise<HotelEvent> {
@@ -3624,6 +3665,10 @@ export class MemStorage implements IStorage {
       attendees: event.attendees ?? 10,
       status: (event.status ?? "tentative") as EventStatus,
       notes: event.notes ?? null,
+      receiptType: event.receiptType ?? null,
+      closedAt: event.closedAt ?? null,
+      totalAmount: event.totalAmount ?? null,
+      totalPaid: event.totalPaid ?? null,
       createdAt: event.createdAt,
     };
     this.events.set(id, newEvent);
@@ -3777,6 +3822,135 @@ export class MemStorage implements IStorage {
     });
 
     return { rooms, days, occupancy, events: eventsMap, cellEvents };
+  }
+
+  // Event Payments
+  async getEventPayments(eventId: string): Promise<EventPayment[]> {
+    return Array.from(this.eventPayments.values()).filter(p => p.eventId === eventId);
+  }
+
+  async createEventPayment(payment: InsertEventPayment): Promise<EventPayment> {
+    const id = randomUUID();
+    const newPayment: EventPayment = {
+      id,
+      eventId: payment.eventId,
+      amount: payment.amount,
+      method: payment.method,
+      isAdvance: payment.isAdvance ?? "false",
+      reservationId: payment.reservationId ?? null,
+      notes: payment.notes ?? null,
+      paidAt: payment.paidAt ?? new Date().toISOString(),
+      createdAt: payment.createdAt ?? new Date().toISOString(),
+    };
+    this.eventPayments.set(id, newPayment);
+    return newPayment;
+  }
+
+  async deleteEventPayment(id: string): Promise<boolean> {
+    return this.eventPayments.delete(id);
+  }
+
+  // Event Tables
+  async getEventTables(eventId: string): Promise<EventTableWithDetails[]> {
+    return Array.from(this.eventTablesMap.values())
+      .filter(t => t.eventId === eventId)
+      .map(table => this.enrichEventTable(table));
+  }
+
+  async getEventTable(id: string): Promise<EventTableWithDetails | undefined> {
+    const table = this.eventTablesMap.get(id);
+    if (!table) return undefined;
+    return this.enrichEventTable(table);
+  }
+
+  private enrichEventTable(table: EventTable): EventTableWithDetails {
+    const charges = Array.from(this.eventTableCharges.values()).filter(c => c.eventTableId === table.id);
+    const payments = Array.from(this.eventTablePayments.values()).filter(p => p.eventTableId === table.id);
+    return { ...table, charges, payments };
+  }
+
+  async createEventTable(table: InsertEventTable): Promise<EventTable> {
+    const id = randomUUID();
+    const newTable: EventTable = {
+      id,
+      eventId: table.eventId,
+      tableNumber: table.tableNumber,
+      label: table.label ?? null,
+      seats: table.seats ?? null,
+      status: table.status ?? "open",
+      reservationId: table.reservationId ?? null,
+      receiptType: table.receiptType ?? null,
+      closedAt: table.closedAt ?? null,
+      createdAt: table.createdAt ?? new Date().toISOString(),
+    };
+    this.eventTablesMap.set(id, newTable);
+    return newTable;
+  }
+
+  async updateEventTable(id: string, table: Partial<InsertEventTable>): Promise<EventTable | undefined> {
+    const existing = this.eventTablesMap.get(id);
+    if (!existing) return undefined;
+    const updated: EventTable = { ...existing, ...table };
+    this.eventTablesMap.set(id, updated);
+    return updated;
+  }
+
+  async deleteEventTable(id: string): Promise<boolean> {
+    const charges = Array.from(this.eventTableCharges.values()).filter(c => c.eventTableId === id);
+    charges.forEach(c => this.eventTableCharges.delete(c.id));
+    const payments = Array.from(this.eventTablePayments.values()).filter(p => p.eventTableId === id);
+    payments.forEach(p => this.eventTablePayments.delete(p.id));
+    return this.eventTablesMap.delete(id);
+  }
+
+  // Event Table Charges
+  async getEventTableCharges(tableId: string): Promise<EventTableCharge[]> {
+    return Array.from(this.eventTableCharges.values()).filter(c => c.eventTableId === tableId);
+  }
+
+  async createEventTableCharge(charge: InsertEventTableCharge): Promise<EventTableCharge> {
+    const id = randomUUID();
+    const newCharge: EventTableCharge = {
+      id,
+      eventTableId: charge.eventTableId,
+      description: charge.description,
+      quantity: charge.quantity ?? 1,
+      unitPrice: charge.unitPrice,
+      total: charge.total,
+      createdAt: charge.createdAt ?? new Date().toISOString(),
+    };
+    this.eventTableCharges.set(id, newCharge);
+    return newCharge;
+  }
+
+  async deleteEventTableCharge(id: string): Promise<boolean> {
+    return this.eventTableCharges.delete(id);
+  }
+
+  // Event Table Payments
+  async getEventTablePayments(tableId: string): Promise<EventTablePayment[]> {
+    return Array.from(this.eventTablePayments.values()).filter(p => p.eventTableId === tableId);
+  }
+
+  async createEventTablePayment(payment: InsertEventTablePayment): Promise<EventTablePayment> {
+    const id = randomUUID();
+    const newPayment: EventTablePayment = {
+      id,
+      eventTableId: payment.eventTableId,
+      amount: payment.amount,
+      method: payment.method,
+      isAdvance: payment.isAdvance ?? "false",
+      reservationId: payment.reservationId ?? null,
+      receiptType: payment.receiptType ?? null,
+      paidAt: payment.paidAt ?? new Date().toISOString(),
+      createdAt: payment.createdAt ?? new Date().toISOString(),
+    };
+    this.eventTablePayments.set(id, newPayment);
+    return newPayment;
+  }
+
+  async deleteEventTablePayment(id: string): Promise<boolean> {
+    return this.eventTablePayments.delete(id);
   }
 
   // ==================== MAINTENANCE ====================

@@ -469,10 +469,10 @@ export type InsertEventRoom = z.infer<typeof insertEventRoomSchema>;
 export type EventRoom = typeof eventRooms.$inferSelect;
 
 // Event Types (Tipos de evento)
-export type EventType = "corporate" | "social" | "wedding" | "conference" | "seminar" | "cocktail" | "meeting" | "other";
+export type EventType = "corporate" | "social" | "wedding" | "conference" | "seminar" | "cocktail" | "meeting" | "table_event" | "other";
 
 // Event Status
-export type EventStatus = "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled";
+export type EventStatus = "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled" | "invoiced";
 
 // Events (Eventos)
 export const events = pgTable("events", {
@@ -492,6 +492,10 @@ export const events = pgTable("events", {
   attendees: integer("attendees").default(10),
   status: text("status").$type<EventStatus>().notNull().default("tentative"),
   notes: text("notes"),
+  receiptType: text("receipt_type"),
+  closedAt: text("closed_at"),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
+  totalPaid: decimal("total_paid", { precision: 10, scale: 2 }),
   createdAt: text("created_at").notNull(),
 });
 
@@ -530,15 +534,88 @@ export const insertEventChargeSchema = createInsertSchema(eventCharges).omit({ i
 export type InsertEventCharge = z.infer<typeof insertEventChargeSchema>;
 export type EventCharge = typeof eventCharges.$inferSelect;
 
+// Event Payments (Pagos de eventos)
+export const eventPayments = pgTable("event_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  method: text("method").notNull(),
+  isAdvance: text("is_advance").default("false"),
+  reservationId: varchar("reservation_id"),
+  notes: text("notes"),
+  paidAt: text("paid_at"),
+  createdAt: text("created_at"),
+});
+
+export const insertEventPaymentSchema = createInsertSchema(eventPayments).omit({ id: true });
+export type InsertEventPayment = z.infer<typeof insertEventPaymentSchema>;
+export type EventPayment = typeof eventPayments.$inferSelect;
+
+// Event Tables (Mesas de eventos por mesa)
+export const eventTables = pgTable("event_tables", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull(),
+  tableNumber: integer("table_number").notNull(),
+  label: text("label"),
+  seats: integer("seats"),
+  status: text("status").notNull().default("open"),
+  reservationId: varchar("reservation_id"),
+  receiptType: text("receipt_type"),
+  closedAt: text("closed_at"),
+  createdAt: text("created_at"),
+});
+
+export const insertEventTableSchema = createInsertSchema(eventTables).omit({ id: true });
+export type InsertEventTable = z.infer<typeof insertEventTableSchema>;
+export type EventTable = typeof eventTables.$inferSelect;
+
+// Event Table Charges
+export const eventTableCharges = pgTable("event_table_charges", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventTableId: varchar("event_table_id").notNull(),
+  description: text("description").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  total: decimal("total", { precision: 10, scale: 2 }).notNull(),
+  createdAt: text("created_at"),
+});
+
+export const insertEventTableChargeSchema = createInsertSchema(eventTableCharges).omit({ id: true });
+export type InsertEventTableCharge = z.infer<typeof insertEventTableChargeSchema>;
+export type EventTableCharge = typeof eventTableCharges.$inferSelect;
+
+// Event Table Payments
+export const eventTablePayments = pgTable("event_table_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventTableId: varchar("event_table_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  method: text("method").notNull(),
+  isAdvance: text("is_advance").default("false"),
+  reservationId: varchar("reservation_id"),
+  receiptType: text("receipt_type"),
+  paidAt: text("paid_at"),
+  createdAt: text("created_at"),
+});
+
+export const insertEventTablePaymentSchema = createInsertSchema(eventTablePayments).omit({ id: true });
+export type InsertEventTablePayment = z.infer<typeof insertEventTablePaymentSchema>;
+export type EventTablePayment = typeof eventTablePayments.$inferSelect;
+
 // Extended Event types
 export type EventWithDetails = Event & {
   eventRoom: EventRoom;
   company?: Company;
   charges?: EventChargeWithType[];
+  payments?: EventPayment[];
 };
 
 export type EventChargeWithType = EventCharge & {
   chargeType?: EventChargeType;
+};
+
+export type EventTableWithDetails = EventTable & {
+  charges: EventTableCharge[];
+  payments: EventTablePayment[];
 };
 
 // Event Planning types

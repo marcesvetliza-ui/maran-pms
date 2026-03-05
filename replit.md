@@ -135,7 +135,19 @@ Preferred communication style: Simple, everyday language.
 - **ARCA Integration Prep**: `receiptType` and `paymentMethod` fields stored on orders for future external billing integration
 - **Recipes & Costs Tab**: New tab for loading recipes per dish (ingredients with quantities and unit costs), automatic cost calculation, gross margin report per product
 
-### Schema Changes
+### Events Module Completion (PDF-driven, 4 tasks)
+- **T001 - Cancel Confirmation**: Cancelling an event now opens an AlertDialog confirmation before applying status change. Red destructive "Sí, cancelar evento" button.
+- **T002 - Overlap Validation**: Backend validates room date overlaps on POST/PATCH events. Returns 409 with descriptive message. Active statuses: tentative, confirmed, in_progress. Frontend shows toast and keeps modal open on conflict.
+- **T003 - Complete Folio**: Full folio with charges (left) and payments (right) with SEÑA badges. Multiple payment methods including room charge. Close requires zero balance + receipt type (Ticket/Factura A/B/C/Nota Credito). Status becomes "invoiced". Room charges create hotel charges on reservation.
+- **T004 - Evento por Mesa**: New "table_event" event type. Mesas tab with card grid showing per-table balance/status. Per-table folio dialog (charges + payments). Individual table close with receipt type. Global summary of all tables.
+
+### Schema Changes (Events)
+- `events`: Added `receipt_type`, `closed_at`, `total_amount`, `total_paid` columns
+- New `EventStatus` value: "invoiced"
+- New `EventType` value: "table_event"
+- New tables: `event_payments`, `event_tables`, `event_table_charges`, `event_table_payments`
+
+### Schema Changes (Restaurant)
 - `restaurant_tables`: Added `has_window` column
 - `restaurant_orders`: Added `receipt_type` and `payment_method` columns
 - New tables: `restaurant_time_slots`, `recipes`, `recipe_ingredients`

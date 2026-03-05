@@ -15,8 +15,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { format, addDays, startOfDay, parseISO, isSameDay, addWeeks, subWeeks } from "date-fns";
+import { format, addDays, startOfDay, parseISO, isSameDay, addWeeks, subWeeks, isValid } from "date-fns";
 import { es } from "date-fns/locale";
 import { 
   Plus, 
@@ -33,6 +34,10 @@ import {
   CreditCard,
   Trash2,
   Edit,
+  Receipt,
+  DollarSign,
+  Info,
+  UtensilsCrossed,
 } from "lucide-react";
 
 type EventRoom = {
@@ -65,12 +70,61 @@ type EventCharge = {
   createdAt: string;
 };
 
+type EventPayment = {
+  id: string;
+  eventId: string;
+  amount: string;
+  method: string;
+  isAdvance: string;
+  reservationId: string | null;
+  notes: string | null;
+  paidAt: string;
+  createdAt: string;
+};
+
+type EventTableCharge = {
+  id: string;
+  eventTableId: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+  total: string;
+  createdAt: string;
+};
+
+type EventTablePayment = {
+  id: string;
+  eventTableId: string;
+  amount: string;
+  method: string;
+  isAdvance: string;
+  reservationId: string | null;
+  receiptType: string | null;
+  paidAt: string;
+  createdAt: string;
+};
+
+type EventTableType = {
+  id: string;
+  eventId: string;
+  tableNumber: number;
+  label: string | null;
+  seats: number | null;
+  status: string;
+  reservationId: string | null;
+  receiptType: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  charges: EventTableCharge[];
+  payments: EventTablePayment[];
+};
+
 type HotelEvent = {
   id: string;
   eventCode: string;
   name: string;
   eventRoomId: string;
-  eventType: "corporate" | "social" | "wedding" | "conference" | "meeting" | "other";
+  eventType: "corporate" | "social" | "wedding" | "conference" | "meeting" | "table_event" | "other";
   contactName: string;
   contactPhone: string | null;
   contactEmail: string | null;
@@ -80,11 +134,26 @@ type HotelEvent = {
   startTime: string | null;
   endTime: string | null;
   attendees: number;
-  status: "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled";
+  status: "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled" | "invoiced";
   notes: string | null;
+  receiptType: string | null;
+  closedAt: string | null;
+  totalAmount: string | null;
+  totalPaid: string | null;
   createdAt: string;
   eventRoom?: EventRoom;
   charges?: EventCharge[];
+  payments?: EventPayment[];
+};
+
+type Reservation = {
+  id: string;
+  reservationCode: string;
+  guestId: string;
+  roomId: string;
+  status: string;
+  guest?: { firstName: string; lastName: string };
+  room?: { roomNumber: string };
 };
 
 type Company = {
@@ -98,6 +167,7 @@ const eventStatusColors: Record<string, string> = {
   in_progress: "bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30",
   completed: "bg-gray-500/20 text-gray-700 dark:text-gray-400 border-gray-500/30",
   cancelled: "bg-red-500/20 text-red-700 dark:text-red-400 border-red-500/30",
+  invoiced: "bg-purple-500/20 text-purple-700 dark:text-purple-400 border-purple-500/30",
 };
 
 const eventStatusLabels: Record<string, string> = {
@@ -106,6 +176,7 @@ const eventStatusLabels: Record<string, string> = {
   in_progress: "En Curso",
   completed: "Completado",
   cancelled: "Cancelado",
+  invoiced: "Facturado",
 };
 
 const eventTypeLabels: Record<string, string> = {
@@ -114,13 +185,36 @@ const eventTypeLabels: Record<string, string> = {
   wedding: "Boda",
   conference: "Conferencia",
   meeting: "Reunion",
+  table_event: "Evento por Mesa",
   other: "Otro",
 };
+
+const paymentMethodLabels: Record<string, string> = {
+  efectivo: "Efectivo",
+  tarjeta_debito: "Tarjeta Debito",
+  tarjeta_credito: "Tarjeta Credito",
+  transferencia: "Transferencia",
+  mercadopago: "MercadoPago",
+  room_charge: "Cargo a Habitacion",
+  cuenta_corriente: "Cuenta Corriente",
+};
+
+const receiptTypes = ["Ticket", "Factura A", "Factura B", "Factura C", "Nota Credito"];
+
+function safeFormatDate(dateStr: string, fmt: string, opts?: any): string {
+  try {
+    const d = parseISO(dateStr);
+    if (!isValid(d)) return dateStr;
+    return format(d, fmt, opts);
+  } catch {
+    return dateStr;
+  }
+}
 
 const eventFormSchema = z.object({
   eventRoomId: z.string().min(1, "Seleccione un salon"),
   name: z.string().min(1, "El nombre del evento es requerido"),
-  eventType: z.enum(["corporate", "social", "wedding", "conference", "meeting", "other"]),
+  eventType: z.enum(["corporate", "social", "wedding", "conference", "meeting", "table_event", "other"]),
   contactName: z.string().min(1, "El nombre de contacto es requerido"),
   contactPhone: z.string().optional(),
   contactEmail: z.string().email("Email invalido").optional().or(z.literal("")),
@@ -150,8 +244,8 @@ type PlanningEvent = {
   contactName: string;
   startDate: string;
   endDate: string;
-  status: "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled";
-  eventType: "corporate" | "social" | "wedding" | "conference" | "meeting" | "other";
+  status: "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled" | "invoiced";
+  eventType: "corporate" | "social" | "wedding" | "conference" | "meeting" | "table_event" | "other";
 };
 
 type EventPlanningResponse = {
@@ -168,6 +262,28 @@ export default function EventsPage() {
   const [isChargeDialogOpen, setIsChargeDialogOpen] = useState(false);
   const [prefilledRoomId, setPrefilledRoomId] = useState<string>("");
   const [prefilledDate, setPrefilledDate] = useState<string>("");
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [folioReceiptType, setFolioReceiptType] = useState("");
+  const [activeTab, setActiveTab] = useState("details");
+  const [isTableFolioOpen, setIsTableFolioOpen] = useState(false);
+  const [selectedTable, setSelectedTable] = useState<EventTableType | null>(null);
+  const [tableFolioReceiptType, setTableFolioReceiptType] = useState("");
+  const [isAddTableOpen, setIsAddTableOpen] = useState(false);
+  const [newTableNumber, setNewTableNumber] = useState(1);
+  const [newTableLabel, setNewTableLabel] = useState("");
+  const [newTableSeats, setNewTableSeats] = useState(4);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("efectivo");
+  const [paymentIsAdvance, setPaymentIsAdvance] = useState(false);
+  const [paymentReservationId, setPaymentReservationId] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [tableChargeDesc, setTableChargeDesc] = useState("");
+  const [tableChargeQty, setTableChargeQty] = useState(1);
+  const [tableChargePrice, setTableChargePrice] = useState("");
+  const [tablePayAmount, setTablePayAmount] = useState("");
+  const [tablePayMethod, setTablePayMethod] = useState("efectivo");
+  const [tablePayAdvance, setTablePayAdvance] = useState(false);
+  const [tablePayResId, setTablePayResId] = useState("");
   const { toast } = useToast();
 
   const weekDays = useMemo(() => {
@@ -190,6 +306,19 @@ export default function EventsPage() {
     queryFn: () => 
       fetch(`/api/events/planning?start=${startDateStr}&end=${endDateStr}`)
         .then(res => res.json()),
+  });
+
+  const { data: reservations = [] } = useQuery<Reservation[]>({
+    queryKey: ["/api/reservations"],
+    queryFn: () => fetch("/api/reservations").then(r => r.json()),
+  });
+
+  const activeReservations = reservations.filter(r => r.status === "checked_in" || r.status === "confirmed");
+
+  const { data: eventTables = [], refetch: refetchTables } = useQuery<EventTableType[]>({
+    queryKey: ["/api/events", selectedEvent?.id, "tables"],
+    queryFn: () => fetch(`/api/events/${selectedEvent!.id}/tables`).then(r => r.json()),
+    enabled: !!selectedEvent && selectedEvent.eventType === "table_event",
   });
 
   const eventsMap = planningData?.events || {};
@@ -233,8 +362,17 @@ export default function EventsPage() {
       eventForm.reset();
       toast({ title: "Evento creado exitosamente" });
     },
-    onError: () => {
-      toast({ title: "Error al crear el evento", variant: "destructive" });
+    onError: async (error: any) => {
+      try {
+        const msg = error?.message || "Error al crear el evento";
+        if (msg.includes("Superposición") || msg.includes("409")) {
+          toast({ title: "Conflicto de horario", description: msg, variant: "destructive" });
+        } else {
+          toast({ title: msg, variant: "destructive" });
+        }
+      } catch {
+        toast({ title: "Error al crear el evento", variant: "destructive" });
+      }
     },
   });
 
@@ -246,8 +384,9 @@ export default function EventsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/events"] });
       toast({ title: "Evento actualizado" });
     },
-    onError: () => {
-      toast({ title: "Error al actualizar el evento", variant: "destructive" });
+    onError: async (error: any) => {
+      const msg = error?.message || "Error al actualizar el evento";
+      toast({ title: msg, variant: "destructive" });
     },
   });
 
@@ -290,6 +429,159 @@ export default function EventsPage() {
     },
   });
 
+  const refreshSelectedEvent = async () => {
+    if (!selectedEvent) return;
+    const response = await fetch(`/api/events/${selectedEvent.id}`);
+    if (response.ok) {
+      const updatedEvent = await response.json();
+      setSelectedEvent(updatedEvent);
+    }
+  };
+
+  const addPaymentMutation = useMutation({
+    mutationFn: ({ eventId, data }: { eventId: string; data: any }) =>
+      apiRequest("POST", `/api/events/${eventId}/payments`, data),
+    onSuccess: async () => {
+      await refreshSelectedEvent();
+      setPaymentAmount("");
+      setPaymentMethod("efectivo");
+      setPaymentIsAdvance(false);
+      setPaymentReservationId("");
+      setPaymentNotes("");
+      toast({ title: "Pago registrado" });
+    },
+    onError: () => {
+      toast({ title: "Error al registrar el pago", variant: "destructive" });
+    },
+  });
+
+  const deletePaymentMutation = useMutation({
+    mutationFn: ({ eventId, payId }: { eventId: string; payId: string }) =>
+      apiRequest("DELETE", `/api/events/${eventId}/payments/${payId}`),
+    onSuccess: async () => {
+      await refreshSelectedEvent();
+      toast({ title: "Pago eliminado" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Error al eliminar el pago", variant: "destructive" });
+    },
+  });
+
+  const closeEventMutation = useMutation({
+    mutationFn: ({ eventId, receiptType }: { eventId: string; receiptType: string }) =>
+      apiRequest("POST", `/api/events/${eventId}/close`, { receiptType }),
+    onSuccess: async () => {
+      await refreshSelectedEvent();
+      queryClient.invalidateQueries({ queryKey: ["/api/events/planning"] });
+      toast({ title: "Evento facturado exitosamente" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Error al cerrar el evento", variant: "destructive" });
+    },
+  });
+
+  const addTableChargeMutation = useMutation({
+    mutationFn: ({ eventId, tableId, data }: { eventId: string; tableId: string; data: any }) =>
+      apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/charges`, data),
+    onSuccess: async () => {
+      await refetchTables();
+      if (selectedTable) {
+        const resp = await fetch(`/api/events/${selectedEvent!.id}/tables`);
+        const tables: EventTableType[] = await resp.json();
+        const updated = tables.find(t => t.id === selectedTable.id);
+        if (updated) setSelectedTable(updated);
+      }
+      setTableChargeDesc("");
+      setTableChargeQty(1);
+      setTableChargePrice("");
+      toast({ title: "Cargo agregado a la mesa" });
+    },
+    onError: () => {
+      toast({ title: "Error al agregar cargo", variant: "destructive" });
+    },
+  });
+
+  const deleteTableChargeMutation = useMutation({
+    mutationFn: ({ eventId, tableId, chargeId }: { eventId: string; tableId: string; chargeId: string }) =>
+      apiRequest("DELETE", `/api/events/${eventId}/tables/${tableId}/charges/${chargeId}`),
+    onSuccess: async () => {
+      await refetchTables();
+      if (selectedTable) {
+        const resp = await fetch(`/api/events/${selectedEvent!.id}/tables`);
+        const tables: EventTableType[] = await resp.json();
+        const updated = tables.find(t => t.id === selectedTable.id);
+        if (updated) setSelectedTable(updated);
+      }
+      toast({ title: "Cargo eliminado" });
+    },
+    onError: () => {
+      toast({ title: "Error al eliminar cargo", variant: "destructive" });
+    },
+  });
+
+  const addTablePaymentMutation = useMutation({
+    mutationFn: ({ eventId, tableId, data }: { eventId: string; tableId: string; data: any }) =>
+      apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/payments`, data),
+    onSuccess: async () => {
+      await refetchTables();
+      if (selectedTable) {
+        const resp = await fetch(`/api/events/${selectedEvent!.id}/tables`);
+        const tables: EventTableType[] = await resp.json();
+        const updated = tables.find(t => t.id === selectedTable.id);
+        if (updated) setSelectedTable(updated);
+      }
+      setTablePayAmount("");
+      setTablePayMethod("efectivo");
+      setTablePayAdvance(false);
+      setTablePayResId("");
+      toast({ title: "Pago registrado en mesa" });
+    },
+    onError: () => {
+      toast({ title: "Error al registrar pago", variant: "destructive" });
+    },
+  });
+
+  const closeTableMutation = useMutation({
+    mutationFn: ({ eventId, tableId, receiptType }: { eventId: string; tableId: string; receiptType: string }) =>
+      apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/close`, { receiptType }),
+    onSuccess: async () => {
+      await refetchTables();
+      setIsTableFolioOpen(false);
+      setSelectedTable(null);
+      toast({ title: "Mesa cerrada exitosamente" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Error al cerrar mesa", variant: "destructive" });
+    },
+  });
+
+  const createTableMutation = useMutation({
+    mutationFn: ({ eventId, data }: { eventId: string; data: any }) =>
+      apiRequest("POST", `/api/events/${eventId}/tables`, data),
+    onSuccess: async () => {
+      await refetchTables();
+      setIsAddTableOpen(false);
+      setNewTableNumber(n => n + 1);
+      setNewTableLabel("");
+      toast({ title: "Mesa agregada" });
+    },
+    onError: () => {
+      toast({ title: "Error al agregar mesa", variant: "destructive" });
+    },
+  });
+
+  const deleteTableMutation = useMutation({
+    mutationFn: ({ eventId, tableId }: { eventId: string; tableId: string }) =>
+      apiRequest("DELETE", `/api/events/${eventId}/tables/${tableId}`),
+    onSuccess: async () => {
+      await refetchTables();
+      toast({ title: "Mesa eliminada" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Error al eliminar mesa", variant: "destructive" });
+    },
+  });
+
   const handleCellClick = (roomId: string, date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
     setPrefilledRoomId(roomId);
@@ -317,6 +609,7 @@ export default function EventsPage() {
       if (response.ok) {
         const fullEvent = await response.json();
         setSelectedEvent(fullEvent);
+        setActiveTab("details");
       }
     } catch (error) {
       toast({ title: "Error al cargar el evento", variant: "destructive" });
@@ -354,6 +647,66 @@ export default function EventsPage() {
     return event.charges.reduce((sum, charge) => sum + parseFloat(charge.totalAmount), 0);
   };
 
+  const calculateEventPaid = (event: HotelEvent): number => {
+    if (!event.payments) return 0;
+    return event.payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+  };
+
+  const handleAddPayment = () => {
+    if (!selectedEvent || !paymentAmount || parseFloat(paymentAmount) <= 0) return;
+    addPaymentMutation.mutate({
+      eventId: selectedEvent.id,
+      data: {
+        amount: paymentAmount,
+        method: paymentMethod,
+        isAdvance: paymentIsAdvance,
+        reservationId: paymentMethod === "room_charge" ? paymentReservationId : null,
+        notes: paymentNotes || null,
+      },
+    });
+  };
+
+  const handleCloseEvent = () => {
+    if (!selectedEvent || !folioReceiptType) return;
+    closeEventMutation.mutate({ eventId: selectedEvent.id, receiptType: folioReceiptType });
+  };
+
+  const handleAddTableCharge = () => {
+    if (!selectedEvent || !selectedTable || !tableChargeDesc || !tableChargePrice) return;
+    addTableChargeMutation.mutate({
+      eventId: selectedEvent.id,
+      tableId: selectedTable.id,
+      data: { description: tableChargeDesc, quantity: tableChargeQty, unitPrice: tableChargePrice },
+    });
+  };
+
+  const handleAddTablePayment = () => {
+    if (!selectedEvent || !selectedTable || !tablePayAmount || parseFloat(tablePayAmount) <= 0) return;
+    addTablePaymentMutation.mutate({
+      eventId: selectedEvent.id,
+      tableId: selectedTable.id,
+      data: {
+        amount: tablePayAmount,
+        method: tablePayMethod,
+        isAdvance: tablePayAdvance,
+        reservationId: tablePayMethod === "room_charge" ? tablePayResId : null,
+      },
+    });
+  };
+
+  const handleCloseTable = () => {
+    if (!selectedEvent || !selectedTable || !tableFolioReceiptType) return;
+    closeTableMutation.mutate({
+      eventId: selectedEvent.id,
+      tableId: selectedTable.id,
+      receiptType: tableFolioReceiptType,
+    });
+  };
+
+  const canShowFolio = (event: HotelEvent) => {
+    return ["confirmed", "in_progress", "completed"].includes(event.status);
+  };
+
   if (roomsLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -361,6 +714,8 @@ export default function EventsPage() {
       </div>
     );
   }
+
+  const detailTabCount = selectedEvent?.eventType === "table_event" ? 4 : 3;
 
   return (
     <div className="flex flex-col h-full p-4 gap-4">
@@ -486,6 +841,7 @@ export default function EventsPage() {
         </CardContent>
       </Card>
 
+      {/* New Event Dialog */}
       <Dialog open={isNewDialogOpen} onOpenChange={setIsNewDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -554,6 +910,7 @@ export default function EventsPage() {
                           <SelectItem value="wedding">Boda</SelectItem>
                           <SelectItem value="conference">Conferencia</SelectItem>
                           <SelectItem value="meeting">Reunion</SelectItem>
+                          <SelectItem value="table_event">Evento por Mesa</SelectItem>
                           <SelectItem value="other">Otro</SelectItem>
                         </SelectContent>
                       </Select>
@@ -561,6 +918,15 @@ export default function EventsPage() {
                     </FormItem>
                   )}
                 />
+
+                {eventForm.watch("eventType") === "table_event" && (
+                  <div className="col-span-2 flex items-start gap-2 p-3 rounded-md bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
+                    <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-blue-700 dark:text-blue-300">
+                      En un Evento por Mesa, los cargos y pagos se gestionan por mesa individual. Los cargos generales del evento se cobran al organizador.
+                    </p>
+                  </div>
+                )}
 
                 <FormField
                   control={eventForm.control}
@@ -709,15 +1075,24 @@ export default function EventsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Event Detail Dialog */}
       <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <span>{selectedEvent?.name}</span>
               {selectedEvent && (
-                <Badge className={eventStatusColors[selectedEvent.status]}>
-                  {eventStatusLabels[selectedEvent.status]}
-                </Badge>
+                <>
+                  <Badge className={eventStatusColors[selectedEvent.status]}>
+                    {eventStatusLabels[selectedEvent.status]}
+                  </Badge>
+                  {selectedEvent.eventType === "table_event" && (
+                    <Badge variant="outline" className="border-orange-500 text-orange-600">
+                      <UtensilsCrossed className="h-3 w-3 mr-1" />
+                      Por Mesa
+                    </Badge>
+                  )}
+                </>
               )}
             </DialogTitle>
             <DialogDescription>
@@ -726,10 +1101,14 @@ export default function EventsPage() {
           </DialogHeader>
 
           {selectedEvent && (
-            <Tabs defaultValue="details" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className={`grid w-full ${detailTabCount === 4 ? "grid-cols-4" : "grid-cols-3"}`}>
                 <TabsTrigger value="details">Detalles</TabsTrigger>
                 <TabsTrigger value="charges">Cargos</TabsTrigger>
+                {selectedEvent.eventType === "table_event" && (
+                  <TabsTrigger value="tables">Mesas</TabsTrigger>
+                )}
+                <TabsTrigger value="folio">Folio</TabsTrigger>
               </TabsList>
 
               <TabsContent value="details" className="space-y-4">
@@ -744,9 +1123,9 @@ export default function EventsPage() {
                       <Calendar className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Fecha:</span>
                       <span>
-                        {format(parseISO(selectedEvent.startDate), "d MMM yyyy", { locale: es })}
+                        {safeFormatDate(selectedEvent.startDate, "d MMM yyyy", { locale: es })}
                         {selectedEvent.startDate !== selectedEvent.endDate && (
-                          <> - {format(parseISO(selectedEvent.endDate), "d MMM yyyy", { locale: es })}</>
+                          <> - {safeFormatDate(selectedEvent.endDate, "d MMM yyyy", { locale: es })}</>
                         )}
                       </span>
                     </div>
@@ -763,6 +1142,10 @@ export default function EventsPage() {
                       <Users className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Asistentes:</span>
                       <span>{selectedEvent.attendees}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="font-medium">Tipo:</span>
+                      <span>{eventTypeLabels[selectedEvent.eventType]}</span>
                     </div>
                   </div>
 
@@ -836,19 +1219,26 @@ export default function EventsPage() {
                       Completar
                     </Button>
                   )}
+                  {canShowFolio(selectedEvent) && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setFolioReceiptType("");
+                        setActiveTab("folio");
+                      }}
+                      data-testid="button-open-folio"
+                    >
+                      <Receipt className="h-4 w-4 mr-2" />
+                      Folio / Facturar
+                    </Button>
+                  )}
                   {(selectedEvent.status === "tentative" || selectedEvent.status === "confirmed") && (
                     <Button
                       variant="destructive"
-                      onClick={() => {
-                        updateEventMutation.mutate({ 
-                          id: selectedEvent.id, 
-                          data: { status: "cancelled" } 
-                        });
-                        setSelectedEvent({ ...selectedEvent, status: "cancelled" });
-                      }}
+                      onClick={() => setCancelConfirmOpen(true)}
                       data-testid="button-cancel-event"
                     >
-                      Cancelar
+                      Cancelar Evento
                     </Button>
                   )}
                 </div>
@@ -857,17 +1247,19 @@ export default function EventsPage() {
               <TabsContent value="charges" className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="font-medium">Cargos del Evento</h4>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      chargeForm.reset();
-                      setIsChargeDialogOpen(true);
-                    }}
-                    data-testid="button-add-charge"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Agregar Cargo
-                  </Button>
+                  {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        chargeForm.reset();
+                        setIsChargeDialogOpen(true);
+                      }}
+                      data-testid="button-add-charge"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Agregar Cargo
+                    </Button>
+                  )}
                 </div>
 
                 <Table>
@@ -888,14 +1280,16 @@ export default function EventsPage() {
                         <TableCell className="text-right">${charge.unitPrice}</TableCell>
                         <TableCell className="text-right font-medium">${charge.totalAmount}</TableCell>
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => deleteChargeMutation.mutate(charge.id)}
-                            data-testid={`button-delete-charge-${charge.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {selectedEvent.status !== "invoiced" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => deleteChargeMutation.mutate(charge.id)}
+                              data-testid={`button-delete-charge-${charge.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -915,11 +1309,355 @@ export default function EventsPage() {
                   </div>
                 </div>
               </TabsContent>
+
+              {/* Mesas Tab - only for table_event */}
+              {selectedEvent.eventType === "table_event" && (
+                <TabsContent value="tables" className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium">Mesas del Evento</h4>
+                    {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setNewTableNumber(eventTables.length + 1);
+                          setNewTableLabel("");
+                          setNewTableSeats(4);
+                          setIsAddTableOpen(true);
+                        }}
+                        data-testid="button-add-table"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Agregar Mesa
+                      </Button>
+                    )}
+                  </div>
+
+                  {eventTables.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      No hay mesas registradas. Agregue mesas para gestionar cargos individuales.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {eventTables.map((table) => {
+                          const tCharges = table.charges.reduce((s, c) => s + parseFloat(c.total), 0);
+                          const tPayments = table.payments.reduce((s, p) => s + parseFloat(p.amount), 0);
+                          const tBalance = tCharges - tPayments;
+                          return (
+                            <Card
+                              key={table.id}
+                              className={`cursor-pointer hover-elevate ${table.status === "closed" || table.status === "invoiced" ? "opacity-70" : ""}`}
+                              onClick={() => {
+                                setSelectedTable(table);
+                                setTableFolioReceiptType("");
+                                setIsTableFolioOpen(true);
+                              }}
+                              data-testid={`table-card-${table.id}`}
+                            >
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="font-bold text-lg">Mesa {table.tableNumber}</span>
+                                  <Badge variant={table.status === "open" ? "default" : "secondary"}>
+                                    {table.status === "open" ? "Abierta" : table.status === "invoiced" ? "Facturada" : "Cerrada"}
+                                  </Badge>
+                                </div>
+                                {table.label && <p className="text-sm text-muted-foreground mb-1">{table.label}</p>}
+                                {table.seats && <p className="text-xs text-muted-foreground">{table.seats} asientos</p>}
+                                <div className="mt-2 pt-2 border-t space-y-1">
+                                  <div className="flex justify-between text-sm">
+                                    <span>Cargos:</span>
+                                    <span className="font-medium">${tCharges.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span>Pagado:</span>
+                                    <span className="font-medium">${tPayments.toFixed(2)}</span>
+                                  </div>
+                                  {tBalance > 0.01 && (
+                                    <div className="flex justify-between text-sm text-red-600">
+                                      <span>Saldo:</span>
+                                      <span className="font-bold">${tBalance.toFixed(2)}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <h5 className="font-medium mb-2">Resumen General</h5>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                          <div>
+                            <p className="text-sm text-muted-foreground">Total Cargos</p>
+                            <p className="text-xl font-bold">
+                              ${eventTables.reduce((s, t) => s + t.charges.reduce((sc, c) => sc + parseFloat(c.total), 0), 0).toFixed(2)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Total Pagado</p>
+                            <p className="text-xl font-bold">
+                              ${eventTables.reduce((s, t) => s + t.payments.reduce((sp, p) => sp + parseFloat(p.amount), 0), 0).toFixed(2)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Mesas Abiertas</p>
+                            <p className="text-xl font-bold">
+                              {eventTables.filter(t => t.status === "open").length} / {eventTables.length}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </TabsContent>
+              )}
+
+              {/* Folio Tab */}
+              <TabsContent value="folio" className="space-y-4">
+                {selectedEvent.status === "invoiced" ? (
+                  <div className="text-center py-6">
+                    <Receipt className="h-12 w-12 mx-auto text-purple-500 mb-3" />
+                    <h4 className="font-bold text-lg">Evento Facturado</h4>
+                    <p className="text-muted-foreground">
+                      Comprobante: {selectedEvent.receiptType} | Cerrado: {selectedEvent.closedAt ? safeFormatDate(selectedEvent.closedAt, "d MMM yyyy HH:mm", { locale: es }) : ""}
+                    </p>
+                    <div className="mt-4 grid grid-cols-2 gap-4 max-w-sm mx-auto">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Total</p>
+                        <p className="text-xl font-bold">${selectedEvent.totalAmount || "0.00"}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Pagado</p>
+                        <p className="text-xl font-bold text-green-600">${selectedEvent.totalPaid || "0.00"}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : selectedEvent.status === "cancelled" ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    Evento cancelado - No se puede facturar
+                  </div>
+                ) : !canShowFolio(selectedEvent) ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    Confirme el evento para acceder al folio
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Left: Charges */}
+                    <div>
+                      <h4 className="font-medium mb-3 flex items-center gap-2">
+                        <CreditCard className="h-4 w-4" />
+                        Cargos
+                      </h4>
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                        {selectedEvent.charges?.map((charge) => (
+                          <div key={charge.id} className="flex items-center justify-between p-2 rounded border text-sm">
+                            <div>
+                              <span className="font-medium">{charge.description}</span>
+                              <span className="text-muted-foreground ml-2">x{charge.quantity}</span>
+                            </div>
+                            <span className="font-medium">${charge.totalAmount}</span>
+                          </div>
+                        ))}
+                        {(!selectedEvent.charges || selectedEvent.charges.length === 0) && (
+                          <p className="text-sm text-muted-foreground text-center py-4">Sin cargos</p>
+                        )}
+                      </div>
+                      <div className="mt-3 pt-3 border-t flex justify-between font-bold">
+                        <span>Total Cargos:</span>
+                        <span>${calculateEventTotal(selectedEvent).toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    {/* Right: Payments */}
+                    <div>
+                      <h4 className="font-medium mb-3 flex items-center gap-2">
+                        <DollarSign className="h-4 w-4" />
+                        Pagos
+                      </h4>
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                        {selectedEvent.payments?.map((payment) => (
+                          <div key={payment.id} className="flex items-center justify-between p-2 rounded border text-sm">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">${payment.amount}</span>
+                              <span className="text-muted-foreground">
+                                {paymentMethodLabels[payment.method] || payment.method}
+                              </span>
+                              {payment.isAdvance === "true" && (
+                                <Badge variant="outline" className="text-xs border-amber-500 text-amber-600">SEÑA</Badge>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => deletePaymentMutation.mutate({ eventId: selectedEvent.id, payId: payment.id })}
+                              data-testid={`button-delete-payment-${payment.id}`}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
+                        {(!selectedEvent.payments || selectedEvent.payments.length === 0) && (
+                          <p className="text-sm text-muted-foreground text-center py-4">Sin pagos</p>
+                        )}
+                      </div>
+
+                      <div className="mt-3 pt-3 border-t space-y-3">
+                        <div className="flex justify-between font-bold">
+                          <span>Total Pagado:</span>
+                          <span className="text-green-600">${calculateEventPaid(selectedEvent).toFixed(2)}</span>
+                        </div>
+
+                        <div className="flex justify-between font-bold text-lg">
+                          <span>Saldo:</span>
+                          <span className={calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent) > 0.01 ? "text-red-600" : "text-green-600"}>
+                            ${(calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent)).toFixed(2)}
+                          </span>
+                        </div>
+
+                        {/* Add payment form */}
+                        <div className="space-y-2 pt-2 border-t">
+                          <p className="text-sm font-medium">Agregar Pago</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="Monto"
+                              value={paymentAmount}
+                              onChange={(e) => setPaymentAmount(e.target.value)}
+                              data-testid="input-payment-amount"
+                            />
+                            <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                              <SelectTrigger data-testid="select-payment-method">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(paymentMethodLabels).map(([k, v]) => (
+                                  <SelectItem key={k} value={k}>{v}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {paymentMethod === "room_charge" && (
+                            <Select value={paymentReservationId} onValueChange={setPaymentReservationId}>
+                              <SelectTrigger data-testid="select-payment-reservation">
+                                <SelectValue placeholder="Seleccionar habitacion" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {activeReservations.map((r) => (
+                                  <SelectItem key={r.id} value={r.id}>
+                                    Hab. {r.room?.roomNumber || "?"} - {r.guest?.firstName} {r.guest?.lastName}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                          <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={paymentIsAdvance}
+                                onChange={(e) => setPaymentIsAdvance(e.target.checked)}
+                                data-testid="checkbox-is-advance"
+                              />
+                              Seña / Anticipo
+                            </label>
+                          </div>
+                          <Input
+                            placeholder="Notas (opcional)"
+                            value={paymentNotes}
+                            onChange={(e) => setPaymentNotes(e.target.value)}
+                            data-testid="input-payment-notes"
+                          />
+                          <Button
+                            size="sm"
+                            className="w-full"
+                            onClick={handleAddPayment}
+                            disabled={addPaymentMutation.isPending || !paymentAmount}
+                            data-testid="button-add-payment"
+                          >
+                            {addPaymentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                            Registrar Pago
+                          </Button>
+                        </div>
+
+                        {/* Close event */}
+                        <div className="space-y-2 pt-2 border-t">
+                          <p className="text-sm font-medium">Cerrar Evento</p>
+                          <Select value={folioReceiptType} onValueChange={setFolioReceiptType}>
+                            <SelectTrigger data-testid="select-receipt-type">
+                              <SelectValue placeholder="Tipo de comprobante" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {receiptTypes.map((rt) => (
+                                <SelectItem key={rt} value={rt}>{rt}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            className="w-full"
+                            variant="default"
+                            disabled={
+                              !folioReceiptType ||
+                              calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent) > 0.01 ||
+                              closeEventMutation.isPending
+                            }
+                            onClick={handleCloseEvent}
+                            data-testid="button-close-event"
+                          >
+                            {closeEventMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                            <Receipt className="h-4 w-4 mr-2" />
+                            Facturar y Cerrar
+                          </Button>
+                          {calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent) > 0.01 && (
+                            <p className="text-xs text-red-500 text-center">
+                              Debe saldar el balance para facturar
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
             </Tabs>
           )}
         </DialogContent>
       </Dialog>
 
+      {/* Cancel Confirmation Dialog (T001) */}
+      <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar Evento</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estas seguro que queres cancelar el evento '{selectedEvent?.name}'? Esta accion marcara el evento como cancelado y no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-confirm-back">Volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (selectedEvent) {
+                  updateEventMutation.mutate({ 
+                    id: selectedEvent.id, 
+                    data: { status: "cancelled" } 
+                  });
+                  setSelectedEvent({ ...selectedEvent, status: "cancelled" });
+                }
+                setCancelConfirmOpen(false);
+              }}
+              data-testid="button-cancel-confirm-yes"
+            >
+              Si, cancelar evento
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add Charge Dialog */}
       <Dialog open={isChargeDialogOpen} onOpenChange={setIsChargeDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -1028,6 +1766,307 @@ export default function EventsPage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Table Dialog */}
+      <Dialog open={isAddTableOpen} onOpenChange={setIsAddTableOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Agregar Mesa</DialogTitle>
+            <DialogDescription>Defina los datos de la nueva mesa</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <FormLabel>Numero de Mesa</FormLabel>
+              <Input
+                type="number"
+                min={1}
+                value={newTableNumber}
+                onChange={(e) => setNewTableNumber(parseInt(e.target.value) || 1)}
+                data-testid="input-table-number"
+              />
+            </div>
+            <div>
+              <FormLabel>Etiqueta (opcional)</FormLabel>
+              <Input
+                value={newTableLabel}
+                onChange={(e) => setNewTableLabel(e.target.value)}
+                placeholder="Ej: VIP, Terraza..."
+                data-testid="input-table-label"
+              />
+            </div>
+            <div>
+              <FormLabel>Asientos</FormLabel>
+              <Input
+                type="number"
+                min={1}
+                value={newTableSeats}
+                onChange={(e) => setNewTableSeats(parseInt(e.target.value) || 1)}
+                data-testid="input-table-seats"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddTableOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={() => {
+                if (selectedEvent) {
+                  createTableMutation.mutate({
+                    eventId: selectedEvent.id,
+                    data: { tableNumber: newTableNumber, label: newTableLabel || null, seats: newTableSeats },
+                  });
+                }
+              }}
+              disabled={createTableMutation.isPending}
+              data-testid="button-submit-table"
+            >
+              {createTableMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Agregar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Table Folio Dialog */}
+      <Dialog open={isTableFolioOpen} onOpenChange={(open) => { if (!open) { setIsTableFolioOpen(false); setSelectedTable(null); } }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              Mesa {selectedTable?.tableNumber}
+              {selectedTable?.label && <span className="text-muted-foreground font-normal">({selectedTable.label})</span>}
+              <Badge variant={selectedTable?.status === "open" ? "default" : "secondary"}>
+                {selectedTable?.status === "open" ? "Abierta" : selectedTable?.status === "invoiced" ? "Facturada" : "Cerrada"}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription>
+              {selectedTable?.seats && `${selectedTable.seats} asientos`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedTable && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Left: Charges */}
+              <div>
+                <h4 className="font-medium mb-3 flex items-center gap-2">
+                  <CreditCard className="h-4 w-4" />
+                  Cargos
+                </h4>
+                <div className="space-y-2 max-h-[250px] overflow-y-auto">
+                  {selectedTable.charges.map((charge) => (
+                    <div key={charge.id} className="flex items-center justify-between p-2 rounded border text-sm">
+                      <div>
+                        <span className="font-medium">{charge.description}</span>
+                        <span className="text-muted-foreground ml-2">x{charge.quantity}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">${charge.total}</span>
+                        {selectedTable.status === "open" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => deleteTableChargeMutation.mutate({
+                              eventId: selectedEvent!.id,
+                              tableId: selectedTable.id,
+                              chargeId: charge.id,
+                            })}
+                            data-testid={`button-delete-table-charge-${charge.id}`}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {selectedTable.charges.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sin cargos</p>
+                  )}
+                </div>
+
+                {selectedTable.status === "open" && (
+                  <div className="mt-3 pt-3 border-t space-y-2">
+                    <p className="text-sm font-medium">Agregar Cargo</p>
+                    <Input
+                      placeholder="Descripcion"
+                      value={tableChargeDesc}
+                      onChange={(e) => setTableChargeDesc(e.target.value)}
+                      data-testid="input-table-charge-desc"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder="Cant."
+                        value={tableChargeQty}
+                        onChange={(e) => setTableChargeQty(parseInt(e.target.value) || 1)}
+                        data-testid="input-table-charge-qty"
+                      />
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Precio Unit."
+                        value={tableChargePrice}
+                        onChange={(e) => setTableChargePrice(e.target.value)}
+                        data-testid="input-table-charge-price"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      onClick={handleAddTableCharge}
+                      disabled={addTableChargeMutation.isPending || !tableChargeDesc || !tableChargePrice}
+                      data-testid="button-add-table-charge"
+                    >
+                      {addTableChargeMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                      Agregar Cargo
+                    </Button>
+                  </div>
+                )}
+
+                <div className="mt-3 pt-3 border-t flex justify-between font-bold">
+                  <span>Total Cargos:</span>
+                  <span>${selectedTable.charges.reduce((s, c) => s + parseFloat(c.total), 0).toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Right: Payments */}
+              <div>
+                <h4 className="font-medium mb-3 flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  Pagos
+                </h4>
+                <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                  {selectedTable.payments.map((payment) => (
+                    <div key={payment.id} className="flex items-center justify-between p-2 rounded border text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">${payment.amount}</span>
+                        <span className="text-muted-foreground">{paymentMethodLabels[payment.method] || payment.method}</span>
+                        {payment.isAdvance === "true" && (
+                          <Badge variant="outline" className="text-xs border-amber-500 text-amber-600">SEÑA</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {selectedTable.payments.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sin pagos</p>
+                  )}
+                </div>
+
+                <div className="mt-3 pt-3 border-t space-y-3">
+                  <div className="flex justify-between font-bold">
+                    <span>Total Pagado:</span>
+                    <span className="text-green-600">
+                      ${selectedTable.payments.reduce((s, p) => s + parseFloat(p.amount), 0).toFixed(2)}
+                    </span>
+                  </div>
+                  {(() => {
+                    const tCharges = selectedTable.charges.reduce((s, c) => s + parseFloat(c.total), 0);
+                    const tPaid = selectedTable.payments.reduce((s, p) => s + parseFloat(p.amount), 0);
+                    const bal = tCharges - tPaid;
+                    return (
+                      <div className="flex justify-between font-bold text-lg">
+                        <span>Saldo:</span>
+                        <span className={bal > 0.01 ? "text-red-600" : "text-green-600"}>
+                          ${bal.toFixed(2)}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {selectedTable.status === "open" && (
+                    <>
+                      <div className="space-y-2 pt-2 border-t">
+                        <p className="text-sm font-medium">Agregar Pago</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="Monto"
+                            value={tablePayAmount}
+                            onChange={(e) => setTablePayAmount(e.target.value)}
+                            data-testid="input-table-pay-amount"
+                          />
+                          <Select value={tablePayMethod} onValueChange={setTablePayMethod}>
+                            <SelectTrigger data-testid="select-table-pay-method">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(paymentMethodLabels).map(([k, v]) => (
+                                <SelectItem key={k} value={k}>{v}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {tablePayMethod === "room_charge" && (
+                          <Select value={tablePayResId} onValueChange={setTablePayResId}>
+                            <SelectTrigger data-testid="select-table-pay-reservation">
+                              <SelectValue placeholder="Seleccionar habitacion" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {activeReservations.map((r) => (
+                                <SelectItem key={r.id} value={r.id}>
+                                  Hab. {r.room?.roomNumber || "?"} - {r.guest?.firstName} {r.guest?.lastName}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={tablePayAdvance}
+                            onChange={(e) => setTablePayAdvance(e.target.checked)}
+                            data-testid="checkbox-table-advance"
+                          />
+                          Seña / Anticipo
+                        </label>
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          onClick={handleAddTablePayment}
+                          disabled={addTablePaymentMutation.isPending || !tablePayAmount}
+                          data-testid="button-add-table-payment"
+                        >
+                          {addTablePaymentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Registrar Pago
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t">
+                        <p className="text-sm font-medium">Cerrar Mesa</p>
+                        <Select value={tableFolioReceiptType} onValueChange={setTableFolioReceiptType}>
+                          <SelectTrigger data-testid="select-table-receipt-type">
+                            <SelectValue placeholder="Tipo de comprobante" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {receiptTypes.map((rt) => (
+                              <SelectItem key={rt} value={rt}>{rt}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          className="w-full"
+                          disabled={
+                            !tableFolioReceiptType ||
+                            selectedTable.charges.reduce((s, c) => s + parseFloat(c.total), 0) - 
+                            selectedTable.payments.reduce((s, p) => s + parseFloat(p.amount), 0) > 0.01 ||
+                            closeTableMutation.isPending
+                          }
+                          onClick={handleCloseTable}
+                          data-testid="button-close-table"
+                        >
+                          {closeTableMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          <Receipt className="h-4 w-4 mr-2" />
+                          Cerrar Mesa
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
