@@ -794,69 +794,63 @@ export default function GroupDetailPage() {
         </div>
         
         {/* Mass Action Buttons */}
-        {group.reservations.length > 0 && (
-          <div className="flex gap-2 flex-wrap">
-            {/* Check-in All Button - Show when there are confirmed reservations */}
-            {group.reservations.some(r => r.status === "confirmed") && (
-              <Button
-                variant="default"
-                onClick={() => setShowCheckInConfirm(true)}
-                disabled={checkInAllMutation.isPending}
-                data-testid="button-check-in-all"
-              >
-                <LogIn className="mr-2 h-4 w-4" />
-                {checkInAllMutation.isPending ? "Procesando..." : "Check-in Grupal"}
-              </Button>
-            )}
-            
-            {group.reservations.some(r => r.status === "checked_in") && (
-              <Button
-                variant="secondary"
-                onClick={() => setShowCheckOutConfirm(true)}
-                disabled={checkOutAllMutation.isPending}
-                data-testid="button-check-out-all"
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                {checkOutAllMutation.isPending ? "Procesando..." : "Check-out Grupal"}
-              </Button>
-            )}
-            
-            {/* Group Payment Button */}
+        <div className="flex gap-2 flex-wrap">
+          {group.reservations.some(r => r.status === "confirmed") && (
             <Button
               variant="default"
-              onClick={() => {
-                setGroupPaymentAmount("");
-                setShowGroupPaymentDialog(true);
-              }}
-              disabled={groupPaymentMutation.isPending}
-              data-testid="button-group-payment-action"
+              onClick={() => setShowCheckInConfirm(true)}
+              disabled={checkInAllMutation.isPending}
+              data-testid="button-check-in-all"
             >
-              <DollarSign className="mr-2 h-4 w-4" />
-              Pago Grupal
+              <LogIn className="mr-2 h-4 w-4" />
+              {checkInAllMutation.isPending ? "Procesando..." : "Check-in Grupal"}
             </Button>
-            
-            {/* Invoice Button */}
+          )}
+          
+          {group.reservations.some(r => r.status === "checked_in") && (
             <Button
-              variant="outline"
-              onClick={loadInvoice}
-              disabled={isLoadingInvoice}
-              data-testid="button-group-invoice"
+              variant="secondary"
+              onClick={() => setShowCheckOutConfirm(true)}
+              disabled={checkOutAllMutation.isPending}
+              data-testid="button-check-out-all"
             >
-              <FileText className="mr-2 h-4 w-4" />
-              {isLoadingInvoice ? "Cargando..." : "Factura Grupal"}
+              <LogOut className="mr-2 h-4 w-4" />
+              {checkOutAllMutation.isPending ? "Procesando..." : "Check-out Grupal"}
             </Button>
-            
-            {/* Rooming List Button */}
-            <Button
-              variant="outline"
-              onClick={() => setShowRoomingListDialog(true)}
-              data-testid="button-rooming-list"
-            >
-              <Printer className="mr-2 h-4 w-4" />
-              Imprimir Rooming List
-            </Button>
-          </div>
-        )}
+          )}
+          
+          <Button
+            variant="default"
+            onClick={() => {
+              setGroupPaymentAmount("");
+              setShowGroupPaymentDialog(true);
+            }}
+            disabled={groupPaymentMutation.isPending}
+            data-testid="button-group-payment"
+          >
+            <DollarSign className="mr-2 h-4 w-4" />
+            Pago Grupal
+          </Button>
+          
+          <Button
+            variant="outline"
+            onClick={loadInvoice}
+            disabled={isLoadingInvoice}
+            data-testid="button-group-invoice"
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            {isLoadingInvoice ? "Cargando..." : "Factura Grupal"}
+          </Button>
+          
+          <Button
+            variant="outline"
+            onClick={() => setShowRoomingListDialog(true)}
+            data-testid="button-rooming-list"
+          >
+            <Printer className="mr-2 h-4 w-4" />
+            Imprimir Rooming List
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
