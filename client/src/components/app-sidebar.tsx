@@ -32,6 +32,7 @@ import {
   AlertTriangle,
   Smartphone,
   Bot,
+  Heart,
 } from "lucide-react";
 import {
   Sidebar,
@@ -96,6 +97,7 @@ function formatTimeAgo(date: Date | string): string {
 function getNotificationIcon(type: string) {
   if (type === "web_checkin") return <Smartphone className="h-4 w-4 text-green-500" />;
   if (type.startsWith("chatbot_")) return <Bot className="h-4 w-4 text-blue-500" />;
+  if (type === "hospitality_alert") return <Heart className="h-4 w-4 text-red-500" />;
   return <Bell className="h-4 w-4 text-muted-foreground" />;
 }
 
@@ -429,6 +431,26 @@ export function AppSidebar() {
                   <Link href="/inventory">
                     <Boxes className="h-5 w-5" />
                     <span>Inventario</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Experiencia del Huésped</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/hospitality"}
+                  data-testid="nav-hospitality"
+                >
+                  <Link href="/hospitality">
+                    <Heart className="h-5 w-5" />
+                    <span>Hospitalidad</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

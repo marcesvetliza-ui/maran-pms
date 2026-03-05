@@ -681,6 +681,45 @@ export async function registerRoutes(
       // Update room status to occupied
       await storage.updateRoom(reservation.roomId, { status: "occupied" });
       
+      // Generate hospitality alerts from guest preferences
+      if (reservation.guestId) {
+        const preferences = await storage.getActiveGuestPreferences(reservation.guestId);
+        for (const pref of preferences) {
+          const areaMap: Record<string, string[]> = {
+            alimentacion: ["restaurant", "reception"],
+            habitacion: ["housekeeping", "reception"],
+            amenities: ["housekeeping"],
+            servicio: ["reception"],
+            fecha_especial: ["reception"],
+            motivo_viaje: ["reception"],
+            nota_interna: ["reception"],
+            otro: ["reception"],
+          };
+          const targetAreas = areaMap[pref.category] || ["reception"];
+          for (const area of targetAreas) {
+            await storage.createHospitalityAlert({
+              reservationId: req.params.id,
+              guestId: reservation.guestId,
+              preferenceId: pref.id,
+              alertMessage: `${pref.title}: ${pref.description || pref.title}`,
+              targetArea: area,
+              priority: pref.priority as any,
+            });
+          }
+          if (pref.priority === "critical" || pref.priority === "high") {
+            await storage.createNotification({
+              type: "hospitality_alert",
+              title: `⚠️ Alerta de hospitalidad - Hab. ${room.roomNumber}`,
+              message: `${pref.title}: ${pref.description || ""}`,
+              targetArea: "all" as any,
+              relatedEntityType: "reservation",
+              relatedEntityId: req.params.id,
+              priority: pref.priority === "critical" ? "urgent" : "high",
+            });
+          }
+        }
+      }
+      
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing check-in" });
@@ -4645,6 +4684,224 @@ Only respond with the JSON object.`;
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing web check-in" });
+    }
+  });
+
+  // ==================== HOSPITALITY MODULE ====================
+
+  // Guest Preferences CRUD
+  app.get("/api/guests/:id/preferences", async (req, res) => {
+    try {
+      const activeOnly = req.query.active === "true";
+      const prefs = activeOnly 
+        ? await storage.getActiveGuestPreferences(req.params.id)
+        : await storage.getGuestPreferences(req.params.id);
+      res.json(prefs);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching preferences" });
+    }
+  });
+
+  app.post("/api/guests/:id/preferences", async (req, res) => {
+    try {
+      const pref = await storage.createGuestPreference({ ...req.body, guestId: req.params.id });
+      res.status(201).json(pref);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating preference" });
+    }
+  });
+
+  app.patch("/api/guests/:guestId/preferences/:prefId", async (req, res) => {
+    try {
+      const pref = await storage.updateGuestPreference(parseInt(req.params.prefId), req.body);
+      if (!pref) return res.status(404).json({ error: "Preference not found" });
+      res.json(pref);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating preference" });
+    }
+  });
+
+  app.patch("/api/guests/:guestId/preferences/:prefId/toggle", async (req, res) => {
+    try {
+      const pref = await storage.toggleGuestPreference(parseInt(req.params.prefId));
+      if (!pref) return res.status(404).json({ error: "Preference not found" });
+      res.json(pref);
+    } catch (error) {
+      res.status(500).json({ error: "Error toggling preference" });
+    }
+  });
+
+  app.delete("/api/guests/:guestId/preferences/:prefId", async (req, res) => {
+    try {
+      const deleted = await storage.deleteGuestPreference(parseInt(req.params.prefId));
+      if (!deleted) return res.status(404).json({ error: "Preference not found" });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting preference" });
+    }
+  });
+
+  // Stay Notes CRUD
+  app.get("/api/reservations/:id/stay-notes", async (req, res) => {
+    try {
+      const notes = await storage.getStayNotes(req.params.id);
+      res.json(notes);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching stay notes" });
+    }
+  });
+
+  app.get("/api/hospitality/stay-notes/active", async (req, res) => {
+    try {
+      const includeResolved = req.query.includeResolved === "true";
+      if (includeResolved) {
+        const allNotes = Array.from((await storage.getActiveStayNotes()) || []);
+        const allReservations = await storage.getReservations();
+        const checkedInIds = new Set(allReservations.filter((r) => r.status === "checked_in").map((r) => r.id));
+        const allStayNotes: any[] = [];
+        for (const r of allReservations) {
+          const notes = await storage.getStayNotes(r.id);
+          allStayNotes.push(...notes);
+        }
+        res.json(allStayNotes);
+      } else {
+        const notes = await storage.getActiveStayNotes();
+        res.json(notes);
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching stay notes" });
+    }
+  });
+
+  app.post("/api/reservations/:id/stay-notes", async (req, res) => {
+    try {
+      const note = await storage.createStayNote({ ...req.body, reservationId: req.params.id });
+      res.status(201).json(note);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating stay note" });
+    }
+  });
+
+  app.patch("/api/hospitality/stay-notes/:noteId", async (req, res) => {
+    try {
+      const note = await storage.updateStayNote(parseInt(req.params.noteId), req.body);
+      if (!note) return res.status(404).json({ error: "Note not found" });
+      res.json(note);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating stay note" });
+    }
+  });
+
+  app.patch("/api/hospitality/stay-notes/:noteId/resolve", async (req, res) => {
+    try {
+      const { resolvedBy } = req.body;
+      const note = await storage.resolveStayNote(parseInt(req.params.noteId), resolvedBy || "Sistema");
+      if (!note) return res.status(404).json({ error: "Note not found" });
+      res.json(note);
+    } catch (error) {
+      res.status(500).json({ error: "Error resolving stay note" });
+    }
+  });
+
+  app.delete("/api/hospitality/stay-notes/:noteId", async (req, res) => {
+    try {
+      const deleted = await storage.deleteStayNote(parseInt(req.params.noteId));
+      if (!deleted) return res.status(404).json({ error: "Note not found" });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting stay note" });
+    }
+  });
+
+  // Hospitality Alerts
+  app.get("/api/hospitality/alerts", async (req, res) => {
+    try {
+      const area = req.query.area as string | undefined;
+      const alerts = await storage.getHospitalityAlerts(area);
+      res.json(alerts);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching alerts" });
+    }
+  });
+
+  app.get("/api/hospitality/alerts/reservation/:id", async (req, res) => {
+    try {
+      const alerts = await storage.getHospitalityAlertsByReservation(req.params.id);
+      res.json(alerts);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching reservation alerts" });
+    }
+  });
+
+  app.patch("/api/hospitality/alerts/:alertId/acknowledge", async (req, res) => {
+    try {
+      const { acknowledgedBy } = req.body;
+      const alert = await storage.acknowledgeHospitalityAlert(parseInt(req.params.alertId), acknowledgedBy || "Sistema");
+      if (!alert) return res.status(404).json({ error: "Alert not found" });
+      res.json(alert);
+    } catch (error) {
+      res.status(500).json({ error: "Error acknowledging alert" });
+    }
+  });
+
+  // Hospitality Dashboard
+  app.get("/api/hospitality/dashboard", async (req, res) => {
+    try {
+      const allReservations = await storage.getReservations();
+      const checkedIn = allReservations.filter((r) => r.status === "checked_in");
+      
+      const guestsWithPrefs = [];
+      for (const r of checkedIn) {
+        if (r.guestId) {
+          const guest = await storage.getGuest(r.guestId);
+          const prefs = await storage.getActiveGuestPreferences(r.guestId);
+          if (guest) {
+            guestsWithPrefs.push({
+              guest,
+              reservation: r,
+              preferences: prefs,
+              hasCritical: prefs.some((p) => p.priority === "critical"),
+              hasHigh: prefs.some((p) => p.priority === "high"),
+            });
+          }
+        }
+      }
+
+      const allAlerts = await storage.getHospitalityAlerts();
+      const pendingAlerts = allAlerts.filter((a) => !a.isAcknowledged);
+
+      const allGuests = await storage.getGuests();
+      const allPrefs = [];
+      for (const g of allGuests) {
+        const prefs = await storage.getActiveGuestPreferences(g.id);
+        const specialDates = prefs.filter((p) => p.category === "fecha_especial");
+        if (specialDates.length > 0) {
+          allPrefs.push({ guest: g, specialDates });
+        }
+      }
+
+      const criticalPrefs = [];
+      for (const g of allGuests) {
+        const prefs = await storage.getActiveGuestPreferences(g.id);
+        const critical = prefs.filter((p) => p.priority === "critical");
+        if (critical.length > 0) {
+          criticalPrefs.push({ guest: g, preferences: critical });
+        }
+      }
+
+      res.json({
+        inHouseGuests: guestsWithPrefs,
+        pendingAlerts,
+        upcomingSpecialDates: allPrefs,
+        criticalPreferences: criticalPrefs,
+        stats: {
+          totalInHouseWithPrefs: guestsWithPrefs.filter((g) => g.preferences.length > 0).length,
+          pendingAlertsCount: pendingAlerts.length,
+          criticalCount: criticalPrefs.reduce((sum, g) => sum + g.preferences.length, 0),
+        },
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching dashboard" });
     }
   });
 

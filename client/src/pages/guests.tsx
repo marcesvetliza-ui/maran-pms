@@ -13,6 +13,8 @@ import {
   MapPin,
   FileText,
   Car,
+  Heart,
+  Calendar,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,9 +53,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus } from "@shared/schema";
+import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
-import { Calendar } from "lucide-react";
 
 function GuestFormDialog({
   guest,
@@ -315,6 +316,13 @@ function GuestDetailDialog({
     queryKey: ["/api/reservations"],
   });
 
+  const { data: preferences = [] } = useQuery<GuestPreference[]>({
+    queryKey: ["/api/guests", guest.id, "preferences"],
+    enabled: open,
+  });
+
+  const activePreferences = preferences.filter((p) => p.isActive);
+
   const guestReservations = allReservations?.filter(r => r.guestId === guest.id) || [];
   const totalStays = guestReservations.filter(r => r.status === "checked_out").length;
   const totalNights = guestReservations.reduce((sum, r) => sum + (r.nights || 0), 0);
@@ -429,6 +437,36 @@ function GuestDetailDialog({
                     <p className="font-medium">{guest.vehiculoColor}</p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {activePreferences.length > 0 && (
+            <div className="border rounded-lg" data-testid="guest-preferences-section">
+              <div className="p-3 border-b bg-muted/50 flex items-center gap-2">
+                <Heart className="h-4 w-4 text-primary" />
+                <h4 className="font-semibold">Preferencias de Hospitalidad</h4>
+                <Badge variant="outline" className="text-xs">{activePreferences.length}</Badge>
+              </div>
+              <div className="divide-y max-h-[200px] overflow-y-auto">
+                {activePreferences.map((pref) => (
+                  <div key={pref.id} className="flex items-center justify-between p-3 text-sm" data-testid={`guest-pref-${pref.id}`}>
+                    <div>
+                      <p className="font-medium">{pref.title}</p>
+                      {pref.description && <p className="text-xs text-muted-foreground">{pref.description}</p>}
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${
+                        pref.priority === "critical" ? "border-red-400 text-red-700 dark:text-red-300" :
+                        pref.priority === "high" ? "border-orange-400 text-orange-700 dark:text-orange-300" :
+                        ""
+                      }`}
+                    >
+                      {pref.priority === "critical" ? "Crítica" : pref.priority === "high" ? "Alta" : pref.priority === "low" ? "Baja" : "Normal"}
+                    </Badge>
+                  </div>
+                ))}
               </div>
             </div>
           )}

@@ -172,6 +172,13 @@ import {
   type NotificationArea,
   type WebCheckin,
   type InsertWebCheckin,
+  // Hospitality
+  type GuestPreference,
+  type InsertGuestPreference,
+  type StayNote,
+  type InsertStayNote,
+  type HospitalityAlert,
+  type InsertHospitalityAlert,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -638,6 +645,29 @@ export interface IStorage {
   getWebCheckinByReservation(reservationId: string): Promise<WebCheckin | undefined>;
   updateWebCheckin(id: number, data: Partial<InsertWebCheckin>): Promise<WebCheckin | undefined>;
   listWebCheckins(): Promise<WebCheckin[]>;
+
+  // Hospitality - Guest Preferences
+  getGuestPreferences(guestId: string): Promise<GuestPreference[]>;
+  getActiveGuestPreferences(guestId: string): Promise<GuestPreference[]>;
+  getGuestPreference(id: number): Promise<GuestPreference | undefined>;
+  createGuestPreference(pref: InsertGuestPreference): Promise<GuestPreference>;
+  updateGuestPreference(id: number, pref: Partial<InsertGuestPreference>): Promise<GuestPreference | undefined>;
+  toggleGuestPreference(id: number): Promise<GuestPreference | undefined>;
+  deleteGuestPreference(id: number): Promise<boolean>;
+
+  // Hospitality - Stay Notes
+  getStayNotes(reservationId: string): Promise<StayNote[]>;
+  getActiveStayNotes(): Promise<StayNote[]>;
+  createStayNote(note: InsertStayNote): Promise<StayNote>;
+  updateStayNote(id: number, note: Partial<InsertStayNote>): Promise<StayNote | undefined>;
+  resolveStayNote(id: number, resolvedBy: string): Promise<StayNote | undefined>;
+  deleteStayNote(id: number): Promise<boolean>;
+
+  // Hospitality - Alerts
+  getHospitalityAlerts(area?: string): Promise<HospitalityAlert[]>;
+  getHospitalityAlertsByReservation(reservationId: string): Promise<HospitalityAlert[]>;
+  createHospitalityAlert(alert: InsertHospitalityAlert): Promise<HospitalityAlert>;
+  acknowledgeHospitalityAlert(id: number, acknowledgedBy: string): Promise<HospitalityAlert | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -709,6 +739,13 @@ export class MemStorage implements IStorage {
   private notificationCounter: number;
   private webCheckinsMap: Map<number, WebCheckin>;
   private webCheckinCounter: number;
+  // Hospitality
+  private guestPreferencesMap: Map<number, GuestPreference>;
+  private guestPreferenceCounter: number;
+  private stayNotesMap: Map<number, StayNote>;
+  private stayNoteCounter: number;
+  private hospitalityAlertsMap: Map<number, HospitalityAlert>;
+  private hospitalityAlertCounter: number;
   // Counters
   private reservationCounter: number;
   private guestCounter: number;
@@ -787,6 +824,13 @@ export class MemStorage implements IStorage {
     this.notificationCounter = 0;
     this.webCheckinsMap = new Map();
     this.webCheckinCounter = 0;
+    // Hospitality
+    this.guestPreferencesMap = new Map();
+    this.guestPreferenceCounter = 0;
+    this.stayNotesMap = new Map();
+    this.stayNoteCounter = 0;
+    this.hospitalityAlertsMap = new Map();
+    this.hospitalityAlertCounter = 0;
     // Counters
     this.reservationCounter = 1000;
     this.guestCounter = 0;
@@ -1234,6 +1278,20 @@ export class MemStorage implements IStorage {
     ];
     chatbotNotifications.forEach((n) => this.notificationsMap.set(n.id, n));
     this.notificationCounter = chatbotNotifications.length;
+
+    const prefNow = new Date();
+    const seedPreferences: GuestPreference[] = [
+      { id: 1, guestId: "g1", category: "alimentacion", subcategory: "alergias", title: "Alergia al maní", description: "Alergia severa al maní y derivados. Riesgo de anafilaxia.", isActive: true, priority: "critical", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 30 * 86400000), updatedAt: new Date(prefNow.getTime() - 30 * 86400000) },
+      { id: 2, guestId: "g1", category: "habitacion", subcategory: "ubicacion", title: "Piso alto", description: "Prefiere habitaciones en pisos altos con vista a la ciudad", isActive: true, priority: "normal", visibleTo: ["reception"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 30 * 86400000), updatedAt: new Date(prefNow.getTime() - 30 * 86400000) },
+      { id: 3, guestId: "g1", category: "amenities", subcategory: "almohadas", title: "Almohadas extra", description: "Solicita 2 almohadas adicionales firmes", isActive: true, priority: "normal", visibleTo: ["housekeeping"], recordedBy: "Housekeeping", sourceStay: null, createdAt: new Date(prefNow.getTime() - 20 * 86400000), updatedAt: new Date(prefNow.getTime() - 20 * 86400000) },
+      { id: 4, guestId: "g2", category: "fecha_especial", subcategory: "cumpleanos", title: "Cumpleaños 22 de julio", description: "Fecha de nacimiento: 22/07. Huésped frecuente, considerar detalle especial.", isActive: true, priority: "high", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 60 * 86400000), updatedAt: new Date(prefNow.getTime() - 60 * 86400000) },
+      { id: 5, guestId: "g2", category: "alimentacion", subcategory: "dieta", title: "Vegetariana", description: "Dieta vegetariana estricta. No consume carnes ni pescados.", isActive: true, priority: "high", visibleTo: ["restaurant", "reception"], recordedBy: "Restaurant", sourceStay: null, createdAt: new Date(prefNow.getTime() - 45 * 86400000), updatedAt: new Date(prefNow.getTime() - 45 * 86400000) },
+      { id: 6, guestId: "g3", category: "habitacion", subcategory: "almohadas", title: "Almohada hipoalergénica", description: "Requiere almohadas hipoalergénicas por sensibilidad", isActive: true, priority: "high", visibleTo: ["housekeeping"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
+      { id: 7, guestId: "g3", category: "servicio", subcategory: "idioma", title: "Idioma inglés", description: "Prefiere comunicación en inglés", isActive: true, priority: "normal", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
+      { id: 8, guestId: "g4", category: "alimentacion", subcategory: "alergias", title: "Intolerancia a lactosa", description: "Intolerancia a la lactosa. Solicitar opciones sin lácteos.", isActive: true, priority: "high", visibleTo: ["restaurant", "reception"], recordedBy: "Restaurant", sourceStay: null, createdAt: new Date(prefNow.getTime() - 10 * 86400000), updatedAt: new Date(prefNow.getTime() - 10 * 86400000) },
+    ];
+    seedPreferences.forEach((p) => this.guestPreferencesMap.set(p.id, p));
+    this.guestPreferenceCounter = seedPreferences.length;
   }
 
   // Users
@@ -4663,6 +4721,164 @@ export class MemStorage implements IStorage {
     return Array.from(this.webCheckinsMap.values()).sort(
       (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
     );
+  }
+
+  // ==================== HOSPITALITY - GUEST PREFERENCES ====================
+  async getGuestPreferences(guestId: string): Promise<GuestPreference[]> {
+    return Array.from(this.guestPreferencesMap.values())
+      .filter((p) => p.guestId === guestId)
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+  }
+
+  async getActiveGuestPreferences(guestId: string): Promise<GuestPreference[]> {
+    return Array.from(this.guestPreferencesMap.values())
+      .filter((p) => p.guestId === guestId && p.isActive)
+      .sort((a, b) => {
+        const priorityOrder = { critical: 0, high: 1, normal: 2, low: 3 };
+        return (priorityOrder[a.priority as keyof typeof priorityOrder] || 2) - (priorityOrder[b.priority as keyof typeof priorityOrder] || 2);
+      });
+  }
+
+  async getGuestPreference(id: number): Promise<GuestPreference | undefined> {
+    return this.guestPreferencesMap.get(id);
+  }
+
+  async createGuestPreference(pref: InsertGuestPreference): Promise<GuestPreference> {
+    const id = ++this.guestPreferenceCounter;
+    const now = new Date();
+    const preference: GuestPreference = {
+      id,
+      guestId: pref.guestId,
+      category: pref.category,
+      subcategory: pref.subcategory ?? null,
+      title: pref.title,
+      description: pref.description ?? null,
+      isActive: pref.isActive ?? true,
+      priority: pref.priority ?? "normal",
+      visibleTo: pref.visibleTo ?? ["all"],
+      recordedBy: pref.recordedBy ?? null,
+      sourceStay: pref.sourceStay ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.guestPreferencesMap.set(id, preference);
+    return preference;
+  }
+
+  async updateGuestPreference(id: number, pref: Partial<InsertGuestPreference>): Promise<GuestPreference | undefined> {
+    const existing = this.guestPreferencesMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...pref, updatedAt: new Date() } as GuestPreference;
+    this.guestPreferencesMap.set(id, updated);
+    return updated;
+  }
+
+  async toggleGuestPreference(id: number): Promise<GuestPreference | undefined> {
+    const existing = this.guestPreferencesMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, isActive: !existing.isActive, updatedAt: new Date() };
+    this.guestPreferencesMap.set(id, updated);
+    return updated;
+  }
+
+  async deleteGuestPreference(id: number): Promise<boolean> {
+    return this.guestPreferencesMap.delete(id);
+  }
+
+  // ==================== HOSPITALITY - STAY NOTES ====================
+  async getStayNotes(reservationId: string): Promise<StayNote[]> {
+    return Array.from(this.stayNotesMap.values())
+      .filter((n) => n.reservationId === reservationId)
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+  }
+
+  async getActiveStayNotes(): Promise<StayNote[]> {
+    return Array.from(this.stayNotesMap.values())
+      .filter((n) => !n.isResolved)
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+  }
+
+  async createStayNote(note: InsertStayNote): Promise<StayNote> {
+    const id = ++this.stayNoteCounter;
+    const stayNote: StayNote = {
+      id,
+      reservationId: note.reservationId,
+      guestId: note.guestId ?? null,
+      category: note.category,
+      title: note.title,
+      description: note.description ?? null,
+      priority: note.priority ?? "normal",
+      visibleTo: note.visibleTo ?? ["all"],
+      isResolved: false,
+      resolvedAt: null,
+      resolvedBy: null,
+      recordedBy: note.recordedBy ?? null,
+      createdAt: new Date(),
+    };
+    this.stayNotesMap.set(id, stayNote);
+    return stayNote;
+  }
+
+  async updateStayNote(id: number, note: Partial<InsertStayNote>): Promise<StayNote | undefined> {
+    const existing = this.stayNotesMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...note } as StayNote;
+    this.stayNotesMap.set(id, updated);
+    return updated;
+  }
+
+  async resolveStayNote(id: number, resolvedBy: string): Promise<StayNote | undefined> {
+    const existing = this.stayNotesMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, isResolved: true, resolvedAt: new Date(), resolvedBy };
+    this.stayNotesMap.set(id, updated);
+    return updated;
+  }
+
+  async deleteStayNote(id: number): Promise<boolean> {
+    return this.stayNotesMap.delete(id);
+  }
+
+  // ==================== HOSPITALITY - ALERTS ====================
+  async getHospitalityAlerts(area?: string): Promise<HospitalityAlert[]> {
+    let alerts = Array.from(this.hospitalityAlertsMap.values());
+    if (area && area !== "all") {
+      alerts = alerts.filter((a) => a.targetArea === area || a.targetArea === "all");
+    }
+    return alerts.sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+  }
+
+  async getHospitalityAlertsByReservation(reservationId: string): Promise<HospitalityAlert[]> {
+    return Array.from(this.hospitalityAlertsMap.values())
+      .filter((a) => a.reservationId === reservationId)
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+  }
+
+  async createHospitalityAlert(alert: InsertHospitalityAlert): Promise<HospitalityAlert> {
+    const id = ++this.hospitalityAlertCounter;
+    const hospitalityAlert: HospitalityAlert = {
+      id,
+      reservationId: alert.reservationId,
+      guestId: alert.guestId,
+      preferenceId: alert.preferenceId ?? null,
+      alertMessage: alert.alertMessage,
+      targetArea: alert.targetArea,
+      priority: alert.priority ?? "normal",
+      isAcknowledged: false,
+      acknowledgedAt: null,
+      acknowledgedBy: null,
+      createdAt: new Date(),
+    };
+    this.hospitalityAlertsMap.set(id, hospitalityAlert);
+    return hospitalityAlert;
+  }
+
+  async acknowledgeHospitalityAlert(id: number, acknowledgedBy: string): Promise<HospitalityAlert | undefined> {
+    const existing = this.hospitalityAlertsMap.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, isAcknowledged: true, acknowledgedAt: new Date(), acknowledgedBy };
+    this.hospitalityAlertsMap.set(id, updated);
+    return updated;
   }
 }
 

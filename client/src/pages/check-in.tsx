@@ -20,6 +20,8 @@ import {
   FileText,
   Image,
   AlertCircle,
+  Heart,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,7 +51,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
-import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, WebCheckin } from "@shared/schema";
+import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, WebCheckin, GuestPreference } from "@shared/schema";
 
 interface WebCheckinListItem extends WebCheckin {
   reservation?: {
@@ -161,6 +163,14 @@ export default function CheckInPage() {
   const applicableRatePlans = ratePlans?.filter((rp) => 
     rp.roomTypeId === selectedRoomTypeId
   );
+
+  const { data: guestPreferences = [] } = useQuery<GuestPreference[]>({
+    queryKey: ["/api/guests", selectedReservation?.guestId, "preferences"],
+    enabled: !!selectedReservation?.guestId && confirmDialogOpen,
+  });
+
+  const activePrefs = guestPreferences.filter((p) => p.isActive);
+  const criticalPrefs = activePrefs.filter((p) => p.priority === "critical" || p.priority === "high");
 
   const selectedRatePlan = ratePlans?.find((rp) => rp.id === selectedRatePlanId);
   const totalAmount = selectedRatePlan ? (parseFloat(selectedRatePlan.baseRate) * nights).toFixed(2) : "0.00";
@@ -1062,6 +1072,38 @@ export default function CheckInPage() {
                     </p>
                     <p className="mb-4 text-muted-foreground">Esto marcara la habitacion como ocupada.</p>
                     
+                    {activePrefs.length > 0 && (
+                      <div className={`mb-4 p-3 rounded-lg border ${criticalPrefs.length > 0 ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30" : "border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30"}`} data-testid="checkin-preference-alert">
+                        <div className="flex items-center gap-2 mb-2">
+                          {criticalPrefs.length > 0 ? (
+                            <AlertTriangle className="h-4 w-4 text-red-500" />
+                          ) : (
+                            <Heart className="h-4 w-4 text-orange-500" />
+                          )}
+                          <span className="font-medium text-sm text-foreground">
+                            Preferencias del huésped ({activePrefs.length})
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {activePrefs.map((pref) => (
+                            <div key={pref.id} className="flex items-center gap-2 text-sm">
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${
+                                  pref.priority === "critical" ? "border-red-400 text-red-700 dark:text-red-300" :
+                                  pref.priority === "high" ? "border-orange-400 text-orange-700 dark:text-orange-300" :
+                                  ""
+                                }`}
+                              >
+                                {pref.priority === "critical" ? "Crítica" : pref.priority === "high" ? "Alta" : pref.priority === "low" ? "Baja" : "Normal"}
+                              </Badge>
+                              <span className="text-foreground">{pref.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="space-y-2">
                       <Label htmlFor="checkInNotes" className="text-foreground">Comentarios / Notas</Label>
                       <Textarea

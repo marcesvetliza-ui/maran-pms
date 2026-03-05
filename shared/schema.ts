@@ -1324,7 +1324,7 @@ export type PackageWithDetails = Package & {
 };
 
 // System Notifications (base for chatbot + web check-in)
-export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa";
+export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert";
 export type NotificationArea = "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "all";
 export type NotificationPriority = "low" | "normal" | "high" | "urgent";
 
@@ -1377,3 +1377,65 @@ export const webCheckins = pgTable("web_checkins", {
 export const insertWebCheckinSchema = createInsertSchema(webCheckins).omit({ id: true, createdAt: true });
 export type InsertWebCheckin = z.infer<typeof insertWebCheckinSchema>;
 export type WebCheckin = typeof webCheckins.$inferSelect;
+
+// Hospitality Module - Guest Preferences CRM
+export type PreferenceCategory = "habitacion" | "alimentacion" | "amenities" | "servicio" | "fecha_especial" | "motivo_viaje" | "nota_interna" | "otro";
+export type PreferencePriority = "low" | "normal" | "high" | "critical";
+
+export const guestPreferences = pgTable("guest_preferences", {
+  id: serial("id").primaryKey(),
+  guestId: varchar("guest_id").notNull(),
+  category: text("category").$type<PreferenceCategory>().notNull(),
+  subcategory: text("subcategory"),
+  title: text("title").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  priority: text("priority").$type<PreferencePriority>().notNull().default("normal"),
+  visibleTo: text("visible_to").array().notNull().default(["all"]),
+  recordedBy: text("recorded_by"),
+  sourceStay: varchar("source_stay"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertGuestPreferenceSchema = createInsertSchema(guestPreferences).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertGuestPreference = z.infer<typeof insertGuestPreferenceSchema>;
+export type GuestPreference = typeof guestPreferences.$inferSelect;
+
+export const stayNotes = pgTable("stay_notes", {
+  id: serial("id").primaryKey(),
+  reservationId: varchar("reservation_id").notNull(),
+  guestId: varchar("guest_id"),
+  category: text("category").$type<PreferenceCategory>().notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  priority: text("priority").$type<PreferencePriority>().notNull().default("normal"),
+  visibleTo: text("visible_to").array().notNull().default(["all"]),
+  isResolved: boolean("is_resolved").default(false),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: text("resolved_by"),
+  recordedBy: text("recorded_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertStayNoteSchema = createInsertSchema(stayNotes).omit({ id: true, createdAt: true, isResolved: true, resolvedAt: true, resolvedBy: true });
+export type InsertStayNote = z.infer<typeof insertStayNoteSchema>;
+export type StayNote = typeof stayNotes.$inferSelect;
+
+export const hospitalityAlerts = pgTable("hospitality_alerts", {
+  id: serial("id").primaryKey(),
+  reservationId: varchar("reservation_id").notNull(),
+  guestId: varchar("guest_id").notNull(),
+  preferenceId: integer("preference_id"),
+  alertMessage: text("alert_message").notNull(),
+  targetArea: text("target_area").notNull(),
+  priority: text("priority").$type<PreferencePriority>().notNull().default("normal"),
+  isAcknowledged: boolean("is_acknowledged").default(false),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  acknowledgedBy: text("acknowledged_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertHospitalityAlertSchema = createInsertSchema(hospitalityAlerts).omit({ id: true, createdAt: true, isAcknowledged: true, acknowledgedAt: true, acknowledgedBy: true });
+export type InsertHospitalityAlert = z.infer<typeof insertHospitalityAlertSchema>;
+export type HospitalityAlert = typeof hospitalityAlerts.$inferSelect;
