@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -1778,7 +1779,7 @@ export default function EventsPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <FormLabel>Numero de Mesa</FormLabel>
+              <Label>Numero de Mesa</Label>
               <Input
                 type="number"
                 min={1}
@@ -1788,7 +1789,7 @@ export default function EventsPage() {
               />
             </div>
             <div>
-              <FormLabel>Etiqueta (opcional)</FormLabel>
+              <Label>Etiqueta (opcional)</Label>
               <Input
                 value={newTableLabel}
                 onChange={(e) => setNewTableLabel(e.target.value)}
@@ -1797,7 +1798,7 @@ export default function EventsPage() {
               />
             </div>
             <div>
-              <FormLabel>Asientos</FormLabel>
+              <Label>Asientos</Label>
               <Input
                 type="number"
                 min={1}
