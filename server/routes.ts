@@ -19,6 +19,19 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  app.get("/api/download/source-code", async (_req, res) => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const filePath = path.resolve("MARAN_SUITE_CODIGO_COMPLETO.txt");
+    if (fs.existsSync(filePath)) {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=MARAN_SUITE_CODIGO_COMPLETO.txt");
+      fs.createReadStream(filePath).pipe(res);
+    } else {
+      res.status(404).send("Archivo no encontrado");
+    }
+  });
+
   // Dashboard
   app.get("/api/dashboard/stats", async (req, res) => {
     try {
