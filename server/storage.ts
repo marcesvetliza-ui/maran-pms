@@ -109,6 +109,9 @@ import {
   type SpaAccountItem,
   type InsertSpaAccountItem,
   type SpaAccountWithItems,
+  type SpaPayment,
+  type InsertSpaPayment,
+  type SpaPaymentMethod,
   // Events
   type EventRoom,
   type InsertEventRoom,
@@ -461,13 +464,18 @@ export interface IStorage {
   getSpaAccountByAppointment(appointmentId: string): Promise<SpaAccountWithItems | undefined>;
   createSpaAccount(account: InsertSpaAccount): Promise<SpaAccount>;
   updateSpaAccount(id: string, account: Partial<InsertSpaAccount>): Promise<SpaAccount | undefined>;
-  closeSpaAccount(id: string, chargedTo: string): Promise<SpaAccount | undefined>;
+  closeSpaAccount(id: string, chargedTo: string, receiptType?: string): Promise<SpaAccount | undefined>;
 
   // SPA Account Items
   getSpaAccountItems(accountId: string): Promise<SpaAccountItem[]>;
   createSpaAccountItem(item: InsertSpaAccountItem): Promise<SpaAccountItem>;
   updateSpaAccountItem(id: string, item: Partial<InsertSpaAccountItem>): Promise<SpaAccountItem | undefined>;
   deleteSpaAccountItem(id: string): Promise<boolean>;
+
+  // SPA Payments
+  getSpaPayments(accountId: string): Promise<SpaPayment[]>;
+  createSpaPayment(payment: InsertSpaPayment): Promise<SpaPayment>;
+  deleteSpaPayment(id: string): Promise<boolean>;
 
   // ==================== EVENTS ====================
   // Event Rooms
@@ -605,6 +613,7 @@ export class MemStorage implements IStorage {
   private spaAppointments: Map<string, SpaAppointment>;
   private spaAccounts: Map<string, SpaAccount>;
   private spaAccountItems: Map<string, SpaAccountItem>;
+  private spaPayments: Map<string, SpaPayment>;
   // Events
   private eventRooms: Map<string, EventRoom>;
   private events: Map<string, HotelEvent>;
@@ -670,6 +679,7 @@ export class MemStorage implements IStorage {
     this.spaAppointments = new Map();
     this.spaAccounts = new Map();
     this.spaAccountItems = new Map();
+    this.spaPayments = new Map();
     // Events
     this.eventRooms = new Map();
     this.events = new Map();
@@ -3288,10 +3298,12 @@ export class MemStorage implements IStorage {
     }
     return accounts.map(account => {
       const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === account.id);
+      const payments = Array.from(this.spaPayments.values()).filter(p => p.accountId === account.id);
       const appointment = this.spaAppointments.get(account.appointmentId);
       return {
         ...account,
         items,
+        payments,
         appointment: appointment ? {
           ...appointment,
           cabin: this.spaCabins.get(appointment.cabinId)!,
@@ -3305,10 +3317,12 @@ export class MemStorage implements IStorage {
     const account = this.spaAccounts.get(id);
     if (!account) return undefined;
     const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === id);
+    const payments = Array.from(this.spaPayments.values()).filter(p => p.accountId === id);
     const appointment = this.spaAppointments.get(account.appointmentId);
     return {
       ...account,
       items,
+      payments,
       appointment: appointment ? {
         ...appointment,
         cabin: this.spaCabins.get(appointment.cabinId)!,
@@ -3333,6 +3347,8 @@ export class MemStorage implements IStorage {
       status: (account.status ?? "open") as SpaAccountStatus,
       subtotal: account.subtotal ?? "0",
       total: account.total ?? "0",
+      totalPaid: account.totalPaid ?? "0",
+      receiptType: account.receiptType ?? null,
       notes: account.notes ?? null,
       openedAt: account.openedAt,
       closedAt: account.closedAt ?? null,
@@ -3355,17 +3371,21 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async closeSpaAccount(id: string, chargedTo: string): Promise<SpaAccount | undefined> {
+  async closeSpaAccount(id: string, chargedTo: string, receiptType?: string): Promise<SpaAccount | undefined> {
     const account = this.spaAccounts.get(id);
     if (!account) return undefined;
     const items = Array.from(this.spaAccountItems.values()).filter(i => i.accountId === id);
     const total = items.reduce((sum, item) => sum + parseFloat(item.subtotal), 0);
+    const payments = Array.from(this.spaPayments.values()).filter(p => p.accountId === id);
+    const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
     
     const updated: SpaAccount = {
       ...account,
       status: "closed",
       subtotal: total.toFixed(2),
       total: total.toFixed(2),
+      totalPaid: totalPaid.toFixed(2),
+      receiptType: receiptType ?? null,
       closedAt: new Date().toISOString(),
       chargedTo,
     };
@@ -3458,6 +3478,55 @@ export class MemStorage implements IStorage {
         const total = items.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
         account.subtotal = total.toFixed(2);
         account.total = total.toFixed(2);
+        this.spaAccounts.set(accountId, account);
+      }
+    }
+
+    return deleted;
+  }
+
+  async getSpaPayments(accountId: string): Promise<SpaPayment[]> {
+    return Array.from(this.spaPayments.values()).filter(p => p.accountId === accountId);
+  }
+
+  async createSpaPayment(payment: InsertSpaPayment): Promise<SpaPayment> {
+    const id = randomUUID();
+    const newPayment: SpaPayment = {
+      id,
+      accountId: payment.accountId,
+      amount: payment.amount,
+      method: payment.method as SpaPaymentMethod,
+      isAdvance: payment.isAdvance ?? "false",
+      appointmentId: payment.appointmentId ?? null,
+      reservationId: payment.reservationId ?? null,
+      notes: payment.notes ?? null,
+      createdAt: payment.createdAt,
+    };
+    this.spaPayments.set(id, newPayment);
+
+    const account = this.spaAccounts.get(payment.accountId);
+    if (account) {
+      const allPayments = Array.from(this.spaPayments.values()).filter(p => p.accountId === payment.accountId);
+      const totalPaid = allPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+      account.totalPaid = totalPaid.toFixed(2);
+      this.spaAccounts.set(payment.accountId, account);
+    }
+
+    return newPayment;
+  }
+
+  async deleteSpaPayment(id: string): Promise<boolean> {
+    const payment = this.spaPayments.get(id);
+    if (!payment) return false;
+    const accountId = payment.accountId;
+    const deleted = this.spaPayments.delete(id);
+
+    if (deleted) {
+      const account = this.spaAccounts.get(accountId);
+      if (account) {
+        const allPayments = Array.from(this.spaPayments.values()).filter(p => p.accountId === accountId);
+        const totalPaid = allPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+        account.totalPaid = totalPaid.toFixed(2);
         this.spaAccounts.set(accountId, account);
       }
     }

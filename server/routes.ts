@@ -4,6 +4,11 @@ import OpenAI from "openai";
 import { storage } from "./storage";
 import { insertGuestReviewSchema } from "@shared/schema";
 
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
@@ -2207,7 +2212,11 @@ Only respond with the JSON object.`;
   // Item Categories
   app.get("/api/inventory/categories", async (req, res) => {
     try {
-      const categories = await storage.getItemCategories();
+      let categories = await storage.getItemCategories();
+      const area = req.query.area as string | undefined;
+      if (area) {
+        categories = categories.filter(c => (c as any).area === area);
+      }
       res.json(categories);
     } catch (error) {
       res.status(500).json({ error: "Error fetching categories" });
@@ -2283,7 +2292,14 @@ Only respond with the JSON object.`;
   // Inventory Items
   app.get("/api/inventory/items", async (req, res) => {
     try {
-      const items = await storage.getInventoryItems();
+      let items = await storage.getInventoryItems();
+      const area = req.query.area as string | undefined;
+      if (area) {
+        items = items.filter(item => {
+          if (item.category && (item.category as any).area === area) return true;
+          return false;
+        });
+      }
       res.json(items);
     } catch (error) {
       res.status(500).json({ error: "Error fetching inventory items" });
@@ -2550,6 +2566,34 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.get("/api/spa/appointments/weekly-summary", async (req, res) => {
+    try {
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate and endDate are required" });
+      }
+      const appointments = await storage.getSpaAppointmentsByDateRange(startDate, endDate);
+      const activeStatuses = ["pending", "confirmed", "in_progress"];
+      const summaryMap = new Map<string, { cabinId: string; date: string; count: number }>();
+      
+      for (const apt of appointments) {
+        if (!activeStatuses.includes(apt.status)) continue;
+        const key = `${apt.cabinId}_${apt.appointmentDate}`;
+        const existing = summaryMap.get(key);
+        if (existing) {
+          existing.count++;
+        } else {
+          summaryMap.set(key, { cabinId: apt.cabinId, date: apt.appointmentDate, count: 1 });
+        }
+      }
+
+      res.json(Array.from(summaryMap.values()));
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching weekly summary" });
+    }
+  });
+
   app.get("/api/spa/appointments/:id", async (req, res) => {
     try {
       const appointment = await storage.getSpaAppointment(req.params.id);
@@ -2566,6 +2610,24 @@ Only respond with the JSON object.`;
       
       if (!cabinId || !treatmentId || !guestName || !appointmentDate || !startTime || !endTime) {
         return res.status(400).json({ error: "cabinId, treatmentId, guestName, appointmentDate, startTime, and endTime are required" });
+      }
+
+      const existingAppointments = await storage.getSpaAppointmentsByCabin(cabinId, appointmentDate);
+      const activeStatuses = ["pending", "confirmed", "in_progress"];
+      const newStart = timeToMinutes(startTime);
+      const newEnd = timeToMinutes(endTime);
+      
+      for (const existing of existingAppointments) {
+        if (!activeStatuses.includes(existing.status)) continue;
+        const existStart = timeToMinutes(existing.startTime);
+        const existEnd = timeToMinutes(existing.endTime);
+        if (newStart < existEnd && newEnd > existStart) {
+          const cabin = await storage.getSpaCabin(cabinId);
+          return res.status(409).json({
+            error: "Superposición de turno",
+            message: `El gabinete '${cabin?.name || cabinId}' ya tiene un turno de ${existing.startTime} a ${existing.endTime} hs. Elegí otro horario o gabinete.`,
+          });
+        }
       }
 
       const appointment = await storage.createSpaAppointment({
@@ -2625,6 +2687,35 @@ Only respond with the JSON object.`;
 
   app.patch("/api/spa/appointments/:id", async (req, res) => {
     try {
+      const current = await storage.getSpaAppointment(req.params.id);
+      if (!current) return res.status(404).json({ error: "Appointment not found" });
+
+      const cabinId = req.body.cabinId || current.cabinId;
+      const appointmentDate = req.body.appointmentDate || current.appointmentDate;
+      const startTime = req.body.startTime || current.startTime;
+      const endTime = req.body.endTime || current.endTime;
+
+      if (req.body.cabinId || req.body.startTime || req.body.endTime || req.body.appointmentDate) {
+        const existingAppointments = await storage.getSpaAppointmentsByCabin(cabinId, appointmentDate);
+        const activeStatuses = ["pending", "confirmed", "in_progress"];
+        const newStart = timeToMinutes(startTime);
+        const newEnd = timeToMinutes(endTime);
+        
+        for (const existing of existingAppointments) {
+          if (existing.id === req.params.id) continue;
+          if (!activeStatuses.includes(existing.status)) continue;
+          const existStart = timeToMinutes(existing.startTime);
+          const existEnd = timeToMinutes(existing.endTime);
+          if (newStart < existEnd && newEnd > existStart) {
+            const cabin = await storage.getSpaCabin(cabinId);
+            return res.status(409).json({
+              error: "Superposición de turno",
+              message: `El gabinete '${cabin?.name || cabinId}' ya tiene un turno de ${existing.startTime} a ${existing.endTime} hs. Elegí otro horario o gabinete.`,
+            });
+          }
+        }
+      }
+
       const appointment = await storage.updateSpaAppointment(req.params.id, req.body);
       if (!appointment) return res.status(404).json({ error: "Appointment not found" });
       res.json(appointment);
@@ -2712,17 +2803,85 @@ Only respond with the JSON object.`;
 
   app.post("/api/spa/accounts/:id/close", async (req, res) => {
     try {
-      const { chargedTo } = req.body;
+      const { chargedTo, receiptType } = req.body;
       
-      if (!chargedTo) {
-        return res.status(400).json({ error: "chargedTo is required (e.g., 'room:reservationId' or 'invoice')" });
+      if (!chargedTo || !receiptType) {
+        return res.status(400).json({ error: "chargedTo and receiptType are required" });
       }
 
-      const account = await storage.closeSpaAccount(req.params.id, chargedTo);
+      const accountData = await storage.getSpaAccount(req.params.id);
+      if (!accountData) return res.status(404).json({ error: "Account not found" });
+
+      const totalAmount = accountData.items.reduce((sum, item) => sum + parseFloat(item.subtotal), 0);
+      const totalPaid = accountData.payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+
+      if (totalPaid < totalAmount) {
+        return res.status(400).json({
+          error: "Saldo pendiente",
+          message: `Faltan $${(totalAmount - totalPaid).toFixed(2)} por cobrar antes de cerrar el folio.`,
+        });
+      }
+
+      const account = await storage.closeSpaAccount(req.params.id, chargedTo, receiptType);
       if (!account) return res.status(404).json({ error: "Account not found" });
       res.json(account);
     } catch (error) {
       res.status(500).json({ error: "Error closing spa account" });
+    }
+  });
+
+  app.get("/api/spa/accounts/:id/payments", async (req, res) => {
+    try {
+      const payments = await storage.getSpaPayments(req.params.id);
+      res.json(payments);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching payments" });
+    }
+  });
+
+  app.post("/api/spa/accounts/:id/payments", async (req, res) => {
+    try {
+      const { amount, method, isAdvance, appointmentId, reservationId, notes } = req.body;
+      
+      if (!amount || !method) {
+        return res.status(400).json({ error: "amount and method are required" });
+      }
+
+      const payment = await storage.createSpaPayment({
+        accountId: req.params.id,
+        amount,
+        method,
+        isAdvance: isAdvance ? "true" : "false",
+        appointmentId: appointmentId || null,
+        reservationId: reservationId || null,
+        notes: notes || null,
+        createdAt: new Date().toISOString(),
+      });
+
+      if (method === "room_charge" && reservationId) {
+        const charge = {
+          reservationId,
+          category: "spa" as const,
+          description: `SPA - Pago ${isAdvance ? "(Seña)" : ""}`,
+          amount: amount,
+          date: new Date().toISOString().split("T")[0],
+          createdBy: null,
+        };
+        await storage.createCharge(charge);
+      }
+
+      res.status(201).json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating payment" });
+    }
+  });
+
+  app.delete("/api/spa/payments/:id", async (req, res) => {
+    try {
+      await storage.deleteSpaPayment(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting payment" });
     }
   });
 

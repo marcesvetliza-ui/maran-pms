@@ -778,11 +778,14 @@ export type RecipeWithIngredients = Recipe & {
 // ==================== INVENTORY MODULE ====================
 
 // Item Categories (for inventory)
+export type InventoryArea = "general" | "spa" | "restaurant" | "housekeeping" | "maintenance" | "admin";
+
 export const itemCategories = pgTable("item_categories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description"),
   parentId: varchar("parent_id"),
+  area: text("area").$type<InventoryArea>().notNull().default("general"),
   isActive: text("is_active").default("true"),
 });
 
@@ -985,6 +988,8 @@ export const spaAccounts = pgTable("spa_accounts", {
   status: text("status").$type<SpaAccountStatus>().notNull().default("open"),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0"),
   total: decimal("total", { precision: 10, scale: 2 }).default("0"),
+  totalPaid: decimal("total_paid", { precision: 10, scale: 2 }).default("0"),
+  receiptType: text("receipt_type"),
   notes: text("notes"),
   openedAt: text("opened_at").notNull(),
   closedAt: text("closed_at"),
@@ -1013,8 +1018,27 @@ export const insertSpaAccountItemSchema = createInsertSchema(spaAccountItems).om
 export type InsertSpaAccountItem = z.infer<typeof insertSpaAccountItemSchema>;
 export type SpaAccountItem = typeof spaAccountItems.$inferSelect;
 
+export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge";
+
+export const spaPayments = pgTable("spa_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  method: text("method").$type<SpaPaymentMethod>().notNull(),
+  isAdvance: text("is_advance").default("false"),
+  appointmentId: varchar("appointment_id"),
+  reservationId: varchar("reservation_id"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertSpaPaymentSchema = createInsertSchema(spaPayments).omit({ id: true });
+export type InsertSpaPayment = z.infer<typeof insertSpaPaymentSchema>;
+export type SpaPayment = typeof spaPayments.$inferSelect;
+
 export type SpaAccountWithItems = SpaAccount & {
   items: SpaAccountItem[];
+  payments: SpaPayment[];
   appointment?: SpaAppointmentWithDetails;
 };
 

@@ -32,6 +32,7 @@ type ItemCategory = {
   name: string;
   description: string | null;
   parentId: string | null;
+  area: string;
   isActive: string | null;
 };
 
@@ -108,6 +109,7 @@ export default function InventoryPage() {
   const [isMovementDialogOpen, setIsMovementDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [movementType, setMovementType] = useState<"entrada" | "salida">("entrada");
+  const [areaFilter, setAreaFilter] = useState("all");
 
   const { data: categories = [] } = useQuery<ItemCategory[]>({
     queryKey: ["/api/inventory/categories"],
@@ -163,10 +165,12 @@ export default function InventoryPage() {
     },
   });
 
-  const filteredItems = items.filter((item) =>
-    item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.sku?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredItems = items.filter((item) => {
+    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesArea = areaFilter === "all" || (item.category as any)?.area === areaFilter;
+    return matchesSearch && matchesArea;
+  });
 
   const totalValue = items.reduce(
     (sum, item) => sum + (item.currentStock * parseFloat(item.costPrice || "0")),
@@ -330,6 +334,20 @@ export default function InventoryPage() {
                 data-testid="input-search"
               />
             </div>
+            <Select value={areaFilter} onValueChange={setAreaFilter}>
+              <SelectTrigger className="w-[180px]" data-testid="select-area-filter">
+                <SelectValue placeholder="Todas las áreas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las áreas</SelectItem>
+                <SelectItem value="general">General</SelectItem>
+                <SelectItem value="spa">SPA</SelectItem>
+                <SelectItem value="restaurant">Restaurante</SelectItem>
+                <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                <SelectItem value="admin">Administración</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {filteredItems.length === 0 ? (
@@ -367,7 +385,10 @@ export default function InventoryPage() {
                         )}
                       </td>
                       <td className="p-3">
-                        {item.category?.name || "-"}
+                        <div>{item.category?.name || "-"}</div>
+                        {item.category?.area && item.category.area !== "general" && (
+                          <Badge variant="secondary" className="text-[10px] mt-0.5">{(item.category as any).area.toUpperCase()}</Badge>
+                        )}
                       </td>
                       <td className="p-3 text-right">
                         <span className={item.currentStock < item.minStock ? "text-red-600 font-semibold" : ""}>
@@ -666,7 +687,7 @@ function NewItemForm({
             <SelectContent>
               {categories.map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>
-                  {cat.name}
+                  {cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}
                 </SelectItem>
               ))}
             </SelectContent>

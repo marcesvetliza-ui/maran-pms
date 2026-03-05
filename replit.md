@@ -109,6 +109,19 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes (March 2026)
 
+### SPA Module Completion (PDF-driven, 5 tasks)
+- **Tarea 1 - Overlap Validation**: Backend validates cabin time overlaps on POST/PATCH appointments. Returns 409 with descriptive message if conflict detected. Only checks active statuses (pending, confirmed, in_progress).
+- **Tarea 2 - Edit/Cancel with Confirmation**: Appointments can be edited (opens form pre-filled) and cancelled with a confirmation dialog. Cancelled appointments shown with strikethrough styling in the grid.
+- **Tarea 3 - Inventory Areas**: `itemCategories` table has new `area` field (general, spa, restaurant, housekeeping, maintenance, admin). Inventory filtered by area in GET endpoints. SPA module has "Insumos" tab showing SPA-area items. Inventory page has area filter dropdown.
+- **Tarea 4 - Weekly Planning View**: Toggle between daily/weekly view in SPA agenda. Weekly view shows 7-day grid by cabin with color-coded occupancy counts (0=gray, 1-2=green, 3-4=amber, 5+=red). New endpoint: GET `/api/spa/appointments/weekly-summary`.
+- **Tarea 5 - Complete Folio**: Full folio with charges (add/remove items) and payments (multiple methods). `spaPayments` table tracks payments with method, advance flag, room charge support. Folio shows left=charges, right=payments with running balance. Close requires receipt type (Ticket/Factura A/B/C/Nota Crédito) and zero balance. Room charge creates charge on reservation.
+
+### Schema Changes (SPA)
+- `spa_accounts`: Added `total_paid`, `receipt_type` columns
+- New table: `spa_payments` (id, account_id, amount, method, is_advance, appointment_id, reservation_id, notes, created_at)
+- `item_categories`: Added `area` column (general/spa/restaurant/housekeeping/maintenance/admin)
+- `SpaAccountWithItems` type now includes `payments: SpaPayment[]`
+
 ### Restaurant Module Adjustments (PDF-driven)
 - **Floor Plan Editor**: Drag & drop table positioning on 8x6 grid, edit mode toggle, add/delete tables
 - **Window Attribute**: `hasWindow` boolean on tables, visible as sky-blue badge in floor plan and reservation selectors
