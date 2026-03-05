@@ -1,0 +1,332 @@
+# Mara - Código Completo del Proyecto
+
+## Estructura de archivos necesarios:
+```
+main.py                    - Aplicación Flask principal
+google_sheets.py           - Integración con Google Sheets
+templates/index.html       - Chat del huésped
+templates/dashboard.html   - Dashboard del staff
+templates/admin.html       - Panel admin (legacy)
+```
+
+## Dependencias (Python):
+```
+flask
+openai
+requests
+```
+
+## Variables de entorno necesarias:
+- `AI_INTEGRATIONS_OPENAI_API_KEY` - API key de OpenAI
+- `AI_INTEGRATIONS_OPENAI_BASE_URL` - URL base de OpenAI
+
+## Integraciones de Replit:
+- `python_openai_ai_integrations` - Para OpenAI
+- `google-sheet` - Para exportar a Google Sheets
+
+---
+
+## ARCHIVO 1: main.py
+
+```python
+import os
+import sqlite3
+import json
+import threading
+import time
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, jsonify
+from openai import OpenAI
+from google_sheets import append_request_to_sheet, get_spreadsheet_url
+
+app = Flask(__name__)
+
+client = OpenAI(
+    api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"),
+    base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+)
+
+DATABASE = 'mara.db'
+
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            intent TEXT,
+            details TEXT,
+            message TEXT,
+            status TEXT DEFAULT 'pending',
+            session_id TEXT,
+            notification_sent INTEGER DEFAULT 0
+        )
+    ''')
+    try:
+        conn.execute('ALTER TABLE requests ADD COLUMN session_id TEXT')
+    except:
+        pass
+    try:
+        conn.execute('ALTER TABLE requests ADD COLUMN notification_sent INTEGER DEFAULT 0')
+    except:
+        pass
+    try:
+        conn.execute('ALTER TABLE requests ADD COLUMN exported_to_sheets INTEGER DEFAULT 0')
+    except:
+        pass
+    conn.execute("UPDATE requests SET status = 'new' WHERE status = 'pending'")
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def cleanup_old_requests():
+    try:
+        conn = get_db()
+        today = datetime.now().strftime('%Y-%m-%d')
+        cursor = conn.execute('''
+            SELECT * FROM requests 
+            WHERE status = 'done' 
+            AND exported_to_sheets = 1 
+            AND date(timestamp) < date(?)
+        ''', (today,))
+        old_requests = cursor.fetchall()
+        if old_requests:
+            conn.execute('''
+                DELETE FROM requests 
+                WHERE status = 'done' 
+                AND exported_to_sheets = 1 
+                AND date(timestamp) < date(?)
+            ''', (today,))
+            conn.commit()
+            print(f'Cleanup: Deleted {len(old_requests)} old requests from previous days')
+        conn.close()
+    except Exception as e:
+        print(f'Cleanup error: {e}')
+
+def midnight_cleanup_scheduler():
+    last_cleanup_date = None
+    while True:
+        now = datetime.now()
+        current_date = now.strftime('%Y-%m-%d')
+        if now.hour == 0 and now.minute < 5 and last_cleanup_date != current_date:
+            print(f'Running midnight cleanup at {now}')
+            cleanup_old_requests()
+            last_cleanup_date = current_date
+        time.sleep(60)
+
+cleanup_thread = threading.Thread(target=midnight_cleanup_scheduler, daemon=True)
+cleanup_thread.start()
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+# === HOTEL_KNOWLEDGE y SYSTEM_PROMPT ===
+# (Copiar exactamente de main.py actual - son muy largos para este archivo)
+# Incluye: info del hotel, FAQs, servicios operativos, flujos de spa/desayuno, formato JSON
+
+@app.route('/admin')
+def admin_panel():
+    return render_template('admin.html')
+
+@app.route('/dashboard')
+def dashboard():
+    return render_template('dashboard.html')
+
+@app.route('/admin/requests', methods=['GET'])
+def get_requests():
+    conn = get_db()
+    cursor = conn.execute('SELECT * FROM requests ORDER BY timestamp DESC')
+    rows = cursor.fetchall()
+    conn.close()
+    requests_list = []
+    for row in rows:
+        requests_list.append({
+            'id': row['id'],
+            'timestamp': row['timestamp'],
+            'intent': row['intent'],
+            'details': json.loads(row['details']) if row['details'] else {},
+            'message': row['message'],
+            'status': row['status']
+        })
+    return jsonify(requests_list)
+
+# ... (resto de endpoints: update_request_status, update_status_post, message, notifications, etc.)
+# Copiar exactamente de main.py
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+```
+
+**NOTA:** El archivo main.py completo tiene 750 líneas. Se recomienda copiar el archivo directamente en vez de desde este documento.
+
+---
+
+## ARCHIVO 2: google_sheets.py
+
+```python
+import os
+import json
+import requests
+from datetime import datetime
+
+connection_settings = None
+
+def get_access_token():
+    global connection_settings
+    if connection_settings and connection_settings.get('settings', {}).get('expires_at'):
+        expires_at = connection_settings['settings']['expires_at']
+        if datetime.fromisoformat(expires_at.replace('Z', '+00:00')) > datetime.now():
+            return connection_settings['settings']['access_token']
+    hostname = os.environ.get('REPLIT_CONNECTORS_HOSTNAME')
+    repl_identity = os.environ.get('REPL_IDENTITY')
+    web_repl_renewal = os.environ.get('WEB_REPL_RENEWAL')
+    if repl_identity:
+        x_replit_token = f'repl {repl_identity}'
+    elif web_repl_renewal:
+        x_replit_token = f'depl {web_repl_renewal}'
+    else:
+        raise Exception('X_REPLIT_TOKEN not found for repl/depl')
+    response = requests.get(
+        f'https://{hostname}/api/v2/connection?include_secrets=true&connector_names=google-sheet',
+        headers={
+            'Accept': 'application/json',
+            'X_REPLIT_TOKEN': x_replit_token
+        }
+    )
+    data = response.json()
+    connection_settings = data.get('items', [{}])[0] if data.get('items') else None
+    if not connection_settings:
+        raise Exception('Google Sheet not connected')
+    access_token = (
+        connection_settings.get('settings', {}).get('access_token') or
+        connection_settings.get('settings', {}).get('oauth', {}).get('credentials', {}).get('access_token')
+    )
+    if not access_token:
+        raise Exception('Google Sheet access token not found')
+    return access_token
+
+SPREADSHEET_ID = None
+
+def get_or_create_spreadsheet():
+    global SPREADSHEET_ID
+    if SPREADSHEET_ID:
+        return SPREADSHEET_ID
+    spreadsheet_id_file = '.sheets_id'
+    if os.path.exists(spreadsheet_id_file):
+        with open(spreadsheet_id_file, 'r') as f:
+            SPREADSHEET_ID = f.read().strip()
+            if SPREADSHEET_ID:
+                return SPREADSHEET_ID
+    access_token = get_access_token()
+    response = requests.post(
+        'https://sheets.googleapis.com/v4/spreadsheets',
+        headers={
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        },
+        json={
+            'properties': {'title': f'Mara - Solicitudes Hotel Maran'},
+            'sheets': [{'properties': {'title': 'Solicitudes', 'gridProperties': {'frozenRowCount': 1}}}]
+        }
+    )
+    if response.status_code != 200:
+        raise Exception(f'Failed to create spreadsheet: {response.text}')
+    data = response.json()
+    SPREADSHEET_ID = data['spreadsheetId']
+    with open(spreadsheet_id_file, 'w') as f:
+        f.write(SPREADSHEET_ID)
+    headers = [['ID', 'Fecha Pedido', 'Hora Pedido', 'Servicio', 'Habitacion', 'Fecha Reserva', 'Hora Reserva', 'Personas', 'Tipo Servicio', 'Estado', 'Mensaje']]
+    requests.post(
+        f'https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}/values/Solicitudes!A1:K1:append',
+        params={'valueInputOption': 'RAW'},
+        headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
+        json={'values': headers}
+    )
+    return SPREADSHEET_ID
+
+def append_request_to_sheet(request_data):
+    try:
+        access_token = get_access_token()
+        spreadsheet_id = get_or_create_spreadsheet()
+        details = request_data.get('details', {})
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except:
+                details = {}
+        timestamp = request_data.get('timestamp', '')
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            fecha = dt.strftime('%Y-%m-%d')
+            hora = dt.strftime('%H:%M')
+        except:
+            fecha = timestamp[:10] if len(timestamp) >= 10 else ''
+            hora = timestamp[11:16] if len(timestamp) >= 16 else ''
+        intent_labels = {'valet': 'Valet Parking', 'restaurant': 'Restaurant', 'spa': 'Spa'}
+        row = [[
+            str(request_data.get('id', '')), fecha, hora,
+            intent_labels.get(request_data.get('intent', ''), request_data.get('intent', '')),
+            details.get('room', ''), details.get('date', ''), details.get('time', ''),
+            details.get('people', ''), details.get('service', ''),
+            request_data.get('status', ''),
+            request_data.get('message', '')[:100] if request_data.get('message') else ''
+        ]]
+        response = requests.post(
+            f'https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/Solicitudes!A:K:append',
+            params={'valueInputOption': 'RAW', 'insertDataOption': 'INSERT_ROWS'},
+            headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
+            json={'values': row}
+        )
+        if response.status_code == 200:
+            print(f'Request {request_data.get("id")} appended to Google Sheet')
+            return True
+        else:
+            print(f'Failed to append to sheet: {response.text}')
+            return False
+    except Exception as e:
+        print(f'Error appending to Google Sheet: {e}')
+        return False
+
+def get_spreadsheet_url():
+    try:
+        spreadsheet_id = get_or_create_spreadsheet()
+        return f'https://docs.google.com/spreadsheets/d/{spreadsheet_id}'
+    except:
+        return None
+```
+
+---
+
+## ARCHIVO 3: templates/index.html
+## ARCHIVO 4: templates/dashboard.html
+## ARCHIVO 5: templates/admin.html
+
+Estos archivos HTML son muy extensos. Se recomienda copiarlos directamente desde el proyecto.
+
+---
+
+## URLs del sistema:
+- `/` - Chat del huésped (Mara)
+- `/dashboard` - Dashboard del staff (4 sectores)
+- `/dashboard?sector=valet` - Solo Valet
+- `/dashboard?sector=restaurant` - Solo Restaurant
+- `/dashboard?sector=spa` - Solo Spa
+- `/dashboard?sector=reception` - Solo Recepcion
+- `/admin` - Panel admin legacy
+
+## Intents del sistema:
+- `valet` - Valet parking
+- `restaurant` - Reserva de restaurant
+- `restaurant_cancel` - Cancelacion de reserva
+- `spa` - Cita en spa
+- `reception` - Pedidos de recepcion
+- `breakfast` - Desayuno en habitacion (aparece en Recepcion)
+- `faq` - Preguntas frecuentes (sin ticket)
+- `info` - Consultas generales (sin ticket)
