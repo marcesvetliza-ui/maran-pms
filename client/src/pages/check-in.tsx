@@ -113,6 +113,15 @@ export default function CheckInPage() {
     queryKey: ["/api/rate-plans"],
   });
 
+  const { data: allReservations } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/reservations"],
+    enabled: activeTab === "webcheckin",
+  });
+
+  const webCheckinReservations = allReservations?.filter(
+    (r) => r.status === "confirmed" || r.status === "pending"
+  );
+
   const { data: webCheckinList } = useQuery<WebCheckinListItem[]>({
     queryKey: ["/api/web-checkin/list"],
     queryFn: async () => {
@@ -699,9 +708,9 @@ export default function CheckInPage() {
               <CardDescription>Seleccioná una reserva confirmada para generar el enlace</CardDescription>
             </CardHeader>
             <CardContent>
-              {reservations && reservations.length > 0 ? (
+              {webCheckinReservations && webCheckinReservations.length > 0 ? (
                 <div className="space-y-2">
-                  {reservations.map((res) => (
+                  {webCheckinReservations.map((res) => (
                     <div
                       key={res.id}
                       className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
@@ -718,27 +727,32 @@ export default function CheckInPage() {
                           </p>
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setWebCheckinReservation(res);
-                          setGeneratedLink(null);
-                          setWebCheckinDialogOpen(true);
-                          generateLinkMutation.mutate(res.id);
-                        }}
-                        disabled={generateLinkMutation.isPending}
-                        data-testid={`button-generate-link-${res.id}`}
-                      >
-                        <Link2 className="h-4 w-4 mr-1" />
-                        Generar Link
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={res.status === "confirmed" ? "default" : "secondary"} className="text-xs">
+                          {res.status === "confirmed" ? "Confirmada" : "Pendiente"}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setWebCheckinReservation(res);
+                            setGeneratedLink(null);
+                            setWebCheckinDialogOpen(true);
+                            generateLinkMutation.mutate(res.id);
+                          }}
+                          disabled={generateLinkMutation.isPending}
+                          data-testid={`button-generate-link-${res.id}`}
+                        >
+                          <Link2 className="h-4 w-4 mr-1" />
+                          Generar Link
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-6">
-                  No hay reservas confirmadas pendientes de check-in
+                  No hay reservas pendientes o confirmadas para generar web check-in
                 </p>
               )}
             </CardContent>
