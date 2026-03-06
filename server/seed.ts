@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { eq, sql, notInArray } from "drizzle-orm";
 import {
   roomTypes,
   bedTypes,
@@ -31,6 +32,7 @@ import {
   groups,
   groupRoomBlocks,
   groupReservationLinks,
+  spaAppointments,
 } from "@shared/schema";
 
 export async function seedDatabase() {
@@ -487,4 +489,155 @@ export async function seedDatabase() {
   ]).onConflictDoNothing();
 
   console.log("Database seeded successfully!");
+}
+
+export async function refreshRealData() {
+  console.log("Refreshing real hotel data...");
+
+  try {
+    const existingRooms = await db.select({ id: rooms.id }).from(rooms);
+    const existingRoomIds = existingRooms.map(r => r.id);
+
+    const realRooms = [
+      { id: "r201", roomNumber: "201", roomTypeId: "rt2", floor: 2, status: "available" as const },
+      { id: "r202", roomNumber: "202", roomTypeId: "rt1", floor: 2, status: "available" as const },
+      { id: "r203", roomNumber: "203", roomTypeId: "rt1", floor: 2, status: "available" as const },
+      { id: "r204", roomNumber: "204", roomTypeId: "rt2", floor: 2, status: "available" as const },
+      { id: "r205", roomNumber: "205", roomTypeId: "rt3", floor: 2, status: "available" as const },
+      { id: "r206", roomNumber: "206", roomTypeId: "rt3", floor: 2, status: "available" as const },
+      { id: "r207", roomNumber: "207", roomTypeId: "rt2", floor: 2, status: "available" as const },
+      { id: "r301", roomNumber: "301", roomTypeId: "rt2", floor: 3, status: "available" as const },
+      { id: "r302", roomNumber: "302", roomTypeId: "rt1", floor: 3, status: "available" as const },
+      { id: "r303", roomNumber: "303", roomTypeId: "rt1", floor: 3, status: "available" as const },
+      { id: "r304", roomNumber: "304", roomTypeId: "rt1", floor: 3, status: "available" as const },
+      { id: "r305", roomNumber: "305", roomTypeId: "rt3", floor: 3, status: "available" as const },
+      { id: "r306", roomNumber: "306", roomTypeId: "rt3", floor: 3, status: "available" as const },
+      { id: "r307", roomNumber: "307", roomTypeId: "rt2", floor: 3, status: "available" as const },
+      { id: "r401", roomNumber: "401", roomTypeId: "rt2", floor: 4, status: "available" as const },
+      { id: "r402", roomNumber: "402", roomTypeId: "rt1", floor: 4, status: "available" as const },
+      { id: "r403", roomNumber: "403", roomTypeId: "rt1", floor: 4, status: "available" as const },
+      { id: "r404", roomNumber: "404", roomTypeId: "rt1", floor: 4, status: "available" as const },
+      { id: "r405", roomNumber: "405", roomTypeId: "rt3", floor: 4, status: "available" as const },
+      { id: "r406", roomNumber: "406", roomTypeId: "rt3", floor: 4, status: "available" as const },
+      { id: "r407", roomNumber: "407", roomTypeId: "rt2", floor: 4, status: "available" as const },
+      { id: "r501", roomNumber: "501", roomTypeId: "rt2", floor: 5, status: "available" as const },
+      { id: "r502", roomNumber: "502", roomTypeId: "rt1", floor: 5, status: "available" as const },
+      { id: "r503", roomNumber: "503", roomTypeId: "rt1", floor: 5, status: "available" as const },
+      { id: "r504", roomNumber: "504", roomTypeId: "rt1", floor: 5, status: "available" as const },
+      { id: "r505", roomNumber: "505", roomTypeId: "rt3", floor: 5, status: "available" as const },
+      { id: "r506", roomNumber: "506", roomTypeId: "rt3", floor: 5, status: "available" as const },
+      { id: "r507", roomNumber: "507", roomTypeId: "rt2", floor: 5, status: "available" as const },
+      { id: "r601", roomNumber: "601", roomTypeId: "rt2", floor: 6, status: "available" as const },
+      { id: "r602", roomNumber: "602", roomTypeId: "rt1", floor: 6, status: "available" as const },
+      { id: "r603", roomNumber: "603", roomTypeId: "rt1", floor: 6, status: "available" as const },
+      { id: "r604", roomNumber: "604", roomTypeId: "rt1", floor: 6, status: "available" as const },
+      { id: "r605", roomNumber: "605", roomTypeId: "rt3", floor: 6, status: "available" as const },
+      { id: "r606", roomNumber: "606", roomTypeId: "rt3", floor: 6, status: "available" as const },
+      { id: "r607", roomNumber: "607", roomTypeId: "rt2", floor: 6, status: "available" as const },
+    ];
+
+    const missingRooms = realRooms.filter(r => !existingRoomIds.includes(r.id));
+    if (missingRooms.length > 0) {
+      await db.insert(rooms).values(missingRooms).onConflictDoNothing();
+      console.log(`Inserted ${missingRooms.length} missing rooms`);
+    }
+
+    const realRoomIds = realRooms.map(r => r.id);
+    const extraRooms = existingRoomIds.filter(id => !realRoomIds.includes(id));
+    for (const extraId of extraRooms) {
+      try {
+        await db.delete(rooms).where(eq(rooms.id, extraId));
+      } catch (e) {}
+    }
+
+    const realAreas = [
+      { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor" as const, capacity: 72, hasTables: "true" as const, isActive: "true" as const },
+      { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor" as const, capacity: 56, hasTables: "true" as const, isActive: "true" as const },
+      { id: "area-rs", name: "Room Service", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+      { id: "area-delivery", name: "Delivery", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+      { id: "area-solarium", name: "Solarium", areaType: "outdoor" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+      { id: "area-spa", name: "SPA", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+    ];
+
+    const existingAreas = await db.select({ id: restaurantAreas.id }).from(restaurantAreas);
+    const existingAreaIds = existingAreas.map(a => a.id);
+    const realAreaIds = realAreas.map(a => a.id);
+
+    for (const area of realAreas) {
+      if (!existingAreaIds.includes(area.id)) {
+        await db.insert(restaurantAreas).values(area).onConflictDoNothing();
+      } else {
+        await db.update(restaurantAreas).set({ name: area.name, areaType: area.areaType, capacity: area.capacity, hasTables: area.hasTables }).where(eq(restaurantAreas.id, area.id));
+      }
+    }
+
+    for (const extraId of existingAreaIds.filter(id => !realAreaIds.includes(id))) {
+      try {
+        await db.delete(restaurantTables).where(eq(restaurantTables.areaId, extraId));
+        await db.delete(restaurantAreas).where(eq(restaurantAreas.id, extraId));
+      } catch (e) {}
+    }
+
+    const existingTables = await db.select({ id: restaurantTables.id }).from(restaurantTables);
+    const existingTableIds = existingTables.map(t => t.id);
+    const realTables: any[] = [];
+    for (let i = 1; i <= 18; i++) {
+      realTables.push({ id: `t${i}`, tableNumber: `${i}`, areaId: "area1", capacity: 4, shape: "square" as const, status: "available" as const });
+    }
+    for (let i = 19; i <= 32; i++) {
+      realTables.push({ id: `t${i}`, tableNumber: `${i}`, areaId: "area2", capacity: 4, shape: "round" as const, status: "available" as const });
+    }
+
+    const missingTables = realTables.filter(t => !existingTableIds.includes(t.id));
+    if (missingTables.length > 0) {
+      await db.insert(restaurantTables).values(missingTables).onConflictDoNothing();
+      console.log(`Inserted ${missingTables.length} missing tables`);
+    }
+
+    const realTableIds = realTables.map(t => t.id);
+    for (const extraId of existingTableIds.filter(id => !realTableIds.includes(id))) {
+      try {
+        await db.delete(restaurantTables).where(eq(restaurantTables.id, extraId));
+      } catch (e) {}
+    }
+
+    const realEventRooms = [
+      { id: "er1", name: "Salón Mitre", capacity: 100, status: "available" as const, description: "Salón principal para eventos grandes", isActive: "true" as const },
+      { id: "er2", name: "Salón Rivadavia", capacity: 60, status: "available" as const, description: "Salón intermedio para eventos medianos", isActive: "true" as const },
+      { id: "er3", name: "Salón Mirador", capacity: 40, status: "available" as const, description: "Salón con vista panorámica", isActive: "true" as const },
+      { id: "er4", name: "Salón Rosedal", capacity: 30, status: "available" as const, description: "Salón íntimo para reuniones", isActive: "true" as const },
+    ];
+
+    const existingEventRooms = await db.select({ id: eventRooms.id }).from(eventRooms);
+    const existingEventRoomIds = existingEventRooms.map(e => e.id);
+    for (const er of realEventRooms) {
+      if (!existingEventRoomIds.includes(er.id)) {
+        await db.insert(eventRooms).values(er).onConflictDoNothing();
+      } else {
+        await db.update(eventRooms).set({ name: er.name, capacity: er.capacity, description: er.description }).where(eq(eventRooms.id, er.id));
+      }
+    }
+
+    for (const extraId of existingEventRoomIds.filter(id => !realEventRooms.map(e => e.id).includes(id))) {
+      try {
+        await db.delete(eventRooms).where(eq(eventRooms.id, extraId));
+      } catch (e) {}
+    }
+
+    await db.delete(spaAppointments);
+    await db.delete(spaCabins);
+    await db.insert(spaCabins).values([
+      { id: "cab1", name: "Agua", description: "Gabinete Agua", isActive: "true" },
+      { id: "cab2", name: "Fuego", description: "Gabinete Fuego", isActive: "true" },
+      { id: "cab3", name: "Aire", description: "Gabinete Aire", isActive: "true" },
+      { id: "cab4", name: "Tierra", description: "Gabinete Tierra", isActive: "true" },
+      { id: "cab5", name: "Hidromasaje", description: "Gabinete Hidromasaje", isActive: "true" },
+      { id: "cab6", name: "Sauna H", description: "Sauna Hombres", isActive: "true" },
+      { id: "cab7", name: "Sauna M", description: "Sauna Mujeres", isActive: "true" },
+    ]).onConflictDoNothing();
+
+    console.log("Real hotel data refreshed successfully!");
+  } catch (error) {
+    console.error("Error refreshing real data:", error);
+  }
 }

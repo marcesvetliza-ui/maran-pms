@@ -65,11 +65,16 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const { seedDatabase } = await import("./seed");
+  const { seedDatabase, refreshRealData } = await import("./seed");
   try {
     await seedDatabase();
   } catch (err) {
     console.error("Seed error:", err);
+  }
+  try {
+    await refreshRealData();
+  } catch (err) {
+    console.error("Refresh real data error:", err);
   }
 
   await registerRoutes(httpServer, app);
