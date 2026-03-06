@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import path from "path";
 import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import passport from "passport";
@@ -5295,6 +5296,15 @@ Only respond with the JSON object.`;
     } catch (error) {
       res.status(500).json({ error: "Error fetching cash summary" });
     }
+  });
+
+  app.get("/api/download/source-code", requireAuth, (req, res) => {
+    const zipPath = path.resolve("maran-suite-system.zip");
+    res.download(zipPath, "maran-suite-system.zip", (err) => {
+      if (err) {
+        res.status(404).json({ error: "Archivo no encontrado" });
+      }
+    });
   });
 
   app.post("/api/help/chat", requireAuth, async (req, res) => {
