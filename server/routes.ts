@@ -5298,13 +5298,16 @@ Only respond with the JSON object.`;
     }
   });
 
-  app.get("/api/download/source-code", requireAuth, (req, res) => {
-    const zipPath = path.resolve("maran-suite-system.zip");
-    res.download(zipPath, "maran-suite-system.zip", (err) => {
-      if (err) {
-        res.status(404).json({ error: "Archivo no encontrado" });
-      }
-    });
+  app.get("/api/download/source-code", requireAuth, async (req, res) => {
+    try {
+      const { execSync } = await import("child_process");
+      const zipPath = path.resolve("/tmp/maran-suite-system.zip");
+      execSync(`cd ${path.resolve(".")} && zip -r ${zipPath} client/src/ server/*.ts shared/ package.json tsconfig.json tailwind.config.ts vite.config.ts drizzle.config.ts replit.md -x "*/node_modules/*" "*/.git/*" "*/.cache/*" "*/dist/*" 2>/dev/null`, { timeout: 30000 });
+      res.download(zipPath, "maran-suite-system.zip");
+    } catch (err) {
+      console.error("Error generating zip:", err);
+      res.status(500).json({ error: "Error al generar el archivo" });
+    }
   });
 
   app.post("/api/help/chat", requireAuth, async (req, res) => {
