@@ -34,8 +34,11 @@ Preferred communication style: Simple, everyday language.
 - **Production**: Serves static files from built frontend assets.
 
 ### Data Layer
-- **ORM**: Drizzle ORM, configured for PostgreSQL.
-- **Schema**: Defined in `shared/schema.ts`, shared across client and server.
+- **ORM**: Drizzle ORM, configured for PostgreSQL via `node-postgres` (`pg`) driver.
+- **Database Connection**: `server/db.ts` creates a `pg.Pool` and wraps it with Drizzle.
+- **Storage Layer**: `server/db-storage.ts` implements `IStorage` interface using Drizzle queries against PostgreSQL. Exported from `server/storage.ts`.
+- **Seed Data**: `server/seed.ts` populates demo data on first startup (checks if room_types exist).
+- **Schema**: Defined in `shared/schema.ts`, shared across client and server. Date fields use `date()` type (returns strings), timestamp fields use `timestamp()` type (returns Date objects).
 - **Validation**: Zod schemas generated from Drizzle schemas using `drizzle-zod`.
 - **Migrations**: Managed with Drizzle Kit via `db:push`.
 
@@ -54,9 +57,12 @@ Preferred communication style: Simple, everyday language.
   - `hooks/`: Custom React hooks.
   - `lib/`: Utilities and query client.
 - `server/`: Express backend.
-  - `index.ts`: Server entry point.
+  - `index.ts`: Server entry point (runs seed on startup).
   - `routes.ts`: API route definitions.
-  - `storage.ts`: Data access layer.
+  - `storage.ts`: IStorage interface definition, MemStorage (legacy), exports DatabaseStorage instance.
+  - `db.ts`: PostgreSQL connection pool with Drizzle ORM.
+  - `db-storage.ts`: DatabaseStorage implementing IStorage with Drizzle queries.
+  - `seed.ts`: Demo data seeding (runs once if database is empty).
   - `vite.ts`: Vite development middleware setup.
 - `shared/`: Shared code, including Drizzle schema and TypeScript types.
 

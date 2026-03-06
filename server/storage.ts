@@ -912,16 +912,16 @@ export class MemStorage implements IStorage {
     rooms.forEach((r) => this.rooms.set(r.id, r));
 
     // Create companies
-    const seedDate = new Date().toISOString().split("T")[0];
+    const seedTimestamp = new Date();
     const companies: Company[] = [
-      { id: "comp1", razonSocial: "TechCorp Argentina S.A.", nombreFantasia: "TechCorp", direccion: "Av. del Libertador 1000", pais: "Argentina", codigoPostal: "1001", localidad: "CABA", provincia: "Buenos Aires", telefono: "+54 11 4000-1234", email: "reservas@techcorp.com.ar", cuilCuit: "30-71234567-8", numeroFiscal: "30714567", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Pablo Mendez", contactEmail: "pablo.mendez@techcorp.com.ar", contactPhone: "+54 11 4000-1235", creditLimit: "50000.00", paymentTermDays: 30, notes: "Cliente corporativo frecuente", isActive: "true", createdAt: seedDate },
-      { id: "comp2", razonSocial: "Consultoría Global S.R.L.", nombreFantasia: "ConsultGlobal", direccion: "Callao 500", pais: "Argentina", codigoPostal: "1002", localidad: "CABA", provincia: "Buenos Aires", telefono: "+54 11 5000-5678", email: "viajes@consultglobal.com", cuilCuit: "30-70987654-3", numeroFiscal: "30709876", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Lucia Torres", contactEmail: "lucia.t@consultglobal.com", contactPhone: "+54 11 5000-5679", creditLimit: "25000.00", paymentTermDays: 15, notes: null, isActive: "true", createdAt: seedDate },
-      { id: "comp3", razonSocial: "Exportadora del Sur S.A.", nombreFantasia: "ExportSur", direccion: "Bv. Oroño 2000", pais: "Argentina", codigoPostal: "2000", localidad: "Rosario", provincia: "Santa Fe", telefono: "+54 341 456-7890", email: "admin@exportsur.com.ar", cuilCuit: "30-65432198-7", numeroFiscal: "30654321", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Martin Gomez", contactEmail: "martin@exportsur.com.ar", contactPhone: "+54 341 456-7891", creditLimit: "30000.00", paymentTermDays: 30, notes: "Empresa de Rosario", isActive: "true", createdAt: seedDate },
+      { id: "comp1", razonSocial: "TechCorp Argentina S.A.", nombreFantasia: "TechCorp", direccion: "Av. del Libertador 1000", pais: "Argentina", codigoPostal: "1001", localidad: "CABA", provincia: "Buenos Aires", telefono: "+54 11 4000-1234", email: "reservas@techcorp.com.ar", cuilCuit: "30-71234567-8", numeroFiscal: "30714567", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Pablo Mendez", contactEmail: "pablo.mendez@techcorp.com.ar", contactPhone: "+54 11 4000-1235", creditLimit: "50000.00", paymentTermDays: 30, notes: "Cliente corporativo frecuente", isActive: "true", createdAt: seedTimestamp },
+      { id: "comp2", razonSocial: "Consultoría Global S.R.L.", nombreFantasia: "ConsultGlobal", direccion: "Callao 500", pais: "Argentina", codigoPostal: "1002", localidad: "CABA", provincia: "Buenos Aires", telefono: "+54 11 5000-5678", email: "viajes@consultglobal.com", cuilCuit: "30-70987654-3", numeroFiscal: "30709876", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Lucia Torres", contactEmail: "lucia.t@consultglobal.com", contactPhone: "+54 11 5000-5679", creditLimit: "25000.00", paymentTermDays: 15, notes: null, isActive: "true", createdAt: seedTimestamp },
+      { id: "comp3", razonSocial: "Exportadora del Sur S.A.", nombreFantasia: "ExportSur", direccion: "Bv. Oroño 2000", pais: "Argentina", codigoPostal: "2000", localidad: "Rosario", provincia: "Santa Fe", telefono: "+54 341 456-7890", email: "admin@exportsur.com.ar", cuilCuit: "30-65432198-7", numeroFiscal: "30654321", condicionIva: "responsable_inscripto", inscripcionNacional: "SI", inscripcionProvincial: "SI", contactName: "Martin Gomez", contactEmail: "martin@exportsur.com.ar", contactPhone: "+54 341 456-7891", creditLimit: "30000.00", paymentTermDays: 30, notes: "Empresa de Rosario", isActive: "true", createdAt: seedTimestamp },
     ];
     companies.forEach((c) => this.companies.set(c.id, c));
 
     // Create guests
-    const guestSeedDate = new Date().toISOString().split("T")[0];
+    const guestSeedDate = new Date();
     const guests: Guest[] = [
       { id: "g1", codigo: "H-2025-0001", firstName: "Carlos", lastName: "García", email: "carlos.garcia@email.com", phone: "+54 11 4567-8901", documentType: "dni", documentNumber: "30456789", nationality: "Argentina", direccion: "Av. Corrientes 1234", localidad: "CABA", codigoPostal: "1043", fechaNacimiento: "1985-03-15", sexo: "masculino", segment: "LEISURE", cuilCuit: "20-30456789-3", companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: "AB 123 CD", vehiculoMarca: "Toyota", vehiculoModelo: "Corolla", vehiculoColor: "Blanco" },
       { id: "g2", codigo: "H-2025-0002", firstName: "María", lastName: "López", email: "maria.lopez@email.com", phone: "+54 11 5678-9012", documentType: "dni", documentNumber: "28765432", nationality: "Argentina", direccion: "Calle Florida 567", localidad: "CABA", codigoPostal: "1005", fechaNacimiento: "1990-07-22", sexo: "femenino", segment: "LEISURE", cuilCuit: "27-28765432-4", companyId: null, fechaAlta: guestSeedDate, vehiculoPatente: null, vehiculoMarca: null, vehiculoModelo: null, vehiculoColor: null },
@@ -945,14 +945,14 @@ export class MemStorage implements IStorage {
     const in10Days = new Date(Date.now() + 10 * 86400000).toISOString().split("T")[0];
     
     const reservations: Reservation[] = [
-      { id: "res1", reservationCode: "RES-1001", guestId: "g1", companyId: null, roomTypeId: "rt2", roomId: "r201", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "120.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res2", reservationCode: "RES-1002", guestId: "g2", companyId: null, roomTypeId: "rt3", roomId: "r305", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "180.00", discountType: "percent", discountValue: "10", finalRatePerNight: "162.00", totalRoomAmount: "1134.00", status: "checked_in", source: "web", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res3", reservationCode: "RES-1003", guestId: "g3", companyId: null, roomTypeId: "rt3", roomId: "r505", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "180.00", discountType: "none", discountValue: "0", finalRatePerNight: "180.00", totalRoomAmount: "540.00", status: "checked_in", source: "booking", otaChannelId: null, externalReservationId: "BK-123456", numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res4", reservationCode: "RES-1004", guestId: "g4", companyId: null, roomTypeId: "rt2", roomId: "r401", ratePlanId: "rp2", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res5", reservationCode: "RES-1005", guestId: "g5", companyId: "comp1", roomTypeId: "rt1", roomId: "r302", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "75.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "65.00", totalRoomAmount: "65.00", status: "confirmed", source: "empresa", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res6", reservationCode: "RES-1006", guestId: "g6", companyId: null, roomTypeId: "rt1", roomId: "r202", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "85.00", discountType: "none", discountValue: "0", finalRatePerNight: "85.00", totalRoomAmount: "340.00", status: "tentative", source: "telefono", otaChannelId: null, externalReservationId: null, numberOfGuests: 1, notes: "Llegada tardia", createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res7", reservationCode: "RES-1007", guestId: "g7", companyId: null, roomTypeId: "rt2", roomId: "r307", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "600.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date().toISOString(), lastModifiedBy: null },
-      { id: "res8", reservationCode: "RES-1008", guestId: "g8", companyId: null, roomTypeId: "rt3", roomId: "r405", ratePlanId: "rp3", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "180.00", discountType: "none", discountValue: "0", finalRatePerNight: "180.00", totalRoomAmount: "1260.00", status: "pending", source: "expedia", otaChannelId: null, externalReservationId: "EX-789012", numberOfGuests: 2, notes: "Turista frances", createdAt: new Date().toISOString(), lastModifiedBy: null },
+      { id: "res1", reservationCode: "RES-1001", guestId: "g1", companyId: null, roomTypeId: "rt2", roomId: "r201", ratePlanId: "rp2", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "120.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date(), lastModifiedBy: null },
+      { id: "res2", reservationCode: "RES-1002", guestId: "g2", companyId: null, roomTypeId: "rt3", roomId: "r305", ratePlanId: "rp3", checkInDate: today, checkOutDate: nextWeek, nights: 7, baseRatePerNight: "180.00", discountType: "percent", discountValue: "10", finalRatePerNight: "162.00", totalRoomAmount: "1134.00", status: "checked_in", source: "web", otaChannelId: null, externalReservationId: null, numberOfGuests: 3, notes: "VIP - Aniversario", createdAt: new Date(), lastModifiedBy: null },
+      { id: "res3", reservationCode: "RES-1003", guestId: "g3", companyId: null, roomTypeId: "rt3", roomId: "r505", ratePlanId: "rp3", checkInDate: today, checkOutDate: in3Days, nights: 3, baseRatePerNight: "180.00", discountType: "none", discountValue: "0", finalRatePerNight: "180.00", totalRoomAmount: "540.00", status: "checked_in", source: "booking", otaChannelId: null, externalReservationId: "BK-123456", numberOfGuests: 2, notes: null, createdAt: new Date(), lastModifiedBy: null },
+      { id: "res4", reservationCode: "RES-1004", guestId: "g4", companyId: null, roomTypeId: "rt2", roomId: "r401", ratePlanId: "rp2", checkInDate: today, checkOutDate: dayAfter, nights: 2, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "240.00", status: "checked_in", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date(), lastModifiedBy: null },
+      { id: "res5", reservationCode: "RES-1005", guestId: "g5", companyId: "comp1", roomTypeId: "rt1", roomId: "r302", ratePlanId: "rp7", checkInDate: today, checkOutDate: tomorrow, nights: 1, baseRatePerNight: "75.00", discountType: "fixed", discountValue: "10", finalRatePerNight: "65.00", totalRoomAmount: "65.00", status: "confirmed", source: "empresa", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date(), lastModifiedBy: null },
+      { id: "res6", reservationCode: "RES-1006", guestId: "g6", companyId: null, roomTypeId: "rt1", roomId: "r202", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "85.00", discountType: "none", discountValue: "0", finalRatePerNight: "85.00", totalRoomAmount: "340.00", status: "tentative", source: "telefono", otaChannelId: null, externalReservationId: null, numberOfGuests: 1, notes: "Llegada tardia", createdAt: new Date(), lastModifiedBy: null },
+      { id: "res7", reservationCode: "RES-1007", guestId: "g7", companyId: null, roomTypeId: "rt2", roomId: "r307", ratePlanId: "rp2", checkInDate: dayAfter, checkOutDate: nextWeek, nights: 5, baseRatePerNight: "120.00", discountType: "none", discountValue: "0", finalRatePerNight: "120.00", totalRoomAmount: "600.00", status: "confirmed", source: "directo", otaChannelId: null, externalReservationId: null, numberOfGuests: 2, notes: null, createdAt: new Date(), lastModifiedBy: null },
+      { id: "res8", reservationCode: "RES-1008", guestId: "g8", companyId: null, roomTypeId: "rt3", roomId: "r405", ratePlanId: "rp3", checkInDate: in3Days, checkOutDate: in10Days, nights: 7, baseRatePerNight: "180.00", discountType: "none", discountValue: "0", finalRatePerNight: "180.00", totalRoomAmount: "1260.00", status: "pending", source: "expedia", otaChannelId: null, externalReservationId: "EX-789012", numberOfGuests: 2, notes: "Turista frances", createdAt: new Date(), lastModifiedBy: null },
     ];
     reservations.forEach((r) => this.reservations.set(r.id, r));
     
@@ -1185,7 +1185,7 @@ export class MemStorage implements IStorage {
     maintenanceStaffData.forEach((s) => this.maintenanceStaff.set(s.id, s));
 
     // System Users (Usuarios del Sistema)
-    const now = new Date().toISOString();
+    const now = new Date();
     const systemUsersData: SystemUser[] = [
       { id: "su1", username: "admin", email: "admin@maransuites.com", fullName: "Administrador Sistema", role: "admin" as SystemUserRole, department: "Sistemas", phone: "+54 343 400-0001", isActive: "true", lastLogin: now, createdAt: now },
       { id: "su2", username: "gerencia", email: "gerencia@maransuites.com", fullName: "Gerente General", role: "manager" as SystemUserRole, department: "Gerencia", phone: "+54 343 400-0002", isActive: "true", lastLogin: null, createdAt: now },
@@ -1482,7 +1482,7 @@ export class MemStorage implements IStorage {
       paymentTermDays: insertCompany.paymentTermDays ?? 30,
       notes: insertCompany.notes ?? null,
       isActive: insertCompany.isActive ?? "true",
-      createdAt: new Date().toISOString().split("T")[0],
+      createdAt: new Date().split("T")[0],
     };
     this.companies.set(id, company);
     return company;
@@ -1553,7 +1553,7 @@ export class MemStorage implements IStorage {
       segment: (insertGuest.segment ?? "LEISURE") as "LEISURE" | "CORP" | "SPORT" | "CONGRESS" | "OTHER",
       cuilCuit: insertGuest.cuilCuit ?? null,
       companyId: insertGuest.companyId ?? null,
-      fechaAlta: new Date().toISOString().split("T")[0],
+      fechaAlta: new Date(),
       vehiculoPatente: insertGuest.vehiculoPatente ?? null,
       vehiculoMarca: insertGuest.vehiculoMarca ?? null,
       vehiculoModelo: insertGuest.vehiculoModelo ?? null,
@@ -1709,7 +1709,7 @@ export class MemStorage implements IStorage {
       externalReservationId: insertReservation.externalReservationId ?? null,
       numberOfGuests: insertReservation.numberOfGuests ?? 1,
       notes: insertReservation.notes ?? null,
-      createdAt: insertReservation.createdAt || new Date().toISOString(),
+      createdAt: insertReservation.createdAt ? new Date(insertReservation.createdAt as string) : new Date(),
       lastModifiedBy: insertReservation.lastModifiedBy ?? null,
     };
     this.reservations.set(id, reservation);
@@ -2206,7 +2206,7 @@ export class MemStorage implements IStorage {
       externalReservationId: log.externalReservationId,
       numberOfGuests: 1,
       notes: `Reserva importada de ${channel.name}`,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
       lastModifiedBy: null,
     });
 
@@ -2214,7 +2214,7 @@ export class MemStorage implements IStorage {
     await this.updateOTAReservationLog(logId, {
       status: "synced",
       internalReservationId: reservation.id,
-      syncedAt: new Date().toISOString(),
+      syncedAt: new Date(),
     });
 
     return reservation;
@@ -2427,7 +2427,7 @@ export class MemStorage implements IStorage {
       externalReservationId: null,
       numberOfGuests: 1,
       notes: `Grupo: ${group.name}`,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
       lastModifiedBy: null,
     });
 
@@ -2678,7 +2678,7 @@ export class MemStorage implements IStorage {
       status: "pending",
       priority: "high",
       scheduledDate: today,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
     });
   }
 
@@ -3202,7 +3202,7 @@ export class MemStorage implements IStorage {
       receiptType: split.receiptType ?? null,
       isPaid: split.isPaid ?? "false",
       paidAt: split.paidAt ?? null,
-      createdAt: split.createdAt ?? new Date().toISOString(),
+      createdAt: split.createdAt ? new Date(split.createdAt as string) : new Date(),
     };
     this.orderSplitsMap.set(id, newSplit);
     return newSplit;
@@ -3677,7 +3677,7 @@ export class MemStorage implements IStorage {
       total: total.toFixed(2),
       totalPaid: totalPaid.toFixed(2),
       receiptType: receiptType ?? null,
-      closedAt: new Date().toISOString(),
+      closedAt: new Date(),
       chargedTo,
     };
     this.spaAccounts.set(id, updated);
@@ -4091,8 +4091,8 @@ export class MemStorage implements IStorage {
       isAdvance: payment.isAdvance ?? "false",
       reservationId: payment.reservationId ?? null,
       notes: payment.notes ?? null,
-      paidAt: payment.paidAt ?? new Date().toISOString(),
-      createdAt: payment.createdAt ?? new Date().toISOString(),
+      paidAt: payment.paidAt ? new Date(payment.paidAt as string) : new Date(),
+      createdAt: payment.createdAt ? new Date(payment.createdAt as string) : new Date(),
     };
     this.eventPayments.set(id, newPayment);
     return newPayment;
@@ -4133,7 +4133,7 @@ export class MemStorage implements IStorage {
       reservationId: table.reservationId ?? null,
       receiptType: table.receiptType ?? null,
       closedAt: table.closedAt ?? null,
-      createdAt: table.createdAt ?? new Date().toISOString(),
+      createdAt: table.createdAt ? new Date(table.createdAt as string) : new Date(),
     };
     this.eventTablesMap.set(id, newTable);
     return newTable;
@@ -4169,7 +4169,7 @@ export class MemStorage implements IStorage {
       quantity: charge.quantity ?? 1,
       unitPrice: charge.unitPrice,
       total: charge.total,
-      createdAt: charge.createdAt ?? new Date().toISOString(),
+      createdAt: charge.createdAt ? new Date(charge.createdAt as string) : new Date(),
     };
     this.eventTableCharges.set(id, newCharge);
     return newCharge;
@@ -4194,8 +4194,8 @@ export class MemStorage implements IStorage {
       isAdvance: payment.isAdvance ?? "false",
       reservationId: payment.reservationId ?? null,
       receiptType: payment.receiptType ?? null,
-      paidAt: payment.paidAt ?? new Date().toISOString(),
-      createdAt: payment.createdAt ?? new Date().toISOString(),
+      paidAt: payment.paidAt ? new Date(payment.paidAt as string) : new Date(),
+      createdAt: payment.createdAt ? new Date(payment.createdAt as string) : new Date(),
     };
     this.eventTablePayments.set(id, newPayment);
     return newPayment;
@@ -4866,4 +4866,6 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+import { DatabaseStorage } from "./db-storage";
+
+export const storage: IStorage = new DatabaseStorage();

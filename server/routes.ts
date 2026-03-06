@@ -518,7 +518,7 @@ export async function registerRoutes(
       const data = {
         ...req.body,
         reservationCode: req.body.reservationCode || storage.generateReservationCode(),
-        createdAt: req.body.createdAt || new Date().toISOString(),
+        createdAt: req.body.createdAt ? new Date(req.body.createdAt) : new Date(),
       };
       const reservation = await storage.createReservation(data);
 
@@ -676,7 +676,7 @@ export async function registerRoutes(
         externalReservationId: null,
         numberOfGuests: original.numberOfGuests,
         notes: `Duplicada de ${original.reservationCode}`,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
         lastModifiedBy: null,
       });
       
@@ -870,7 +870,7 @@ export async function registerRoutes(
         roomNumber: reservation.room?.roomNumber || "",
         checkInDate: reservation.checkInDate,
         checkOutDate: reservation.checkOutDate,
-        cancellationDate: new Date().toISOString(),
+        cancellationDate: new Date(),
         cancelledBy: req.body.cancelledBy || null,
         reason: req.body.reason || null,
       });
@@ -1111,7 +1111,7 @@ export async function registerRoutes(
     try {
       const channel = await storage.createOTAChannel({
         ...req.body,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(channel);
     } catch (error) {
@@ -1170,7 +1170,7 @@ export async function registerRoutes(
     try {
       const log = await storage.createOTAReservationLog({
         ...req.body,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(log);
     } catch (error) {
@@ -1221,7 +1221,7 @@ export async function registerRoutes(
         status: "pending",
         rawData: null,
         syncedAt: null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
 
       res.status(201).json(log);
@@ -1273,7 +1273,7 @@ export async function registerRoutes(
         status: status || "tentative",
         releaseDate: releaseDate || null,
         notes: notes || null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
         createdBy: null,
       });
       res.status(201).json(group);
@@ -1794,7 +1794,7 @@ Only respond with the JSON object, no additional text.`;
         categories: analysis.categories,
         keyPhrases: analysis.keyPhrases,
         improvementSuggestions: analysis.improvementSuggestions,
-        analyzedAt: new Date().toISOString(),
+        analyzedAt: new Date(),
       });
 
       res.json(updatedReview);
@@ -1851,7 +1851,7 @@ Only respond with the JSON object.`;
             categories: analysis.categories,
             keyPhrases: analysis.keyPhrases,
             improvementSuggestions: analysis.improvementSuggestions,
-            analyzedAt: new Date().toISOString(),
+            analyzedAt: new Date(),
           });
           results.analyzed++;
         } catch {
@@ -1892,7 +1892,7 @@ Only respond with the JSON object.`;
     try {
       const task = await storage.createHousekeepingTask({
         ...req.body,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(task);
     } catch (error) {
@@ -1943,7 +1943,7 @@ Only respond with the JSON object.`;
     try {
       const task = await storage.updateHousekeepingTask(req.params.id, {
         status: "in_progress",
-        startedAt: new Date().toISOString(),
+        startedAt: new Date(),
       });
       if (!task) {
         return res.status(404).json({ error: "Task not found" });
@@ -1961,7 +1961,7 @@ Only respond with the JSON object.`;
     try {
       const task = await storage.updateHousekeepingTask(req.params.id, {
         status: "completed",
-        completedAt: new Date().toISOString(),
+        completedAt: new Date(),
       });
       if (!task) {
         return res.status(404).json({ error: "Task not found" });
@@ -1981,7 +1981,7 @@ Only respond with the JSON object.`;
       const task = await storage.updateHousekeepingTask(req.params.id, {
         status: "inspected",
         inspectedBy,
-        inspectedAt: new Date().toISOString(),
+        inspectedAt: new Date(),
       });
       if (!task) {
         return res.status(404).json({ error: "Task not found" });
@@ -2189,7 +2189,7 @@ Only respond with the JSON object.`;
       const order = await storage.createRestaurantOrder({
         ...req.body,
         orderNumber,
-        openedAt: new Date().toISOString(),
+        openedAt: new Date(),
       });
       if (order.tableId) {
         await storage.updateRestaurantTable(order.tableId, { status: "occupied" });
@@ -2221,7 +2221,7 @@ Only respond with the JSON object.`;
       // Update order as closed
       const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
         status: "closed",
-        closedAt: new Date().toISOString(),
+        closedAt: new Date(),
         chargedToRoom: chargeToRoom ? "true" : "false",
         roomNumber: roomNumber || null,
         receiptType: receiptType || null,
@@ -2235,7 +2235,7 @@ Only respond with the JSON object.`;
           description: `Restaurante - Pedido ${order.orderNumber}`,
           amount: order.total || "0",
           category: "restaurant",
-          date: new Date().toISOString(),
+          date: new Date().toISOString().split("T")[0],
         });
       }
       
@@ -2370,7 +2370,7 @@ Only respond with the JSON object.`;
     try {
       const reservation = await storage.createTableReservation({
         ...req.body,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(reservation);
     } catch (error) {
@@ -2459,7 +2459,7 @@ Only respond with the JSON object.`;
           orderId: req.params.id,
           splitNumber: i,
           amount,
-          createdAt: new Date().toISOString(),
+          createdAt: new Date(),
         });
         splits.push(split);
       }
@@ -2488,7 +2488,7 @@ Only respond with the JSON object.`;
         method,
         receiptType: receiptType || null,
         isPaid: "true",
-        paidAt: new Date().toISOString(),
+        paidAt: new Date(),
       });
       if (!split) return res.status(404).json({ error: "Split not found" });
 
@@ -2499,7 +2499,7 @@ Only respond with the JSON object.`;
         const order = await storage.getRestaurantOrder(req.params.id);
         await storage.updateRestaurantOrder(req.params.id, {
           status: "closed",
-          closedAt: new Date().toISOString(),
+          closedAt: new Date(),
           paymentMethod: method,
           receiptType: receiptType || null,
         });
@@ -2797,7 +2797,7 @@ Only respond with the JSON object.`;
         previousStock,
         newStock,
         notes,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       
       res.status(201).json(movement);
@@ -3057,7 +3057,7 @@ Only respond with the JSON object.`;
         endTime,
         status: status || "pending",
         notes: notes || null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
 
       const treatment = await storage.getSpaTreatment(treatmentId);
@@ -3076,7 +3076,7 @@ Only respond with the JSON object.`;
         subtotal: treatmentPrice,
         total: treatmentPrice,
         notes: null,
-        openedAt: new Date().toISOString(),
+        openedAt: new Date(),
         closedAt: null,
         closedBy: null,
         chargedTo: null,
@@ -3090,7 +3090,7 @@ Only respond with the JSON object.`;
         subtotal: treatmentPrice,
         itemType: "treatment",
         notes: null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
 
       res.status(201).json(appointment);
@@ -3194,7 +3194,7 @@ Only respond with the JSON object.`;
         subtotal: "0",
         total: "0",
         notes: notes || null,
-        openedAt: new Date().toISOString(),
+        openedAt: new Date(),
         closedAt: null,
         closedBy: null,
         chargedTo: null,
@@ -3269,7 +3269,7 @@ Only respond with the JSON object.`;
         appointmentId: appointmentId || null,
         reservationId: reservationId || null,
         notes: notes || null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
 
       if (method === "room_charge" && reservationId) {
@@ -3328,7 +3328,7 @@ Only respond with the JSON object.`;
         subtotal,
         itemType: itemType || "treatment",
         notes: notes || null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(item);
     } catch (error) {
@@ -3501,7 +3501,7 @@ Only respond with the JSON object.`;
       const event = await storage.createEvent({
         ...req.body,
         eventCode,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(event);
     } catch (error) {
@@ -3586,7 +3586,7 @@ Only respond with the JSON object.`;
         totalAmount: total,
         date: new Date().toISOString().split("T")[0],
         notes: notes || null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(charge);
     } catch (error) {
@@ -3644,8 +3644,8 @@ Only respond with the JSON object.`;
         isAdvance: isAdvance ? "true" : "false",
         reservationId: reservationId || null,
         notes: notes || null,
-        paidAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
+        paidAt: new Date(),
+        createdAt: new Date(),
       });
       const refreshedEvent = await storage.getEvent(req.params.eventId);
       if (refreshedEvent) {
@@ -3734,7 +3734,7 @@ Only respond with the JSON object.`;
       await storage.updateEvent(req.params.eventId, {
         status: "invoiced",
         receiptType,
-        closedAt: new Date().toISOString(),
+        closedAt: new Date(),
         totalAmount: totalCharges.toFixed(2),
         totalPaid: totalPayments.toFixed(2),
       } as any);
@@ -3768,7 +3768,7 @@ Only respond with the JSON object.`;
         label: label || null,
         seats: seats || null,
         reservationId: reservationId || null,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(table);
     } catch (error) {
@@ -3819,7 +3819,7 @@ Only respond with the JSON object.`;
         quantity: qty,
         unitPrice,
         total,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(charge);
     } catch (error) {
@@ -3856,8 +3856,8 @@ Only respond with the JSON object.`;
         method,
         isAdvance: isAdvance ? "true" : "false",
         reservationId: reservationId || null,
-        paidAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
+        paidAt: new Date(),
+        createdAt: new Date(),
       });
       res.status(201).json(payment);
     } catch (error) {
@@ -3920,7 +3920,7 @@ Only respond with the JSON object.`;
       await storage.updateEventTable(req.params.tableId, {
         status: "invoiced",
         receiptType,
-        closedAt: new Date().toISOString(),
+        closedAt: new Date(),
       });
 
       const updated = await storage.getEventTable(req.params.tableId);
@@ -4046,7 +4046,7 @@ Only respond with the JSON object.`;
       const order = await storage.createWorkOrder({
         ...req.body,
         orderCode,
-        reportedAt: new Date().toISOString(),
+        reportedAt: new Date(),
       });
       res.status(201).json(order);
     } catch (error) {
@@ -4058,7 +4058,7 @@ Only respond with the JSON object.`;
     try {
       const updates = { ...req.body };
       if (updates.status === "completed" && !updates.completedAt) {
-        updates.completedAt = new Date().toISOString();
+        updates.completedAt = new Date();
       }
       const order = await storage.updateWorkOrder(req.params.id, updates);
       if (!order) return res.status(404).json({ error: "Work order not found" });
@@ -4148,7 +4148,7 @@ Only respond with the JSON object.`;
     try {
       const user = await storage.createSystemUser({
         ...req.body,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(user);
     } catch (error) {
@@ -4205,7 +4205,7 @@ Only respond with the JSON object.`;
     try {
       const setting = await storage.upsertSystemSetting({
         ...req.body,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       });
       res.json(setting);
     } catch (error) {
@@ -4247,7 +4247,7 @@ Only respond with the JSON object.`;
     try {
       const log = await storage.createAuditLog({
         ...req.body,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(),
       });
       res.status(201).json(log);
     } catch (error) {
@@ -4304,7 +4304,7 @@ Only respond with the JSON object.`;
         status: status || "active",
         includedServices,
         terms,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       res.status(201).json(pkg);
     } catch (error) {
@@ -4352,7 +4352,7 @@ Only respond with the JSON object.`;
         status: "inactive",
         includedServices: original.includedServices,
         terms: original.terms,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
       });
       if (original.items && original.items.length > 0) {
         for (const item of original.items) {

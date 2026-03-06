@@ -79,7 +79,7 @@ export const companies = pgTable("companies", {
   paymentTermDays: integer("payment_term_days").default(30),
   notes: text("notes"),
   isActive: text("is_active").default("true"),
-  createdAt: text("created_at"),
+  createdAt: timestamp("created_at"),
 });
 
 export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
@@ -103,12 +103,12 @@ export const guests = pgTable("guests", {
   direccion: text("direccion"),
   localidad: text("localidad"),
   codigoPostal: text("codigo_postal"),
-  fechaNacimiento: text("fecha_nacimiento"),
+  fechaNacimiento: date("fecha_nacimiento"),
   sexo: text("sexo").$type<GuestSex>().default("no_especifica"),
   segment: text("segment").$type<GuestSegment>().default("LEISURE"),
   cuilCuit: text("cuil_cuit"),
   companyId: varchar("company_id"),
-  fechaAlta: text("fecha_alta"),
+  fechaAlta: timestamp("fecha_alta"),
   vehiculoPatente: text("vehiculo_patente"),
   vehiculoMarca: text("vehiculo_marca"),
   vehiculoModelo: text("vehiculo_modelo"),
@@ -147,8 +147,8 @@ export const reservations = pgTable("reservations", {
   roomTypeId: varchar("room_type_id").notNull(),
   roomId: varchar("room_id").notNull(),
   ratePlanId: varchar("rate_plan_id"),
-  checkInDate: text("check_in_date").notNull(),
-  checkOutDate: text("check_out_date").notNull(),
+  checkInDate: date("check_in_date").notNull(),
+  checkOutDate: date("check_out_date").notNull(),
   nights: integer("nights").notNull().default(1),
   baseRatePerNight: decimal("base_rate_per_night", { precision: 10, scale: 2 }),
   discountType: text("discount_type").$type<DiscountType>().notNull().default("none"),
@@ -169,7 +169,7 @@ export const reservations = pgTable("reservations", {
   lateCheckOutTime: text("late_check_out_time"),
   lateCheckOutCharge: numeric("late_check_out_charge", { precision: 10, scale: 2 }),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
   lastModifiedBy: varchar("last_modified_by"),
 });
 
@@ -185,7 +185,7 @@ export const charges = pgTable("charges", {
   reservationId: varchar("reservation_id").notNull(),
   description: text("description").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  date: text("date").notNull(),
+  date: date("date").notNull(),
   category: text("category").$type<ChargeCategory>().notNull().default("otros"),
   createdBy: varchar("created_by"),
 });
@@ -203,7 +203,7 @@ export const payments = pgTable("payments", {
   reservationId: varchar("reservation_id").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   method: text("method").$type<PaymentMethod>().notNull(),
-  date: text("date").notNull(),
+  date: date("date").notNull(),
   reference: text("reference"),
   receivedBy: varchar("received_by"),
   notes: text("notes"),
@@ -219,9 +219,9 @@ export const cancelledReservationLogs = pgTable("cancelled_reservation_logs", {
   reservationCode: text("reservation_code").notNull(),
   guestName: text("guest_name").notNull(),
   roomNumber: text("room_number").notNull(),
-  checkInDate: text("check_in_date").notNull(),
-  checkOutDate: text("check_out_date").notNull(),
-  cancellationDate: text("cancellation_date").notNull(),
+  checkInDate: date("check_in_date").notNull(),
+  checkOutDate: date("check_out_date").notNull(),
+  cancellationDate: timestamp("cancellation_date").notNull(),
   cancelledBy: varchar("cancelled_by"),
   reason: text("reason"),
 });
@@ -243,12 +243,12 @@ export const housekeepingTasks = pgTable("housekeeping_tasks", {
   priority: text("priority").$type<HousekeepingPriority>().notNull().default("normal"),
   assignedTo: varchar("assigned_to"),
   notes: text("notes"),
-  scheduledDate: text("scheduled_date").notNull(),
-  startedAt: text("started_at"),
-  completedAt: text("completed_at"),
+  scheduledDate: date("scheduled_date").notNull(),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
   inspectedBy: varchar("inspected_by"),
-  inspectedAt: text("inspected_at"),
-  createdAt: text("created_at").notNull(),
+  inspectedAt: timestamp("inspected_at"),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertHousekeepingTaskSchema = createInsertSchema(housekeepingTasks).omit({ id: true });
@@ -324,8 +324,8 @@ export const otaChannels = pgTable("ota_channels", {
   hotelCode: text("hotel_code"),
   commissionPercent: decimal("commission_percent", { precision: 5, scale: 2 }).default("15.00"),
   syncEnabled: text("sync_enabled").notNull().default("false"),
-  lastSyncAt: text("last_sync_at"),
-  createdAt: text("created_at").notNull(),
+  lastSyncAt: timestamp("last_sync_at"),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertOTAChannelSchema = createInsertSchema(otaChannels).omit({ id: true });
@@ -341,16 +341,16 @@ export const otaReservationLogs = pgTable("ota_reservation_logs", {
   externalReservationId: text("external_reservation_id").notNull(),
   internalReservationId: varchar("internal_reservation_id"),
   guestName: text("guest_name").notNull(),
-  checkInDate: text("check_in_date").notNull(),
-  checkOutDate: text("check_out_date").notNull(),
+  checkInDate: date("check_in_date").notNull(),
+  checkOutDate: date("check_out_date").notNull(),
   roomTypeName: text("room_type_name"),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
   commission: decimal("commission", { precision: 10, scale: 2 }),
   netAmount: decimal("net_amount", { precision: 10, scale: 2 }),
   status: text("status").$type<OTASyncStatus>().notNull().default("pending"),
   rawData: text("raw_data"),
-  syncedAt: text("synced_at"),
-  createdAt: text("created_at").notNull(),
+  syncedAt: timestamp("synced_at"),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertOTAReservationLogSchema = createInsertSchema(otaReservationLogs).omit({ id: true });
@@ -379,13 +379,13 @@ export const groups = pgTable("groups", {
   contactName: text("contact_name"),
   contactPhone: text("contact_phone"),
   contactEmail: text("contact_email"),
-  eventDate: text("event_date"),
-  checkInDate: text("check_in_date").notNull(),
-  checkOutDate: text("check_out_date").notNull(),
+  eventDate: date("event_date"),
+  checkInDate: date("check_in_date").notNull(),
+  checkOutDate: date("check_out_date").notNull(),
   status: text("status").$type<GroupStatus>().notNull().default("tentative"),
-  releaseDate: text("release_date"),
+  releaseDate: date("release_date"),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
   createdBy: varchar("created_by"),
 });
 
@@ -402,8 +402,8 @@ export const groupRoomBlocks = pgTable("group_room_blocks", {
   ratePlanId: varchar("rate_plan_id"),
   agreedRate: decimal("agreed_rate", { precision: 12, scale: 2 }),
   // Block-specific dates (can differ from group master dates)
-  blockCheckInDate: text("block_check_in_date"),
-  blockCheckOutDate: text("block_check_out_date"),
+  blockCheckInDate: date("block_check_in_date"),
+  blockCheckOutDate: date("block_check_out_date"),
 });
 
 export const insertGroupRoomBlockSchema = createInsertSchema(groupRoomBlocks).omit({ id: true });
@@ -443,7 +443,7 @@ export const guestReviews = pgTable("guest_reviews", {
   reservationId: varchar("reservation_id"),
   guestId: varchar("guest_id").notNull(),
   roomId: varchar("room_id"),
-  reviewDate: text("review_date").notNull(),
+  reviewDate: date("review_date").notNull(),
   source: text("source").notNull().default("direct"),
   rating: integer("rating").notNull(),
   title: text("title"),
@@ -455,10 +455,10 @@ export const guestReviews = pgTable("guest_reviews", {
   categoryScores: text("category_scores"),
   keyPhrases: text("key_phrases").array(),
   improvementSuggestions: text("improvement_suggestions").array(),
-  analyzedAt: text("analyzed_at"),
+  analyzedAt: timestamp("analyzed_at"),
   isPublished: text("is_published").default("false"),
   staffResponse: text("staff_response"),
-  respondedAt: text("responded_at"),
+  respondedAt: timestamp("responded_at"),
   respondedBy: text("responded_by"),
 });
 
@@ -508,18 +508,18 @@ export const events = pgTable("events", {
   contactPhone: text("contact_phone"),
   contactEmail: text("contact_email"),
   companyId: varchar("company_id"),
-  startDate: text("start_date").notNull(),
-  endDate: text("end_date").notNull(),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
   startTime: text("start_time"),
   endTime: text("end_time"),
   attendees: integer("attendees").default(10),
   status: text("status").$type<EventStatus>().notNull().default("tentative"),
   notes: text("notes"),
   receiptType: text("receipt_type"),
-  closedAt: text("closed_at"),
+  closedAt: timestamp("closed_at"),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
   totalPaid: decimal("total_paid", { precision: 10, scale: 2 }),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertEventSchema = createInsertSchema(events).omit({ id: true });
@@ -548,9 +548,9 @@ export const eventCharges = pgTable("event_charges", {
   quantity: integer("quantity").notNull().default(1),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
-  date: text("date").notNull(),
+  date: date("date").notNull(),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertEventChargeSchema = createInsertSchema(eventCharges).omit({ id: true });
@@ -566,8 +566,8 @@ export const eventPayments = pgTable("event_payments", {
   isAdvance: text("is_advance").default("false"),
   reservationId: varchar("reservation_id"),
   notes: text("notes"),
-  paidAt: text("paid_at"),
-  createdAt: text("created_at"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at"),
 });
 
 export const insertEventPaymentSchema = createInsertSchema(eventPayments).omit({ id: true });
@@ -584,8 +584,8 @@ export const eventTables = pgTable("event_tables", {
   status: text("status").notNull().default("open"),
   reservationId: varchar("reservation_id"),
   receiptType: text("receipt_type"),
-  closedAt: text("closed_at"),
-  createdAt: text("created_at"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at"),
 });
 
 export const insertEventTableSchema = createInsertSchema(eventTables).omit({ id: true });
@@ -600,7 +600,7 @@ export const eventTableCharges = pgTable("event_table_charges", {
   quantity: integer("quantity").notNull().default(1),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
-  createdAt: text("created_at"),
+  createdAt: timestamp("created_at"),
 });
 
 export const insertEventTableChargeSchema = createInsertSchema(eventTableCharges).omit({ id: true });
@@ -616,8 +616,8 @@ export const eventTablePayments = pgTable("event_table_payments", {
   isAdvance: text("is_advance").default("false"),
   reservationId: varchar("reservation_id"),
   receiptType: text("receipt_type"),
-  paidAt: text("paid_at"),
-  createdAt: text("created_at"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at"),
 });
 
 export const insertEventTablePaymentSchema = createInsertSchema(eventTablePayments).omit({ id: true });
@@ -656,7 +656,7 @@ export type EventPlanningData = {
 export const conversations = pgTable("conversations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   title: text("title").notNull(),
-  createdAt: text("created_at"),
+  createdAt: timestamp("created_at"),
 });
 
 export const messages = pgTable("messages", {
@@ -664,7 +664,7 @@ export const messages = pgTable("messages", {
   conversationId: varchar("conversation_id").notNull(),
   role: text("role").notNull(),
   content: text("content").notNull(),
-  createdAt: text("created_at"),
+  createdAt: timestamp("created_at"),
 });
 
 // ==================== RESTAURANT MODULE ====================
@@ -721,11 +721,11 @@ export const tableReservations = pgTable("table_reservations", {
   guestPhone: text("guest_phone"),
   guestEmail: text("guest_email"),
   partySize: integer("party_size").notNull().default(2),
-  reservationDate: text("reservation_date").notNull(),
+  reservationDate: date("reservation_date").notNull(),
   reservationTime: text("reservation_time").notNull(),
   status: text("status").$type<TableReservationStatus>().notNull().default("pending"),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertTableReservationSchema = createInsertSchema(tableReservations).omit({ id: true });
@@ -795,8 +795,8 @@ export const restaurantOrders = pgTable("restaurant_orders", {
   tax: decimal("tax", { precision: 10, scale: 2 }).default("0"),
   total: decimal("total", { precision: 10, scale: 2 }).default("0"),
   notes: text("notes"),
-  openedAt: text("opened_at").notNull(),
-  closedAt: text("closed_at"),
+  openedAt: timestamp("opened_at").notNull(),
+  closedAt: timestamp("closed_at"),
   chargedToRoom: text("charged_to_room").default("false"),
   roomNumber: text("room_number"),
   receiptType: text("receipt_type").$type<ReceiptType>(),
@@ -820,7 +820,7 @@ export const orderItems = pgTable("order_items", {
   status: text("status").$type<OrderItemStatus>().notNull().default("pending"),
   course: integer("course").default(1),
   notes: text("notes"),
-  sentAt: text("sent_at"),
+  sentAt: timestamp("sent_at"),
 });
 
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
@@ -847,8 +847,8 @@ export const orderSplits = pgTable("order_splits", {
   method: text("method").$type<RestaurantPaymentMethod>(),
   receiptType: text("receipt_type").$type<ReceiptType>(),
   isPaid: text("is_paid").default("false"),
-  paidAt: text("paid_at"),
-  createdAt: text("created_at"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at"),
 });
 
 export const insertOrderSplitSchema = createInsertSchema(orderSplits).omit({ id: true });
@@ -976,7 +976,7 @@ export const stockMovements = pgTable("stock_movements", {
   unitCost: decimal("unit_cost", { precision: 10, scale: 2 }),
   reference: text("reference"),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
   createdBy: text("created_by"),
 });
 
@@ -1000,9 +1000,9 @@ export const purchaseOrders = pgTable("purchase_orders", {
   tax: decimal("tax", { precision: 12, scale: 2 }).default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).default("0"),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
-  expectedDate: text("expected_date"),
-  receivedAt: text("received_at"),
+  createdAt: timestamp("created_at").notNull(),
+  expectedDate: date("expected_date"),
+  receivedAt: timestamp("received_at"),
 });
 
 export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders).omit({ id: true });
@@ -1084,12 +1084,12 @@ export const spaAppointments = pgTable("spa_appointments", {
   guestPhone: text("guest_phone"),
   guestEmail: text("guest_email"),
   reservationId: varchar("reservation_id"),
-  appointmentDate: text("appointment_date").notNull(),
+  appointmentDate: date("appointment_date").notNull(),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
   status: text("status").$type<SpaAppointmentStatus>().notNull().default("pending"),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertSpaAppointmentSchema = createInsertSchema(spaAppointments).omit({ id: true });
@@ -1115,8 +1115,8 @@ export const spaAccounts = pgTable("spa_accounts", {
   totalPaid: decimal("total_paid", { precision: 10, scale: 2 }).default("0"),
   receiptType: text("receipt_type"),
   notes: text("notes"),
-  openedAt: text("opened_at").notNull(),
-  closedAt: text("closed_at"),
+  openedAt: timestamp("opened_at").notNull(),
+  closedAt: timestamp("closed_at"),
   closedBy: text("closed_by"),
   chargedTo: text("charged_to"),
 });
@@ -1135,7 +1135,7 @@ export const spaAccountItems = pgTable("spa_account_items", {
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
   itemType: text("item_type").notNull().default("treatment"),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertSpaAccountItemSchema = createInsertSchema(spaAccountItems).omit({ id: true });
@@ -1153,7 +1153,7 @@ export const spaPayments = pgTable("spa_payments", {
   appointmentId: varchar("appointment_id"),
   reservationId: varchar("reservation_id"),
   notes: text("notes"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertSpaPaymentSchema = createInsertSchema(spaPayments).omit({ id: true });
@@ -1200,9 +1200,9 @@ export const workOrders = pgTable("work_orders", {
   status: text("status").$type<WorkOrderStatus>().notNull().default("pending"),
   assignedToId: varchar("assigned_to_id"),
   reportedBy: text("reported_by"),
-  reportedAt: text("reported_at").notNull(),
-  scheduledDate: text("scheduled_date"),
-  completedAt: text("completed_at"),
+  reportedAt: timestamp("reported_at").notNull(),
+  scheduledDate: date("scheduled_date"),
+  completedAt: timestamp("completed_at"),
   completedBy: text("completed_by"),
   estimatedCost: decimal("estimated_cost", { precision: 10, scale: 2 }),
   actualCost: decimal("actual_cost", { precision: 10, scale: 2 }),
@@ -1233,8 +1233,8 @@ export const systemUsers = pgTable("system_users", {
   department: text("department"),
   phone: text("phone"),
   isActive: text("is_active").default("true"),
-  lastLogin: text("last_login"),
-  createdAt: text("created_at").notNull(),
+  lastLogin: timestamp("last_login"),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertSystemUserSchema = createInsertSchema(systemUsers).omit({ id: true });
@@ -1248,7 +1248,7 @@ export const systemSettings = pgTable("system_settings", {
   value: text("value").notNull(),
   category: text("category").notNull().default("general"),
   description: text("description"),
-  updatedAt: text("updated_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
   updatedBy: text("updated_by"),
 });
 
@@ -1270,7 +1270,7 @@ export const auditLogs = pgTable("audit_logs", {
   description: text("description").notNull(),
   details: text("details"),
   ipAddress: text("ip_address"),
-  timestamp: text("timestamp").notNull(),
+  timestamp: timestamp("timestamp").notNull(),
 });
 
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true });
@@ -1289,12 +1289,12 @@ export const packages = pgTable("packages", {
   nights: integer("nights").notNull().default(1),
   basePrice: decimal("base_price", { precision: 12, scale: 2 }).notNull(),
   discountPercent: decimal("discount_percent", { precision: 5, scale: 2 }),
-  validFrom: text("valid_from"),
-  validUntil: text("valid_until"),
+  validFrom: date("valid_from"),
+  validUntil: date("valid_until"),
   status: text("status").$type<PackageStatus>().notNull().default("active"),
   includedServices: text("included_services").array(),
   terms: text("terms"),
-  createdAt: text("created_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
 export const insertPackageSchema = createInsertSchema(packages).omit({ id: true });
