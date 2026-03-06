@@ -5296,6 +5296,26 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.post("/api/admin/init-cash-configs", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { sql } = await import("drizzle-orm");
+      const existing = await db.select().from(cashRegisterConfigs).limit(1);
+      if (existing.length > 0) {
+        return res.json({ success: true, message: "Cash configs ya existen" });
+      }
+      await db.insert(cashRegisterConfigs).values([
+        { id: "crc1", area: "reception", areaLabel: "Recepción", shiftsPerDay: 3, isActive: true },
+        { id: "crc2", area: "restaurant", areaLabel: "Restaurante", shiftsPerDay: 2, isActive: true },
+        { id: "crc3", area: "spa", areaLabel: "SPA", shiftsPerDay: 1, isActive: true },
+        { id: "crc4", area: "events", areaLabel: "Eventos", shiftsPerDay: 1, isActive: true },
+      ]);
+      res.json({ success: true, message: "Cash configs creadas correctamente" });
+    } catch (error: any) {
+      console.error("Error creating cash configs:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/admin/clean-data", requireRole(["admin"]), async (req, res) => {
     try {
       const { sql } = await import("drizzle-orm");
