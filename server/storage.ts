@@ -670,6 +670,15 @@ export interface IStorage {
   acknowledgeHospitalityAlert(id: string, acknowledgedBy: string): Promise<HospitalityAlert | undefined>;
   bulkCheckIn(groupId: string): Promise<{ processed: number; skipped: number; skippedRooms: string[] }>;
   bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }>;
+  getExecutiveStats(from: string, to: string): Promise<any>;
+  getReportOccupancy(from: string, to: string): Promise<any[]>;
+  getReportRevenueByRoomType(from: string, to: string): Promise<any[]>;
+  getReportByChannel(from: string, to: string): Promise<any[]>;
+  getReportReservations(from: string, to: string, status?: string): Promise<any[]>;
+  getReportPayments(from: string, to: string): Promise<any>;
+  getReportTopGuests(from: string, to: string, limit?: number): Promise<any[]>;
+  getReportHousekeeping(from: string, to: string): Promise<any>;
+  getReportRestaurant(from: string, to: string): Promise<any>;
 }
 
 export class MemStorage implements IStorage {
@@ -4874,4 +4883,13 @@ export class MemStorage implements IStorage {
   async bulkCheckOut(_groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }> {
     return { processed: 0, skipped: 0, pendingBalance: [] };
   }
+  async getExecutiveStats(_from: string, _to: string): Promise<any> { return {}; }
+  async getReportOccupancy(_from: string, _to: string): Promise<any[]> { return []; }
+  async getReportRevenueByRoomType(_from: string, _to: string): Promise<any[]> { return []; }
+  async getReportByChannel(_from: string, _to: string): Promise<any[]> { return []; }
+  async getReportReservations(_from: string, _to: string, _status?: string): Promise<any[]> { return []; }
+  async getReportPayments(_from: string, _to: string): Promise<any> { return { byMethod: [], grandTotal: 0 }; }
+  async getReportTopGuests(_from: string, _to: string, _limit?: number): Promise<any[]> { return []; }
+  async getReportHousekeeping(_from: string, _to: string): Promise<any> { return { daily: [], byType: [], totalCompleted: 0, totalPending: 0 }; }
+  async getReportRestaurant(_from: string, _to: string): Promise<any> { return { totalOrders: 0, totalRevenue: 0, totalCovers: 0, avgTicket: 0, topItems: [], byArea: [] }; }
 }

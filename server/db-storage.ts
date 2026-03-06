@@ -2560,6 +2560,317 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async getExecutiveStats(from: string, to: string): Promise<any> {
+    const allRooms = await db.select().from(rooms);
+    const totalRooms = allRooms.length;
+
+    const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, cleaning: 0, maintenance: 0, oos: 0 };
+    for (const r of allRooms) {
+      const s = r.status || "available";
+      if (s in roomsByStatus) roomsByStatus[s]++;
+      else roomsByStatus[s] = (roomsByStatus[s] || 0) + 1;
+    }
+
+    const periodReservations = await db.select().from(reservations)
+      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
+
+    let totalNightsSold = 0;
+    for (const r of periodReservations) {
+      const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(from).getTime()));
+      const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(to).getTime()));
+      const nights = Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
+      totalNightsSold += nights;
+    }
+
+    const periodPayments = await db.select().from(payments)
+      .where(and(gte(payments.date, from), lte(payments.date, to)));
+    const totalRevenue = periodPayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+
+    const periodCharges = await db.select().from(charges)
+      .where(and(gte(charges.date, from), lte(charges.date, to)));
+    const accommodationCharges = periodCharges.filter(c => (c.category || "").toLowerCase().includes("aloj"));
+    const accommodationRevenue = accommodationCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+    const extrasRevenue = totalRevenue - accommodationRevenue;
+
+    const daysInPeriod = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
+    const occupiedRooms = roomsByStatus.occupied || 0;
+    const availableRooms = roomsByStatus.available || 0;
+    const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+
+    const adr = totalNightsSold > 0 ? Math.round(totalRevenue / totalNightsSold) : 0;
+    const revpar = Math.round(adr * occupancyRate / 100);
+
+    const byChannelMap = new Map<string, { reservations: number; revenue: number }>();
+    for (const r of periodReservations) {
+      const src = r.source || "directo";
+      if (!byChannelMap.has(src)) byChannelMap.set(src, { reservations: 0, revenue: 0 });
+      const entry = byChannelMap.get(src)!;
+      entry.reservations++;
+      entry.revenue += parseFloat(r.totalRoomAmount || "0");
+    }
+    const totalChannelRevenue = Array.from(byChannelMap.values()).reduce((s, v) => s + v.revenue, 0);
+    const byChannel = Array.from(byChannelMap.entries()).map(([source, data]) => ({
+      source,
+      reservations: data.reservations,
+      revenue: Math.round(data.revenue),
+      percentage: totalChannelRevenue > 0 ? Math.round((data.revenue / totalChannelRevenue) * 100) : 0,
+    })).sort((a, b) => b.revenue - a.revenue);
+
+    const prevFrom = new Date(new Date(from).getTime() - 365 * 86400000).toISOString().split("T")[0];
+    const prevTo = new Date(new Date(to).getTime() - 365 * 86400000).toISOString().split("T")[0];
+    const prevReservations = await db.select().from(reservations)
+      .where(and(lte(reservations.checkInDate, prevTo), gte(reservations.checkOutDate, prevFrom)));
+    const prevPayments = await db.select().from(payments)
+      .where(and(gte(payments.date, prevFrom), lte(payments.date, prevTo)));
+    const prevTotalRevenue = prevPayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+    let prevNightsSold = 0;
+    for (const r of prevReservations) {
+      const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(prevFrom).getTime()));
+      const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(prevTo).getTime()));
+      prevNightsSold += Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
+    }
+    const prevAdr = prevNightsSold > 0 ? Math.round(prevTotalRevenue / prevNightsSold) : 0;
+    const prevOccupancyRate = totalRooms > 0 ? Math.round((prevReservations.length / totalRooms) * 100) : 0;
+    const prevRevpar = Math.round(prevAdr * prevOccupancyRate / 100);
+
+    const today = new Date().toISOString().split("T")[0];
+    const todayReservations = await db.select().from(reservations)
+      .where(eq(reservations.checkInDate, today));
+    const todayCheckIns = todayReservations.filter(r => r.status === "confirmed" || r.status === "checked_in").length;
+    const todayCheckOutReservations = await db.select().from(reservations)
+      .where(eq(reservations.checkOutDate, today));
+    const todayCheckOuts = todayCheckOutReservations.filter(r => r.status === "checked_in").length;
+    const pendingCheckIns = todayReservations.filter(r => r.status === "confirmed").length;
+
+    return {
+      occupancyRate, occupiedRooms, availableRooms, totalRooms,
+      totalRevenue: Math.round(totalRevenue), accommodationRevenue: Math.round(accommodationRevenue), extrasRevenue: Math.round(extrasRevenue),
+      adr, revpar, byChannel,
+      previousYear: { occupancyRate: prevOccupancyRate, totalRevenue: Math.round(prevTotalRevenue), adr: prevAdr, revpar: prevRevpar },
+      todayCheckIns, todayCheckOuts, pendingCheckIns,
+      roomsByStatus,
+    };
+  }
+
+  async getReportOccupancy(from: string, to: string): Promise<any[]> {
+    const result: any[] = [];
+    const allRooms = await db.select().from(rooms);
+    const totalRooms = allRooms.length;
+    const start = new Date(from);
+    const end = new Date(to);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split("T")[0];
+      const dayReservations = await db.select().from(reservations)
+        .where(and(lte(reservations.checkInDate, dateStr), gt(reservations.checkOutDate, dateStr),
+          inArray(reservations.status, ["checked_in", "checked_out", "confirmed"])));
+      const occupied = dayReservations.length;
+      const available = totalRooms - occupied;
+      const occupancy = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0;
+      result.push({ date: dateStr, available, occupied, occupancy, totalRooms });
+    }
+    return result;
+  }
+
+  async getReportRevenueByRoomType(from: string, to: string): Promise<any[]> {
+    const types = await db.select().from(roomTypes);
+    const periodRes = await db.select().from(reservations)
+      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
+
+    const result: any[] = [];
+    let grandTotal = 0;
+    for (const t of types) {
+      const typeRes = periodRes.filter(r => r.roomTypeId === t.id);
+      let nightsSold = 0;
+      let revenue = 0;
+      for (const r of typeRes) {
+        nightsSold += r.nights || 0;
+        revenue += parseFloat(r.totalRoomAmount || "0");
+      }
+      grandTotal += revenue;
+      const typeRooms = (await db.select().from(rooms).where(eq(rooms.roomTypeId, t.id))).length;
+      result.push({ type: t.name, rooms: typeRooms, nightsSold, revenue: Math.round(revenue), adr: nightsSold > 0 ? Math.round(revenue / nightsSold) : 0 });
+    }
+    return result.map(r => ({ ...r, percentage: grandTotal > 0 ? Math.round((r.revenue / grandTotal) * 100) : 0 }));
+  }
+
+  async getReportByChannel(from: string, to: string): Promise<any[]> {
+    const periodRes = await db.select().from(reservations)
+      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
+
+    const map = new Map<string, { reservations: number; nights: number; revenue: number }>();
+    for (const r of periodRes) {
+      const src = r.source || "directo";
+      if (!map.has(src)) map.set(src, { reservations: 0, nights: 0, revenue: 0 });
+      const e = map.get(src)!;
+      e.reservations++;
+      e.nights += r.nights || 0;
+      e.revenue += parseFloat(r.totalRoomAmount || "0");
+    }
+    const total = Array.from(map.values()).reduce((s, v) => s + v.revenue, 0);
+    const commissionRates: Record<string, number> = { booking: 15, airbnb: 14, expedia: 18, despegar: 17 };
+    return Array.from(map.entries()).map(([source, d]) => {
+      const commRate = commissionRates[source] || 0;
+      const commission = Math.round(d.revenue * commRate / 100);
+      return { source, reservations: d.reservations, nights: d.nights, revenue: Math.round(d.revenue), commission, net: Math.round(d.revenue - commission), percentage: total > 0 ? Math.round((d.revenue / total) * 100) : 0 };
+    }).sort((a, b) => b.revenue - a.revenue);
+  }
+
+  async getReportReservations(from: string, to: string, status?: string): Promise<any[]> {
+    let query = db.select().from(reservations)
+      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
+
+    let allRes = await query;
+    if (status && status !== "all") {
+      allRes = allRes.filter(r => r.status === status);
+    }
+
+    const result: any[] = [];
+    for (const r of allRes) {
+      const guest = r.guestId ? await db.select().from(guests).where(eq(guests.id, r.guestId)).then(g => g[0]) : null;
+      const room = r.roomId ? await db.select().from(rooms).where(eq(rooms.id, r.roomId)).then(rm => rm[0]) : null;
+      const type = r.roomTypeId ? await db.select().from(roomTypes).where(eq(roomTypes.id, r.roomTypeId)).then(t => t[0]) : null;
+      const company = r.companyId ? await db.select().from(companies).where(eq(companies.id, r.companyId)).then(c => c[0]) : null;
+      const resPay = await db.select().from(payments).where(eq(payments.reservationId, r.id));
+      const totalPaid = resPay.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+      const total = parseFloat(r.totalRoomAmount || "0");
+      result.push({
+        code: r.reservationCode, guest: guest ? `${guest.lastName} ${guest.firstName}` : "-",
+        company: company?.razonSocial || "-", room: room?.roomNumber || "-", type: type?.name || "-",
+        checkIn: r.checkInDate, checkOut: r.checkOutDate, nights: r.nights,
+        source: r.source, status: r.status, total: Math.round(total), paid: Math.round(totalPaid), balance: Math.round(total - totalPaid),
+      });
+    }
+    return result;
+  }
+
+  async getReportPayments(from: string, to: string): Promise<any> {
+    const allPayments = await db.select().from(payments)
+      .where(and(gte(payments.date, from), lte(payments.date, to)));
+
+    const methodMap = new Map<string, { count: number; total: number }>();
+    for (const p of allPayments) {
+      const m = p.method || "efectivo";
+      if (!methodMap.has(m)) methodMap.set(m, { count: 0, total: 0 });
+      const e = methodMap.get(m)!;
+      e.count++;
+      e.total += parseFloat(p.amount || "0");
+    }
+    const grandTotal = Array.from(methodMap.values()).reduce((s, v) => s + v.total, 0);
+    const byMethod = Array.from(methodMap.entries()).map(([method, d]) => ({
+      method, count: d.count, total: Math.round(d.total),
+      percentage: grandTotal > 0 ? Math.round((d.total / grandTotal) * 100) : 0,
+    })).sort((a, b) => b.total - a.total);
+
+    return { byMethod, grandTotal: Math.round(grandTotal) };
+  }
+
+  async getReportTopGuests(from: string, to: string, limit: number = 50): Promise<any[]> {
+    const periodRes = await db.select().from(reservations)
+      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
+
+    const guestMap = new Map<string, { stays: number; nights: number; revenue: number; lastVisit: string }>();
+    for (const r of periodRes) {
+      if (!r.guestId) continue;
+      if (!guestMap.has(r.guestId)) guestMap.set(r.guestId, { stays: 0, nights: 0, revenue: 0, lastVisit: "" });
+      const e = guestMap.get(r.guestId)!;
+      e.stays++;
+      e.nights += r.nights || 0;
+      e.revenue += parseFloat(r.totalRoomAmount || "0");
+      if (r.checkOutDate > e.lastVisit) e.lastVisit = r.checkOutDate as string;
+    }
+
+    const entries = Array.from(guestMap.entries()).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, limit);
+    const result: any[] = [];
+    let rank = 0;
+    for (const [guestId, data] of entries) {
+      rank++;
+      const guest = await db.select().from(guests).where(eq(guests.id, guestId)).then(g => g[0]);
+      result.push({
+        rank, guest: guest ? `${guest.lastName} ${guest.firstName}` : "-",
+        code: guest?.codigo || "-", stays: data.stays, nights: data.nights,
+        revenue: Math.round(data.revenue), lastVisit: data.lastVisit, segment: guest?.segment || "-",
+      });
+    }
+    return result;
+  }
+
+  async getReportHousekeeping(from: string, to: string): Promise<any> {
+    const tasks = await db.select().from(housekeepingTasks)
+      .where(and(gte(housekeepingTasks.scheduledDate, from), lte(housekeepingTasks.scheduledDate, to)));
+
+    const allTasks = tasks.length > 0 ? tasks : await db.select().from(housekeepingTasks);
+
+    const byDate = new Map<string, { completed: number; pending: number; urgent: number }>();
+    const byType = new Map<string, number>();
+
+    for (const t of allTasks) {
+      const dateStr = t.scheduledDate || new Date().toISOString().split("T")[0];
+      if (!byDate.has(dateStr as string)) byDate.set(dateStr as string, { completed: 0, pending: 0, urgent: 0 });
+      const e = byDate.get(dateStr as string)!;
+      if (t.status === "completed" || t.status === "inspected") e.completed++;
+      else e.pending++;
+      if (t.priority === "urgent" || t.priority === "high") e.urgent++;
+
+      const type = t.type || "other";
+      byType.set(type, (byType.get(type) || 0) + 1);
+    }
+
+    return {
+      daily: Array.from(byDate.entries()).map(([date, d]) => ({ date, ...d })).sort((a, b) => a.date.localeCompare(b.date)),
+      byType: Array.from(byType.entries()).map(([type, count]) => ({ type, count })),
+      totalCompleted: allTasks.filter(t => t.status === "completed" || t.status === "inspected").length,
+      totalPending: allTasks.filter(t => t.status === "pending" || t.status === "assigned").length,
+    };
+  }
+
+  async getReportRestaurant(from: string, to: string): Promise<any> {
+    const orders = await db.select().from(restaurantOrders);
+    const items = await db.select().from(orderItems);
+    const menuItemsList = await db.select().from(menuItems);
+    const areas = await db.select().from(restaurantAreas);
+
+    const menuMap = new Map(menuItemsList.map(m => [m.id, m]));
+    const areaMap = new Map(areas.map(a => [a.id, a]));
+
+    let totalRevenue = 0;
+    let totalCovers = 0;
+    const itemSales = new Map<string, { name: string; count: number; revenue: number }>();
+    const areaRevenue = new Map<string, { name: string; orders: number; revenue: number; covers: number }>();
+
+    for (const o of orders) {
+      const orderTotal = items.filter(i => i.orderId === o.id).reduce((s, i) => s + parseFloat(i.subtotal || "0"), 0);
+      totalRevenue += orderTotal;
+      totalCovers += o.covers || 0;
+
+      const table = o.tableId ? await db.select().from(restaurantTables).where(eq(restaurantTables.id, o.tableId)).then(t => t[0]) : null;
+      const areaId = table?.areaId || "unknown";
+      const area = areaMap.get(areaId);
+      if (!areaRevenue.has(areaId)) areaRevenue.set(areaId, { name: area?.name || "Otro", orders: 0, revenue: 0, covers: 0 });
+      const ae = areaRevenue.get(areaId)!;
+      ae.orders++;
+      ae.revenue += orderTotal;
+      ae.covers += o.covers || 0;
+
+      for (const i of items.filter(it => it.orderId === o.id)) {
+        const mi = menuMap.get(i.menuItemId);
+        const name = mi?.name || "Desconocido";
+        if (!itemSales.has(i.menuItemId)) itemSales.set(i.menuItemId, { name, count: 0, revenue: 0 });
+        const ie = itemSales.get(i.menuItemId)!;
+        ie.count += i.quantity;
+        ie.revenue += parseFloat(i.subtotal || "0");
+      }
+    }
+
+    const topItems = Array.from(itemSales.values()).sort((a, b) => b.count - a.count).slice(0, 10);
+    const byArea = Array.from(areaRevenue.values()).sort((a, b) => b.revenue - a.revenue);
+
+    return {
+      totalOrders: orders.length, totalRevenue: Math.round(totalRevenue), totalCovers,
+      avgTicket: orders.length > 0 ? Math.round(totalRevenue / orders.length) : 0,
+      topItems, byArea,
+    };
+  }
+
   async bulkCheckIn(groupId: string): Promise<{ processed: number; skipped: number; skippedRooms: string[] }> {
     const links = await db.select().from(groupReservationLinks)
       .where(eq(groupReservationLinks.groupId, groupId));

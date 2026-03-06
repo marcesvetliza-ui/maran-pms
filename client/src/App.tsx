@@ -34,6 +34,8 @@ import CompaniesPage from "@/pages/companies";
 import WebCheckinPublicPage from "@/pages/web-checkin-public";
 import ChatbotDashboardPage from "@/pages/chatbot-dashboard";
 import HospitalityPage from "@/pages/hospitality";
+import ReportsPage from "@/pages/reports";
+import DashboardExecutivePage from "@/pages/dashboard-executive";
 import LoginPage from "@/pages/login";
 import { LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -85,6 +87,8 @@ function Router() {
       <Route path="/companies" component={CompaniesPage} />
       <Route path="/chatbot" component={ChatbotDashboardPage} />
       <Route path="/hospitality" component={HospitalityPage} />
+      <Route path="/reports" component={ReportsPage} />
+      <Route path="/executive" component={DashboardExecutivePage} />
       <Route component={NotFound} />
     </Switch>
   );

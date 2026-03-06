@@ -33,6 +33,8 @@ import {
   Smartphone,
   Bot,
   Heart,
+  BarChart3,
+  FileText,
 } from "lucide-react";
 import {
   Sidebar,
@@ -278,6 +280,32 @@ export function AppSidebar() {
                   <Link href="/">
                     <LayoutDashboard className="h-5 w-5" />
                     <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/executive"}
+                  data-testid="nav-executive"
+                >
+                  <Link href="/executive">
+                    <BarChart3 className="h-5 w-5" />
+                    <span>Ejecutivo</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/reports"}
+                  data-testid="nav-reports"
+                >
+                  <Link href="/reports">
+                    <FileText className="h-5 w-5" />
+                    <span>Reportes</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

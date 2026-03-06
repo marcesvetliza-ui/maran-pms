@@ -5024,5 +5024,116 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.get("/api/executive/stats", requireAuth, async (req, res) => {
+    try {
+      const today = new Date();
+      let from = req.query.from as string;
+      let to = req.query.to as string;
+      const period = req.query.period as string;
+
+      if (period === "today") {
+        from = to = today.toISOString().split("T")[0];
+      } else if (period === "week") {
+        const start = new Date(today);
+        start.setDate(start.getDate() - start.getDay());
+        from = start.toISOString().split("T")[0];
+        to = today.toISOString().split("T")[0];
+      } else if (period === "month") {
+        from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
+        to = today.toISOString().split("T")[0];
+      } else if (period === "year") {
+        from = new Date(today.getFullYear(), 0, 1).toISOString().split("T")[0];
+        to = today.toISOString().split("T")[0];
+      } else if (!from || !to) {
+        from = to = today.toISOString().split("T")[0];
+      }
+
+      const stats = await storage.getExecutiveStats(from, to);
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching executive stats" });
+    }
+  });
+
+  app.get("/api/reports/occupancy", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportOccupancy(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching occupancy report" });
+    }
+  });
+
+  app.get("/api/reports/revenue-by-room-type", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportRevenueByRoomType(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching revenue report" });
+    }
+  });
+
+  app.get("/api/reports/by-channel", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportByChannel(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching channel report" });
+    }
+  });
+
+  app.get("/api/reports/reservations", requireAuth, async (req, res) => {
+    try {
+      const { from, to, status } = req.query as { from: string; to: string; status?: string };
+      const data = await storage.getReportReservations(from, to, status);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching reservations report" });
+    }
+  });
+
+  app.get("/api/reports/payments", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportPayments(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching payments report" });
+    }
+  });
+
+  app.get("/api/reports/top-guests", requireAuth, async (req, res) => {
+    try {
+      const { from, to, limit } = req.query as { from: string; to: string; limit?: string };
+      const data = await storage.getReportTopGuests(from, to, limit ? parseInt(limit) : 50);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching top guests report" });
+    }
+  });
+
+  app.get("/api/reports/housekeeping", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportHousekeeping(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching housekeeping report" });
+    }
+  });
+
+  app.get("/api/reports/restaurant", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportRestaurant(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching restaurant report" });
+    }
+  });
+
   return httpServer;
 }
