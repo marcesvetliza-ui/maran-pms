@@ -196,8 +196,15 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
+type SpaTreatmentCategory = {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number | null;
+};
+
 type ViewMode = "daily" | "weekly";
-type SpaTab = "agenda" | "insumos";
+type SpaTab = "agenda" | "tratamientos" | "insumos";
 
 export default function SpaPage() {
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
@@ -220,6 +227,9 @@ export default function SpaPage() {
   const [chargeQuantity, setChargeQuantity] = useState("1");
   const [chargeType, setChargeType] = useState("service");
   const [receiptType, setReceiptType] = useState("");
+  const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
+  const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
+  const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
   const { toast } = useToast();
 
   const { data: cabins = [], isLoading: cabinsLoading } = useQuery<SpaCabin[]>({
@@ -228,6 +238,10 @@ export default function SpaPage() {
 
   const { data: treatments = [] } = useQuery<SpaTreatment[]>({
     queryKey: ["/api/spa/treatments"],
+  });
+
+  const { data: treatmentCategories = [] } = useQuery<SpaTreatmentCategory[]>({
+    queryKey: ["/api/spa/treatment-categories"],
   });
 
   const { data: checkedInReservations = [] } = useQuery<Reservation[]>({
@@ -483,6 +497,69 @@ export default function SpaPage() {
     },
   });
 
+  const treatmentForm = useForm({
+    defaultValues: {
+      name: "",
+      description: "",
+      categoryId: "",
+      durationMinutes: 60,
+      price: "",
+      isActive: "true",
+    },
+  });
+
+  const createTreatmentMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest(editingTreatment ? "PATCH" : "POST",
+        editingTreatment ? `/api/spa/treatments/${editingTreatment.id}` : "/api/spa/treatments",
+        data
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/treatments"] });
+      toast({ title: editingTreatment ? "Tratamiento actualizado" : "Tratamiento creado" });
+      setIsTreatmentDialogOpen(false);
+      setEditingTreatment(null);
+      treatmentForm.reset({ name: "", description: "", categoryId: "", durationMinutes: 60, price: "", isActive: "true" });
+    },
+    onError: () => {
+      toast({ title: "Error al guardar tratamiento", variant: "destructive" });
+    },
+  });
+
+  const deleteTreatmentMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/spa/treatments/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/treatments"] });
+      toast({ title: "Tratamiento eliminado" });
+      setDeletingTreatment(null);
+    },
+    onError: () => {
+      toast({ title: "Error al eliminar tratamiento", variant: "destructive" });
+    },
+  });
+
+  const handleNewTreatment = () => {
+    setEditingTreatment(null);
+    treatmentForm.reset({ name: "", description: "", categoryId: "", durationMinutes: 60, price: "", isActive: "true" });
+    setIsTreatmentDialogOpen(true);
+  };
+
+  const handleEditTreatment = (t: SpaTreatment) => {
+    setEditingTreatment(t);
+    treatmentForm.reset({
+      name: t.name,
+      description: t.description || "",
+      categoryId: t.categoryId || "",
+      durationMinutes: t.durationMinutes,
+      price: t.price,
+      isActive: t.isActive || "true",
+    });
+    setIsTreatmentDialogOpen(true);
+  };
+
   const handlePreviousDay = () => setSelectedDate(addDays(selectedDate, -1));
   const handleNextDay = () => setSelectedDate(addDays(selectedDate, 1));
   const handleToday = () => setSelectedDate(startOfDay(new Date()));
@@ -634,6 +711,14 @@ export default function SpaPage() {
             data-testid="tab-agenda"
           >
             <CalendarDays className="h-4 w-4 mr-1" /> Agenda
+          </Button>
+          <Button
+            variant={activeTab === "tratamientos" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("tratamientos")}
+            data-testid="tab-tratamientos"
+          >
+            <Sparkles className="h-4 w-4 mr-1" /> Tratamientos
           </Button>
           <Button
             variant={activeTab === "insumos" ? "default" : "ghost"}
@@ -836,6 +921,93 @@ export default function SpaPage() {
             </Card>
           )}
         </>
+      )}
+
+      {activeTab === "tratamientos" && (
+        <Card className="flex-1">
+          <CardHeader className="py-3 px-4 flex flex-row items-center justify-between">
+            <CardTitle className="text-base">Tratamientos del SPA</CardTitle>
+            <Button size="sm" onClick={handleNewTreatment} data-testid="button-new-treatment">
+              <Plus className="h-4 w-4 mr-1" /> Nuevo Tratamiento
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {treatments.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Sparkles className="h-12 w-12 mx-auto mb-3 opacity-40" />
+                <p className="text-sm">No hay tratamientos cargados.</p>
+                <p className="text-xs mt-1">Agregá tratamientos para poder agendar turnos.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {treatmentCategories.map((cat) => {
+                  const catTreatments = treatments.filter((t) => t.categoryId === cat.id);
+                  if (catTreatments.length === 0) return null;
+                  return (
+                    <div key={cat.id}>
+                      <h3 className="text-sm font-semibold text-muted-foreground mb-2 mt-3">{cat.name}</h3>
+                      {catTreatments.map((t) => (
+                        <div key={t.id} className="flex items-center justify-between p-3 border rounded-lg mb-1" data-testid={`treatment-row-${t.id}`}>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium">{t.name}</p>
+                              {t.isActive !== "true" && <Badge variant="secondary" className="text-xs">Inactivo</Badge>}
+                            </div>
+                            {t.description && <p className="text-xs text-muted-foreground mt-0.5">{t.description}</p>}
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <p className="text-sm font-medium">${parseFloat(t.price).toLocaleString()}</p>
+                              <p className="text-xs text-muted-foreground">{t.durationMinutes} min</p>
+                            </div>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditTreatment(t)} data-testid={`button-edit-treatment-${t.id}`}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeletingTreatment(t)} data-testid={`button-delete-treatment-${t.id}`}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+                {treatments.filter((t) => !t.categoryId || !treatmentCategories.find((c) => c.id === t.categoryId)).length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-muted-foreground mb-2 mt-3">Sin categoría</h3>
+                    {treatments.filter((t) => !t.categoryId || !treatmentCategories.find((c) => c.id === t.categoryId)).map((t) => (
+                      <div key={t.id} className="flex items-center justify-between p-3 border rounded-lg mb-1" data-testid={`treatment-row-${t.id}`}>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium">{t.name}</p>
+                            {t.isActive !== "true" && <Badge variant="secondary" className="text-xs">Inactivo</Badge>}
+                          </div>
+                          {t.description && <p className="text-xs text-muted-foreground mt-0.5">{t.description}</p>}
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-sm font-medium">${parseFloat(t.price).toLocaleString()}</p>
+                            <p className="text-xs text-muted-foreground">{t.durationMinutes} min</p>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditTreatment(t)} data-testid={`button-edit-treatment-${t.id}`}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeletingTreatment(t)} data-testid={`button-delete-treatment-${t.id}`}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {activeTab === "insumos" && (
@@ -1430,6 +1602,78 @@ export default function SpaPage() {
               </Button>
             </DialogFooter>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isTreatmentDialogOpen} onOpenChange={(open) => { if (!open) { setIsTreatmentDialogOpen(false); setEditingTreatment(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingTreatment ? "Editar Tratamiento" : "Nuevo Tratamiento"}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={treatmentForm.handleSubmit((data) => createTreatmentMutation.mutate(data))} className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Nombre *</label>
+              <Input {...treatmentForm.register("name", { required: true })} placeholder="Nombre del tratamiento" data-testid="input-treatment-name" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Descripción</label>
+              <Textarea {...treatmentForm.register("description")} placeholder="Descripción del tratamiento" data-testid="input-treatment-description" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Categoría</label>
+              <Select value={treatmentForm.watch("categoryId")} onValueChange={(v) => treatmentForm.setValue("categoryId", v)}>
+                <SelectTrigger data-testid="select-treatment-category"><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
+                <SelectContent>
+                  {treatmentCategories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium">Duración (min) *</label>
+                <Input type="number" {...treatmentForm.register("durationMinutes", { valueAsNumber: true })} data-testid="input-treatment-duration" />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Precio *</label>
+                <Input type="number" step="0.01" {...treatmentForm.register("price", { required: true })} placeholder="0.00" data-testid="input-treatment-price" />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Estado</label>
+              <Select value={treatmentForm.watch("isActive")} onValueChange={(v) => treatmentForm.setValue("isActive", v)}>
+                <SelectTrigger data-testid="select-treatment-active"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">Activo</SelectItem>
+                  <SelectItem value="false">Inactivo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { setIsTreatmentDialogOpen(false); setEditingTreatment(null); }}>Cancelar</Button>
+              <Button type="submit" disabled={createTreatmentMutation.isPending} data-testid="button-submit-treatment">
+                {createTreatmentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {editingTreatment ? "Guardar" : "Crear"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deletingTreatment} onOpenChange={(open) => { if (!open) setDeletingTreatment(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Eliminar Tratamiento</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">¿Estás seguro de eliminar "{deletingTreatment?.name}"? Esta acción no se puede deshacer.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingTreatment(null)}>Cancelar</Button>
+            <Button variant="destructive" disabled={deleteTreatmentMutation.isPending} onClick={() => deletingTreatment && deleteTreatmentMutation.mutate(deletingTreatment.id)} data-testid="button-confirm-delete-treatment">
+              {deleteTreatmentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Eliminar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
