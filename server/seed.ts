@@ -83,8 +83,9 @@ export async function seedDatabase() {
 
   console.log("Seeding rooms...");
   await db.insert(rooms).values([
-    { id: "r201", roomNumber: "201", roomTypeId: "rt2", floor: 2, status: "occupied", bedConfig: "MAT_CC_EXTRA", features: ["accessible", "separable_bed"], maxOccupancy: 3, notes: null },
+    { id: "r201", roomNumber: "201", roomTypeId: "rt2", floor: 2, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["accessible", "separable_bed"], maxOccupancy: 3, notes: null },
     { id: "r202", roomNumber: "202", roomTypeId: "rt1", floor: 2, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
+    { id: "r203", roomNumber: "203", roomTypeId: "rt1", floor: 2, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r204", roomNumber: "204", roomTypeId: "rt2", floor: 2, status: "available", bedConfig: "MAT_CC", features: ["accessible", "separable_bed", "sofa_bed", "living_room"], maxOccupancy: 4, notes: null },
     { id: "r205", roomNumber: "205", roomTypeId: "rt3", floor: 2, status: "available", bedConfig: "MAT_EXTRA", features: ["balcony", "living_room"], maxOccupancy: 4, notes: null },
     { id: "r206", roomNumber: "206", roomTypeId: "rt3", floor: 2, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room"], maxOccupancy: 4, notes: null },
@@ -93,10 +94,10 @@ export async function seedDatabase() {
     { id: "r302", roomNumber: "302", roomTypeId: "rt1", floor: 3, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r303", roomNumber: "303", roomTypeId: "rt1", floor: 3, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r304", roomNumber: "304", roomTypeId: "rt1", floor: 3, status: "available", bedConfig: "MAT", features: ["shower_only"], maxOccupancy: 2, notes: null },
-    { id: "r305", roomNumber: "305", roomTypeId: "rt3", floor: 3, status: "occupied", bedConfig: "MAT_EXTRA", features: ["extra_bed", "living_room", "balcony"], maxOccupancy: 5, notes: null },
+    { id: "r305", roomNumber: "305", roomTypeId: "rt3", floor: 3, status: "available", bedConfig: "MAT_EXTRA", features: ["extra_bed", "living_room", "balcony"], maxOccupancy: 5, notes: null },
     { id: "r306", roomNumber: "306", roomTypeId: "rt3", floor: 3, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room", "balcony"], maxOccupancy: 4, notes: null },
     { id: "r307", roomNumber: "307", roomTypeId: "rt2", floor: 3, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
-    { id: "r401", roomNumber: "401", roomTypeId: "rt2", floor: 4, status: "occupied", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
+    { id: "r401", roomNumber: "401", roomTypeId: "rt2", floor: 4, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
     { id: "r402", roomNumber: "402", roomTypeId: "rt1", floor: 4, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r403", roomNumber: "403", roomTypeId: "rt1", floor: 4, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r404", roomNumber: "404", roomTypeId: "rt1", floor: 4, status: "available", bedConfig: "MAT", features: ["shower_only"], maxOccupancy: 2, notes: null },
@@ -107,10 +108,10 @@ export async function seedDatabase() {
     { id: "r502", roomNumber: "502", roomTypeId: "rt1", floor: 5, status: "available", bedConfig: "MAT_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r503", roomNumber: "503", roomTypeId: "rt1", floor: 5, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r504", roomNumber: "504", roomTypeId: "rt1", floor: 5, status: "available", bedConfig: "MAT", features: ["shower_only"], maxOccupancy: 2, notes: null },
-    { id: "r505", roomNumber: "505", roomTypeId: "rt3", floor: 5, status: "occupied", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room", "balcony"], maxOccupancy: 4, notes: null },
+    { id: "r505", roomNumber: "505", roomTypeId: "rt3", floor: 5, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room", "balcony"], maxOccupancy: 4, notes: null },
     { id: "r506", roomNumber: "506", roomTypeId: "rt3", floor: 5, status: "available", bedConfig: "MAT_EXTRA", features: ["extra_bed", "living_room", "balcony"], maxOccupancy: 5, notes: null },
     { id: "r507", roomNumber: "507", roomTypeId: "rt2", floor: 5, status: "available", bedConfig: "MAT_CC", features: [], maxOccupancy: 2, notes: null },
-    { id: "r601", roomNumber: "601", roomTypeId: "rt2", floor: 6, status: "available", bedConfig: "TWIN_CC_EXTRA" as any, features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
+    { id: "r601", roomNumber: "601", roomTypeId: "rt2", floor: 6, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3, notes: null },
     { id: "r602", roomNumber: "602", roomTypeId: "rt1", floor: 6, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r603", roomNumber: "603", roomTypeId: "rt1", floor: 6, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2, notes: null },
     { id: "r604", roomNumber: "604", roomTypeId: "rt1", floor: 6, status: "available", bedConfig: "MAT", features: [], maxOccupancy: 2, notes: null },
@@ -267,12 +268,13 @@ export async function seedDatabase() {
 
   console.log("Seeding SPA cabins...");
   await db.insert(spaCabins).values([
-    { id: "cab1", name: "Cabina 1 - Masajes", description: "Cabina para masajes relajantes y terapeuticos", isActive: "true" },
-    { id: "cab2", name: "Cabina 2 - Masajes", description: "Cabina para masajes con aromaterapia", isActive: "true" },
-    { id: "cab3", name: "Cabina 3 - Faciales", description: "Cabina especializada en tratamientos faciales", isActive: "true" },
-    { id: "cab4", name: "Cabina 4 - Corporales", description: "Cabina para tratamientos corporales", isActive: "true" },
-    { id: "cab5", name: "Cabina 5 - VIP", description: "Cabina VIP para tratamientos premium", isActive: "true" },
-    { id: "cab6", name: "Cabina 6 - Parejas", description: "Cabina doble para tratamientos en pareja", isActive: "true" },
+    { id: "cab1", name: "Agua", description: "Gabinete Agua", isActive: "true" },
+    { id: "cab2", name: "Fuego", description: "Gabinete Fuego", isActive: "true" },
+    { id: "cab3", name: "Aire", description: "Gabinete Aire", isActive: "true" },
+    { id: "cab4", name: "Tierra", description: "Gabinete Tierra", isActive: "true" },
+    { id: "cab5", name: "Hidromasaje", description: "Gabinete Hidromasaje", isActive: "true" },
+    { id: "cab6", name: "Sauna H", description: "Sauna Hombres", isActive: "true" },
+    { id: "cab7", name: "Sauna M", description: "Sauna Mujeres", isActive: "true" },
   ]);
 
   console.log("Seeding SPA treatment categories...");
@@ -304,11 +306,10 @@ export async function seedDatabase() {
 
   console.log("Seeding event rooms...");
   await db.insert(eventRooms).values([
-    { id: "er1", name: "Salon Parana", capacity: 100, status: "available", description: "Salon principal con vista al rio", amenities: ["projector", "audio", "wifi"], isActive: "true" },
-    { id: "er2", name: "Salon Victoria", capacity: 60, status: "available", description: "Salon ejecutivo para reuniones", amenities: ["projector", "wifi", "whiteboard"], isActive: "true" },
-    { id: "er3", name: "Salon Diamante", capacity: 40, status: "available", description: "Sala de conferencias", amenities: ["projector", "audio", "wifi", "videoconference"], isActive: "true" },
-    { id: "er4", name: "Salon Esmeralda", capacity: 30, status: "available", description: "Sala de reuniones ejecutivas", amenities: ["projector", "wifi"], isActive: "true" },
-    { id: "er5", name: "Terraza Eventos", capacity: 150, status: "available", description: "Espacio al aire libre para eventos sociales", amenities: ["audio", "lighting"], isActive: "true" },
+    { id: "er1", name: "Salón Mitre", capacity: 100, status: "available", description: "Salón principal para eventos grandes", amenities: ["projector", "audio", "wifi"], isActive: "true" },
+    { id: "er2", name: "Salón Rivadavia", capacity: 60, status: "available", description: "Salón intermedio para eventos medianos", amenities: ["projector", "wifi", "whiteboard"], isActive: "true" },
+    { id: "er3", name: "Salón Mirador", capacity: 40, status: "available", description: "Salón con vista panorámica", amenities: ["projector", "audio", "wifi", "videoconference"], isActive: "true" },
+    { id: "er4", name: "Salón Rosedal", capacity: 30, status: "available", description: "Salón íntimo para reuniones", amenities: ["projector", "wifi"], isActive: "true" },
   ]);
 
   console.log("Seeding event charge types...");
