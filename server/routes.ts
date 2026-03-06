@@ -329,6 +329,32 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/rooms/in-house", async (req, res) => {
+    try {
+      const allRooms = await storage.getRooms();
+      const occupiedRooms = allRooms.filter(r => r.status === "occupied");
+      const allReservations = await storage.getReservations();
+      const activeReservations = allReservations.filter(r => r.status === "checked_in");
+      const result = [];
+      for (const room of occupiedRooms) {
+        const reservation = activeReservations.find(r => r.roomId === room.id);
+        if (reservation) {
+          const guest = await storage.getGuest(reservation.guestId);
+          result.push({
+            roomId: room.id,
+            roomNumber: room.roomNumber,
+            guestName: guest ? `${guest.firstName} ${guest.lastName}` : "Huésped",
+            reservationId: reservation.id,
+          });
+        }
+      }
+      result.sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching in-house rooms" });
+    }
+  });
+
   app.get("/api/rooms/:id", async (req, res) => {
     try {
       const room = await storage.getRoom(req.params.id);
@@ -941,10 +967,8 @@ export async function registerRoutes(
       // Update reservation status
       await storage.updateReservation(req.params.id, { status: "checked_out" });
       
-      // Update room status to cleaning
-      await storage.updateRoom(reservation.roomId, { status: "cleaning" });
+      await storage.updateRoom(reservation.roomId, { status: "dirty" });
       
-      // Create housekeeping task for the room
       await storage.createCheckoutCleaningTask(reservation.roomId);
       
       res.json({ success: true });
@@ -2259,9 +2283,20 @@ Only respond with the JSON object.`;
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
       
-      const { chargeToRoom, roomNumber, reservationId, receiptType, paymentMethod } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType } = req.body;
+      const effectiveReservationId = reservationId || roomReservationId;
       
-      // Update order as closed
+      let finalTotal = parseFloat(order.total || "0");
+      let discountAmount = 0;
+      if (discount && discount > 0) {
+        if (discountType === "percent") {
+          discountAmount = finalTotal * discount / 100;
+        } else {
+          discountAmount = discount;
+        }
+        finalTotal = Math.max(0, finalTotal - discountAmount);
+      }
+      
       const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
         status: "closed",
         closedAt: new Date(),
@@ -2269,30 +2304,30 @@ Only respond with the JSON object.`;
         roomNumber: roomNumber || null,
         receiptType: receiptType || null,
         paymentMethod: paymentMethod || null,
+        total: String(finalTotal.toFixed(2)),
+        notes: discountAmount > 0 ? `Descuento: $${discountAmount.toFixed(2)}` : undefined,
       });
       
-      // If charging to room, create a charge on the reservation
-      if (chargeToRoom && reservationId) {
+      if (chargeToRoom && effectiveReservationId) {
         await storage.createCharge({
-          reservationId,
-          description: `Restaurante - Pedido ${order.orderNumber}`,
-          amount: order.total || "0",
+          reservationId: effectiveReservationId,
+          description: `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`,
+          amount: String(finalTotal.toFixed(2)),
           category: "restaurant",
           date: new Date().toISOString().split("T")[0],
         });
       }
       
-      // Free up the table
       if (order.tableId) {
         await storage.updateRestaurantTable(order.tableId, { status: "available" });
       }
 
       try {
-        const label = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}`;
+        const label = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
         await storage.registerCashMovement(
           "restaurant", "restaurant_order", req.params.id, label,
           paymentMethod || (chargeToRoom ? "room_charge" : "cash"),
-          String(order.total || "0"), "income",
+          String(finalTotal.toFixed(2)), "income",
           undefined, receiptType
         );
       } catch (e) {}
@@ -5293,6 +5328,39 @@ Only respond with the JSON object.`;
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Error fetching cash summary" });
+    }
+  });
+
+  app.post("/api/admin/init-rooms-7-12", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { sql } = await import("drizzle-orm");
+      const existing = await db.execute(sql`SELECT id FROM rooms WHERE floor >= 7 LIMIT 1`);
+      if (existing.rows && existing.rows.length > 0) {
+        return res.json({ success: true, message: "Rooms floors 7-12 already exist" });
+      }
+      const newRooms: any[] = [];
+      for (let floor = 7; floor <= 12; floor++) {
+        const f = floor;
+        const p = (n: number) => `${floor}0${n}`;
+        const pid = (n: number) => `r${floor}0${n}`;
+        newRooms.push(
+          { id: pid(1), roomNumber: p(1), roomTypeId: "rt2", floor: f, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "extra_bed"], maxOccupancy: 3 },
+          { id: pid(2), roomNumber: p(2), roomTypeId: "rt1", floor: f, status: "available", bedConfig: "TWIN_CC", features: ["twin_config", "separable_bed"], maxOccupancy: 2 },
+          { id: pid(3), roomNumber: p(3), roomTypeId: "rt1", floor: f, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2 },
+          { id: pid(4), roomNumber: p(4), roomTypeId: "rt1", floor: f, status: "available", bedConfig: "MAT", features: ["shower_only"], maxOccupancy: 2 },
+          { id: pid(5), roomNumber: p(5), roomTypeId: "rt3", floor: f, status: "available", bedConfig: "MAT_CC_EXTRA", features: ["separable_bed", "living_room", "balcony"], maxOccupancy: 4 },
+          { id: pid(6), roomNumber: p(6), roomTypeId: "rt3", floor: f, status: "available", bedConfig: "MAT_EXTRA", features: ["extra_bed", "living_room", "balcony"], maxOccupancy: 5 },
+          { id: pid(7), roomNumber: p(7), roomTypeId: "rt2", floor: f, status: "available", bedConfig: "MAT_CC", features: ["separable_bed"], maxOccupancy: 2 }
+        );
+      }
+      for (const room of newRooms) {
+        const featuresArr = `{${room.features.join(",")}}`;
+        await db.execute(sql`INSERT INTO rooms (id, room_number, room_type_id, floor, status, bed_config, features, max_occupancy) VALUES (${room.id}, ${room.roomNumber}, ${room.roomTypeId}, ${room.floor}, ${room.status}, ${room.bedConfig}, ${featuresArr}::text[], ${room.maxOccupancy})`);
+      }
+      res.json({ success: true, message: `${newRooms.length} rooms created for floors 7-12` });
+    } catch (error: any) {
+      console.error("Error creating rooms:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 

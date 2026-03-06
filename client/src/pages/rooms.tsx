@@ -67,7 +67,7 @@ function RoomStatusBadge({ status }: { status: RoomStatus }) {
   const statusConfig: Record<RoomStatus, { label: string; className: string }> = {
     available: { label: "Disponible", className: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
     occupied: { label: "Ocupada", className: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" },
-    dirty: { label: "Dirty", className: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400" },
+    dirty: { label: "Sucia", className: "bg-orange-200 text-orange-900 dark:bg-orange-900/40 dark:text-orange-400" },
     cleaning: { label: "Limpieza", className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400" },
     maintenance: { label: "Mantenimiento", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
     oos: { label: "Fuera de Servicio", className: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" },
@@ -251,7 +251,7 @@ function RoomFormDialog({
                 <SelectContent>
                   <SelectItem value="available">Disponible</SelectItem>
                   <SelectItem value="occupied">Ocupada</SelectItem>
-                  <SelectItem value="dirty">Dirty</SelectItem>
+                  <SelectItem value="dirty">Sucia</SelectItem>
                   <SelectItem value="cleaning">Limpieza</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
                   <SelectItem value="oos">Fuera de Servicio</SelectItem>
@@ -365,11 +365,12 @@ export default function RoomsPage() {
       </div>
 
       {/* Status Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-6">
         {[
           { key: "all", label: "Total", color: "bg-muted" },
           { key: "available", label: "Disponibles", color: "bg-green-100 dark:bg-green-900/30" },
           { key: "occupied", label: "Ocupadas", color: "bg-blue-100 dark:bg-blue-900/30" },
+          { key: "dirty", label: "Sucias", color: "bg-orange-200 dark:bg-orange-900/30" },
           { key: "cleaning", label: "Limpieza", color: "bg-yellow-100 dark:bg-yellow-900/30" },
           { key: "maintenance", label: "Mantenimiento", color: "bg-red-100 dark:bg-red-900/30" },
         ].map(({ key, label, color }) => (
@@ -454,6 +455,8 @@ export default function RoomsPage() {
                     ? "border-green-200 dark:border-green-800"
                     : room.status === "occupied"
                     ? "border-blue-200 dark:border-blue-800"
+                    : room.status === "dirty"
+                    ? "border-orange-400 dark:border-orange-700"
                     : room.status === "cleaning"
                     ? "border-yellow-200 dark:border-yellow-800"
                     : "border-red-200 dark:border-red-800"

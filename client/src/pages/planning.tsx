@@ -34,7 +34,8 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, ReservationWithDetails, ReservationStatus, ReservationSource } from "@shared/schema";
+import { Textarea } from "@/components/ui/textarea";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan } from "@shared/schema";
 
 function formatDate(dateStr: string) {
   const date = new Date(dateStr + "T12:00:00");
@@ -64,8 +65,10 @@ function getStatusColor(status: PlanningCellStatus): string {
       return "bg-orange-100 dark:bg-orange-900/40 border-orange-200 dark:border-orange-800";
     case "maintenance":
       return "bg-red-100 dark:bg-red-900/40 border-red-200 dark:border-red-800";
+    case "dirty":
+      return "bg-orange-200 dark:bg-orange-900/50 border-orange-400 dark:border-orange-700";
     case "cleaning":
-      return "bg-purple-100 dark:bg-purple-900/40 border-purple-200 dark:border-purple-800";
+      return "bg-yellow-100 dark:bg-yellow-900/40 border-yellow-200 dark:border-yellow-800";
     case "group_blocked":
       return "bg-indigo-100 dark:bg-indigo-900/40 border-indigo-200 dark:border-indigo-800";
     default:
@@ -85,6 +88,8 @@ function getStatusLabel(status: PlanningCellStatus): string {
       return "Check-out hoy";
     case "maintenance":
       return "Mantenimiento";
+    case "dirty":
+      return "Sucia";
     case "cleaning":
       return "Limpieza";
     case "group_blocked":
@@ -175,6 +180,7 @@ const bedConfigLabels: Record<string, string> = {
 function Legend() {
   const statusItems: { status: PlanningCellStatus; label: string }[] = [
     { status: "available", label: "Disponible" },
+    { status: "dirty", label: "Sucia" },
     { status: "cleaning", label: "Limpieza" },
     { status: "maintenance", label: "Mantenimiento" },
     { status: "group_blocked", label: "Grupo bloq." },
@@ -222,6 +228,8 @@ type QuickReservationData = {
   roomId: string;
   roomNumber: string;
   roomTypeName: string;
+  roomTypeId: string;
+  bedConfig: string;
   checkInDate: string;
 };
 
@@ -240,26 +248,43 @@ function QuickReservationDialog({
   const [guestId, setGuestId] = useState("");
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [checkOutDate, setCheckOutDate] = useState("");
+  const [bedConfig, setBedConfig] = useState("");
+  const [ratePlanId, setRatePlanId] = useState("");
+  const [source, setSource] = useState<string>("directo");
+  const [notes, setNotes] = useState("");
+  const [guestSearch, setGuestSearch] = useState("");
+  const [showNewGuest, setShowNewGuest] = useState(false);
+  const [newGuest, setNewGuest] = useState({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
+
+  const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
 
   useEffect(() => {
     if (reservationData) {
       const nextDay = new Date(reservationData.checkInDate + "T12:00:00");
       nextDay.setDate(nextDay.getDate() + 1);
       setCheckOutDate(nextDay.toISOString().split("T")[0]);
+      setBedConfig(reservationData.bedConfig || "");
     }
   }, [reservationData]);
 
+  const filteredGuests = guestSearch.length > 0
+    ? guests.filter(g => 
+        `${g.firstName} ${g.lastName} ${g.documentNumber || ""}`.toLowerCase().includes(guestSearch.toLowerCase())
+      ).slice(0, 10)
+    : guests.slice(0, 10);
+
+  const createGuestMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/guests", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+    },
+  });
+
   const mutation = useMutation({
-    mutationFn: async (data: {
-      guestId: string;
-      roomId: string;
-      checkInDate: string;
-      checkOutDate: string;
-      numberOfGuests: number;
-      status: string;
-      totalAmount: string;
-      createdAt: string;
-    }) => {
+    mutationFn: async (data: any) => {
       return apiRequest("POST", "/api/reservations", data);
     },
     onSuccess: () => {
@@ -271,14 +296,13 @@ function QuickReservationDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
       toast({
         title: "Reserva creada",
         description: "La reserva ha sido creada exitosamente desde el planning.",
       });
       onOpenChange(false);
-      setGuestId("");
-      setCheckOutDate("");
-      setNumberOfGuests(1);
+      resetForm();
     },
     onError: () => {
       toast({
@@ -289,103 +313,243 @@ function QuickReservationDialog({
     },
   });
 
-  const handleSubmit = () => {
-    if (!reservationData || !guestId || !checkOutDate) {
-      toast({
-        title: "Datos incompletos",
-        description: "Por favor complete todos los campos obligatorios.",
-        variant: "destructive",
-      });
+  const resetForm = () => {
+    setGuestId("");
+    setCheckOutDate("");
+    setNumberOfGuests(1);
+    setBedConfig("");
+    setRatePlanId("");
+    setSource("directo");
+    setNotes("");
+    setGuestSearch("");
+    setShowNewGuest(false);
+    setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
+  };
+
+  const handleSubmit = async () => {
+    if (!reservationData || !checkOutDate) {
+      toast({ title: "Datos incompletos", description: "Complete todos los campos obligatorios.", variant: "destructive" });
       return;
     }
 
     if (checkOutDate <= reservationData.checkInDate) {
-      toast({
-        title: "Fechas inválidas",
-        description: "La fecha de check-out debe ser posterior al check-in.",
-        variant: "destructive",
-      });
+      toast({ title: "Fechas inválidas", description: "La fecha de check-out debe ser posterior al check-in.", variant: "destructive" });
       return;
     }
 
+    let finalGuestId = guestId;
+
+    if (!finalGuestId && showNewGuest) {
+      if (!newGuest.firstName.trim()) {
+        toast({ title: "Datos incompletos", description: "Ingrese al menos el nombre del huésped.", variant: "destructive" });
+        return;
+      }
+      try {
+        const created = await createGuestMutation.mutateAsync({
+          firstName: newGuest.firstName.trim(),
+          lastName: newGuest.lastName.trim() || "",
+          documentType: newGuest.documentNumber ? "dni" : null,
+          documentNumber: newGuest.documentNumber || null,
+          phone: newGuest.phone || null,
+          email: newGuest.email || null,
+          nationality: "Argentina",
+          segment: "LEISURE",
+        });
+        finalGuestId = created.id;
+      } catch {
+        toast({ title: "Error", description: "No se pudo crear el huésped.", variant: "destructive" });
+        return;
+      }
+    }
+
+    if (!finalGuestId) {
+      toast({ title: "Datos incompletos", description: "Seleccione o cree un huésped.", variant: "destructive" });
+      return;
+    }
+
+    const checkIn = new Date(reservationData.checkInDate + "T12:00:00");
+    const checkOut = new Date(checkOutDate + "T12:00:00");
+    const nights = Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
+
+    const selectedPlan = ratePlans?.find(rp => rp.id === ratePlanId);
+
     mutation.mutate({
-      guestId,
+      guestId: finalGuestId,
       roomId: reservationData.roomId,
+      roomTypeId: reservationData.roomTypeId,
       checkInDate: reservationData.checkInDate,
       checkOutDate,
       numberOfGuests,
+      nights,
       status: "confirmed",
-      totalAmount: "0",
+      source,
+      ratePlanId: ratePlanId || null,
+      bedTypeNotes: bedConfig || null,
+      baseRatePerNight: selectedPlan?.baseRate || null,
+      totalRoomAmount: selectedPlan ? (parseFloat(selectedPlan.baseRate) * nights).toFixed(2) : null,
+      notes: notes || null,
+      discountType: "none",
+      discountValue: "0",
       createdAt: new Date().toISOString(),
     });
   };
 
   if (!reservationData) return null;
 
+  const bedConfigOptions = [
+    { value: "MAT", label: "Matrimonial" },
+    { value: "TWIN", label: "Twin (2 camas)" },
+    { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
+    { value: "TWIN_CC", label: "Twin + Cama cuna" },
+    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
+    { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
+  ];
+
+  const sourceOptions = [
+    { value: "directo", label: "Directo" },
+    { value: "telefono", label: "Teléfono" },
+    { value: "web", label: "Web" },
+    { value: "booking", label: "Booking" },
+    { value: "expedia", label: "Expedia" },
+    { value: "airbnb", label: "Airbnb" },
+    { value: "despegar", label: "Despegar" },
+    { value: "empresa", label: "Empresa" },
+  ];
+
+  const roomRatePlans = ratePlans?.filter(rp => rp.roomTypeId === reservationData.roomTypeId) || [];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Nueva Reserva Rapida</DialogTitle>
+          <DialogTitle data-testid="title-quick-reservation">Nueva Reserva Rápida</DialogTitle>
           <DialogDescription>
-            Habitacion {reservationData.roomNumber} ({reservationData.roomTypeName}) - Check-in: {formatDateReadable(reservationData.checkInDate)}
+            Hab. {reservationData.roomNumber} ({reservationData.roomTypeName}) — Check-in: {formatDateReadable(reservationData.checkInDate)}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
+        <div className="grid gap-3 py-2">
           <div className="grid gap-2">
-            <Label htmlFor="guest">Huésped *</Label>
-            <Select value={guestId} onValueChange={setGuestId}>
-              <SelectTrigger data-testid="select-guest-quick">
-                <SelectValue placeholder="Seleccionar huésped" />
-              </SelectTrigger>
-              <SelectContent>
-                {guests.map((guest) => (
-                  <SelectItem key={guest.id} value={guest.id}>
-                    {guest.firstName} {guest.lastName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label>Huésped *</Label>
+            {!showNewGuest ? (
+              <>
+                <Input
+                  placeholder="Buscar huésped por nombre o DNI..."
+                  value={guestSearch}
+                  onChange={(e) => setGuestSearch(e.target.value)}
+                  data-testid="input-guest-search"
+                />
+                {(guestSearch.length > 0 || guests.length > 0) && (
+                  <div className="border rounded-md max-h-32 overflow-y-auto">
+                    {filteredGuests.map((guest) => (
+                      <div
+                        key={guest.id}
+                        className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-accent ${guestId === guest.id ? "bg-accent font-medium" : ""}`}
+                        onClick={() => { setGuestId(guest.id); setGuestSearch(`${guest.firstName} ${guest.lastName}`); }}
+                        data-testid={`guest-option-${guest.id}`}
+                      >
+                        {guest.firstName} {guest.lastName} {guest.documentNumber ? `— ${guest.documentNumber}` : ""}
+                      </div>
+                    ))}
+                    {filteredGuests.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">No se encontraron huéspedes</div>
+                    )}
+                  </div>
+                )}
+                <Button variant="outline" size="sm" className="w-fit" onClick={() => { setShowNewGuest(true); setGuestId(""); }} data-testid="button-new-guest">
+                  <Plus className="h-3 w-3 mr-1" /> Nuevo huésped
+                </Button>
+              </>
+            ) : (
+              <div className="border rounded-md p-3 space-y-2 bg-muted/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">Nuevo huésped</span>
+                  <Button variant="ghost" size="sm" onClick={() => { setShowNewGuest(false); setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" }); }} data-testid="button-cancel-new-guest">
+                    Cancelar
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input placeholder="Nombre *" value={newGuest.firstName} onChange={(e) => setNewGuest({...newGuest, firstName: e.target.value})} data-testid="input-new-guest-firstname" />
+                  <Input placeholder="Apellido" value={newGuest.lastName} onChange={(e) => setNewGuest({...newGuest, lastName: e.target.value})} data-testid="input-new-guest-lastname" />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <Input placeholder="DNI" value={newGuest.documentNumber} onChange={(e) => setNewGuest({...newGuest, documentNumber: e.target.value})} data-testid="input-new-guest-dni" />
+                  <Input placeholder="Teléfono" value={newGuest.phone} onChange={(e) => setNewGuest({...newGuest, phone: e.target.value})} data-testid="input-new-guest-phone" />
+                  <Input placeholder="Email" value={newGuest.email} onChange={(e) => setNewGuest({...newGuest, email: e.target.value})} data-testid="input-new-guest-email" />
+                </div>
+              </div>
+            )}
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="checkIn">Check-in</Label>
-            <Input
-              id="checkIn"
-              type="date"
-              value={reservationData.checkInDate}
-              disabled
-              className="bg-muted"
-            />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1">
+              <Label>Check-in</Label>
+              <Input type="date" value={reservationData.checkInDate} disabled className="bg-muted" />
+            </div>
+            <div className="grid gap-1">
+              <Label>Check-out *</Label>
+              <Input type="date" value={checkOutDate} onChange={(e) => setCheckOutDate(e.target.value)} min={reservationData.checkInDate} data-testid="input-checkout-quick" />
+            </div>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="checkOut">Check-out *</Label>
-            <Input
-              id="checkOut"
-              type="date"
-              value={checkOutDate}
-              onChange={(e) => setCheckOutDate(e.target.value)}
-              min={reservationData.checkInDate}
-              data-testid="input-checkout-quick"
-            />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1">
+              <Label>Tipo de camaje</Label>
+              <Select value={bedConfig} onValueChange={setBedConfig}>
+                <SelectTrigger data-testid="select-bed-config">
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bedConfigOptions.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1">
+              <Label>Huéspedes</Label>
+              <Input type="number" min={1} max={10} value={numberOfGuests} onChange={(e) => setNumberOfGuests(parseInt(e.target.value) || 1)} data-testid="input-guests-quick" />
+            </div>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="guests">Cantidad de huéspedes</Label>
-            <Input
-              id="guests"
-              type="number"
-              min={1}
-              max={10}
-              value={numberOfGuests}
-              onChange={(e) => setNumberOfGuests(parseInt(e.target.value) || 1)}
-              data-testid="input-guests-quick"
-            />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1">
+              <Label>Plan tarifario</Label>
+              <Select value={ratePlanId} onValueChange={setRatePlanId}>
+                <SelectTrigger data-testid="select-rate-plan">
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {roomRatePlans.map(rp => (
+                    <SelectItem key={rp.id} value={rp.id}>{rp.name} (${rp.baseRate})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1">
+              <Label>Canal</Label>
+              <Select value={source} onValueChange={setSource}>
+                <SelectTrigger data-testid="select-source">
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sourceOptions.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-1">
+            <Label>Observaciones</Label>
+            <Textarea placeholder="Notas o pedidos especiales..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} data-testid="input-notes-quick" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel-quick">
+          <Button variant="outline" onClick={() => { onOpenChange(false); resetForm(); }} data-testid="button-cancel-quick">
             Volver
           </Button>
-          <Button onClick={handleSubmit} disabled={mutation.isPending} data-testid="button-create-quick">
+          <Button onClick={handleSubmit} disabled={mutation.isPending || createGuestMutation.isPending} data-testid="button-create-quick">
             {mutation.isPending ? "Creando..." : "Crear Reserva"}
           </Button>
         </DialogFooter>
@@ -418,6 +582,18 @@ function ReservationDetailModal({
   onNavigate: (path: string) => void;
 }) {
   const { toast } = useToast();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editCheckIn, setEditCheckIn] = useState("");
+  const [editCheckOut, setEditCheckOut] = useState("");
+  const [editChannel, setEditChannel] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editEarlyCheckIn, setEditEarlyCheckIn] = useState(false);
+  const [editLateCheckOut, setEditLateCheckOut] = useState(false);
+  const [editRatePerNight, setEditRatePerNight] = useState("");
+  const [checkoutStep, setCheckoutStep] = useState(0);
+  const [checkoutReceiptType, setCheckoutReceiptType] = useState("ticket");
+  const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState("efectivo");
+  const [checkoutPayAmount, setCheckoutPayAmount] = useState("");
 
   const { data: reservation, isLoading } = useQuery<ReservationWithDetails>({
     queryKey: ["/api/reservations", reservationId],
@@ -428,6 +604,71 @@ function ReservationDetailModal({
     },
     enabled: !!reservationId && open,
   });
+
+  const updateReservationMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      return apiRequest("PATCH", `/api/reservations/${reservationId}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId] });
+      queryClient.invalidateQueries({ predicate: (query) =>
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
+      toast({ title: "Reserva actualizada" });
+      setIsEditing(false);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo actualizar la reserva.", variant: "destructive" });
+    },
+  });
+
+  const addPaymentMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      return apiRequest("POST", `/api/payments`, { ...data, reservationId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+    },
+  });
+
+  const startCheckout = () => {
+    setCheckoutStep(1);
+    setCheckoutReceiptType("ticket");
+    setCheckoutPaymentMethod("efectivo");
+    setCheckoutPayAmount("");
+  };
+
+  const startEditing = () => {
+    if (!reservation) return;
+    setEditCheckIn(reservation.checkInDate);
+    setEditCheckOut(reservation.checkOutDate);
+    setEditChannel(reservation.source || "directo");
+    setEditNotes(reservation.notes || "");
+    setEditEarlyCheckIn(reservation.earlyCheckIn === "true" || reservation.earlyCheckIn === true);
+    setEditLateCheckOut(reservation.lateCheckOut === "true" || reservation.lateCheckOut === true);
+    setEditRatePerNight(reservation.finalRatePerNight?.toString() || "");
+    setIsEditing(true);
+  };
+
+  const saveEdit = () => {
+    const ci = new Date(editCheckIn + "T12:00:00");
+    const co = new Date(editCheckOut + "T12:00:00");
+    const nights = Math.max(1, Math.round((co.getTime() - ci.getTime()) / (1000 * 60 * 60 * 24)));
+    const rate = parseFloat(editRatePerNight) || 0;
+    updateReservationMutation.mutate({
+      checkInDate: editCheckIn,
+      checkOutDate: editCheckOut,
+      source: editChannel,
+      notes: editNotes,
+      earlyCheckIn: editEarlyCheckIn,
+      lateCheckOut: editLateCheckOut,
+      finalRatePerNight: editRatePerNight,
+      nights,
+      totalRoomAmount: (rate * nights).toFixed(2),
+    });
+  };
 
   const checkInMutation = useMutation({
     mutationFn: async () => {
@@ -452,7 +693,7 @@ function ReservationDetailModal({
 
   const checkOutMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+      return apiRequest("POST", `/api/reservations/${reservationId}/check-out`, { forceCheckout: true });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -505,6 +746,174 @@ function ReservationDetailModal({
             <Skeleton className="h-6 w-1/2" />
           </div>
         ) : reservation ? (
+          checkoutStep > 0 ? (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center gap-2 mb-2">
+                {[1,2,3,4].map(s => (
+                  <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= checkoutStep ? "bg-primary" : "bg-muted"}`} />
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground text-center">
+                Paso {checkoutStep} de 4: {checkoutStep === 1 ? "Resumen de cuenta" : checkoutStep === 2 ? "Pago" : checkoutStep === 3 ? "Comprobante" : "Confirmar"}
+              </p>
+
+              {checkoutStep === 1 && (() => {
+                const totalPayments = reservation.payments?.reduce((s, p) => s + parseFloat(p.amount), 0) || 0;
+                const totalAmount = parseFloat(reservation.totalRoomAmount || "0") + totalCharges;
+                const balance = totalAmount - totalPayments;
+                return (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-muted/50 rounded-md space-y-1">
+                      <div className="flex justify-between text-sm"><span>Habitación ({reservation.nights} noches)</span><span>${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+                      {totalCharges > 0 && <div className="flex justify-between text-sm"><span>Cargos extras</span><span>${totalCharges.toFixed(2)}</span></div>}
+                      <div className="flex justify-between text-sm border-t pt-1"><span>Pagado</span><span className="text-green-600">-${totalPayments.toFixed(2)}</span></div>
+                      <div className="flex justify-between font-bold pt-1 border-t"><span>Saldo</span><span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toFixed(2)}</span></div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setCheckoutStep(0)}>Cancelar</Button>
+                      <Button size="sm" onClick={() => setCheckoutStep(balance > 0 ? 2 : 3)} data-testid="button-checkout-step1-next">
+                        {balance > 0 ? "Registrar Pago" : "Siguiente"}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {checkoutStep === 2 && (() => {
+                const totalPayments = reservation.payments?.reduce((s, p) => s + parseFloat(p.amount), 0) || 0;
+                const totalAmount = parseFloat(reservation.totalRoomAmount || "0") + totalCharges;
+                const balance = totalAmount - totalPayments;
+                return (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
+                      Saldo pendiente: <span className="font-bold">${balance.toFixed(2)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Monto</Label>
+                        <Input type="number" min={0} step="0.01" value={checkoutPayAmount || balance.toFixed(2)} onChange={(e) => setCheckoutPayAmount(e.target.value)} data-testid="input-checkout-amount" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Método</Label>
+                        <Select value={checkoutPaymentMethod} onValueChange={setCheckoutPaymentMethod}>
+                          <SelectTrigger data-testid="select-checkout-method"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="efectivo">Efectivo</SelectItem>
+                            <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                            <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                            <SelectItem value="transferencia">Transferencia</SelectItem>
+                            <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setCheckoutStep(1)}>Atrás</Button>
+                      <Button size="sm" onClick={() => {
+                        addPaymentMutation.mutate({ amount: checkoutPayAmount || balance.toFixed(2), method: checkoutPaymentMethod, receiptType: checkoutReceiptType }, {
+                          onSuccess: () => setCheckoutStep(3),
+                        });
+                      }} disabled={addPaymentMutation.isPending} data-testid="button-checkout-pay">
+                        {addPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setCheckoutStep(3)} data-testid="button-checkout-skip-pay">
+                        Omitir
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {checkoutStep === 3 && (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tipo de Comprobante</Label>
+                    <Select value={checkoutReceiptType} onValueChange={setCheckoutReceiptType}>
+                      <SelectTrigger data-testid="select-checkout-receipt"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ticket">Ticket</SelectItem>
+                        <SelectItem value="factura_a">Factura A</SelectItem>
+                        <SelectItem value="factura_b">Factura B</SelectItem>
+                        <SelectItem value="factura_c">Factura C</SelectItem>
+                        <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setCheckoutStep(2)}>Atrás</Button>
+                    <Button size="sm" onClick={() => setCheckoutStep(4)} data-testid="button-checkout-step3-next">Siguiente</Button>
+                  </div>
+                </div>
+              )}
+
+              {checkoutStep === 4 && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-muted/50 rounded-md text-sm space-y-1">
+                    <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.firstName} {reservation.guest?.lastName}</span>.</p>
+                    <p>Habitación <span className="font-bold">{reservation.room?.roomNumber}</span> quedará en estado <Badge variant="outline" className="text-orange-700">Sucia</Badge>.</p>
+                    <p>Se creará tarea de limpieza en Housekeeping.</p>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setCheckoutStep(3)}>Atrás</Button>
+                    <Button variant="destructive" size="sm" onClick={() => {
+                      checkOutMutation.mutate();
+                      setCheckoutStep(0);
+                    }} disabled={checkOutMutation.isPending} data-testid="button-checkout-confirm">
+                      {checkOutMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : isEditing ? (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label className="text-xs">Check-in</Label>
+                  <Input type="date" value={editCheckIn} onChange={(e) => setEditCheckIn(e.target.value)} data-testid="input-edit-checkin" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Check-out</Label>
+                  <Input type="date" value={editCheckOut} onChange={(e) => setEditCheckOut(e.target.value)} data-testid="input-edit-checkout" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Canal</Label>
+                  <Select value={editChannel} onValueChange={setEditChannel}>
+                    <SelectTrigger data-testid="select-edit-channel"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(["directo","booking","expedia","airbnb","despegar","telefono","email","web","agencia","otro"] as const).map(s => (
+                        <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Tarifa/noche</Label>
+                  <Input type="number" min={0} step="0.01" value={editRatePerNight} onChange={(e) => setEditRatePerNight(e.target.value)} data-testid="input-edit-rate" />
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={editEarlyCheckIn} onChange={(e) => setEditEarlyCheckIn(e.target.checked)} className="rounded" data-testid="check-edit-early" />
+                  <Sunrise className="h-4 w-4 text-orange-400" /> Early Check-in
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={editLateCheckOut} onChange={(e) => setEditLateCheckOut(e.target.checked)} className="rounded" data-testid="check-edit-late" />
+                  <Sunset className="h-4 w-4 text-purple-400" /> Late Check-out
+                </label>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Observaciones</Label>
+                <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} rows={2} data-testid="input-edit-notes" />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>Cancelar</Button>
+                <Button size="sm" onClick={saveEdit} disabled={updateReservationMutation.isPending} data-testid="button-save-edit">
+                  {updateReservationMutation.isPending ? "Guardando..." : "Guardar Cambios"}
+                </Button>
+              </div>
+            </div>
+          ) : (
           <div className="space-y-4 py-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -572,13 +981,27 @@ function ReservationDetailModal({
             {reservation.notes && (
               <div className="text-sm bg-muted/30 rounded-md p-3">
                 <div className="text-muted-foreground mb-1">Notas:</div>
-                <div>{reservation.notes}</div>
+                <div style={{ whiteSpace: "pre-wrap" }}>{reservation.notes}</div>
               </div>
             )}
           </div>
+          )
         ) : null}
 
+        {!isEditing && (
         <DialogFooter className="flex-col gap-2 sm:flex-row">
+          {reservation && reservation.status !== "checked_out" && reservation.status !== "cancelled" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={startEditing}
+              className="w-full sm:w-auto"
+              data-testid="button-edit-reservation"
+            >
+              <ArrowLeftRight className="h-4 w-4 mr-2" />
+              Editar
+            </Button>
+          )}
           {canCheckIn && (
             <Button
               onClick={() => checkInMutation.mutate()}
@@ -592,14 +1015,13 @@ function ReservationDetailModal({
           )}
           {canCheckOut && (
             <Button
-              onClick={() => checkOutMutation.mutate()}
-              disabled={checkOutMutation.isPending}
+              onClick={startCheckout}
               variant="secondary"
               className="w-full sm:w-auto"
               data-testid="button-checkout-quick"
             >
               <LogOut className="h-4 w-4 mr-2" />
-              {checkOutMutation.isPending ? "Procesando..." : "Check-out"}
+              Check-out
             </Button>
           )}
           <Button
@@ -615,6 +1037,7 @@ function ReservationDetailModal({
             Ver Completo
           </Button>
         </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -699,6 +1122,8 @@ export default function PlanningPage() {
         roomId: room.id,
         roomNumber: room.roomNumber,
         roomTypeName: room.roomType.name,
+        roomTypeId: room.roomTypeId,
+        bedConfig: room.bedConfig || "",
         checkInDate: day,
       });
       setQuickReservationOpen(true);
@@ -716,6 +1141,15 @@ export default function PlanningPage() {
   }, {} as Record<number, typeof data.rooms>) || {};
 
   const floors = Object.keys(groupedRooms).map(Number).sort((a, b) => a - b);
+
+  // Sort rooms within each floor numerically by room number
+  Object.keys(groupedRooms).forEach((floor) => {
+    groupedRooms[Number(floor)].sort((a, b) => {
+      const numA = parseInt(a.roomNumber.replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(b.roomNumber.replace(/\D/g, ''), 10) || 0;
+      return numA - numB;
+    });
+  });
 
   return (
     <div className="flex flex-col gap-4 p-6 h-full">

@@ -1445,6 +1445,7 @@ export default function SpaPage() {
                           <SelectItem value="factura_b">Factura B</SelectItem>
                           <SelectItem value="factura_c">Factura C</SelectItem>
                           <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
+                          <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

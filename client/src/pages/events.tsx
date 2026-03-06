@@ -190,6 +190,16 @@ const eventTypeLabels: Record<string, string> = {
   other: "Otro",
 };
 
+const eventTypeColors: Record<string, string> = {
+  corporate: "bg-blue-500/20 text-blue-800 dark:text-blue-200 border border-blue-400/40",
+  social: "bg-pink-500/20 text-pink-800 dark:text-pink-200 border border-pink-400/40",
+  wedding: "bg-amber-100/60 text-amber-900 dark:bg-amber-400/20 dark:text-amber-200 border border-amber-400/40",
+  conference: "bg-green-500/20 text-green-800 dark:text-green-200 border border-green-400/40",
+  meeting: "bg-teal-500/20 text-teal-800 dark:text-teal-200 border border-teal-400/40",
+  table_event: "bg-violet-500/20 text-violet-800 dark:text-violet-200 border border-violet-400/40",
+  other: "bg-gray-500/20 text-gray-800 dark:text-gray-200 border border-gray-400/40",
+};
+
 const paymentMethodLabels: Record<string, string> = {
   efectivo: "Efectivo",
   tarjeta_debito: "Tarjeta Debito",
@@ -200,7 +210,7 @@ const paymentMethodLabels: Record<string, string> = {
   cuenta_corriente: "Cuenta Corriente",
 };
 
-const receiptTypes = ["Ticket", "Factura A", "Factura B", "Factura C", "Nota Credito"];
+const receiptTypes = ["Ticket", "Factura A", "Factura B", "Factura C", "Nota Credito", "Voucher (No Fiscal)"];
 
 function safeFormatDate(dateStr: string, fmt: string, opts?: any): string {
   try {
@@ -285,6 +295,7 @@ export default function EventsPage() {
   const [tablePayMethod, setTablePayMethod] = useState("efectivo");
   const [tablePayAdvance, setTablePayAdvance] = useState(false);
   const [tablePayResId, setTablePayResId] = useState("");
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const { toast } = useToast();
 
   const weekDays = useMemo(() => {
@@ -326,6 +337,24 @@ export default function EventsPage() {
   const cellEventsMap = planningData?.cellEvents || {};
 
   const eventForm = useForm<EventFormValues>({
+    resolver: zodResolver(eventFormSchema),
+    defaultValues: {
+      eventRoomId: "",
+      name: "",
+      eventType: "corporate",
+      contactName: "",
+      contactPhone: "",
+      contactEmail: "",
+      startDate: "",
+      endDate: "",
+      startTime: "",
+      endTime: "",
+      attendees: 10,
+      notes: "",
+    },
+  });
+
+  const editForm = useForm<EventFormValues>({
     resolver: zodResolver(eventFormSchema),
     defaultValues: {
       eventRoomId: "",
@@ -621,6 +650,42 @@ export default function EventsPage() {
     createEventMutation.mutate(data);
   };
 
+  const handleOpenEdit = () => {
+    if (!selectedEvent) return;
+    editForm.reset({
+      eventRoomId: selectedEvent.eventRoomId,
+      name: selectedEvent.name,
+      eventType: selectedEvent.eventType as EventFormValues["eventType"],
+      contactName: selectedEvent.contactName,
+      contactPhone: selectedEvent.contactPhone || "",
+      contactEmail: selectedEvent.contactEmail || "",
+      startDate: selectedEvent.startDate,
+      endDate: selectedEvent.endDate,
+      startTime: selectedEvent.startTime || "",
+      endTime: selectedEvent.endTime || "",
+      attendees: selectedEvent.attendees,
+      notes: selectedEvent.notes || "",
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const onSubmitEdit = (data: EventFormValues) => {
+    if (!selectedEvent) return;
+    updateEventMutation.mutate(
+      { id: selectedEvent.id, data },
+      {
+        onSuccess: async () => {
+          const response = await fetch(`/api/events/${selectedEvent.id}`);
+          if (response.ok) {
+            const updatedEvent = await response.json();
+            setSelectedEvent(updatedEvent);
+          }
+          setIsEditDialogOpen(false);
+        },
+      }
+    );
+  };
+
   const onSubmitCharge = (data: ChargeFormValues) => {
     if (!selectedEvent) return;
     createChargeMutation.mutate({ eventId: selectedEvent.id, data });
@@ -812,7 +877,7 @@ export default function EventsPage() {
                               {cellEvents.map((event) => (
                                 <div
                                   key={event.id}
-                                  className={`p-1.5 rounded-md text-xs cursor-pointer ${eventStatusColors[event.status]}`}
+                                  className={`p-1.5 rounded-md text-xs cursor-pointer ${eventTypeColors[event.eventType] || eventTypeColors.other}`}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleEventClick(event.id);
@@ -820,7 +885,7 @@ export default function EventsPage() {
                                   data-testid={`event-${event.id}`}
                                 >
                                   <div className="font-medium truncate">{event.name}</div>
-                                  <div className="text-xs opacity-80 truncate">{event.contactName}</div>
+                                  <div className="text-xs opacity-80 truncate">{eventTypeLabels[event.eventType] || event.eventType}</div>
                                 </div>
                               ))}
                               {cellEvents.length === 0 && (
@@ -839,6 +904,14 @@ export default function EventsPage() {
             </div>
             <ScrollBar orientation="horizontal" />
           </ScrollArea>
+          <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t" data-testid="event-type-legend">
+            {Object.entries(eventTypeLabels).map(([key, label]) => (
+              <div key={key} className="flex items-center gap-1.5">
+                <div className={`w-3 h-3 rounded-sm ${eventTypeColors[key]}`} />
+                <span className="text-xs text-muted-foreground">{label}</span>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -1076,6 +1149,231 @@ export default function EventsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Event Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar Evento</DialogTitle>
+            <DialogDescription>
+              Modifique los datos del evento
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(onSubmitEdit)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Nombre del Evento</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Nombre del evento" {...field} data-testid="input-edit-event-name" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="eventRoomId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Salon</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-edit-event-room">
+                            <SelectValue placeholder="Seleccionar salon" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {eventRooms.filter(r => r.isActive).map((room) => (
+                            <SelectItem key={room.id} value={room.id}>
+                              {room.name} (Cap: {room.capacity})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="eventType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo de Evento</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-edit-event-type">
+                            <SelectValue placeholder="Seleccionar tipo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="corporate">Corporativo</SelectItem>
+                          <SelectItem value="social">Social</SelectItem>
+                          <SelectItem value="wedding">Boda</SelectItem>
+                          <SelectItem value="conference">Conferencia</SelectItem>
+                          <SelectItem value="meeting">Reunion</SelectItem>
+                          <SelectItem value="table_event">Evento por Mesa</SelectItem>
+                          <SelectItem value="other">Otro</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="contactName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Persona de Contacto</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Nombre de contacto" {...field} data-testid="input-edit-contact-name" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="contactPhone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Telefono</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Telefono" {...field} data-testid="input-edit-contact-phone" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="contactEmail"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input type="email" placeholder="Email" {...field} data-testid="input-edit-contact-email" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="attendees"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Asistentes</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={1}
+                          {...field}
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                          data-testid="input-edit-attendees"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="startDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Fecha Inicio</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} data-testid="input-edit-start-date" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="endDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Fecha Fin</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} data-testid="input-edit-end-date" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="startTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Hora Inicio</FormLabel>
+                      <FormControl>
+                        <Input type="time" {...field} data-testid="input-edit-start-time" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="endTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Hora Fin</FormLabel>
+                      <FormControl>
+                        <Input type="time" {...field} data-testid="input-edit-end-time" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Notas</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Notas adicionales" {...field} data-testid="input-edit-notes" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={updateEventMutation.isPending} data-testid="button-submit-edit-event">
+                  {updateEventMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Guardar Cambios
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
       {/* Event Detail Dialog */}
       <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1173,11 +1471,21 @@ export default function EventsPage() {
 
                 {selectedEvent.notes && (
                   <div className="p-3 rounded-md bg-muted">
-                    <p className="text-sm">{selectedEvent.notes}</p>
+                    <p className="text-sm whitespace-pre-wrap">{selectedEvent.notes}</p>
                   </div>
                 )}
 
                 <div className="flex flex-wrap gap-2 pt-4 border-t">
+                  {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
+                    <Button
+                      variant="outline"
+                      onClick={handleOpenEdit}
+                      data-testid="button-edit-event"
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Editar
+                    </Button>
+                  )}
                   {selectedEvent.status === "tentative" && (
                     <Button
                       onClick={() => {

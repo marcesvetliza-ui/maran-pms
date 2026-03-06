@@ -593,12 +593,18 @@ export class DatabaseStorage implements IStorage {
       cellReservations[room.id] = {};
       cellGroupBlocks[room.id] = {};
 
+      const todayStr = new Date().toISOString().split("T")[0];
+
       for (const day of days) {
         if (room.status === "maintenance") {
           occupancy[room.id].push("maintenance");
           continue;
         }
-        if (room.status === "cleaning") {
+        if (room.status === "dirty" && day === todayStr) {
+          occupancy[room.id].push("dirty");
+          continue;
+        }
+        if (room.status === "cleaning" && day === todayStr) {
           occupancy[room.id].push("cleaning");
           continue;
         }
@@ -2569,7 +2575,7 @@ export class DatabaseStorage implements IStorage {
     const allRooms = await db.select().from(rooms);
     const totalRooms = allRooms.length;
 
-    const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, cleaning: 0, maintenance: 0, oos: 0 };
+    const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, dirty: 0, cleaning: 0, maintenance: 0, oos: 0 };
     for (const r of allRooms) {
       const s = r.status || "available";
       if (s in roomsByStatus) roomsByStatus[s]++;
@@ -2965,7 +2971,7 @@ export class DatabaseStorage implements IStorage {
         .where(eq(reservations.id, reservation.id));
 
       await db.update(rooms)
-        .set({ status: "cleaning" })
+        .set({ status: "dirty" })
         .where(eq(rooms.id, reservation.roomId));
 
       try {
