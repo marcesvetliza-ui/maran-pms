@@ -2,7 +2,7 @@
 
 ## Overview
 
-Maran Suite System is a comprehensive full-stack hospitality management suite designed for Maran Suites & Towers, a 77-room, 12-floor hotel. The system, developed in Spanish (es) and adhering to Material Design principles, aims to be a modular commercial product. It provides a unified platform for managing various hotel operations, including guest services, reservations, and internal management.
+Maran Suite System is a comprehensive full-stack hospitality management suite designed for Maran Suites & Towers, a 66-room, 12-floor hotel (Floors 2-12: Floor 2 has 6 rooms, Floors 3-9 have 7 each, Floor 10 has 5, Floors 11-12 have 3 each). The system, developed in Spanish (es) and adhering to Material Design principles, aims to be a modular commercial product. It provides a unified platform for managing various hotel operations, including guest services, reservations, and internal management.
 
 Key capabilities include:
 - A central dashboard for operational oversight.
