@@ -119,51 +119,49 @@ export async function registerRoutes(
   app.use("/api/system-users", requireRole(["admin"]));
   app.use("/api/system-settings", requireRole(["admin"]));
 
-  app.get("/api/download/source-code", async (_req, res) => {
+  app.get("/api/source/files", requireAuth, async (_req, res) => {
     const fs = await import("fs");
-    const path = await import("path");
-    const filePath = path.resolve("MARAN_SUITE_CODIGO_COMPLETO.txt");
-    if (fs.existsSync(filePath)) {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.setHeader("Content-Disposition", "attachment; filename=MARAN_SUITE_CODIGO_COMPLETO.txt");
-      fs.createReadStream(filePath).pipe(res);
-    } else {
-      res.status(404).send("Archivo no encontrado");
+    const srcPath = path.resolve(".");
+    const allowedDirs = ["client/src", "server", "shared", "script"];
+    const allowedRootFiles = ["package.json", "tsconfig.json", "tailwind.config.ts", "vite.config.ts", "drizzle.config.ts", "replit.md"];
+    const results: string[] = [];
+
+    function walkDir(dir: string) {
+      try {
+        const entries = fs.readdirSync(path.join(srcPath, dir), { withFileTypes: true });
+        for (const entry of entries) {
+          const rel = dir + "/" + entry.name;
+          if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules" && entry.name !== "dist" && entry.name !== "ui" && entry.name !== "replit_integrations") {
+            walkDir(rel);
+          } else if (entry.isFile() && /\.(ts|tsx|css|json|md)$/.test(entry.name)) {
+            results.push(rel);
+          }
+        }
+      } catch {}
     }
+
+    for (const d of allowedDirs) walkDir(d);
+    for (const f of allowedRootFiles) {
+      if (fs.existsSync(path.join(srcPath, f))) results.push(f);
+    }
+    res.json(results.sort());
   });
 
-  app.get("/api/download/source-code-pdf", async (_req, res) => {
+  app.get("/api/source/file", requireAuth, async (req, res) => {
     const fs = await import("fs");
-    const filePath = "/home/runner/workspace/MARAN_SUITE_CODIGO_COMPLETO.pdf";
-    if (fs.existsSync(filePath)) {
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", "attachment; filename=MARAN_SUITE_CODIGO_COMPLETO.pdf");
-      fs.createReadStream(filePath).pipe(res);
-    } else {
-      res.status(404).send("PDF no encontrado");
+    const filePath = req.query.path as string;
+    if (!filePath || filePath.includes("..") || filePath.startsWith("/")) {
+      return res.status(400).json({ error: "Ruta inválida" });
     }
-  });
-
-  app.get("/api/download/source-code-zip", async (_req, res) => {
-    const { execSync } = await import("child_process");
-    const fs = await import("fs");
-    const zipPath = "/tmp/maran-suite-source.zip";
+    const fullPath = path.resolve(filePath);
+    if (!fullPath.startsWith(path.resolve("."))) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
     try {
-      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-      execSync(
-        `cd /home/runner/workspace && zip -r ${zipPath} ` +
-        `shared/ server/index.ts server/routes.ts server/storage.ts server/vite.ts server/static.ts ` +
-        `client/index.html client/src/ ` +
-        `package.json tsconfig.json vite.config.ts tailwind.config.ts drizzle.config.ts components.json ` +
-        `script/ replit.md MARAN_SUITE_CODIGO_COMPLETO.txt ` +
-        `-x "*/node_modules/*" -x "*/.git/*" -x "*/dist/*"`,
-        { timeout: 30000 }
-      );
-      res.setHeader("Content-Type", "application/zip");
-      res.setHeader("Content-Disposition", "attachment; filename=maran-suite-source.zip");
-      fs.createReadStream(zipPath).pipe(res);
-    } catch (err) {
-      res.status(500).send("Error generando ZIP");
+      const content = fs.readFileSync(fullPath, "utf-8");
+      res.json({ path: filePath, content });
+    } catch {
+      res.status(404).json({ error: "Archivo no encontrado" });
     }
   });
 
@@ -5295,25 +5293,6 @@ Only respond with the JSON object.`;
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Error fetching cash summary" });
-    }
-  });
-
-  app.get("/api/download/source-code", requireAuth, async (req, res) => {
-    try {
-      const fs = await import("fs");
-      const { execSync } = await import("child_process");
-
-      const prodZip = path.resolve("dist/public/maran-suite-system.zip");
-      if (fs.existsSync(prodZip)) {
-        return res.download(prodZip, "maran-suite-system.zip");
-      }
-
-      const tmpZip = "/tmp/maran-suite-system.zip";
-      execSync(`cd ${path.resolve(".")} && zip -r ${tmpZip} client/src/ server/*.ts shared/ package.json tsconfig.json tailwind.config.ts vite.config.ts drizzle.config.ts replit.md -x "*/node_modules/*" "*/.git/*" "*/.cache/*" "*/dist/*" 2>/dev/null`, { timeout: 30000 });
-      res.download(tmpZip, "maran-suite-system.zip");
-    } catch (err) {
-      console.error("Error generating zip:", err);
-      res.status(500).json({ error: "Error al generar el archivo" });
     }
   });
 

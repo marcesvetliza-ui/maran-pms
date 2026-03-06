@@ -36,6 +36,7 @@ import {
   BarChart3,
   FileText,
   Wallet,
+  FileCode,
 } from "lucide-react";
 import {
   Sidebar,
@@ -532,6 +533,18 @@ export function AppSidebar() {
                   <Link href="/administration">
                     <Shield className="h-5 w-5" />
                     <span>Administración</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/source-code"}
+                  data-testid="nav-source-code"
+                >
+                  <Link href="/source-code">
+                    <FileCode className="h-5 w-5" />
+                    <span>Código Fuente</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
