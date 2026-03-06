@@ -627,7 +627,7 @@ export default function GroupDetailPage() {
   const loadInvoice = async () => {
     setIsLoadingInvoice(true);
     try {
-      const res = await fetch(`/api/groups/${groupId}/invoice`);
+      const res = await fetch(`/api/groups/${groupId}/invoice`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setInvoiceData(data);

@@ -27,6 +27,9 @@ import {
   auditLogs,
   systemNotifications,
   guestPreferences,
+  groups,
+  groupRoomBlocks,
+  groupReservationLinks,
 } from "@shared/schema";
 
 export async function seedDatabase() {
@@ -413,6 +416,65 @@ export async function seedDatabase() {
     { id: "pref-006", guestId: "g3", category: "habitacion", subcategory: "almohadas", title: "Almohada hipoalergénica", description: "Requiere almohadas hipoalergénicas por sensibilidad", isActive: true, priority: "high", visibleTo: ["housekeeping"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
     { id: "pref-007", guestId: "g3", category: "servicio", subcategory: "idioma", title: "Idioma inglés", description: "Prefiere comunicación en inglés", isActive: true, priority: "normal", visibleTo: ["all"], recordedBy: "Recepción", sourceStay: null, createdAt: new Date(prefNow.getTime() - 15 * 86400000), updatedAt: new Date(prefNow.getTime() - 15 * 86400000) },
     { id: "pref-008", guestId: "g4", category: "alimentacion", subcategory: "alergias", title: "Intolerancia a lactosa", description: "Intolerancia a la lactosa. Solicitar opciones sin lácteos.", isActive: true, priority: "high", visibleTo: ["restaurant", "reception"], recordedBy: "Restaurant", sourceStay: null, createdAt: new Date(prefNow.getTime() - 10 * 86400000), updatedAt: new Date(prefNow.getTime() - 10 * 86400000) },
+  ]);
+
+  console.log("Seeding groups...");
+  const in14Days = new Date(Date.now() + 14 * 86400000).toISOString().split("T")[0];
+  const in17Days = new Date(Date.now() + 17 * 86400000).toISOString().split("T")[0];
+
+  await db.insert(groups).values([
+    {
+      id: "grp1",
+      groupCode: "GRP-0001",
+      name: "Congreso AACR 2026",
+      contactName: "Dr. Roberto Fernández",
+      contactPhone: "+54 343 455-1234",
+      contactEmail: "rfernandez@aacr.org.ar",
+      checkInDate: tomorrow,
+      checkOutDate: in5Days,
+      status: "confirmed",
+      notes: "Congreso anual de cardiología, 4 noches",
+      createdAt: now,
+      createdBy: "su1",
+    },
+    {
+      id: "grp2",
+      groupCode: "GRP-0002",
+      name: "Boda Martínez-Sosa",
+      contactName: "Laura Martínez",
+      contactPhone: "+54 343 456-7890",
+      contactEmail: "laura.martinez@email.com",
+      checkInDate: in14Days,
+      checkOutDate: in17Days,
+      eventDate: new Date(Date.now() + 15 * 86400000).toISOString().split("T")[0],
+      status: "tentative",
+      notes: "Boda el sábado, invitados llegan el viernes",
+      createdAt: now,
+      createdBy: "su1",
+    },
+  ]);
+
+  await db.insert(groupRoomBlocks).values([
+    { id: "grb1", groupId: "grp1", roomTypeId: "rt2", quantity: 3, ratePlanId: "rp2", agreedRate: "110.00", blockCheckInDate: tomorrow, blockCheckOutDate: in5Days },
+    { id: "grb2", groupId: "grp1", roomTypeId: "rt1", quantity: 2, ratePlanId: "rp1", agreedRate: "75.00", blockCheckInDate: tomorrow, blockCheckOutDate: in5Days },
+    { id: "grb3", groupId: "grp2", roomTypeId: "rt3", quantity: 2, ratePlanId: "rp3", agreedRate: "160.00", blockCheckInDate: in14Days, blockCheckOutDate: in17Days },
+    { id: "grb4", groupId: "grp2", roomTypeId: "rt2", quantity: 3, ratePlanId: "rp2", agreedRate: "100.00", blockCheckInDate: in14Days, blockCheckOutDate: in17Days },
+  ]);
+
+  await db.insert(reservations).values([
+    { id: "res-grp1-1", reservationCode: "RES-G001-1", guestId: "g5", companyId: "comp1", roomTypeId: "rt2", roomId: "r301", ratePlanId: "rp2", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "110.00", discountType: "none", discountValue: "0", finalRatePerNight: "110.00", totalRoomAmount: "440.00", status: "confirmed", source: "directo", numberOfGuests: 2, createdAt: now },
+    { id: "res-grp1-2", reservationCode: "RES-G001-2", guestId: "g6", companyId: null, roomTypeId: "rt2", roomId: "r307", ratePlanId: "rp2", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "110.00", discountType: "none", discountValue: "0", finalRatePerNight: "110.00", totalRoomAmount: "440.00", status: "confirmed", source: "directo", numberOfGuests: 1, createdAt: now },
+    { id: "res-grp1-3", reservationCode: "RES-G001-3", guestId: "g7", companyId: null, roomTypeId: "rt2", roomId: "r207", ratePlanId: "rp2", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "110.00", discountType: "none", discountValue: "0", finalRatePerNight: "110.00", totalRoomAmount: "440.00", status: "confirmed", source: "directo", numberOfGuests: 2, createdAt: now },
+    { id: "res-grp1-4", reservationCode: "RES-G001-4", guestId: "g8", companyId: null, roomTypeId: "rt1", roomId: "r302", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "75.00", discountType: "none", discountValue: "0", finalRatePerNight: "75.00", totalRoomAmount: "300.00", status: "confirmed", source: "directo", numberOfGuests: 1, createdAt: now },
+    { id: "res-grp1-5", reservationCode: "RES-G001-5", guestId: "g1", companyId: null, roomTypeId: "rt1", roomId: "r303", ratePlanId: "rp1", checkInDate: tomorrow, checkOutDate: in5Days, nights: 4, baseRatePerNight: "75.00", discountType: "none", discountValue: "0", finalRatePerNight: "75.00", totalRoomAmount: "300.00", status: "confirmed", source: "directo", numberOfGuests: 2, createdAt: now },
+  ]);
+
+  await db.insert(groupReservationLinks).values([
+    { id: "grl1", groupId: "grp1", reservationId: "res-grp1-1" },
+    { id: "grl2", groupId: "grp1", reservationId: "res-grp1-2" },
+    { id: "grl3", groupId: "grp1", reservationId: "res-grp1-3" },
+    { id: "grl4", groupId: "grp1", reservationId: "res-grp1-4" },
+    { id: "grl5", groupId: "grp1", reservationId: "res-grp1-5" },
   ]);
 
   console.log("Database seeded successfully!");
