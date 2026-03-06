@@ -679,6 +679,18 @@ export interface IStorage {
   getReportTopGuests(from: string, to: string, limit?: number): Promise<any[]>;
   getReportHousekeeping(from: string, to: string): Promise<any>;
   getReportRestaurant(from: string, to: string): Promise<any>;
+
+  getCashConfigs(): Promise<any[]>;
+  updateCashConfig(area: string, data: any): Promise<any>;
+  getCashShifts(area?: string, status?: string): Promise<any[]>;
+  getCurrentShift(area: string): Promise<any>;
+  openShift(data: any): Promise<any>;
+  closeShift(shiftId: string, closedBy: string, notes?: string): Promise<any>;
+  getShiftDetail(shiftId: string): Promise<any>;
+  getCashMovements(shiftId: string): Promise<any[]>;
+  createCashMovement(data: any): Promise<any>;
+  registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType?: string, registeredBy?: string, receiptType?: string): Promise<any>;
+  getCashSummary(area?: string, from?: string, to?: string): Promise<any[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -4892,4 +4904,15 @@ export class MemStorage implements IStorage {
   async getReportTopGuests(_from: string, _to: string, _limit?: number): Promise<any[]> { return []; }
   async getReportHousekeeping(_from: string, _to: string): Promise<any> { return { daily: [], byType: [], totalCompleted: 0, totalPending: 0 }; }
   async getReportRestaurant(_from: string, _to: string): Promise<any> { return { totalOrders: 0, totalRevenue: 0, totalCovers: 0, avgTicket: 0, topItems: [], byArea: [] }; }
+  async getCashConfigs(): Promise<any[]> { return []; }
+  async updateCashConfig(_area: string, _data: any): Promise<any> { return null; }
+  async getCashShifts(_area?: string, _status?: string): Promise<any[]> { return []; }
+  async getCurrentShift(_area: string): Promise<any> { return undefined; }
+  async openShift(_data: any): Promise<any> { return {}; }
+  async closeShift(_shiftId: string, _closedBy: string, _notes?: string): Promise<any> { return {}; }
+  async getShiftDetail(_shiftId: string): Promise<any> { return {}; }
+  async getCashMovements(_shiftId: string): Promise<any[]> { return []; }
+  async createCashMovement(_data: any): Promise<any> { return {}; }
+  async registerCashMovement(_area: string, _sourceType: string, _sourceId: string | null, _sourceLabel: string, _paymentMethod: string, _amount: string, _movementType?: string, _registeredBy?: string, _receiptType?: string): Promise<any> { return {}; }
+  async getCashSummary(_area?: string, _from?: string, _to?: string): Promise<any[]> { return []; }
 }

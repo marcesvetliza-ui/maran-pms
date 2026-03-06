@@ -27,6 +27,7 @@ import {
   auditLogs,
   systemNotifications,
   guestPreferences,
+  cashRegisterConfigs,
   groups,
   groupRoomBlocks,
   groupReservationLinks,
@@ -476,6 +477,13 @@ export async function seedDatabase() {
     { id: "grl4", groupId: "grp1", reservationId: "res-grp1-4" },
     { id: "grl5", groupId: "grp1", reservationId: "res-grp1-5" },
   ]);
+
+  await db.insert(cashRegisterConfigs).values([
+    { id: "crc1", area: "reception", areaLabel: "Recepción", shiftsPerDay: 3, isActive: true },
+    { id: "crc2", area: "restaurant", areaLabel: "Restaurante", shiftsPerDay: 2, isActive: true },
+    { id: "crc3", area: "spa", areaLabel: "SPA", shiftsPerDay: 1, isActive: true },
+    { id: "crc4", area: "events", areaLabel: "Eventos", shiftsPerDay: 1, isActive: true },
+  ]).onConflictDoNothing();
 
   console.log("Database seeded successfully!");
 }

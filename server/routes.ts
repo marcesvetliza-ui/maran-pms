@@ -1153,6 +1153,28 @@ export async function registerRoutes(
   app.post("/api/payments", async (req, res) => {
     try {
       const payment = await storage.createPayment(req.body);
+
+      try {
+        const methodMap: Record<string, string> = {
+          efectivo: "cash", tarjeta_debito: "debit_card", tarjeta_credito: "credit_card",
+          transferencia: "transfer", mercadopago: "mercadopago", cuenta_corriente: "current_account",
+          cargo_habitacion: "room_charge", room_charge: "room_charge",
+          cash: "cash", debit_card: "debit_card", credit_card: "credit_card", transfer: "transfer",
+          current_account: "current_account",
+        };
+        const rawMethod = req.body.method || "cash";
+        const cashMethod = methodMap[rawMethod] || rawMethod;
+        const reservation = req.body.reservationId ? await storage.getReservation(req.body.reservationId) : null;
+        const label = reservation
+          ? `Reserva ${reservation.reservationCode} - Pago ${rawMethod}`
+          : `Pago manual - ${req.body.description || "Sin descripción"}`;
+        await storage.registerCashMovement(
+          "reception", "reservation", req.body.reservationId || null, label,
+          cashMethod, String(req.body.amount), "income",
+          undefined, req.body.receiptType
+        );
+      } catch (e) {}
+
       res.status(201).json(payment);
     } catch (error) {
       res.status(500).json({ error: "Error creating payment" });
@@ -2264,7 +2286,17 @@ Only respond with the JSON object.`;
       if (order.tableId) {
         await storage.updateRestaurantTable(order.tableId, { status: "available" });
       }
-      
+
+      try {
+        const label = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}`;
+        await storage.registerCashMovement(
+          "restaurant", "restaurant_order", req.params.id, label,
+          paymentMethod || (chargeToRoom ? "room_charge" : "cash"),
+          String(order.total || "0"), "income",
+          undefined, receiptType
+        );
+      } catch (e) {}
+
       res.json(updatedOrder);
     } catch (error) {
       res.status(500).json({ error: "Error closing order" });
@@ -3305,6 +3337,14 @@ Only respond with the JSON object.`;
         await storage.createCharge(charge);
       }
 
+      try {
+        const label = `SPA - Pago ${isAdvance ? "(Seña)" : ""} - Cuenta ${req.params.id}`;
+        await storage.registerCashMovement(
+          "spa", "spa_account", req.params.id, label,
+          method, String(amount), "income"
+        );
+      } catch (e) {}
+
       res.status(201).json(payment);
     } catch (error) {
       res.status(500).json({ error: "Error creating payment" });
@@ -3673,6 +3713,16 @@ Only respond with the JSON object.`;
         const totalPaid = (refreshedEvent.payments || []).reduce((sum, p) => sum + parseFloat(p.amount), 0);
         await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
       }
+
+      try {
+        const evt = await storage.getEvent(req.params.eventId);
+        const label = `Evento ${evt?.name || req.params.eventId} - Pago ${method}`;
+        await storage.registerCashMovement(
+          "events", "event", req.params.eventId, label,
+          method, String(amount), "income"
+        );
+      } catch (e) {}
+
       res.status(201).json(payment);
     } catch (error) {
       res.status(500).json({ error: "Error creating event payment" });
@@ -3880,6 +3930,16 @@ Only respond with the JSON object.`;
         paidAt: new Date(),
         createdAt: new Date(),
       });
+
+      try {
+        const evt = await storage.getEvent(req.params.eventId);
+        const label = `Evento ${evt?.name || req.params.eventId} - Mesa ${table.tableName} - Pago ${method}`;
+        await storage.registerCashMovement(
+          "events", "event", req.params.eventId, label,
+          method, String(amount), "income"
+        );
+      } catch (e) {}
+
       res.status(201).json(payment);
     } catch (error) {
       res.status(500).json({ error: "Error creating table payment" });
@@ -5132,6 +5192,107 @@ Only respond with the JSON object.`;
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Error fetching restaurant report" });
+    }
+  });
+
+  // ==================== Cash Register Module ====================
+
+  app.get("/api/cash/configs", requireAuth, async (req, res) => {
+    try {
+      const configs = await storage.getCashConfigs();
+      res.json(configs);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching cash configs" });
+    }
+  });
+
+  app.patch("/api/cash/configs/:area", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
+    try {
+      const updated = await storage.updateCashConfig(req.params.area, req.body);
+      if (!updated) return res.status(404).json({ error: "Config not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating cash config" });
+    }
+  });
+
+  app.get("/api/cash/shifts", requireAuth, async (req, res) => {
+    try {
+      const { area, status } = req.query as { area?: string; status?: string };
+      const shifts = await storage.getCashShifts(area, status);
+      res.json(shifts);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching shifts" });
+    }
+  });
+
+  app.get("/api/cash/shifts/current", requireAuth, async (req, res) => {
+    try {
+      const { area } = req.query as { area: string };
+      if (!area) return res.status(400).json({ error: "area is required" });
+      const shift = await storage.getCurrentShift(area);
+      res.json(shift || null);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching current shift" });
+    }
+  });
+
+  app.post("/api/cash/shifts/open", requireAuth, async (req, res) => {
+    try {
+      const shift = await storage.openShift(req.body);
+      res.status(201).json(shift);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Error opening shift" });
+    }
+  });
+
+  app.post("/api/cash/shifts/:id/close", requireAuth, async (req, res) => {
+    try {
+      const { closedBy, notes } = req.body;
+      if (!closedBy) return res.status(400).json({ error: "closedBy is required" });
+      const result = await storage.closeShift(req.params.id, closedBy, notes);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Error closing shift" });
+    }
+  });
+
+  app.get("/api/cash/shifts/:id", requireAuth, async (req, res) => {
+    try {
+      const detail = await storage.getShiftDetail(req.params.id);
+      res.json(detail);
+    } catch (error: any) {
+      res.status(404).json({ error: error.message || "Shift not found" });
+    }
+  });
+
+  app.get("/api/cash/movements", requireAuth, async (req, res) => {
+    try {
+      const { shiftId } = req.query as { shiftId: string };
+      if (!shiftId) return res.status(400).json({ error: "shiftId is required" });
+      const movements = await storage.getCashMovements(shiftId);
+      res.json(movements);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching movements" });
+    }
+  });
+
+  app.post("/api/cash/movements", requireAuth, async (req, res) => {
+    try {
+      const movement = await storage.createCashMovement(req.body);
+      res.status(201).json(movement);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating movement" });
+    }
+  });
+
+  app.get("/api/cash/summary", requireAuth, async (req, res) => {
+    try {
+      const { area, from, to } = req.query as { area?: string; from?: string; to?: string };
+      const data = await storage.getCashSummary(area, from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching cash summary" });
     }
   });
 

@@ -1440,3 +1440,77 @@ export const hospitalityAlerts = pgTable("hospitality_alerts", {
 export const insertHospitalityAlertSchema = createInsertSchema(hospitalityAlerts).omit({ id: true, createdAt: true, isAcknowledged: true, acknowledgedAt: true, acknowledgedBy: true });
 export type InsertHospitalityAlert = z.infer<typeof insertHospitalityAlertSchema>;
 export type HospitalityAlert = typeof hospitalityAlerts.$inferSelect;
+
+// ==================== Cash Register Module ====================
+
+export const cashRegisterConfigs = pgTable("cash_register_configs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  area: text("area").notNull().unique(),
+  areaLabel: text("area_label").notNull(),
+  shiftsPerDay: integer("shifts_per_day").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertCashRegisterConfigSchema = createInsertSchema(cashRegisterConfigs).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertCashRegisterConfig = z.infer<typeof insertCashRegisterConfigSchema>;
+export type CashRegisterConfig = typeof cashRegisterConfigs.$inferSelect;
+
+export const cashShifts = pgTable("cash_shifts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  area: text("area").notNull(),
+  shiftNumber: integer("shift_number").notNull(),
+  openedBy: text("opened_by").notNull(),
+  closedBy: text("closed_by"),
+  openedAt: timestamp("opened_at").notNull().defaultNow(),
+  closedAt: timestamp("closed_at"),
+  status: text("status").notNull().default("open"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCashShiftSchema = createInsertSchema(cashShifts).omit({ id: true, closedBy: true, closedAt: true, status: true, createdAt: true });
+export type InsertCashShift = z.infer<typeof insertCashShiftSchema>;
+export type CashShift = typeof cashShifts.$inferSelect;
+
+export const cashMovements = pgTable("cash_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shiftId: varchar("shift_id"),
+  area: text("area").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: varchar("source_id"),
+  sourceLabel: text("source_label"),
+  paymentMethod: text("payment_method").notNull(),
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  movementType: text("movement_type").notNull().default("income"),
+  receiptType: text("receipt_type"),
+  registeredBy: text("registered_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({ id: true, createdAt: true });
+export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
+export type CashMovement = typeof cashMovements.$inferSelect;
+
+export const cashClosingSummaries = pgTable("cash_closing_summaries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shiftId: varchar("shift_id").notNull(),
+  area: text("area").notNull(),
+  totalCash: numeric("total_cash", { precision: 10, scale: 2 }).default("0"),
+  totalDebitCard: numeric("total_debit_card", { precision: 10, scale: 2 }).default("0"),
+  totalCreditCard: numeric("total_credit_card", { precision: 10, scale: 2 }).default("0"),
+  totalTransfer: numeric("total_transfer", { precision: 10, scale: 2 }).default("0"),
+  totalMercadopago: numeric("total_mercadopago", { precision: 10, scale: 2 }).default("0"),
+  totalCurrentAccount: numeric("total_current_account", { precision: 10, scale: 2 }).default("0"),
+  totalRoomCharge: numeric("total_room_charge", { precision: 10, scale: 2 }).default("0"),
+  totalGeneral: numeric("total_general", { precision: 10, scale: 2 }).default("0"),
+  transactionCount: integer("transaction_count").default(0),
+  closedAt: timestamp("closed_at").defaultNow(),
+  closedBy: text("closed_by"),
+  notes: text("notes"),
+});
+
+export const insertCashClosingSummarySchema = createInsertSchema(cashClosingSummaries).omit({ id: true, closedAt: true });
+export type InsertCashClosingSummary = z.infer<typeof insertCashClosingSummarySchema>;
+export type CashClosingSummary = typeof cashClosingSummaries.$inferSelect;

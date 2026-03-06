@@ -36,6 +36,7 @@ import ChatbotDashboardPage from "@/pages/chatbot-dashboard";
 import HospitalityPage from "@/pages/hospitality";
 import ReportsPage from "@/pages/reports";
 import DashboardExecutivePage from "@/pages/dashboard-executive";
+import CashRegisterPage from "@/pages/cash-register";
 import LoginPage from "@/pages/login";
 import { LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,7 @@ function Router() {
       <Route path="/hospitality" component={HospitalityPage} />
       <Route path="/reports" component={ReportsPage} />
       <Route path="/executive" component={DashboardExecutivePage} />
+      <Route path="/cash-register" component={CashRegisterPage} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -35,6 +35,7 @@ import {
   Heart,
   BarChart3,
   FileText,
+  Wallet,
 } from "lucide-react";
 import {
   Sidebar,
@@ -459,6 +460,18 @@ export function AppSidebar() {
                   <Link href="/inventory">
                     <Boxes className="h-5 w-5" />
                     <span>Inventario</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/cash-register"}
+                  data-testid="nav-cash-register"
+                >
+                  <Link href="/cash-register">
+                    <Wallet className="h-5 w-5" />
+                    <span>Caja</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

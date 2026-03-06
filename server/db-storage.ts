@@ -69,6 +69,10 @@ import {
   type GuestPreference, type InsertGuestPreference,
   type StayNote, type InsertStayNote,
   type HospitalityAlert, type InsertHospitalityAlert,
+  type CashRegisterConfig, type InsertCashRegisterConfig,
+  type CashShift, type InsertCashShift,
+  type CashMovement, type InsertCashMovement,
+  type CashClosingSummary, type InsertCashClosingSummary,
   type OrderStatus,
   type SpaPaymentMethod,
   users, rooms, roomTypes, ratePlans, companies, guests, bedTypes,
@@ -89,6 +93,7 @@ import {
   packages, packageItems,
   systemNotifications, webCheckins,
   guestPreferences, stayNotes, hospitalityAlerts,
+  cashRegisterConfigs, cashShifts, cashMovements, cashClosingSummaries,
 } from "@shared/schema";
 
 export class DatabaseStorage implements IStorage {
@@ -2993,6 +2998,176 @@ export class DatabaseStorage implements IStorage {
     }
 
     return { processed, skipped, pendingBalance };
+  }
+  // ==================== Cash Register Module ====================
+
+  async getCashConfigs(): Promise<CashRegisterConfig[]> {
+    return db.select().from(cashRegisterConfigs).orderBy(asc(cashRegisterConfigs.area));
+  }
+
+  async updateCashConfig(area: string, data: Partial<InsertCashRegisterConfig>): Promise<CashRegisterConfig | undefined> {
+    const [updated] = await db.update(cashRegisterConfigs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(cashRegisterConfigs.area, area))
+      .returning();
+    return updated;
+  }
+
+  async getCashShifts(area?: string, status?: string): Promise<CashShift[]> {
+    const conditions: any[] = [];
+    if (area) conditions.push(eq(cashShifts.area, area));
+    if (status) conditions.push(eq(cashShifts.status, status));
+    return db.select().from(cashShifts)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(cashShifts.openedAt));
+  }
+
+  async getCurrentShift(area: string): Promise<CashShift | undefined> {
+    const [shift] = await db.select().from(cashShifts)
+      .where(and(eq(cashShifts.area, area), eq(cashShifts.status, "open")))
+      .orderBy(desc(cashShifts.openedAt))
+      .limit(1);
+    return shift;
+  }
+
+  async openShift(data: InsertCashShift): Promise<CashShift> {
+    const existing = await this.getCurrentShift(data.area);
+    if (existing) {
+      throw new Error("Ya hay un turno abierto para esta área");
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayShifts = await db.select({ cnt: count() }).from(cashShifts)
+      .where(and(
+        eq(cashShifts.area, data.area),
+        gte(cashShifts.openedAt, today)
+      ));
+    const shiftNumber = (todayShifts[0]?.cnt || 0) + 1;
+
+    const [shift] = await db.insert(cashShifts).values({
+      id: randomUUID(),
+      area: data.area,
+      shiftNumber,
+      openedBy: data.openedBy,
+      notes: data.notes || null,
+      openedAt: new Date(),
+      status: "open",
+    }).returning();
+    return shift;
+  }
+
+  async closeShift(shiftId: string, closedBy: string, notes?: string): Promise<{ shift: CashShift; summary: CashClosingSummary }> {
+    const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, shiftId));
+    if (!shift) throw new Error("Turno no encontrado");
+    if (shift.status !== "open") throw new Error("El turno ya está cerrado");
+
+    const movements = await db.select().from(cashMovements).where(eq(cashMovements.shiftId, shiftId));
+
+    const totals: Record<string, number> = {
+      cash: 0, debit_card: 0, credit_card: 0, transfer: 0,
+      mercadopago: 0, current_account: 0, room_charge: 0,
+    };
+    let totalGeneral = 0;
+
+    for (const m of movements) {
+      const amt = parseFloat(m.amount);
+      const sign = m.movementType === "expense" ? -1 : 1;
+      const method = m.paymentMethod;
+      if (totals[method] !== undefined) totals[method] += amt * sign;
+      totalGeneral += amt * sign;
+    }
+
+    const [summary] = await db.insert(cashClosingSummaries).values({
+      id: randomUUID(),
+      shiftId,
+      area: shift.area,
+      totalCash: totals.cash.toFixed(2),
+      totalDebitCard: totals.debit_card.toFixed(2),
+      totalCreditCard: totals.credit_card.toFixed(2),
+      totalTransfer: totals.transfer.toFixed(2),
+      totalMercadopago: totals.mercadopago.toFixed(2),
+      totalCurrentAccount: totals.current_account.toFixed(2),
+      totalRoomCharge: totals.room_charge.toFixed(2),
+      totalGeneral: totalGeneral.toFixed(2),
+      transactionCount: movements.length,
+      closedBy,
+      notes: notes || null,
+    }).returning();
+
+    const [updatedShift] = await db.update(cashShifts)
+      .set({ status: "closed", closedAt: new Date(), closedBy })
+      .where(eq(cashShifts.id, shiftId))
+      .returning();
+
+    return { shift: updatedShift, summary };
+  }
+
+  async getShiftDetail(shiftId: string): Promise<{ shift: CashShift; movements: CashMovement[]; summary: CashClosingSummary | null }> {
+    const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, shiftId));
+    if (!shift) throw new Error("Turno no encontrado");
+    const movements = await db.select().from(cashMovements)
+      .where(eq(cashMovements.shiftId, shiftId))
+      .orderBy(asc(cashMovements.createdAt));
+    const [summary] = await db.select().from(cashClosingSummaries)
+      .where(eq(cashClosingSummaries.shiftId, shiftId))
+      .limit(1);
+    return { shift, movements, summary: summary || null };
+  }
+
+  async getCashMovements(shiftId: string): Promise<CashMovement[]> {
+    return db.select().from(cashMovements)
+      .where(eq(cashMovements.shiftId, shiftId))
+      .orderBy(desc(cashMovements.createdAt));
+  }
+
+  async createCashMovement(data: InsertCashMovement): Promise<CashMovement> {
+    const [movement] = await db.insert(cashMovements).values({
+      id: randomUUID(),
+      ...data,
+    }).returning();
+    return movement;
+  }
+
+  async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string): Promise<CashMovement> {
+    const currentShift = await this.getCurrentShift(area);
+    const label = currentShift ? sourceLabel : `${sourceLabel} (sin turno asignado)`;
+    const [movement] = await db.insert(cashMovements).values({
+      id: randomUUID(),
+      shiftId: currentShift?.id || null,
+      area,
+      sourceType,
+      sourceId,
+      sourceLabel: label,
+      paymentMethod,
+      amount,
+      movementType,
+      registeredBy: registeredBy || null,
+      receiptType: receiptType || null,
+    }).returning();
+    return movement;
+  }
+
+  async getCashSummary(area?: string, from?: string, to?: string): Promise<any[]> {
+    const conditions: any[] = [];
+    if (area) conditions.push(eq(cashClosingSummaries.area, area));
+    if (from) conditions.push(gte(cashClosingSummaries.closedAt, new Date(from)));
+    if (to) {
+      const toDate = new Date(to);
+      toDate.setDate(toDate.getDate() + 1);
+      conditions.push(lt(cashClosingSummaries.closedAt, toDate));
+    }
+
+    const summaries = await db.select().from(cashClosingSummaries)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(cashClosingSummaries.closedAt));
+
+    const results = [];
+    for (const s of summaries) {
+      const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, s.shiftId));
+      results.push({ ...s, shift });
+    }
+    return results;
   }
 }
 

@@ -30,6 +30,7 @@ import {
   Clock,
   Save,
   History,
+  Wallet,
 } from "lucide-react";
 import { Bed, Check } from "lucide-react";
 import type { SystemUser, SystemSetting, AuditLog, SystemUserRole, BedType } from "@shared/schema";
@@ -117,6 +118,25 @@ export default function AdministrationPage() {
 
   const { data: auditLogs = [], isLoading: loadingLogs } = useQuery<AuditLog[]>({
     queryKey: ["/api/admin/audit-logs"],
+  });
+
+  const { data: cashConfigs = [], isLoading: loadingCashConfigs } = useQuery<any[]>({
+    queryKey: ["/api/cash/configs"],
+  });
+
+  const [editingCashConfig, setEditingCashConfig] = useState<any>(null);
+  const [cashConfigForm, setCashConfigForm] = useState({ areaLabel: "", shiftsPerDay: 1 });
+
+  const updateCashConfigMutation = useMutation({
+    mutationFn: async (data: { area: string; areaLabel: string; shiftsPerDay: number }) => {
+      const res = await apiRequest("PATCH", `/api/cash/configs/${data.area}`, { areaLabel: data.areaLabel, shiftsPerDay: data.shiftsPerDay });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/configs"] });
+      setEditingCashConfig(null);
+      toast({ title: "Configuración actualizada" });
+    },
   });
 
   const { data: bedTypesData = [], isLoading: loadingBedTypes } = useQuery<BedType[]>({
@@ -375,6 +395,10 @@ export default function AdministrationPage() {
           <TabsTrigger value="audit" data-testid="tab-admin-audit">
             <History className="w-4 h-4 mr-2" />
             Auditoria
+          </TabsTrigger>
+          <TabsTrigger value="cash-config" data-testid="tab-admin-cash-config">
+            <Wallet className="w-4 h-4 mr-2" />
+            Cajas
           </TabsTrigger>
         </TabsList>
 
@@ -821,7 +845,110 @@ export default function AdministrationPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="cash-config" className="space-y-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <h2 className="text-lg font-semibold">Configuración de Cajas</h2>
+          </div>
+          <Card>
+            <CardContent className="pt-6">
+              {loadingCashConfigs ? (
+                <div className="space-y-2">
+                  {[1, 2, 3, 4].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Área</TableHead>
+                      <TableHead>Etiqueta</TableHead>
+                      <TableHead>Turnos por día</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {cashConfigs.map((config: any) => (
+                      <TableRow key={config.area} data-testid={`row-cash-config-${config.area}`}>
+                        <TableCell className="font-mono">{config.area}</TableCell>
+                        <TableCell className="font-medium">{config.areaLabel}</TableCell>
+                        <TableCell>{config.shiftsPerDay}</TableCell>
+                        <TableCell>
+                          <Badge variant={config.isActive ? "default" : "secondary"}>
+                            {config.isActive ? "Activa" : "Inactiva"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            data-testid={`btn-edit-cash-config-${config.area}`}
+                            onClick={() => {
+                              setEditingCashConfig(config);
+                              setCashConfigForm({ areaLabel: config.areaLabel, shiftsPerDay: config.shiftsPerDay });
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      <Dialog open={!!editingCashConfig} onOpenChange={(open) => { if (!open) setEditingCashConfig(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Configuración de Caja</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Etiqueta del área</Label>
+              <Input
+                value={cashConfigForm.areaLabel}
+                onChange={(e) => setCashConfigForm(prev => ({ ...prev, areaLabel: e.target.value }))}
+                data-testid="input-cash-config-label"
+              />
+            </div>
+            <div>
+              <Label>Turnos por día</Label>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={cashConfigForm.shiftsPerDay}
+                onChange={(e) => setCashConfigForm(prev => ({ ...prev, shiftsPerDay: parseInt(e.target.value) || 1 }))}
+                data-testid="input-cash-config-shifts"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={() => {
+                  if (editingCashConfig) {
+                    updateCashConfigMutation.mutate({
+                      area: editingCashConfig.area,
+                      areaLabel: cashConfigForm.areaLabel,
+                      shiftsPerDay: cashConfigForm.shiftsPerDay,
+                    });
+                  }
+                }}
+                disabled={updateCashConfigMutation.isPending}
+                data-testid="btn-save-cash-config"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
         <DialogContent className="max-w-md">
