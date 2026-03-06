@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import passport from "passport";
-import { storage } from "./storage";
+import { storage } from "./db-storage";
 import { insertGuestReviewSchema } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
@@ -1504,98 +1504,21 @@ export async function registerRoutes(
   });
 
   // Group Mass Actions - Check-in all group reservations
-  app.post("/api/groups/:groupId/check-in-all", async (req, res) => {
+  app.post("/api/groups/:groupId/check-in-all", requireAuth, async (req, res) => {
     try {
-      const group = await storage.getGroup(req.params.groupId);
-      if (!group) {
-        return res.status(404).json({ error: "Group not found" });
-      }
-
-      const results = { success: 0, failed: 0, errors: [] as string[] };
-      
-      for (const reservation of group.reservations) {
-        if (reservation.status === "confirmed") {
-          // Verify room is available for check-in
-          const room = await storage.getRoom(reservation.roomId);
-          if (room && room.status === "available") {
-            await storage.updateReservation(reservation.id, { status: "checked_in" });
-            await storage.updateRoom(reservation.roomId, { status: "occupied" });
-            results.success++;
-          } else {
-            results.failed++;
-            results.errors.push(`Hab. ${room?.roomNumber || reservation.roomId}: no disponible para check-in`);
-          }
-        } else if (reservation.status === "checked_in") {
-          // Already checked in, count as success
-          results.success++;
-        }
-      }
-
-      // Update group status to inhouse if any successful check-ins
-      if (results.success > 0) {
-        await storage.updateGroup(req.params.groupId, { status: "inhouse" });
-      }
-
-      res.json(results);
+      const result = await storage.bulkCheckIn(req.params.groupId);
+      res.json({ success: result.processed, failed: result.skipped, errors: result.skippedRooms.map(r => `Hab. ${r}: no disponible para check-in`) });
     } catch (error) {
-      res.status(500).json({ error: "Error processing group check-in" });
+      res.status(500).json({ error: "Error en check-in grupal" });
     }
   });
 
-  // Group Mass Actions - Check-out all group reservations
-  app.post("/api/groups/:groupId/check-out-all", async (req, res) => {
+  app.post("/api/groups/:groupId/check-out-all", requireAuth, async (req, res) => {
     try {
-      const group = await storage.getGroup(req.params.groupId);
-      if (!group) {
-        return res.status(404).json({ error: "Group not found" });
-      }
-
-      const results = { success: 0, failed: 0, errors: [] as string[] };
-      
-      for (const reservation of group.reservations) {
-        if (reservation.status === "checked_in") {
-          const charges = await storage.getCharges(reservation.id);
-          const payments = await storage.getPayments(reservation.id);
-          const totalCharges = charges.reduce((sum: number, c) => sum + parseFloat(c.amount), 0);
-          const totalPayments = payments.reduce((sum: number, p) => sum + parseFloat(p.amount), 0);
-          const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
-          const grandTotal = roomTotal + totalCharges;
-          const balance = grandTotal - totalPayments;
-
-          if (balance > 0.01) {
-            results.failed++;
-            results.errors.push(`Hab. ${reservation.room?.roomNumber}: saldo pendiente $${balance.toFixed(2)}`);
-          } else {
-            await storage.updateReservation(reservation.id, { status: "checked_out" });
-            await storage.updateRoom(reservation.roomId, { status: "cleaning" });
-            try {
-              await storage.createHousekeepingTask({
-                roomId: reservation.roomId,
-                type: "checkout",
-                status: "pending",
-                priority: "high",
-                notes: `Check-out grupal - ${group.name}`,
-              });
-            } catch {}
-            results.success++;
-          }
-        } else if (reservation.status === "checked_out") {
-          results.success++;
-        }
-      }
-
-      // Update group status to finished if all checked out
-      const allCheckedOut = group.reservations.every(r => 
-        r.status === "checked_out" || r.status === "cancelled"
-      ) || (results.success === group.reservations.length);
-      
-      if (allCheckedOut && group.reservations.length > 0) {
-        await storage.updateGroup(req.params.groupId, { status: "finished" });
-      }
-
-      res.json(results);
+      const result = await storage.bulkCheckOut(req.params.groupId);
+      res.json({ success: result.processed, failed: result.skipped, errors: result.pendingBalance.map(p => `Hab. ${p.room}: saldo pendiente $${p.balance.toFixed(2)}`) });
     } catch (error) {
-      res.status(500).json({ error: "Error processing group check-out" });
+      res.status(500).json({ error: "Error en check-out grupal" });
     }
   });
 

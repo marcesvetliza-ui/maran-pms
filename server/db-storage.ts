@@ -2559,4 +2559,130 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(hospitalityAlerts.id, id)).returning();
     return updated;
   }
+
+  async bulkCheckIn(groupId: string): Promise<{ processed: number; skipped: number; skippedRooms: string[] }> {
+    const links = await db.select().from(groupReservationLinks)
+      .where(eq(groupReservationLinks.groupId, groupId));
+
+    let processed = 0;
+    let skipped = 0;
+    const skippedRooms: string[] = [];
+
+    for (const link of links) {
+      const [reservation] = await db.select().from(reservations)
+        .where(eq(reservations.id, link.reservationId));
+
+      if (!reservation || reservation.status !== "confirmed") continue;
+
+      const [room] = await db.select().from(rooms)
+        .where(eq(rooms.id, reservation.roomId));
+
+      if (!room || room.status !== "available") {
+        skipped++;
+        if (room) skippedRooms.push(room.roomNumber);
+        continue;
+      }
+
+      await db.update(reservations)
+        .set({ status: "checked_in" })
+        .where(eq(reservations.id, reservation.id));
+
+      await db.update(rooms)
+        .set({ status: "occupied" })
+        .where(eq(rooms.id, room.id));
+
+      processed++;
+    }
+
+    if (processed > 0) {
+      await db.update(groups)
+        .set({ status: "inhouse" as any })
+        .where(eq(groups.id, groupId));
+    }
+
+    return { processed, skipped, skippedRooms };
+  }
+
+  async bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }> {
+    const links = await db.select().from(groupReservationLinks)
+      .where(eq(groupReservationLinks.groupId, groupId));
+
+    let processed = 0;
+    let skipped = 0;
+    const pendingBalance: Array<{ room: string; guestName: string; balance: number }> = [];
+
+    const [group] = await db.select().from(groups).where(eq(groups.id, groupId));
+
+    for (const link of links) {
+      const [reservation] = await db.select().from(reservations)
+        .where(eq(reservations.id, link.reservationId));
+
+      if (!reservation || reservation.status !== "checked_in") continue;
+
+      const chargesList = await db.select().from(charges)
+        .where(eq(charges.reservationId, reservation.id));
+      const paymentsList = await db.select().from(payments)
+        .where(eq(payments.reservationId, reservation.id));
+
+      const totalCharges = chargesList.reduce((sum, c) => sum + parseFloat(c.amount || "0"), 0);
+      const totalPayments = paymentsList.reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
+      const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+      const balance = roomTotal + totalCharges - totalPayments;
+
+      const [room] = await db.select().from(rooms)
+        .where(eq(rooms.id, reservation.roomId));
+
+      if (balance > 0.01) {
+        skipped++;
+        const [guest] = await db.select().from(guests)
+          .where(eq(guests.id, reservation.guestId));
+        pendingBalance.push({
+          room: room?.roomNumber || reservation.roomId,
+          guestName: guest ? `${guest.lastName} ${guest.firstName}` : "Sin nombre",
+          balance,
+        });
+        continue;
+      }
+
+      await db.update(reservations)
+        .set({ status: "checked_out" })
+        .where(eq(reservations.id, reservation.id));
+
+      await db.update(rooms)
+        .set({ status: "cleaning" })
+        .where(eq(rooms.id, reservation.roomId));
+
+      try {
+        await db.insert(housekeepingTasks).values({
+          id: randomUUID(),
+          roomId: reservation.roomId,
+          type: "checkout_clean",
+          priority: "high",
+          status: "pending",
+          notes: `Check-out grupal — ${group?.name || groupId}`,
+          createdAt: new Date(),
+        } as any);
+      } catch {}
+
+      processed++;
+    }
+
+    const allLinks = await db.select().from(groupReservationLinks)
+      .where(eq(groupReservationLinks.groupId, groupId));
+    let allDone = true;
+    for (const l of allLinks) {
+      const [r] = await db.select().from(reservations).where(eq(reservations.id, l.reservationId));
+      if (r && r.status !== "checked_out" && r.status !== "cancelled") {
+        allDone = false;
+        break;
+      }
+    }
+    if (allDone && allLinks.length > 0) {
+      await db.update(groups).set({ status: "finished" as any }).where(eq(groups.id, groupId));
+    }
+
+    return { processed, skipped, pendingBalance };
+  }
 }
+
+export const storage = new DatabaseStorage();

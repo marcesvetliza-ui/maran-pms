@@ -668,6 +668,8 @@ export interface IStorage {
   getHospitalityAlertsByReservation(reservationId: string): Promise<HospitalityAlert[]>;
   createHospitalityAlert(alert: InsertHospitalityAlert): Promise<HospitalityAlert>;
   acknowledgeHospitalityAlert(id: string, acknowledgedBy: string): Promise<HospitalityAlert | undefined>;
+  bulkCheckIn(groupId: string): Promise<{ processed: number; skipped: number; skippedRooms: string[] }>;
+  bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }>;
 }
 
 export class MemStorage implements IStorage {
@@ -4864,8 +4866,12 @@ export class MemStorage implements IStorage {
     this.hospitalityAlertsMap.set(id, updated);
     return updated;
   }
+
+  async bulkCheckIn(_groupId: string): Promise<{ processed: number; skipped: number; skippedRooms: string[] }> {
+    return { processed: 0, skipped: 0, skippedRooms: [] };
+  }
+
+  async bulkCheckOut(_groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }> {
+    return { processed: 0, skipped: 0, pendingBalance: [] };
+  }
 }
-
-import { DatabaseStorage } from "./db-storage";
-
-export const storage: IStorage = new DatabaseStorage();
