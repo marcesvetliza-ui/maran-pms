@@ -24,6 +24,8 @@ import {
   MessageCircle,
   User,
   Hash,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -130,6 +132,12 @@ export default function ChatbotDashboardPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showRead, setShowRead] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<SystemNotification | null>(null);
+  const [showSecret, setShowSecret] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const { data: secretData } = useQuery<{ secret: string }>({
+    queryKey: ["/api/webhook/chatbot/secret"],
+  });
 
   const { data: notifications = [], isLoading } = useQuery<SystemNotification[]>({
     queryKey: ["/api/notifications", "chatbot"],
@@ -492,9 +500,36 @@ export default function ChatbotDashboardPage() {
             </div>
             <div className="space-y-2">
               <p className="text-sm font-medium">Header de Autenticación</p>
-              <code className="block p-2 bg-muted rounded text-xs font-mono">
-                X-Chatbot-Secret: ••••••••
-              </code>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 block p-2 bg-muted rounded text-xs font-mono" data-testid="text-webhook-secret">
+                  X-Chatbot-Secret: {showSecret && secretData?.secret ? secretData.secret : "••••••••••••"}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => setShowSecret(!showSecret)}
+                  data-testid="button-toggle-secret"
+                >
+                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => {
+                    if (secretData?.secret) {
+                      navigator.clipboard.writeText(secretData.secret);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                      toast({ title: "Secret copiado al portapapeles" });
+                    }
+                  }}
+                  data-testid="button-copy-secret"
+                >
+                  {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
             <div className="space-y-2 md:col-span-2">
               <p className="text-sm font-medium">Áreas soportadas</p>

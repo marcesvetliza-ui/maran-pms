@@ -4605,6 +4605,14 @@ Only respond with the JSON object.`;
 
   // ==================== CHATBOT WEBHOOK ====================
 
+  app.get("/api/webhook/chatbot/secret", requireAuth, async (req, res) => {
+    if ((req.user as any)?.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    const secret = process.env.CHATBOT_WEBHOOK_SECRET || "";
+    res.json({ secret });
+  });
+
   app.post("/api/webhook/chatbot", async (req, res) => {
     try {
       const secret = req.headers["x-chatbot-secret"] as string;
