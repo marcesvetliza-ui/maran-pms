@@ -5300,10 +5300,17 @@ Only respond with the JSON object.`;
 
   app.get("/api/download/source-code", requireAuth, async (req, res) => {
     try {
+      const fs = await import("fs");
       const { execSync } = await import("child_process");
-      const zipPath = path.resolve("/tmp/maran-suite-system.zip");
-      execSync(`cd ${path.resolve(".")} && zip -r ${zipPath} client/src/ server/*.ts shared/ package.json tsconfig.json tailwind.config.ts vite.config.ts drizzle.config.ts replit.md -x "*/node_modules/*" "*/.git/*" "*/.cache/*" "*/dist/*" 2>/dev/null`, { timeout: 30000 });
-      res.download(zipPath, "maran-suite-system.zip");
+
+      const prodZip = path.resolve("dist/public/maran-suite-system.zip");
+      if (fs.existsSync(prodZip)) {
+        return res.download(prodZip, "maran-suite-system.zip");
+      }
+
+      const tmpZip = "/tmp/maran-suite-system.zip";
+      execSync(`cd ${path.resolve(".")} && zip -r ${tmpZip} client/src/ server/*.ts shared/ package.json tsconfig.json tailwind.config.ts vite.config.ts drizzle.config.ts replit.md -x "*/node_modules/*" "*/.git/*" "*/.cache/*" "*/dist/*" 2>/dev/null`, { timeout: 30000 });
+      res.download(tmpZip, "maran-suite-system.zip");
     } catch (err) {
       console.error("Error generating zip:", err);
       res.status(500).json({ error: "Error al generar el archivo" });

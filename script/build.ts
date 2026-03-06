@@ -1,6 +1,9 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, readdir, stat, writeFile, mkdir } from "fs/promises";
+import { createWriteStream } from "fs";
+import { execSync } from "child_process";
+import path from "path";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -61,7 +64,17 @@ async function buildAll() {
   });
 }
 
-buildAll().catch((err) => {
+async function generateSourceZip() {
+  console.log("generating source code zip...");
+  try {
+    execSync(`zip -r dist/public/maran-suite-system.zip client/src/ server/*.ts shared/ package.json tsconfig.json tailwind.config.ts vite.config.ts drizzle.config.ts replit.md -x "*/node_modules/*" "*/.git/*" "*/.cache/*" "*/dist/*"`, { timeout: 30000 });
+    console.log("source zip created at dist/public/maran-suite-system.zip");
+  } catch (err) {
+    console.warn("Could not generate source zip:", err);
+  }
+}
+
+buildAll().then(() => generateSourceZip()).catch((err) => {
   console.error(err);
   process.exit(1);
 });
