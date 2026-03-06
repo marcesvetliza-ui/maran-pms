@@ -1227,6 +1227,7 @@ export type SystemUserRole = "admin" | "manager" | "reception" | "housekeeping" 
 export const systemUsers = pgTable("system_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
+  password: text("password"),
   email: text("email").notNull(),
   fullName: text("full_name").notNull(),
   role: text("role").$type<SystemUserRole>().notNull().default("reception"),

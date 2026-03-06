@@ -89,6 +89,20 @@ Preferred communication style: Simple, everyday language.
 - **Printable Rooming List**: Group detail page has "Imprimir Rooming List" button that opens a dialog with room assignments table (room number, type, guest, document, dates, status, notes). Print button opens a clean new window with "Maran Suites & Towers" header, group info, formatted table, and auto-triggers browser print dialog.
 - **Package Module Enhancements**: Package cards show validity dates and discount info. Quick actions: duplicate package (creates inactive copy with all items), status toggle (active/inactive). API endpoints: `POST /api/packages/:id/duplicate`, `PATCH /api/packages/:id/toggle-status`.
 
+### Authentication & Authorization
+- **Strategy**: Passport.js with local strategy (username/password).
+- **Password Hashing**: bcrypt with 10 salt rounds.
+- **Session Store**: connect-pg-simple storing sessions in PostgreSQL `sessions` table.
+- **Session Duration**: 8 hours (one work shift).
+- **Auth Module**: `server/auth.ts` exports `setupAuth()`, `requireAuth`, `requireRole()`, `hashPassword()`, `verifyPassword()`.
+- **Auth Routes**: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/setup` (one-time admin setup).
+- **Protected Routes**: All `/api/*` routes require authentication EXCEPT: `/api/auth/*`, `/api/public/*`, `/api/webhook/chatbot`.
+- **Role-Based Access**: Admin-only routes for `/api/system-users` and `/api/system-settings`.
+- **Login Page**: `client/src/pages/login.tsx` with hotel branding.
+- **Frontend Auth Flow**: `App.tsx` checks `GET /api/auth/me` on load; shows login page if unauthenticated.
+- **Default Admin**: username: `admin`, password: `maran2026` (set via `/api/auth/setup` endpoint).
+- **Auth Context**: `useAuth()` hook provides current user and logout function throughout the app.
+
 ## External Dependencies
 
 ### Database

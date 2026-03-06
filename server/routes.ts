@@ -2,8 +2,13 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import OpenAI from "openai";
 import { randomUUID } from "crypto";
+import passport from "passport";
 import { storage } from "./storage";
 import { insertGuestReviewSchema } from "@shared/schema";
+import { requireAuth, requireRole, hashPassword } from "./auth";
+import { db } from "./db";
+import { systemUsers } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -19,6 +24,99 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  app.post("/api/auth/login", (req, res, next) => {
+    passport.authenticate("local", (err: any, user: any, info: any) => {
+      if (err) return next(err);
+      if (!user) {
+        return res.status(401).json({ message: info?.message || "Credenciales incorrectas" });
+      }
+      req.logIn(user, (err) => {
+        if (err) return next(err);
+        return res.json(user);
+      });
+    })(req, res, next);
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.logout((err) => {
+      if (err) {
+        return res.status(500).json({ message: "Error al cerrar sesión" });
+      }
+      res.json({ message: "Sesión cerrada" });
+    });
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    if (req.isAuthenticated()) {
+      return res.json(req.user);
+    }
+    res.status(401).json({ message: "No autenticado" });
+  });
+
+  app.post("/api/auth/setup", async (req, res) => {
+    try {
+      const allUsers = await db.select().from(systemUsers);
+      const anyUserWithPassword = allUsers.some(u => u.password !== null);
+      if (anyUserWithPassword) {
+        return res.status(400).json({ message: "Setup ya fue completado. Este endpoint está deshabilitado." });
+      }
+
+      const hashedPassword = await hashPassword("maran2026");
+      
+      const adminUser = allUsers.find(u => u.username === "admin");
+      if (adminUser) {
+        await db
+          .update(systemUsers)
+          .set({ password: hashedPassword })
+          .where(eq(systemUsers.id, adminUser.id));
+      } else {
+        await db.insert(systemUsers).values({
+          id: randomUUID(),
+          username: "admin",
+          password: hashedPassword,
+          email: "admin@maransuites.com",
+          fullName: "Administrador Sistema",
+          role: "admin",
+          department: "Sistemas",
+          phone: "+54 343 400-0001",
+          isActive: "true",
+          createdAt: new Date(),
+        });
+      }
+
+      res.json({ message: "Usuario admin configurado con contraseña" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.use("/api", (req, res, next) => {
+    const publicPaths = [
+      "/api/auth/login",
+      "/api/auth/logout",
+      "/api/auth/me",
+      "/api/auth/setup",
+    ];
+    
+    if (publicPaths.includes(req.path)) {
+      return next();
+    }
+    
+    if (req.path.startsWith("/api/public/")) {
+      return next();
+    }
+    
+    if (req.path === "/api/webhook/chatbot" && req.method === "POST") {
+      return next();
+    }
+
+    requireAuth(req, res, next);
+  });
+
+  app.use("/api/system-users", requireRole(["admin"]));
+  app.use("/api/system-settings", requireRole(["admin"]));
+
   app.get("/api/download/source-code", async (_req, res) => {
     const fs = await import("fs");
     const path = await import("path");

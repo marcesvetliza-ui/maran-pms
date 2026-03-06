@@ -1,6 +1,7 @@
+import { useState, useEffect, createContext, useContext, useCallback } from "react";
 import { Switch, Route, useRoute } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -33,6 +34,29 @@ import CompaniesPage from "@/pages/companies";
 import WebCheckinPublicPage from "@/pages/web-checkin-public";
 import ChatbotDashboardPage from "@/pages/chatbot-dashboard";
 import HospitalityPage from "@/pages/hospitality";
+import LoginPage from "@/pages/login";
+import { LogOut, User } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  role: string;
+  department: string | null;
+}
+
+interface AuthContextType {
+  user: AuthUser | null;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType>({ user: null, logout: () => {} });
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
 
 function Router() {
   return (
@@ -67,6 +91,7 @@ function Router() {
 }
 
 function AppLayout() {
+  const { user, logout } = useAuth();
   const sidebarStyle = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",
@@ -79,7 +104,25 @@ function AppLayout() {
         <div className="flex flex-col flex-1 overflow-hidden">
           <header className="flex items-center justify-between gap-4 px-4 py-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
+            <div className="flex items-center gap-3">
+              {user && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="text-current-user">
+                  <User className="w-4 h-4" />
+                  <span>{user.fullName}</span>
+                  <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{user.role}</span>
+                </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={logout}
+                title="Cerrar sesión"
+                data-testid="button-logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </Button>
+              <ThemeToggle />
+            </div>
           </header>
           <main className="flex-1 overflow-auto">
             <Router />
@@ -87,6 +130,64 @@ function AppLayout() {
         </div>
       </div>
     </SidebarProvider>
+  );
+}
+
+function AuthenticatedApp() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  const checkAuth = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me", { credentials: "include" });
+      if (res.ok) {
+        const userData = await res.json();
+        setUser(userData);
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  const handleLogin = (userData: AuthUser) => {
+    setUser(userData);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch {}
+    setUser(null);
+    queryClient.clear();
+  };
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-muted-foreground">Cargando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  return (
+    <AuthContext.Provider value={{ user, logout: handleLogout }}>
+      <AppLayout />
+    </AuthContext.Provider>
   );
 }
 
@@ -100,7 +201,7 @@ function App() {
           {isWebCheckin ? (
             <WebCheckinPublicPage />
           ) : (
-            <AppLayout />
+            <AuthenticatedApp />
           )}
           <Toaster />
         </TooltipProvider>
