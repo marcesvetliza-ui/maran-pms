@@ -38,6 +38,7 @@ import ReportsPage from "@/pages/reports";
 import DashboardExecutivePage from "@/pages/dashboard-executive";
 import CashRegisterPage from "@/pages/cash-register";
 import LoginPage from "@/pages/login";
+import HelpChat from "@/components/help-chat";
 import { LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -193,6 +194,7 @@ function AuthenticatedApp() {
   return (
     <AuthContext.Provider value={{ user, logout: handleLogout }}>
       <AppLayout />
+      <HelpChat />
     </AuthContext.Provider>
   );
 }

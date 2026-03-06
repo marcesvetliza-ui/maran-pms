@@ -9,6 +9,7 @@ import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { HELP_MANUAL } from "./help-manual";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -5293,6 +5294,44 @@ Only respond with the JSON object.`;
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Error fetching cash summary" });
+    }
+  });
+
+  app.post("/api/help/chat", requireAuth, async (req, res) => {
+    try {
+      const { message, history } = req.body;
+
+      if (!message || typeof message !== "string" || message.length > 1000) {
+        return res.status(400).json({ error: "Mensaje inválido (máximo 1000 caracteres)" });
+      }
+
+      const validHistory: Array<{role: "user" | "assistant", content: string}> = [];
+      if (Array.isArray(history)) {
+        for (const item of history.slice(-10)) {
+          if (item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string") {
+            validHistory.push({ role: item.role, content: item.content.slice(0, 1000) });
+          }
+        }
+      }
+
+      const messages: Array<{role: "system" | "user" | "assistant", content: string}> = [
+        { role: "system", content: HELP_MANUAL },
+        ...validHistory,
+        { role: "user", content: message }
+      ];
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages,
+        max_tokens: 500,
+        temperature: 0.3,
+      });
+
+      const reply = completion.choices[0].message.content;
+      res.json({ reply });
+    } catch (error) {
+      console.error("Error in help chat:", error);
+      res.status(500).json({ error: "Error al procesar la consulta" });
     }
   });
 
