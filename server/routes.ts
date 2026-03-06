@@ -109,7 +109,7 @@ export async function registerRoutes(
       return next();
     }
     
-    if (req.path === "/api/webhook/chatbot" && req.method === "POST") {
+    if ((req.path === "/api/webhook/chatbot" || req.path === "/webhook/chatbot") && req.method === "POST") {
       return next();
     }
 
