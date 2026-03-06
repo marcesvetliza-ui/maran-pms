@@ -5296,6 +5296,49 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.post("/api/admin/clean-data", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { sql } = await import("drizzle-orm");
+      await db.execute(sql`DELETE FROM cash_movements`);
+      await db.execute(sql`DELETE FROM cash_closing_summaries`);
+      await db.execute(sql`DELETE FROM cash_shifts`);
+      await db.execute(sql`DELETE FROM order_items`);
+      await db.execute(sql`DELETE FROM restaurant_orders`);
+      await db.execute(sql`DELETE FROM spa_payments`);
+      await db.execute(sql`DELETE FROM spa_account_items`);
+      await db.execute(sql`DELETE FROM spa_accounts`);
+      await db.execute(sql`DELETE FROM spa_appointments`);
+      await db.execute(sql`DELETE FROM event_table_payments`);
+      await db.execute(sql`DELETE FROM event_table_charges`);
+      await db.execute(sql`DELETE FROM event_tables`);
+      await db.execute(sql`DELETE FROM event_charges`);
+      await db.execute(sql`DELETE FROM event_payments`);
+      await db.execute(sql`DELETE FROM events`);
+      await db.execute(sql`DELETE FROM housekeeping_tasks`);
+      await db.execute(sql`DELETE FROM work_orders`);
+      await db.execute(sql`DELETE FROM web_checkins`);
+      await db.execute(sql`DELETE FROM stay_notes`);
+      await db.execute(sql`DELETE FROM guest_preferences`);
+      await db.execute(sql`DELETE FROM hospitality_alerts`);
+      await db.execute(sql`DELETE FROM charges`);
+      await db.execute(sql`DELETE FROM payments`);
+      await db.execute(sql`DELETE FROM group_reservation_links`);
+      await db.execute(sql`DELETE FROM group_room_blocks`);
+      await db.execute(sql`DELETE FROM groups`);
+      await db.execute(sql`DELETE FROM reservations`);
+      await db.execute(sql`DELETE FROM audit_logs`);
+      await db.execute(sql`DELETE FROM system_notifications`);
+      await db.execute(sql`DELETE FROM guests`);
+      await db.execute(sql`DELETE FROM companies`);
+      await db.execute(sql`UPDATE rooms SET status = 'available'`);
+      await db.execute(sql`UPDATE restaurant_tables SET status = 'available'`);
+      res.json({ success: true, message: "Datos de prueba eliminados correctamente" });
+    } catch (error: any) {
+      console.error("Error cleaning data:", error);
+      res.status(500).json({ error: error.message || "Error al limpiar datos" });
+    }
+  });
+
   app.post("/api/help/chat", requireAuth, async (req, res) => {
     try {
       const { message, history } = req.body;
