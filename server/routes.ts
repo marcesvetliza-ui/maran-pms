@@ -1243,6 +1243,9 @@ export async function registerRoutes(
 
   app.post("/api/payments", async (req, res) => {
     try {
+      if (req.body.billingTarget && !["guest", "company"].includes(req.body.billingTarget)) {
+        req.body.billingTarget = "guest";
+      }
       const payment = await storage.createPayment(req.body);
 
       try {

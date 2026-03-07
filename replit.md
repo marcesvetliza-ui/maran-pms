@@ -124,12 +124,12 @@ Preferred communication style: Simple, everyday language.
 - [x] B11: Bloqueos de grupo sin asignar se muestran como alerta en planning
 
 ### MEJORAS OPERATIVAS (Prioridad Media)
-- [ ] M01: Facturar desde saldo pendiente en folio
-- [ ] M02: Facturación independiente huésped/empresa
-- [ ] M03: Eliminar opción "check in" del dropdown de estado de reserva
-- [ ] M04: Paquetes en reservas rápidas desde planning
-- [ ] M05: Check-in/out/facturación grupal masiva (en progreso)
-- [ ] M06: Rooming list imprimible desde grupo
+- [x] M01: Facturar desde saldo pendiente en folio — "Pagar Saldo Pendiente" button pre-fills balance, "Registrar Pago" pre-fills amount
+- [x] M02: Facturación independiente huésped/empresa — billingTarget field on payments (guest/company), selector in folio & check-out
+- [x] M03: Eliminar opción "check in"/"check out" del dropdown de estado de reserva
+- [x] M04: Paquetes en reservas rápidas desde planning — package selector auto-fills rate and nights
+- [x] M05: Check-in/out/facturación grupal masiva — already fully implemented (mass check-in, check-out, group payment)
+- [x] M06: Rooming list imprimible desde grupo — already fully implemented with printRoomingList
 
 ### FUNCIONALIDADES NUEVAS (Prioridad Baja / Próxima Etapa)
 - [ ] F01: Inventario/stock de items para consumos y cargos

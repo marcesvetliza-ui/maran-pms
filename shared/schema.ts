@@ -198,6 +198,8 @@ export type Charge = typeof charges.$inferSelect;
 export type PaymentMethod = "efectivo" | "tarjeta_debito" | "tarjeta_credito" | "transferencia" | "mercadopago" | "cuenta_corriente";
 
 // Payments table (pagos adelantados y durante estadía)
+export type BillingTarget = "guest" | "company";
+
 export const payments = pgTable("payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   reservationId: varchar("reservation_id").notNull(),
@@ -207,6 +209,7 @@ export const payments = pgTable("payments", {
   reference: text("reference"),
   receivedBy: varchar("received_by"),
   notes: text("notes"),
+  billingTarget: text("billing_target").$type<BillingTarget>().default("guest"),
 });
 
 export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true });

@@ -88,6 +88,7 @@ export default function CheckOutPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentBillingTarget, setPaymentBillingTarget] = useState<"guest" | "company">("guest");
   const [checkoutComplete, setCheckoutComplete] = useState(false);
   const [finalSummary, setFinalSummary] = useState<{ guestName: string; roomNumber: string; checkOutDate: string; totalPaid: number; methods: string[] } | null>(null);
 
@@ -124,19 +125,21 @@ export default function CheckOutPage() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string }) => {
+    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; billingTarget: "guest" | "company" }) => {
       return apiRequest("POST", "/api/payments", {
         reservationId: selectedReservation!.id,
         amount: data.amount,
         method: data.method,
         date: new Date().toISOString().split("T")[0],
         reference: data.reference || null,
+        billingTarget: data.billingTarget,
       });
     },
     onSuccess: () => {
       refetchFolio();
       setPaymentAmount("");
       setPaymentReference("");
+      setPaymentBillingTarget("guest");
       toast({ title: "Pago registrado" });
     },
     onError: (error: any) => {
@@ -452,14 +455,28 @@ export default function CheckOutPage() {
                         </Select>
                       </div>
                     </div>
-                    <div>
-                      <Label>Referencia (opcional)</Label>
-                      <Input
-                        value={paymentReference}
-                        onChange={(e) => setPaymentReference(e.target.value)}
-                        placeholder="N° de comprobante, autorización..."
-                        data-testid="input-payment-reference"
-                      />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Referencia (opcional)</Label>
+                        <Input
+                          value={paymentReference}
+                          onChange={(e) => setPaymentReference(e.target.value)}
+                          placeholder="N° de comprobante..."
+                          data-testid="input-payment-reference"
+                        />
+                      </div>
+                      <div>
+                        <Label>Facturar a</Label>
+                        <Select value={paymentBillingTarget} onValueChange={(v) => setPaymentBillingTarget(v as "guest" | "company")}>
+                          <SelectTrigger data-testid="select-billing-target">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="guest">Huésped</SelectItem>
+                            <SelectItem value="company">Empresa</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     <Button
                       onClick={() => {
@@ -472,6 +489,7 @@ export default function CheckOutPage() {
                           amount,
                           method: paymentMethod,
                           reference: paymentReference,
+                          billingTarget: paymentBillingTarget,
                         });
                       }}
                       disabled={addPaymentMutation.isPending}
@@ -498,7 +516,14 @@ export default function CheckOutPage() {
                         <TableBody>
                           {folio.payments.map((p) => (
                             <TableRow key={p.id}>
-                              <TableCell>{paymentMethodLabels[p.method as PaymentMethod] || p.method}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-1.5">
+                                  <span>{paymentMethodLabels[p.method as PaymentMethod] || p.method}</span>
+                                  {(p as any).billingTarget === "company" && (
+                                    <Badge variant="secondary" className="text-xs">Empresa</Badge>
+                                  )}
+                                </div>
+                              </TableCell>
                               <TableCell className="text-right">${parseFloat(p.amount).toFixed(2)}</TableCell>
                             </TableRow>
                           ))}

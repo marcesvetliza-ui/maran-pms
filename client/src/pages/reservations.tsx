@@ -21,6 +21,7 @@ import {
   ArrowRightLeft,
   Sunrise,
   Sunset,
+  DollarSign,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -573,8 +574,6 @@ export function ReservationFormDialog({
                   <SelectContent>
                     <SelectItem value="pending">Pendiente</SelectItem>
                     <SelectItem value="confirmed">Confirmada</SelectItem>
-                    <SelectItem value="checked_in">Check-in</SelectItem>
-                    <SelectItem value="checked_out">Check-out</SelectItem>
                     <SelectItem value="cancelled">Cancelada</SelectItem>
                   </SelectContent>
                 </Select>
@@ -832,6 +831,7 @@ function ReservationDetailDialog({
     method: "efectivo" as PaymentMethod,
     reference: "",
     notes: "",
+    billingTarget: "guest" as "guest" | "company",
   });
 
   // Fetch active reservations for transfer target selection
@@ -894,7 +894,7 @@ function ReservationDetailDialog({
     onSuccess: () => {
       refetchPayments();
       setShowAddPayment(false);
-      setNewPayment({ amount: "", method: "efectivo", reference: "", notes: "" });
+      setNewPayment({ amount: "", method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
       toast({ title: "Pago registrado", description: "El pago ha sido registrado exitosamente." });
     },
     onError: (error: any) => {
@@ -1201,7 +1201,12 @@ function ReservationDetailDialog({
             <div className="border rounded-lg">
               <div className="flex items-center justify-between p-3 border-b bg-muted/50">
                 <h4 className="font-semibold">Pagos / Anticipos</h4>
-                <Button size="sm" variant="outline" onClick={() => setShowAddPayment(!showAddPayment)} data-testid="button-add-payment">
+                <Button size="sm" variant="outline" onClick={() => {
+                  if (!showAddPayment) {
+                    setNewPayment({ ...newPayment, amount: balance > 0 ? balance.toFixed(2) : "" });
+                  }
+                  setShowAddPayment(!showAddPayment);
+                }} data-testid="button-add-payment">
                   <Plus className="h-4 w-4 mr-1" />
                   Registrar Pago
                 </Button>
@@ -1238,13 +1243,26 @@ function ReservationDetailDialog({
                       </SelectContent>
                     </Select>
                   </div>
-                  <Input
-                    placeholder="Referencia (Nº comprobante, tarjeta, etc.)"
-                    value={newPayment.reference}
-                    onChange={(e) => setNewPayment({ ...newPayment, reference: e.target.value })}
-                    className="mb-2"
-                    data-testid="input-payment-reference"
-                  />
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <Input
+                      placeholder="Referencia (Nº comprobante, etc.)"
+                      value={newPayment.reference}
+                      onChange={(e) => setNewPayment({ ...newPayment, reference: e.target.value })}
+                      data-testid="input-payment-reference"
+                    />
+                    <Select
+                      value={newPayment.billingTarget}
+                      onValueChange={(value) => setNewPayment({ ...newPayment, billingTarget: value as "guest" | "company" })}
+                    >
+                      <SelectTrigger data-testid="select-billing-target">
+                        <SelectValue placeholder="Facturar a" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="guest">Huésped</SelectItem>
+                        <SelectItem value="company">Empresa</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="flex justify-end gap-2">
                     <Button size="sm" variant="ghost" onClick={() => setShowAddPayment(false)}>
                       Cancelar
@@ -1266,6 +1284,9 @@ function ReservationDetailDialog({
                   <div key={payment.id} className="flex items-center justify-between p-3 text-sm" data-testid={`payment-row-${payment.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline" className="text-xs">{paymentMethodLabels[payment.method]}</Badge>
+                      {(payment as any).billingTarget === "company" && (
+                        <Badge variant="secondary" className="text-xs">Empresa</Badge>
+                      )}
                       {payment.reference && <span className="text-muted-foreground">{payment.reference}</span>}
                       <span className="text-muted-foreground text-xs">({payment.date})</span>
                     </div>
@@ -1315,6 +1336,20 @@ function ReservationDetailDialog({
                     ${balance.toFixed(2)}
                   </span>
                 </div>
+                {balance > 0.01 && !showAddPayment && (
+                  <Button 
+                    size="sm" 
+                    className="w-full mt-2" 
+                    onClick={() => {
+                      setNewPayment({ amount: balance.toFixed(2), method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
+                      setShowAddPayment(true);
+                    }}
+                    data-testid="button-pay-balance"
+                  >
+                    <DollarSign className="h-4 w-4 mr-1" />
+                    Pagar Saldo Pendiente (${balance.toFixed(2)})
+                  </Button>
+                )}
               </div>
             </div>
           </TabsContent>

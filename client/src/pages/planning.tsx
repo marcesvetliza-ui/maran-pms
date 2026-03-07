@@ -46,7 +46,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company } from "@shared/schema";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Package } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
 import { CompanySelector } from "@/components/entity-selector";
 
@@ -275,8 +275,10 @@ function QuickReservationDialog({
   const [newGuest, setNewGuest] = useState({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [packageId, setPackageId] = useState("");
 
   const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
+  const { data: activePackages } = useQuery<Package[]>({ queryKey: ["/api/packages/active"] });
 
   useEffect(() => {
     if (reservationData) {
@@ -347,6 +349,7 @@ function QuickReservationDialog({
     setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
     setCompanyId(null);
     setSelectedCompany(null);
+    setPackageId("");
   };
 
   const handleSubmit = async () => {
@@ -395,6 +398,11 @@ function QuickReservationDialog({
     const nights = Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
 
     const selectedPlan = ratePlans?.find(rp => rp.id === ratePlanId);
+    const selectedPackage = activePackages?.find(p => p.id === packageId);
+
+    const effectiveRate = manualRate || (selectedPackage ? (parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)).toFixed(2) : selectedPlan?.baseRate) || null;
+    const packageNote = selectedPackage ? `[Paquete: ${selectedPackage.name}]` : "";
+    const finalNotes = [packageNote, notes].filter(Boolean).join(" ") || null;
 
     mutation.mutate({
       guestId: finalGuestId,
@@ -409,12 +417,12 @@ function QuickReservationDialog({
       ratePlanId: ratePlanId || null,
       companyId: companyId || null,
       bedTypeNotes: bedConfig || null,
-      baseRatePerNight: manualRate || selectedPlan?.baseRate || null,
-      finalRatePerNight: manualRate || selectedPlan?.baseRate || null,
-      totalRoomAmount: manualRate ? (parseFloat(manualRate) * nights).toFixed(2) : selectedPlan ? (parseFloat(selectedPlan.baseRate) * nights).toFixed(2) : null,
-      notes: notes || null,
-      discountType: "none",
-      discountValue: "0",
+      baseRatePerNight: effectiveRate,
+      finalRatePerNight: effectiveRate,
+      totalRoomAmount: effectiveRate ? (parseFloat(effectiveRate) * nights).toFixed(2) : null,
+      notes: finalNotes,
+      discountType: selectedPackage?.discountPercent ? "percent" : "none",
+      discountValue: selectedPackage?.discountPercent || "0",
       createdAt: new Date().toISOString(),
     });
   };
@@ -586,6 +594,42 @@ function QuickReservationDialog({
               </Select>
             </div>
           </div>
+
+          {activePackages && activePackages.length > 0 && (
+            <div className="grid gap-1">
+              <Label>Paquete (opcional)</Label>
+              <Select value={packageId} onValueChange={(val) => {
+                if (val === "__none__") {
+                  setPackageId("");
+                  setManualRate("");
+                  return;
+                }
+                setPackageId(val);
+                const pkg = activePackages.find(p => p.id === val);
+                if (pkg) {
+                  const ratePerNight = (parseFloat(pkg.basePrice) / (pkg.nights || 1)).toFixed(2);
+                  setManualRate(ratePerNight);
+                  if (pkg.nights && reservationData) {
+                    const nextDay = new Date(reservationData.checkInDate + "T12:00:00");
+                    nextDay.setDate(nextDay.getDate() + pkg.nights);
+                    setCheckOutDate(nextDay.toISOString().split("T")[0]);
+                  }
+                }
+              }}>
+                <SelectTrigger data-testid="select-package">
+                  <SelectValue placeholder="Sin paquete" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin paquete</SelectItem>
+                  {activePackages.map(pkg => (
+                    <SelectItem key={pkg.id} value={pkg.id}>
+                      {pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="grid gap-1">
             <Label>Tarifa manual / noche (opcional)</Label>
