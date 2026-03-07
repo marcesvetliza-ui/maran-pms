@@ -72,10 +72,17 @@ function RatePlanFormDialog({
     name: ratePlan?.name || "",
     roomTypeId: ratePlan?.roomTypeId || "",
     baseRate: ratePlan?.baseRate || "",
+    rate1pax: ratePlan?.rate1pax || "",
+    rate2pax: ratePlan?.rate2pax || "",
+    rate3pax: ratePlan?.rate3pax || "",
+    rate4pax: ratePlan?.rate4pax || "",
     currency: ratePlan?.currency || "ARS",
     refundable: ratePlan?.refundable || "true",
     cancellationPolicy: ratePlan?.cancellationPolicy || "",
   });
+
+  const selectedRoomType = roomTypes.find(rt => rt.id === formData.roomTypeId);
+  const maxOcc = selectedRoomType?.maxOccupancy || 4;
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertRatePlan>) => {
@@ -109,7 +116,7 @@ function RatePlanFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Plan Tarifario" : "Nuevo Plan Tarifario"}</DialogTitle>
           <DialogDescription>
@@ -181,6 +188,58 @@ function RatePlanFormDialog({
                 </Select>
               </div>
             </div>
+            {formData.roomTypeId && (
+              <div className="grid gap-2">
+                <Label>Tarifas por Pasajero (PAX)</Label>
+                <p className="text-xs text-muted-foreground">Dejá en blanco para usar la tarifa base. Ocupación máx: {maxOcc} PAX</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-1">
+                    <Label className="text-xs text-muted-foreground">1 PAX</Label>
+                    <Input
+                      type="number" min={0} step="0.01"
+                      value={formData.rate1pax || ""}
+                      onChange={(e) => setFormData({ ...formData, rate1pax: e.target.value || null })}
+                      placeholder={formData.baseRate ? `Base: $${formData.baseRate}` : "0.00"}
+                      data-testid="input-rate-1pax"
+                    />
+                  </div>
+                  <div className="grid gap-1">
+                    <Label className="text-xs text-muted-foreground">2 PAX</Label>
+                    <Input
+                      type="number" min={0} step="0.01"
+                      value={formData.rate2pax || ""}
+                      onChange={(e) => setFormData({ ...formData, rate2pax: e.target.value || null })}
+                      placeholder={formData.baseRate ? `Base: $${formData.baseRate}` : "0.00"}
+                      data-testid="input-rate-2pax"
+                    />
+                  </div>
+                  {maxOcc >= 3 && (
+                    <div className="grid gap-1">
+                      <Label className="text-xs text-muted-foreground">3 PAX</Label>
+                      <Input
+                        type="number" min={0} step="0.01"
+                        value={formData.rate3pax || ""}
+                        onChange={(e) => setFormData({ ...formData, rate3pax: e.target.value || null })}
+                        placeholder={formData.baseRate ? `Base: $${formData.baseRate}` : "0.00"}
+                        data-testid="input-rate-3pax"
+                      />
+                    </div>
+                  )}
+                  {maxOcc >= 4 && (
+                    <div className="grid gap-1">
+                      <Label className="text-xs text-muted-foreground">4 PAX</Label>
+                      <Input
+                        type="number" min={0} step="0.01"
+                        value={formData.rate4pax || ""}
+                        onChange={(e) => setFormData({ ...formData, rate4pax: e.target.value || null })}
+                        placeholder={formData.baseRate ? `Base: $${formData.baseRate}` : "0.00"}
+                        data-testid="input-rate-4pax"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-4">
               <Label htmlFor="refundable">Reembolsable</Label>
               <Switch
@@ -363,10 +422,20 @@ export default function RatePlansPage() {
                         <TableRow key={plan.id} data-testid={`rate-plan-row-${plan.id}`}>
                           <TableCell className="font-medium">{plan.name}</TableCell>
                           <TableCell>
-                            <span className="font-semibold text-primary">
-                              {formatCurrency(plan.baseRate, plan.currency)}
-                            </span>
-                            <span className="text-muted-foreground text-sm">/noche</span>
+                            <div>
+                              <span className="font-semibold text-primary">
+                                {formatCurrency(plan.baseRate, plan.currency)}
+                              </span>
+                              <span className="text-muted-foreground text-sm">/noche</span>
+                            </div>
+                            {(plan.rate1pax || plan.rate2pax || plan.rate3pax || plan.rate4pax) && (
+                              <div className="flex gap-1.5 mt-1 flex-wrap">
+                                {plan.rate1pax && <Badge variant="outline" className="text-xs">1P: ${plan.rate1pax}</Badge>}
+                                {plan.rate2pax && <Badge variant="outline" className="text-xs">2P: ${plan.rate2pax}</Badge>}
+                                {plan.rate3pax && <Badge variant="outline" className="text-xs">3P: ${plan.rate3pax}</Badge>}
+                                {plan.rate4pax && <Badge variant="outline" className="text-xs">4P: ${plan.rate4pax}</Badge>}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>
                             {plan.refundable === "true" ? (

@@ -132,10 +132,10 @@ Preferred communication style: Simple, everyday language.
 - [x] M06: Rooming list imprimible desde grupo — already fully implemented with printRoomingList
 
 ### FUNCIONALIDADES NUEVAS (Prioridad Baja / Próxima Etapa)
-- [ ] F01: Inventario/stock de items para consumos y cargos
-- [ ] F02: Reportes contables ampliados y comprobantes
-- [ ] F03: Módulo completo de paquetes (noches + servicios)
-- [ ] F04: Tarifas por cantidad de pasajeros (2, 4, etc.)
+- [x] F01: Inventario/stock de items para consumos y cargos — already fully implemented (categories, suppliers, items, movements, low-stock alerts)
+- [x] F02: Reportes contables ampliados y comprobantes — new "Facturación" tab in Reports with guest/company breakdown, pie chart by method, detailed receipts table, CSV export
+- [x] F03: Módulo completo de paquetes (noches + servicios) — already fully implemented (packages CRUD, items, duplication, status toggle)
+- [x] F04: Tarifas por cantidad de pasajeros (rate1pax-rate4pax fields on rate plans, auto-applied on reservation creation based on guest count)
 
 ### NOTAS
 - Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación

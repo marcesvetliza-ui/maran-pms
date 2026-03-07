@@ -210,6 +210,15 @@ export default function ReportsPage() {
     enabled: activeTab === "restaurant",
   });
 
+  type BillingPaymentRow = { id: string; reservation_id: string; amount: string; method: string; date: string; reference: string; billing_target: string; reservation_code: string; room_number: string; guest_name: string; company_name: string };
+  type BillingData = { payments: BillingPaymentRow[]; summary: { totalPayments: number; totalAmount: number; guestTotal: number; companyTotal: number; byMethod: Record<string, { count: number; total: number }> } };
+
+  const billing = useQuery<BillingData>({
+    queryKey: ["/api/reports/billing", from, to],
+    queryFn: () => fetchReport(`/api/reports/billing?from=${from}&to=${to}`),
+    enabled: activeTab === "billing",
+  });
+
   const handleExportCSV = () => {
     switch (activeTab) {
       case "occupancy":
@@ -281,6 +290,20 @@ export default function ReportsPage() {
             ["Producto", "Cantidad", "Revenue"],
             restaurant.data.topItems.map((r) => [r.name, String(r.count), formatARS(r.revenue)]),
             "restaurante"
+          );
+        }
+        break;
+      case "billing":
+        if (billing.data) {
+          const methodLabels: Record<string, string> = { efectivo: "Efectivo", tarjeta_debito: "Tarjeta Débito", tarjeta_credito: "Tarjeta Crédito", transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente" };
+          exportCSV(
+            ["Fecha", "Reserva", "Habitación", "Huésped", "Empresa", "Método", "Factura a", "Monto", "Referencia"],
+            billing.data.payments.map((p) => [
+              p.date, p.reservation_code || "-", p.room_number || "-", p.guest_name || "-", p.company_name || "-",
+              methodLabels[p.method] || p.method, p.billing_target === "company" ? "Empresa" : "Huésped",
+              formatARS(parseFloat(p.amount || "0")), p.reference || ""
+            ]),
+            "facturacion"
           );
         }
         break;
@@ -378,6 +401,10 @@ export default function ReportsPage() {
           <TabsTrigger value="restaurant" data-testid="tab-restaurant">
             <UtensilsCrossed className="h-4 w-4 mr-1" />
             Restaurante
+          </TabsTrigger>
+          <TabsTrigger value="billing" data-testid="tab-billing">
+            <CreditCard className="h-4 w-4 mr-1" />
+            Facturación
           </TabsTrigger>
         </TabsList>
 
@@ -886,6 +913,120 @@ export default function ReportsPage() {
                 </>
               ) : (
                 <p className="text-muted-foreground text-center py-8">No hay datos de restaurante para el período seleccionado</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="billing" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle data-testid="text-billing-title">Reporte de Facturación</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {billing.isLoading ? (
+                <LoadingSkeleton />
+              ) : billing.data ? (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <Card className="border">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-sm text-muted-foreground">Total Cobrado</p>
+                        <p className="text-2xl font-bold text-primary" data-testid="text-billing-total">{formatARS(billing.data.summary.totalAmount)}</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="border">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-sm text-muted-foreground">Transacciones</p>
+                        <p className="text-2xl font-bold">{billing.data.summary.totalPayments}</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="border">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-sm text-muted-foreground">Facturado a Huéspedes</p>
+                        <p className="text-2xl font-bold text-blue-600">{formatARS(billing.data.summary.guestTotal)}</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="border">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-sm text-muted-foreground">Facturado a Empresas</p>
+                        <p className="text-2xl font-bold text-orange-600">{formatARS(billing.data.summary.companyTotal)}</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {Object.keys(billing.data.summary.byMethod).length > 0 && (
+                    <div className="mb-6">
+                      <h3 className="text-lg font-semibold mb-3">Por Método de Pago</h3>
+                      <div className="h-[250px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={Object.entries(billing.data.summary.byMethod).map(([method, data]) => ({
+                                name: ({efectivo:"Efectivo",tarjeta_debito:"T. Débito",tarjeta_credito:"T. Crédito",transferencia:"Transferencia",mercadopago:"MercadoPago",cuenta_corriente:"Cta. Corriente"} as Record<string,string>)[method] || method,
+                                value: data.total,
+                                count: data.count,
+                              }))}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={80}
+                              label={({ name, percent }: any) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                            >
+                              {Object.keys(billing.data.summary.byMethod).map((_, i) => (
+                                <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value: number) => formatARS(value)} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+
+                  <h3 className="text-lg font-semibold mb-3">Detalle de Comprobantes</h3>
+                  <div className="overflow-auto">
+                    <Table data-testid="table-billing">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead>Reserva</TableHead>
+                          <TableHead>Hab.</TableHead>
+                          <TableHead>Huésped</TableHead>
+                          <TableHead>Método</TableHead>
+                          <TableHead>Factura a</TableHead>
+                          <TableHead className="text-right">Monto</TableHead>
+                          <TableHead>Referencia</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {billing.data.payments.map((p, i) => (
+                          <TableRow key={p.id || i} data-testid={`row-billing-${i}`}>
+                            <TableCell className="text-sm">{new Date(p.date + "T12:00:00").toLocaleDateString("es-AR")}</TableCell>
+                            <TableCell className="font-mono text-xs">{p.reservation_code || "-"}</TableCell>
+                            <TableCell>{p.room_number || "-"}</TableCell>
+                            <TableCell>{p.guest_name || "-"}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="text-xs">
+                                {({efectivo:"Efectivo",tarjeta_debito:"T. Débito",tarjeta_credito:"T. Crédito",transferencia:"Transferencia",mercadopago:"MercadoPago",cuenta_corriente:"Cta. Corriente"} as Record<string,string>)[p.method] || p.method}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={p.billing_target === "company" ? "secondary" : "outline"} className="text-xs">
+                                {p.billing_target === "company" ? (p.company_name || "Empresa") : "Huésped"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-medium">{formatARS(parseFloat(p.amount || "0"))}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{p.reference || "-"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted-foreground text-center py-8">No hay datos de facturación para el período seleccionado</p>
               )}
             </CardContent>
           </Card>

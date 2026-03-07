@@ -284,15 +284,26 @@ export function ReservationFormDialog({
     });
   };
 
+  const getPaxRate = (plan: any, numGuests: number) => {
+    const paxRateMap: Record<number, string | null | undefined> = {
+      1: plan.rate1pax,
+      2: plan.rate2pax,
+      3: plan.rate3pax,
+      4: plan.rate4pax,
+    };
+    return paxRateMap[numGuests] || plan.baseRate;
+  };
+
   const handleRatePlanChange = (ratePlanId: string) => {
     const plan = ratePlans?.find(p => p.id === ratePlanId);
     if (plan) {
       const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
-      const totals = calculateTotals(plan.baseRate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
+      const rate = getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2);
+      const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
       setFormData({ 
         ...formData, 
         ratePlanId, 
-        baseRatePerNight: plan.baseRate,
+        baseRatePerNight: rate,
         ...totals,
       });
     }
@@ -558,7 +569,18 @@ export function ReservationFormDialog({
                   type="number"
                   min={1}
                   value={formData.numberOfGuests}
-                  onChange={(e) => setFormData({ ...formData, numberOfGuests: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    const numGuests = parseInt(e.target.value) || 1;
+                    const plan = ratePlans?.find(p => p.id === formData.ratePlanId);
+                    if (plan) {
+                      const rate = getPaxRate(plan, numGuests);
+                      const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+                      const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
+                      setFormData({ ...formData, numberOfGuests: numGuests, baseRatePerNight: rate, ...totals });
+                    } else {
+                      setFormData({ ...formData, numberOfGuests: numGuests });
+                    }
+                  }}
                   data-testid="input-num-guests"
                 />
               </div>

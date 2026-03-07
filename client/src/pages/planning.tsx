@@ -400,7 +400,12 @@ function QuickReservationDialog({
     const selectedPlan = ratePlans?.find(rp => rp.id === ratePlanId);
     const selectedPackage = activePackages?.find(p => p.id === packageId);
 
-    const effectiveRate = manualRate || (selectedPackage ? (parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)).toFixed(2) : selectedPlan?.baseRate) || null;
+    const getPlanPaxRate = (plan: any, pax: number) => {
+      const paxMap: Record<number, string | null | undefined> = { 1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax };
+      return paxMap[pax] || plan.baseRate;
+    };
+    const planRate = selectedPlan ? getPlanPaxRate(selectedPlan, numberOfGuests) : null;
+    const effectiveRate = manualRate || (selectedPackage ? (parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)).toFixed(2) : planRate) || null;
     const packageNote = selectedPackage ? `[Paquete: ${selectedPackage.name}]` : "";
     const finalNotes = [packageNote, notes].filter(Boolean).join(" ") || null;
 

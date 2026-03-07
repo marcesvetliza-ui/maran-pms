@@ -9,7 +9,7 @@ import { insertGuestReviewSchema } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 
 function timeToMinutes(time: string): number {
@@ -5295,6 +5295,63 @@ Only respond with the JSON object.`;
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Error fetching housekeeping report" });
+    }
+  });
+
+  app.get("/api/reports/billing", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const result = await db.execute(sql`
+        SELECT 
+          p.id,
+          p.reservation_id,
+          p.amount,
+          p.method,
+          p.date,
+          p.reference,
+          p.billing_target,
+          r.reservation_code,
+          r.room_id,
+          rm.room_number,
+          g.first_name || ' ' || g.last_name as guest_name,
+          COALESCE(c.nombre_fantasia, c.razon_social) as company_name
+        FROM payments p
+        LEFT JOIN reservations r ON r.id = p.reservation_id
+        LEFT JOIN rooms rm ON rm.id = r.room_id
+        LEFT JOIN guests g ON g.id = r.guest_id
+        LEFT JOIN companies c ON c.id = r.company_id
+        WHERE p.date >= ${from} AND p.date <= ${to}
+        ORDER BY p.date DESC, p.id DESC
+      `);
+      
+      const payments = result.rows || [];
+      const guestTotal = payments
+        .filter((p: any) => !p.billing_target || p.billing_target === 'guest')
+        .reduce((sum: number, p: any) => sum + parseFloat(p.amount || '0'), 0);
+      const companyTotal = payments
+        .filter((p: any) => p.billing_target === 'company')
+        .reduce((sum: number, p: any) => sum + parseFloat(p.amount || '0'), 0);
+      
+      const byMethod: Record<string, { count: number; total: number }> = {};
+      for (const p of payments as any[]) {
+        const m = p.method || 'otros';
+        if (!byMethod[m]) byMethod[m] = { count: 0, total: 0 };
+        byMethod[m].count++;
+        byMethod[m].total += parseFloat(p.amount || '0');
+      }
+
+      res.json({
+        payments,
+        summary: {
+          totalPayments: payments.length,
+          totalAmount: guestTotal + companyTotal,
+          guestTotal,
+          companyTotal,
+          byMethod,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching billing report" });
     }
   });
 
