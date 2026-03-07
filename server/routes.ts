@@ -829,8 +829,16 @@ export async function registerRoutes(
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const checkInDate = reservation.checkInDate;
+      const todayMs = new Date(today + "T12:00:00").getTime();
+      const ciMs = new Date(checkInDate + "T12:00:00").getTime();
+      const diffDays = Math.round((ciMs - todayMs) / (1000 * 60 * 60 * 24));
+      if (diffDays > 1 || diffDays < -1) {
+        return res.status(400).json({ error: `No se puede hacer check-in: la fecha de ingreso es ${checkInDate} y hoy es ${today}` });
+      }
       
-      // Validate room is available (clean) before check-in
       const room = await storage.getRoom(reservation.roomId);
       if (!room) {
         return res.status(400).json({ error: "Habitación no encontrada" });
@@ -945,6 +953,15 @@ export async function registerRoutes(
       
       if (reservation.status !== "checked_in") {
         return res.status(400).json({ error: "Solo se puede hacer check-out de reservas con estado checked_in" });
+      }
+
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const checkOutDate = reservation.checkOutDate;
+      const todayMs = new Date(today + "T12:00:00").getTime();
+      const coMs = new Date(checkOutDate + "T12:00:00").getTime();
+      const diffDays = Math.round((coMs - todayMs) / (1000 * 60 * 60 * 24));
+      if (diffDays > 1 || diffDays < -1) {
+        return res.status(400).json({ error: `No se puede hacer check-out: la fecha de salida es ${checkOutDate} y hoy es ${today}` });
       }
 
       // Get balance - if forceCheckout is true, skip balance check

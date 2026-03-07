@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,13 +37,17 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan } from "@shared/schema";
 
+function getLocalToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+}
+
 function formatDate(dateStr: string) {
   const date = new Date(dateStr + "T12:00:00");
   return {
     dayName: date.toLocaleDateString("es-ES", { weekday: "short" }),
     dayNumber: date.getDate(),
     monthName: date.toLocaleDateString("es-ES", { month: "short" }),
-    isToday: dateStr === new Date().toISOString().split("T")[0],
+    isToday: dateStr === getLocalToday(),
     isWeekend: date.getDay() === 0 || date.getDay() === 6,
   };
 }
@@ -251,6 +255,7 @@ function QuickReservationDialog({
   const [bedConfig, setBedConfig] = useState("");
   const [ratePlanId, setRatePlanId] = useState("");
   const [source, setSource] = useState<string>("directo");
+  const [manualRate, setManualRate] = useState("");
   const [notes, setNotes] = useState("");
   const [guestSearch, setGuestSearch] = useState("");
   const [showNewGuest, setShowNewGuest] = useState(false);
@@ -320,6 +325,7 @@ function QuickReservationDialog({
     setBedConfig("");
     setRatePlanId("");
     setSource("directo");
+    setManualRate("");
     setNotes("");
     setGuestSearch("");
     setShowNewGuest(false);
@@ -385,8 +391,9 @@ function QuickReservationDialog({
       source,
       ratePlanId: ratePlanId || null,
       bedTypeNotes: bedConfig || null,
-      baseRatePerNight: selectedPlan?.baseRate || null,
-      totalRoomAmount: selectedPlan ? (parseFloat(selectedPlan.baseRate) * nights).toFixed(2) : null,
+      baseRatePerNight: manualRate || selectedPlan?.baseRate || null,
+      finalRatePerNight: manualRate || selectedPlan?.baseRate || null,
+      totalRoomAmount: manualRate ? (parseFloat(manualRate) * nights).toFixed(2) : selectedPlan ? (parseFloat(selectedPlan.baseRate) * nights).toFixed(2) : null,
       notes: notes || null,
       discountType: "none",
       discountValue: "0",
@@ -538,6 +545,19 @@ function QuickReservationDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="grid gap-1">
+            <Label>Tarifa manual / noche (opcional)</Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder={ratePlanId && roomRatePlans.find(rp => rp.id === ratePlanId)?.baseRate ? `Plan: $${roomRatePlans.find(rp => rp.id === ratePlanId)?.baseRate}` : "Usar tarifa del plan"}
+              value={manualRate}
+              onChange={(e) => setManualRate(e.target.value)}
+              data-testid="input-manual-rate"
+            />
           </div>
 
           <div className="grid gap-1">
@@ -717,11 +737,42 @@ function ReservationDetailModal({
     },
   });
 
+  const cancelReservationMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { status: "cancelled" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Reserva cancelada" });
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo cancelar", variant: "destructive" });
+    },
+  });
+
   if (!reservationId) return null;
 
   const statusBadge = reservation ? getStatusBadge(reservation.status) : null;
-  const canCheckIn = reservation?.status === "confirmed" || reservation?.status === "pending";
-  const canCheckOut = reservation?.status === "checked_in";
+  const todayLocal = getLocalToday();
+  const isCheckInDateValid = reservation ? (() => {
+    const todayMs = new Date(todayLocal + "T12:00:00").getTime();
+    const ciMs = new Date(reservation.checkInDate + "T12:00:00").getTime();
+    return Math.abs(Math.round((ciMs - todayMs) / (1000 * 60 * 60 * 24))) <= 1;
+  })() : false;
+  const isCheckOutDateValid = reservation ? (() => {
+    const todayMs = new Date(todayLocal + "T12:00:00").getTime();
+    const coMs = new Date(reservation.checkOutDate + "T12:00:00").getTime();
+    return Math.abs(Math.round((coMs - todayMs) / (1000 * 60 * 60 * 24))) <= 1;
+  })() : false;
+  const canCheckIn = (reservation?.status === "confirmed" || reservation?.status === "pending") && isCheckInDateValid;
+  const canCheckOut = reservation?.status === "checked_in" && isCheckOutDateValid;
+  const canCancel = reservation?.status === "confirmed" || reservation?.status === "pending" || reservation?.status === "tentative";
   const totalCharges = reservation?.charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
 
   const printConfirmation = () => {
@@ -1159,6 +1210,23 @@ function ReservationDetailModal({
               Check-out
             </Button>
           )}
+          {canCancel && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (window.confirm("¿Está seguro que desea cancelar esta reserva?")) {
+                  cancelReservationMutation.mutate();
+                }
+              }}
+              disabled={cancelReservationMutation.isPending}
+              className="w-full sm:w-auto"
+              data-testid="button-cancel-reservation"
+            >
+              <Ban className="h-4 w-4 mr-2" />
+              {cancelReservationMutation.isPending ? "Cancelando..." : "Anular"}
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() => {
@@ -1181,7 +1249,8 @@ function ReservationDetailModal({
 export default function PlanningPage() {
   const [, navigate] = useLocation();
   const [dateRange, setDateRange] = useState(() => {
-    const today = new Date();
+    const todayStr = getLocalToday();
+    const today = new Date(todayStr + "T12:00:00");
     const start = new Date(today);
     start.setDate(start.getDate() - 1);
     const end = new Date(today);
@@ -1204,6 +1273,7 @@ export default function PlanningPage() {
       if (!res.ok) throw new Error("Failed to fetch planning data");
       return res.json();
     },
+    refetchInterval: 30000,
   });
 
   const { data: guests = [] } = useQuery<Guest[]>({
@@ -1228,7 +1298,8 @@ export default function PlanningPage() {
   };
 
   const goToToday = () => {
-    const today = new Date();
+    const todayStr = getLocalToday();
+    const today = new Date(todayStr + "T12:00:00");
     const start = new Date(today);
     start.setDate(start.getDate() - 1);
     const end = new Date(today);
@@ -1340,7 +1411,7 @@ export default function PlanningPage() {
 
       <Legend />
 
-      <Card className="flex-1 overflow-hidden">
+      <Card className="flex-1 min-h-0">
         <CardHeader className="py-3 px-4 border-b">
           <CardTitle className="text-base font-medium flex items-center gap-2">
             <Info className="h-4 w-4 text-muted-foreground" />
@@ -1350,7 +1421,7 @@ export default function PlanningPage() {
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0 h-[calc(100%-60px)]">
+        <CardContent className="p-0 h-[calc(100%-60px)] overflow-auto">
           {isLoading ? (
             <div className="p-4 space-y-2">
               {[...Array(10)].map((_, i) => (

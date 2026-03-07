@@ -126,7 +126,8 @@ function buildSummaryFromMovements(movements: CashMovement[]) {
       summary[m.paymentMethod] = { count: 0, total: 0 };
     }
     summary[m.paymentMethod].count += 1;
-    summary[m.paymentMethod].total += m.movementType === "income" ? m.amount : -m.amount;
+    const amt = parseFloat(String(m.amount)) || 0;
+    summary[m.paymentMethod].total += m.movementType === "income" ? amt : -amt;
   }
   return summary;
 }

@@ -1,4 +1,8 @@
 import { randomUUID } from "crypto";
+
+function getArgentinaToday(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+}
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { IStorage } from "./storage";
@@ -479,7 +483,7 @@ export class DatabaseStorage implements IStorage {
 
   async getDashboardStats() {
     const allRooms = await db.select().from(rooms);
-    const today = new Date().toISOString().split("T")[0];
+    const today = getArgentinaToday();
 
     const totalRooms = allRooms.length;
     const availableRooms = allRooms.filter(r => r.status === "available").length;
@@ -593,7 +597,7 @@ export class DatabaseStorage implements IStorage {
       cellReservations[room.id] = {};
       cellGroupBlocks[room.id] = {};
 
-      const todayStr = new Date().toISOString().split("T")[0];
+      const todayStr = getArgentinaToday();
 
       for (const day of days) {
         if (room.status === "maintenance") {
@@ -1104,7 +1108,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCheckoutCleaningTask(roomId: string): Promise<HousekeepingTask> {
-    const today = new Date().toISOString().split("T")[0];
+    const today = getArgentinaToday();
     return this.createHousekeepingTask({
       roomId,
       taskType: "checkout_clean",
@@ -2306,7 +2310,7 @@ export class DatabaseStorage implements IStorage {
     recentAuditLogs: AuditLog[];
   }> {
     const allUsers = await db.select().from(systemUsers);
-    const today = new Date().toISOString().split("T")[0];
+    const today = getArgentinaToday();
 
     const recentLogins = allUsers.filter(u => {
       if (!u.lastLogin) return false;
@@ -2347,7 +2351,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActivePackages(): Promise<PackageWithDetails[]> {
-    const today = new Date().toISOString().split("T")[0];
+    const today = getArgentinaToday();
     const allPkgs = await db.select().from(packages).where(eq(packages.status, "active"));
     const filtered = allPkgs.filter(p => {
       if (p.validFrom && p.validFrom > today) return false;
@@ -2644,7 +2648,7 @@ export class DatabaseStorage implements IStorage {
     const prevOccupancyRate = totalRooms > 0 ? Math.round((prevReservations.length / totalRooms) * 100) : 0;
     const prevRevpar = Math.round(prevAdr * prevOccupancyRate / 100);
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = getArgentinaToday();
     const todayReservations = await db.select().from(reservations)
       .where(eq(reservations.checkInDate, today));
     const todayCheckIns = todayReservations.filter(r => r.status === "confirmed" || r.status === "checked_in").length;
