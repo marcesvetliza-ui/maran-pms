@@ -1,7 +1,18 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, Fragment, forwardRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  useDraggable,
+  useDroppable,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1246,8 +1257,77 @@ function ReservationDetailModal({
   );
 }
 
+function DraggableReservationCell({
+  id,
+  reservationId,
+  roomId,
+  children,
+  className,
+  onClick,
+  "data-testid": testId,
+}: {
+  id: string;
+  reservationId: string;
+  roomId: string;
+  children: React.ReactNode;
+  className: string;
+  onClick: () => void;
+  "data-testid"?: string;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id,
+    data: { reservationId, roomId },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      onClick={(e) => {
+        if (!isDragging) onClick();
+      }}
+      className={`${className} ${isDragging ? "opacity-40 ring-2 ring-primary" : ""}`}
+      data-testid={testId}
+      style={{ touchAction: "none" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DroppableRoomRow({
+  roomId,
+  children,
+  className,
+  isOver,
+  "data-testid": testId,
+}: {
+  roomId: string;
+  children: React.ReactNode;
+  className?: string;
+  isOver?: boolean;
+  "data-testid"?: string;
+}) {
+  const { setNodeRef, isOver: over } = useDroppable({
+    id: `drop-${roomId}`,
+    data: { roomId },
+  });
+
+  return (
+    <tr
+      ref={setNodeRef}
+      className={`${className || ""} ${over ? "bg-primary/10 ring-1 ring-primary/30" : ""}`}
+      data-testid={testId}
+    >
+      {children}
+    </tr>
+  );
+}
+
 export default function PlanningPage() {
   const [, navigate] = useLocation();
+  const { toast } = useToast();
   const [dateRange, setDateRange] = useState(() => {
     const todayStr = getLocalToday();
     const today = new Date(todayStr + "T12:00:00");
@@ -1265,6 +1345,88 @@ export default function PlanningPage() {
   const [selectedCell, setSelectedCell] = useState<QuickReservationData | null>(null);
   const [reservationDetailOpen, setReservationDetailOpen] = useState(false);
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
+
+  const [dragActiveId, setDragActiveId] = useState<string | null>(null);
+  const [moveConfirm, setMoveConfirm] = useState<{
+    reservationId: string;
+    guestName: string;
+    fromRoomNumber: string;
+    toRoomId: string;
+    toRoomNumber: string;
+    toRoomType: string;
+  } | null>(null);
+
+  const pointerSensor = useSensor(PointerSensor, {
+    activationConstraint: { distance: 8 },
+  });
+  const sensors = useSensors(pointerSensor);
+
+  const moveReservationMutation = useMutation({
+    mutationFn: async ({ reservationId, roomId }: { reservationId: string; roomId: string }) => {
+      const res = await apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      toast({ title: "Reserva movida", description: "La habitación fue actualizada correctamente." });
+      setMoveConfirm(null);
+    },
+    onError: (error: any) => {
+      const msg = error?.message || "No se pudo mover la reserva.";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    },
+  });
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const resId = (event.active.data.current as any)?.reservationId;
+    setDragActiveId(resId || null);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setDragActiveId(null);
+    const { active, over } = event;
+    if (!over || !data) return;
+
+    const reservationId = (active.data.current as any)?.reservationId;
+    const fromRoomId = (active.data.current as any)?.roomId;
+    const toRoomId = (over.data.current as any)?.roomId;
+
+    if (!reservationId || !toRoomId || fromRoomId === toRoomId) return;
+
+    const reservation = data.reservations[reservationId];
+    if (!reservation) return;
+
+    const toRoom = data.rooms.find(r => r.id === toRoomId);
+    const fromRoom = data.rooms.find(r => r.id === fromRoomId);
+    if (!toRoom || !fromRoom) return;
+
+    const checkInIdx = data.days.indexOf(reservation.checkIn);
+    const checkOutIdx = data.days.indexOf(reservation.checkOut);
+    const startIdx = Math.max(0, checkInIdx >= 0 ? checkInIdx : 0);
+    const endIdx = checkOutIdx >= 0 ? checkOutIdx - 1 : data.days.length - 1;
+
+    for (let i = startIdx; i <= endIdx; i++) {
+      const day = data.days[i];
+      const existingResId = data.cellReservations[toRoomId]?.[day];
+      if (existingResId && existingResId !== reservationId) {
+        toast({
+          title: "Habitación ocupada",
+          description: `La habitación ${toRoom.roomNumber} tiene otra reserva en esas fechas.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    setMoveConfirm({
+      reservationId,
+      guestName: reservation.guestName,
+      fromRoomNumber: fromRoom.roomNumber,
+      toRoomId: toRoom.id,
+      toRoomNumber: toRoom.roomNumber,
+      toRoomType: toRoom.roomType.name,
+    });
+  };
 
   const { data, isLoading } = useQuery<PlanningData>({
     queryKey: ["/api/planning", dateRange.start, dateRange.end],
@@ -1284,6 +1446,8 @@ export default function PlanningPage() {
       return res.json();
     },
   });
+
+  const dragActiveReservation = dragActiveId && data ? data.reservations[dragActiveId] : null;
 
   const navigateDays = (direction: "prev" | "next") => {
     const days = direction === "prev" ? -7 : 7;
@@ -1429,7 +1593,8 @@ export default function PlanningPage() {
               ))}
             </div>
           ) : data ? (
-            <ScrollArea className="h-full">
+            <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+              <ScrollArea className="h-full">
               <div className="min-w-max">
                 <table className="w-full border-collapse">
                   <thead className="sticky top-0 z-20 bg-background">
@@ -1470,7 +1635,7 @@ export default function PlanningPage() {
                           </td>
                         </tr>
                         {groupedRooms[floor]?.map((room) => (
-                          <tr key={room.id} className="hover:bg-muted/20" data-testid={`row-room-${room.id}`}>
+                          <DroppableRoomRow key={room.id} roomId={room.id} className="hover:bg-muted/20" data-testid={`row-room-${room.id}`}>
                             <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r">
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1533,18 +1698,17 @@ export default function PlanningPage() {
                                 >
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      <div
-                                        onClick={() => handleCellClick(room, day, status, reservationId)}
-                                        className={`h-8 rounded border flex items-center justify-center transition-all ${
-                                          reservation ? getSourceColor(reservation.source) : getStatusColor(status)
-                                        } ${
-                                          isClickable || reservationId
-                                            ? "cursor-pointer hover:ring-2 hover:ring-primary/50 hover:scale-105" 
-                                            : "cursor-default"
-                                        }`}
-                                        data-testid={`cell-${room.id}-${day}`}
-                                      >
-                                        {reservation ? (
+                                      {reservation ? (
+                                        <DraggableReservationCell
+                                          id={`drag-${reservationId}-${room.id}-${day}`}
+                                          reservationId={reservationId!}
+                                          roomId={room.id}
+                                          onClick={() => handleCellClick(room, day, status, reservationId)}
+                                          className={`h-8 rounded border flex items-center justify-center transition-all cursor-grab active:cursor-grabbing ${
+                                            getSourceColor(reservation.source)
+                                          } hover:ring-2 hover:ring-primary/50`}
+                                          data-testid={`cell-${room.id}-${day}`}
+                                        >
                                           <span className="text-[10px] font-medium truncate px-1 max-w-[56px] inline-flex items-center gap-0.5">
                                             {reservation.earlyCheckIn && day === reservation.checkIn && (
                                               <Sunrise className="h-3 w-3 text-orange-400 flex-shrink-0" data-testid="icon-early-checkin" />
@@ -1554,10 +1718,24 @@ export default function PlanningPage() {
                                               <Sunset className="h-3 w-3 text-purple-400 flex-shrink-0" data-testid="icon-late-checkout" />
                                             )}
                                           </span>
-                                        ) : isClickable ? (
-                                          <Plus className="h-3 w-3 text-green-600 dark:text-green-400 opacity-0 group-hover:opacity-100" />
-                                        ) : null}
-                                      </div>
+                                        </DraggableReservationCell>
+                                      ) : (
+                                        <div
+                                          onClick={() => handleCellClick(room, day, status, reservationId)}
+                                          className={`h-8 rounded border flex items-center justify-center transition-all ${
+                                            getStatusColor(status)
+                                          } ${
+                                            isClickable
+                                              ? "cursor-pointer hover:ring-2 hover:ring-primary/50 hover:scale-105" 
+                                              : "cursor-default"
+                                          }`}
+                                          data-testid={`cell-${room.id}-${day}`}
+                                        >
+                                          {isClickable ? (
+                                            <Plus className="h-3 w-3 text-green-600 dark:text-green-400 opacity-0 group-hover:opacity-100" />
+                                          ) : null}
+                                        </div>
+                                      )}
                                     </TooltipTrigger>
                                     <TooltipContent side="top" className="max-w-[200px]">
                                       <div className="text-xs space-y-1">
@@ -1602,7 +1780,7 @@ export default function PlanningPage() {
                                 </td>
                               );
                             })}
-                          </tr>
+                          </DroppableRoomRow>
                         ))}
                       </Fragment>
                     ))}
@@ -1611,6 +1789,17 @@ export default function PlanningPage() {
               </div>
               <ScrollBar orientation="horizontal" />
             </ScrollArea>
+            <DragOverlay dropAnimation={null}>
+              {dragActiveReservation ? (
+                <div className="h-8 rounded border bg-primary/20 border-primary flex items-center justify-center px-2 shadow-lg min-w-[60px]">
+                  <Move className="h-3 w-3 mr-1 text-primary" />
+                  <span className="text-[10px] font-semibold text-primary truncate">
+                    {dragActiveReservation.isGroup ? "GRP" : dragActiveReservation.guestName.split(" ")[0]}
+                  </span>
+                </div>
+              ) : null}
+            </DragOverlay>
+            </DndContext>
           ) : null}
         </CardContent>
       </Card>
@@ -1628,6 +1817,63 @@ export default function PlanningPage() {
         reservationId={selectedReservationId}
         onNavigate={navigate}
       />
+
+      <Dialog open={!!moveConfirm} onOpenChange={(open) => !open && setMoveConfirm(null)}>
+        <DialogContent className="max-w-md" data-testid="dialog-move-reservation">
+          <DialogHeader>
+            <DialogTitle>
+              <Move className="h-5 w-5 inline mr-2" />
+              Mover Reserva
+            </DialogTitle>
+            <DialogDescription>
+              ¿Confirmar el cambio de habitación para esta reserva?
+            </DialogDescription>
+          </DialogHeader>
+          {moveConfirm && (
+            <div className="space-y-3 py-2">
+              <div className="flex items-center gap-2">
+                <User className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium">{moveConfirm.guestName}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Badge variant="outline" className="text-sm" data-testid="badge-from-room">
+                  Hab. {moveConfirm.fromRoomNumber}
+                </Badge>
+                <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+                <Badge className="text-sm bg-primary" data-testid="badge-to-room">
+                  Hab. {moveConfirm.toRoomNumber}
+                </Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Tipo: {moveConfirm.toRoomType}
+              </p>
+            </div>
+          )}
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setMoveConfirm(null)}
+              data-testid="button-cancel-move"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (moveConfirm) {
+                  moveReservationMutation.mutate({
+                    reservationId: moveConfirm.reservationId,
+                    roomId: moveConfirm.toRoomId,
+                  });
+                }
+              }}
+              disabled={moveReservationMutation.isPending}
+              data-testid="button-confirm-move"
+            >
+              {moveReservationMutation.isPending ? "Moviendo..." : "Confirmar Movimiento"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

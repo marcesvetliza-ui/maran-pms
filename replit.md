@@ -59,7 +59,7 @@ Preferred communication style: Simple, everyday language.
 - **SPA Module**: Cabin time overlap validation, streamlined edit/cancel processes, inventory management, weekly planning view, folio system.
 - **Restaurant Module**: Drag & drop floor plan editor, configurable reservation time slots, menu CRUD, detailed billing, recipe and cost calculation, waiter assignment, tableless areas, course-based ordering, bill splitting.
 - **Events Module**: Cancellation confirmations, room overlap validation, folio system with advanced payment options.
-- **Planning Calendar Enhancements**: Color-coded reservations by source, updated legend and tooltips.
+- **Planning Calendar Enhancements**: Color-coded reservations by source, updated legend and tooltips. Drag & drop to move reservations between rooms (using @dnd-kit/core) with confirmation dialog and server-side overlap validation.
 - **Rate Editing**: Manual override of `baseRatePerNight`, automatic `finalRatePerNight` calculation.
 - **Payments Section**: Separate tracking of payments and charges in the folio, multiple payment methods.
 - **Guest Vehicle Data**: Optional fields for vehicle details.

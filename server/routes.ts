@@ -678,6 +678,25 @@ export async function registerRoutes(
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+
+      if (req.body.roomId && req.body.roomId !== existing.roomId) {
+        const allReservations = await storage.getReservations();
+        const checkIn = req.body.checkInDate || existing.checkInDate;
+        const checkOut = req.body.checkOutDate || existing.checkOutDate;
+        const conflict = allReservations.find(r =>
+          r.id !== req.params.id &&
+          r.roomId === req.body.roomId &&
+          r.status !== "cancelled" &&
+          r.checkInDate < checkOut &&
+          r.checkOutDate > checkIn
+        );
+        if (conflict) {
+          return res.status(409).json({
+            error: "La habitación destino tiene otra reserva en esas fechas.",
+          });
+        }
+      }
+
       const reservation = await storage.updateReservation(req.params.id, req.body);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
