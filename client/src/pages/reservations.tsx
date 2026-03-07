@@ -143,6 +143,43 @@ function ReservationFormDialog({
     createdAt: reservation?.createdAt || new Date().toISOString(),
   });
 
+  useEffect(() => {
+    if (open) {
+      setSelectedGuest(reservation?.guest || null);
+      setSelectedCompany(reservation?.company || null);
+      setSelectedRoomTypeId(reservation?.roomTypeId || "");
+      setFormData({
+        reservationCode: reservation?.reservationCode || "",
+        guestId: reservation?.guestId || "",
+        companyId: reservation?.companyId || "",
+        roomTypeId: reservation?.roomTypeId || "",
+        roomId: reservation?.roomId || "",
+        ratePlanId: reservation?.ratePlanId || "",
+        checkInDate: reservation?.checkInDate || today,
+        checkOutDate: reservation?.checkOutDate || tomorrow,
+        nights: reservation?.nights || 1,
+        numberOfGuests: reservation?.numberOfGuests || 1,
+        status: reservation?.status || "pending",
+        source: reservation?.source || "directo",
+        discountType: reservation?.discountType || "none",
+        discountValue: reservation?.discountValue || "0",
+        baseRatePerNight: reservation?.baseRatePerNight || "",
+        finalRatePerNight: reservation?.finalRatePerNight || "",
+        totalRoomAmount: reservation?.totalRoomAmount || "",
+        bedTypeId: reservation?.bedTypeId || null,
+        bedTypeNotes: reservation?.bedTypeNotes || "",
+        earlyCheckIn: reservation?.earlyCheckIn || false,
+        earlyCheckInTime: reservation?.earlyCheckInTime || "",
+        earlyCheckInCharge: reservation?.earlyCheckInCharge || "",
+        lateCheckOut: reservation?.lateCheckOut || false,
+        lateCheckOutTime: reservation?.lateCheckOutTime || "",
+        lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
+        notes: reservation?.notes || "",
+        createdAt: reservation?.createdAt || new Date().toISOString(),
+      });
+    }
+  }, [open, reservation?.id]);
+
   const createGuestMutation = useMutation({
     mutationFn: async (guest: InsertGuest): Promise<Guest> => {
       const res = await apiRequest("POST", "/api/guests", guest);
@@ -338,7 +375,16 @@ function ReservationFormDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    mutation.mutate(formData);
+    mutation.mutate({
+      ...formData,
+      bedTypeId: formData.bedTypeId || null,
+      nights: Number(formData.nights),
+      numberOfGuests: Number(formData.numberOfGuests),
+      baseRatePerNight: String(formData.baseRatePerNight || "0"),
+      finalRatePerNight: String(formData.finalRatePerNight || "0"),
+      totalRoomAmount: String(formData.totalRoomAmount || "0"),
+      discountValue: String(formData.discountValue || "0"),
+    });
   };
 
   const availableRooms = rooms.filter((r) => 
@@ -603,13 +649,19 @@ function ReservationFormDialog({
                 <div className="grid gap-2">
                   <Label htmlFor="bedType">Tipo de camaje</Label>
                   <Select
-                    value={formData.bedTypeId ? String(formData.bedTypeId) : ""}
-                    onValueChange={(value) => setFormData({ ...formData, bedTypeId: parseInt(value) })}
+                    value={formData.bedTypeId != null ? String(formData.bedTypeId) : "none"}
+                    onValueChange={(value) =>
+                      setFormData({
+                        ...formData,
+                        bedTypeId: value === "none" ? null : value,
+                      })
+                    }
                   >
                     <SelectTrigger data-testid="select-bed-type">
                       <SelectValue placeholder="Seleccionar tipo de camaje" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="none">Sin preferencia</SelectItem>
                       {bedTypes?.filter(bt => bt.isActive).map((bt) => (
                         <SelectItem key={bt.id} value={String(bt.id)}>
                           {bt.name}

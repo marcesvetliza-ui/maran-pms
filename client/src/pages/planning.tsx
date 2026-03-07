@@ -1486,6 +1486,24 @@ export default function PlanningPage() {
     });
   };
 
+  const findReservationForRoomAndDay = (roomId: string, day: string): string | null => {
+    if (!data?.reservations || !data?.cellReservations?.[roomId]) return null;
+    const roomCells = data.cellReservations[roomId];
+    for (const [cellDay, resId] of Object.entries(roomCells)) {
+      if (cellDay === day) return resId;
+    }
+    const targetDate = new Date(day + "T00:00:00");
+    for (const [resId, reservation] of Object.entries(data.reservations)) {
+      const checkIn = new Date(reservation.checkIn + "T00:00:00");
+      const checkOut = new Date(reservation.checkOut + "T00:00:00");
+      const hasRoomMatch = Object.values(roomCells).includes(resId);
+      if (hasRoomMatch && targetDate >= checkIn && targetDate < checkOut) {
+        return resId;
+      }
+    }
+    return null;
+  };
+
   const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
     if (status === "available") {
       setSelectedCell({
@@ -1497,9 +1515,12 @@ export default function PlanningPage() {
         checkInDate: day,
       });
       setQuickReservationOpen(true);
-    } else if (reservationId) {
-      setSelectedReservationId(reservationId);
-      setReservationDetailOpen(true);
+    } else {
+      const resolvedId = reservationId || findReservationForRoomAndDay(room.id, day);
+      if (resolvedId) {
+        setSelectedReservationId(resolvedId);
+        setReservationDetailOpen(true);
+      }
     }
   };
 

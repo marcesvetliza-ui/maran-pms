@@ -702,7 +702,7 @@ export async function registerRoutes(
           req.body[field] = null;
         }
       }
-      const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId", "reservationCode"];
+      const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId"];
       for (const field of nullableStringFields) {
         if (req.body[field] === "") {
           req.body[field] = null;
