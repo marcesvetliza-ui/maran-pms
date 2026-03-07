@@ -639,6 +639,19 @@ export async function registerRoutes(
 
   app.post("/api/reservations", async (req, res) => {
     try {
+      const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
+      for (const field of numericFields) {
+        if (req.body[field] === "" || req.body[field] === undefined) {
+          req.body[field] = null;
+        }
+      }
+      const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId"];
+      for (const field of nullableStringFields) {
+        if (req.body[field] === "") {
+          req.body[field] = null;
+        }
+      }
+
       const data = {
         ...req.body,
         reservationCode: req.body.reservationCode || storage.generateReservationCode(),
@@ -667,7 +680,8 @@ export async function registerRoutes(
       }
 
       res.status(201).json(reservation);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Error creating reservation:", error?.message || error);
       res.status(500).json({ error: "Error creating reservation" });
     }
   });
@@ -677,6 +691,22 @@ export async function registerRoutes(
       const existing = await storage.getReservation(req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
+      }
+
+      delete req.body.createdAt;
+      delete req.body.id;
+
+      const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
+      for (const field of numericFields) {
+        if (req.body[field] === "" || req.body[field] === undefined) {
+          req.body[field] = null;
+        }
+      }
+      const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId", "reservationCode"];
+      for (const field of nullableStringFields) {
+        if (req.body[field] === "") {
+          req.body[field] = null;
+        }
       }
 
       if (req.body.roomId && req.body.roomId !== existing.roomId) {
@@ -723,7 +753,8 @@ export async function registerRoutes(
       }
 
       res.json(reservation);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Error updating reservation:", error?.message || error);
       res.status(500).json({ error: "Error updating reservation" });
     }
   });
