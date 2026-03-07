@@ -107,3 +107,36 @@ Preferred communication style: Simple, everyday language.
 - **Vite**: Frontend build tool and development server.
 - **esbuild**: Fast bundling in production.
 - **TypeScript**: Type safety across the stack.
+
+## Pendientes y Observaciones (Marzo 2026)
+
+### BUGS CRÍTICOS (Prioridad Alta)
+- [ ] B01: Editar/modificar reserva de grupo la elimina en vez de guardar cambios
+- [ ] B02: No se puede abrir ni editar reservas de grupo desde pestaña Grupos
+- [ ] B03: Al vincular empresa a reserva se borran datos previos de la reserva
+- [ ] B04: Early/late check-in no se visualiza consistentemente en la grilla del planning
+- [ ] B05: Botón "Hoy" en planning muestra el día anterior
+- [ ] B06: Colores de estado de habitación (check-in/out) no se actualizan sin refrescar la página
+- [ ] B07: Ordenamiento de habitaciones mezclado en la pestaña de habitaciones
+- [ ] B08: Check-in muestra reservas de fechas distintas al día actual
+- [ ] B09: Reserva rápida desde planning no permite asociar empresa
+- [ ] B10: No permite editar camaje desde housekeeping ni estado de habitaciones
+- [ ] B11: Bloqueos de grupo sin asignar no se visualizan en la grilla del planning
+
+### MEJORAS OPERATIVAS (Prioridad Media)
+- [ ] M01: Facturar desde saldo pendiente en folio
+- [ ] M02: Facturación independiente huésped/empresa
+- [ ] M03: Eliminar opción "check in" del dropdown de estado de reserva
+- [ ] M04: Paquetes en reservas rápidas desde planning
+- [ ] M05: Check-in/out/facturación grupal masiva (en progreso)
+- [ ] M06: Rooming list imprimible desde grupo
+
+### FUNCIONALIDADES NUEVAS (Prioridad Baja / Próxima Etapa)
+- [ ] F01: Inventario/stock de items para consumos y cargos
+- [ ] F02: Reportes contables ampliados y comprobantes
+- [ ] F03: Módulo completo de paquetes (noches + servicios)
+- [ ] F04: Tarifas por cantidad de pasajeros (2, 4, etc.)
+
+### NOTAS
+- Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación
+- Las tarifas por PAX se configuran en el plan tarifario
