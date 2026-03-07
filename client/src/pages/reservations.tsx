@@ -81,7 +81,7 @@ function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }
 
-function ReservationFormDialog({
+export function ReservationFormDialog({
   reservation,
   guests,
   rooms,
@@ -394,7 +394,7 @@ function ReservationFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Reserva" : "Nueva Reserva"}</DialogTitle>
           <DialogDescription>
@@ -809,11 +809,13 @@ function ReservationDetailDialog({
   open,
   onOpenChange,
   onCancel,
+  onEdit,
 }: {
   reservation: ReservationWithDetails;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCancel: () => void;
+  onEdit?: () => void;
 }) {
   const { toast } = useToast();
   const [showAddCharge, setShowAddCharge] = useState(false);
@@ -895,6 +897,15 @@ function ReservationDetailDialog({
       setNewPayment({ amount: "", method: "efectivo", reference: "", notes: "" });
       toast({ title: "Pago registrado", description: "El pago ha sido registrado exitosamente." });
     },
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo registrar el pago";
+      toast({
+        title: "Error al registrar pago",
+        description: message,
+        variant: "destructive",
+      });
+      console.error("Payment error:", error);
+    },
   });
 
   const deletePaymentMutation = useMutation({
@@ -963,7 +974,7 @@ function ReservationDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-[680px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Reserva {reservation.reservationCode}
@@ -1310,7 +1321,20 @@ function ReservationDetailDialog({
         </Tabs>
 
         <DialogFooter className="gap-2 sm:justify-between">
-          <div>
+          <div className="flex gap-2 flex-wrap">
+            {onEdit && reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  onEdit();
+                  onOpenChange(false);
+                }}
+                data-testid="button-edit-from-detail"
+              >
+                <Pencil className="h-4 w-4 mr-2" />
+                Editar Reserva
+              </Button>
+            )}
             {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
               <Button 
                 variant="destructive" 
@@ -1338,7 +1362,7 @@ function ReservationDetailDialog({
           setTargetReservationId("");
         }
       }}>
-        <DialogContent className="sm:max-w-[450px]">
+        <DialogContent className="w-[95vw] max-w-[450px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ArrowRightLeft className="h-5 w-5" />
@@ -1473,7 +1497,7 @@ function CancelReservationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="w-[95vw] max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">
             <X className="h-5 w-5" />
@@ -1885,6 +1909,10 @@ export default function ReservationsPage() {
           open={detailDialogOpen}
           onOpenChange={setDetailDialogOpen}
           onCancel={() => setCancelDialogOpen(true)}
+          onEdit={() => {
+            setDetailDialogOpen(false);
+            setDialogOpen(true);
+          }}
         />
       )}
 

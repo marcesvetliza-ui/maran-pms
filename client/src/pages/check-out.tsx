@@ -139,6 +139,15 @@ export default function CheckOutPage() {
       setPaymentReference("");
       toast({ title: "Pago registrado" });
     },
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo registrar el pago";
+      toast({
+        title: "Error al registrar pago",
+        description: message,
+        variant: "destructive",
+      });
+      console.error("Payment error:", error);
+    },
   });
 
   const checkOutMutation = useMutation({
@@ -451,11 +460,18 @@ export default function CheckOutPage() {
                       />
                     </div>
                     <Button
-                      onClick={() => addPaymentMutation.mutate({
-                        amount: paymentAmount || balance.toFixed(2),
-                        method: paymentMethod,
-                        reference: paymentReference,
-                      })}
+                      onClick={() => {
+                        const amount = paymentAmount || balance.toFixed(2);
+                        if (!amount || parseFloat(amount) <= 0) {
+                          toast({ title: "Ingresá un monto válido", variant: "destructive" });
+                          return;
+                        }
+                        addPaymentMutation.mutate({
+                          amount,
+                          method: paymentMethod,
+                          reference: paymentReference,
+                        });
+                      }}
                       disabled={addPaymentMutation.isPending}
                       data-testid="button-register-payment"
                     >

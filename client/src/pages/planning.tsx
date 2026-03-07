@@ -46,7 +46,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan } from "@shared/schema";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan } from "@shared/schema";
+import { ReservationFormDialog } from "./reservations";
 
 function getLocalToday() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -438,7 +439,7 @@ function QuickReservationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle data-testid="title-quick-reservation">Nueva Reserva Rápida</DialogTitle>
           <DialogDescription>
@@ -606,11 +607,13 @@ function ReservationDetailModal({
   onOpenChange,
   reservationId,
   onNavigate,
+  onEdit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   reservationId: string | null;
   onNavigate: (path: string) => void;
+  onEdit?: (reservation: ReservationWithDetails) => void;
 }) {
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
@@ -661,6 +664,15 @@ function ReservationDetailModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId] });
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+    },
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo registrar el pago";
+      toast({
+        title: "Error al registrar pago",
+        description: message,
+        variant: "destructive",
+      });
+      console.error("Payment error:", error);
     },
   });
 
@@ -912,7 +924,7 @@ function ReservationDetailModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="w-[95vw] max-w-[560px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calendar className="h-5 w-5" />
@@ -996,7 +1008,12 @@ function ReservationDetailModal({
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => setCheckoutStep(1)}>Atrás</Button>
                       <Button size="sm" onClick={() => {
-                        addPaymentMutation.mutate({ amount: checkoutPayAmount || balance.toFixed(2), method: checkoutPaymentMethod, receiptType: checkoutReceiptType }, {
+                        const amount = checkoutPayAmount || balance.toFixed(2);
+                        if (!amount || parseFloat(amount) <= 0) {
+                          toast({ title: "Ingresá un monto válido", variant: "destructive" });
+                          return;
+                        }
+                        addPaymentMutation.mutate({ amount, method: checkoutPaymentMethod, receiptType: checkoutReceiptType }, {
                           onSuccess: () => setCheckoutStep(3),
                         });
                       }} disabled={addPaymentMutation.isPending} data-testid="button-checkout-pay">
@@ -1187,11 +1204,14 @@ function ReservationDetailModal({
               Confirmación
             </Button>
           )}
-          {reservation && reservation.status !== "checked_out" && reservation.status !== "cancelled" && (
+          {reservation && reservation.status !== "checked_out" && reservation.status !== "cancelled" && onEdit && (
             <Button
               variant="outline"
               size="sm"
-              onClick={startEditing}
+              onClick={() => {
+                onEdit(reservation);
+                onOpenChange(false);
+              }}
               className="w-full sm:w-auto"
               data-testid="button-edit-reservation"
             >
@@ -1285,6 +1305,7 @@ function DraggableReservationCell({
       {...listeners}
       {...attributes}
       onClick={(e) => {
+        if (e.defaultPrevented) return;
         if (!isDragging) onClick();
       }}
       className={`${className} ${isDragging ? "opacity-40 ring-2 ring-primary" : ""}`}
@@ -1345,6 +1366,9 @@ export default function PlanningPage() {
   const [selectedCell, setSelectedCell] = useState<QuickReservationData | null>(null);
   const [reservationDetailOpen, setReservationDetailOpen] = useState(false);
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
+
+  const [editReservationOpen, setEditReservationOpen] = useState(false);
+  const [editingReservationData, setEditingReservationData] = useState<ReservationWithDetails | null>(null);
 
   const [dragActiveId, setDragActiveId] = useState<string | null>(null);
   const [moveConfirm, setMoveConfirm] = useState<{
@@ -1445,6 +1469,14 @@ export default function PlanningPage() {
       if (!res.ok) throw new Error("Failed to fetch guests");
       return res.json();
     },
+  });
+
+  const { data: allRooms = [] } = useQuery<RoomWithType[]>({
+    queryKey: ["/api/rooms"],
+  });
+
+  const { data: roomTypes = [] } = useQuery<RoomType[]>({
+    queryKey: ["/api/room-types"],
   });
 
   const dragActiveReservation = dragActiveId && data ? data.reservations[dragActiveId] : null;
@@ -1837,7 +1869,26 @@ export default function PlanningPage() {
         onOpenChange={setReservationDetailOpen}
         reservationId={selectedReservationId}
         onNavigate={navigate}
+        onEdit={(reservation) => {
+          setEditingReservationData(reservation);
+          setEditReservationOpen(true);
+        }}
       />
+
+      {editingReservationData && (
+        <ReservationFormDialog
+          reservation={editingReservationData}
+          guests={guests}
+          rooms={allRooms}
+          roomTypes={roomTypes}
+          open={editReservationOpen}
+          onOpenChange={setEditReservationOpen}
+          onSuccess={() => {
+            setEditingReservationData(null);
+            queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+          }}
+        />
+      )}
 
       <Dialog open={!!moveConfirm} onOpenChange={(open) => !open && setMoveConfirm(null)}>
         <DialogContent className="max-w-md" data-testid="dialog-move-reservation">
