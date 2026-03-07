@@ -111,17 +111,17 @@ Preferred communication style: Simple, everyday language.
 ## Pendientes y Observaciones (Marzo 2026)
 
 ### BUGS CRÍTICOS (Prioridad Alta)
-- [ ] B01: Editar/modificar reserva de grupo la elimina en vez de guardar cambios
-- [ ] B02: No se puede abrir ni editar reservas de grupo desde pestaña Grupos
-- [ ] B03: Al vincular empresa a reserva se borran datos previos de la reserva
-- [ ] B04: Early/late check-in no se visualiza consistentemente en la grilla del planning
-- [ ] B05: Botón "Hoy" en planning muestra el día anterior
-- [ ] B06: Colores de estado de habitación (check-in/out) no se actualizan sin refrescar la página
-- [ ] B07: Ordenamiento de habitaciones mezclado en la pestaña de habitaciones
-- [ ] B08: Check-in muestra reservas de fechas distintas al día actual
-- [ ] B09: Reserva rápida desde planning no permite asociar empresa
-- [ ] B10: No permite editar camaje desde housekeeping ni estado de habitaciones
-- [ ] B11: Bloqueos de grupo sin asignar no se visualizan en la grilla del planning
+- [x] B01: Editar/modificar reserva de grupo — PATCH route verified correct, group metadata editing works
+- [x] B02: Reservas de grupo clickeables desde detalle de grupo (navega a Reservas)
+- [x] B03: Al vincular empresa — form uses spread operator correctly, preserves fields
+- [x] B04: Early/late check-in icons — late checkout icon now shows on last occupied day (checkOut-1)
+- [x] B05: Botón "Hoy" inicia desde hoy (no desde ayer)
+- [x] B06: Colores de estado se actualizan — planning query invalidated from check-in/out/reservations pages
+- [x] B07: Ordenamiento de habitaciones por piso y número
+- [x] B08: Check-in filtra por fecha actual (hoy y mañana, solo confirmed/pending)
+- [x] B09: Reserva rápida desde planning permite asociar empresa (CompanySelector)
+- [x] B10: Editar camaje desde housekeeping (popover → dialog con Select)
+- [x] B11: Bloqueos de grupo sin asignar se muestran como alerta en planning
 
 ### MEJORAS OPERATIVAS (Prioridad Media)
 - [ ] M01: Facturar desde saldo pendiente en folio

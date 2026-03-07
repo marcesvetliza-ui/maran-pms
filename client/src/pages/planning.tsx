@@ -46,8 +46,9 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan } from "@shared/schema";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
+import { CompanySelector } from "@/components/entity-selector";
 
 function getLocalToday() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -272,6 +273,8 @@ function QuickReservationDialog({
   const [guestSearch, setGuestSearch] = useState("");
   const [showNewGuest, setShowNewGuest] = useState(false);
   const [newGuest, setNewGuest] = useState({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
+  const [companyId, setCompanyId] = useState<string | null>(null);
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
 
   const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
 
@@ -342,6 +345,8 @@ function QuickReservationDialog({
     setGuestSearch("");
     setShowNewGuest(false);
     setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
+    setCompanyId(null);
+    setSelectedCompany(null);
   };
 
   const handleSubmit = async () => {
@@ -402,6 +407,7 @@ function QuickReservationDialog({
       status: "confirmed",
       source,
       ratePlanId: ratePlanId || null,
+      companyId: companyId || null,
       bedTypeNotes: bedConfig || null,
       baseRatePerNight: manualRate || selectedPlan?.baseRate || null,
       finalRatePerNight: manualRate || selectedPlan?.baseRate || null,
@@ -498,6 +504,28 @@ function QuickReservationDialog({
               </div>
             )}
           </div>
+
+          <CompanySelector
+            selectedCompany={selectedCompany}
+            onSelect={(company) => {
+              setSelectedCompany(company);
+              setCompanyId(company.id);
+            }}
+            onCreateNew={async (data) => {
+              try {
+                const res = await apiRequest("POST", "/api/companies", data);
+                const created = await res.json();
+                setSelectedCompany(created);
+                setCompanyId(created.id);
+              } catch {
+                toast({ title: "Error", description: "No se pudo crear la empresa.", variant: "destructive" });
+              }
+            }}
+            onClear={() => {
+              setSelectedCompany(null);
+              setCompanyId(null);
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1">
@@ -1351,13 +1379,10 @@ export default function PlanningPage() {
   const { toast } = useToast();
   const [dateRange, setDateRange] = useState(() => {
     const todayStr = getLocalToday();
-    const today = new Date(todayStr + "T12:00:00");
-    const start = new Date(today);
-    start.setDate(start.getDate() - 1);
-    const end = new Date(today);
-    end.setDate(end.getDate() + 14);
+    const end = new Date(todayStr + "T12:00:00");
+    end.setDate(end.getDate() + 15);
     return {
-      start: start.toISOString().split("T")[0],
+      start: todayStr,
       end: end.toISOString().split("T")[0],
     };
   });
@@ -1495,13 +1520,10 @@ export default function PlanningPage() {
 
   const goToToday = () => {
     const todayStr = getLocalToday();
-    const today = new Date(todayStr + "T12:00:00");
-    const start = new Date(today);
-    start.setDate(start.getDate() - 1);
-    const end = new Date(today);
-    end.setDate(end.getDate() + 14);
+    const end = new Date(todayStr + "T12:00:00");
+    end.setDate(end.getDate() + 15);
     setDateRange({
-      start: start.toISOString().split("T")[0],
+      start: todayStr,
       end: end.toISOString().split("T")[0],
     });
   };
@@ -1627,6 +1649,28 @@ export default function PlanningPage() {
       </div>
 
       <Legend />
+
+      {data?.unassignedGroupBlocks && data.unassignedGroupBlocks.length > 0 && (
+        <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-700">
+          <CardContent className="p-3">
+            <div className="flex items-start gap-2">
+              <Users className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm">
+                <span className="font-medium text-orange-800 dark:text-orange-300">
+                  Bloques de grupo sin asignar:
+                </span>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {data.unassignedGroupBlocks.map((block, idx) => (
+                    <Badge key={idx} variant="outline" className="text-xs border-orange-400 text-orange-700 dark:text-orange-300" data-testid={`badge-unassigned-block-${idx}`}>
+                      {block.groupName}: {block.quantity - block.assigned} hab. {block.roomTypeName} ({block.checkIn} → {block.checkOut})
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="flex-1 min-h-0">
         <CardHeader className="py-3 px-4 border-b">
@@ -1767,7 +1811,12 @@ export default function PlanningPage() {
                                               <Sunrise className="h-3 w-3 text-orange-400 flex-shrink-0" data-testid="icon-early-checkin" />
                                             )}
                                             {reservation.isGroup ? "GRP" : reservation.guestName.split(" ")[0]}
-                                            {reservation.lateCheckOut && day === reservation.checkOut && (
+                                            {reservation.lateCheckOut && (() => {
+                                              const coDate = new Date(reservation.checkOut + "T12:00:00");
+                                              coDate.setDate(coDate.getDate() - 1);
+                                              const lastDay = coDate.toISOString().split("T")[0];
+                                              return day === lastDay;
+                                            })() && (
                                               <Sunset className="h-3 w-3 text-purple-400 flex-shrink-0" data-testid="icon-late-checkout" />
                                             )}
                                           </span>

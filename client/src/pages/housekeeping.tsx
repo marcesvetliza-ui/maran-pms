@@ -88,6 +88,7 @@ function RoomCard({
   onCreateTask,
   onUpdateStatus,
   onOpenDetails,
+  onEditBedConfig,
 }: { 
   room: RoomWithType;
   tasks: HousekeepingTaskWithRoom[];
@@ -96,6 +97,7 @@ function RoomCard({
   onCreateTask: (roomId: string) => void;
   onUpdateStatus: (roomId: string, status: RoomStatus) => void;
   onOpenDetails: (roomId: string) => void;
+  onEditBedConfig: (roomId: string, currentConfig: string) => void;
 }) {
   const config = statusConfig[room.status];
   const Icon = config.icon;
@@ -169,6 +171,16 @@ function RoomCard({
                   >
                     <Wrench className="h-3 w-3 mr-2 text-red-500" />
                     Mantenimiento
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="w-full justify-start h-8 text-xs"
+                    onClick={() => onEditBedConfig(room.id, room.bedConfig || "")}
+                    data-testid={`button-edit-bedconfig-${room.id}`}
+                  >
+                    <Bed className="h-3 w-3 mr-2 text-blue-500" />
+                    Cambiar Camaje {room.bedConfig ? `(${room.bedConfig})` : ""}
                   </Button>
                 </div>
               </PopoverContent>
@@ -380,6 +392,39 @@ export default function Housekeeping() {
     setDetailsDialogOpen(true);
   };
 
+  const [bedConfigDialogOpen, setBedConfigDialogOpen] = useState(false);
+  const [bedConfigRoomId, setBedConfigRoomId] = useState<string | null>(null);
+  const [bedConfigValue, setBedConfigValue] = useState("");
+
+  const bedConfigOptions = [
+    { value: "MAT", label: "Matrimonial" },
+    { value: "TWIN", label: "Twin (2 camas)" },
+    { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
+    { value: "TWIN_CC", label: "Twin + Cama cuna" },
+    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
+    { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
+  ];
+
+  const updateBedConfigMutation = useMutation({
+    mutationFn: ({ roomId, bedConfig }: { roomId: string; bedConfig: string }) =>
+      apiRequest("PATCH", `/api/rooms/${roomId}`, { bedConfig }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setBedConfigDialogOpen(false);
+      setBedConfigRoomId(null);
+      toast({ title: "Camaje actualizado" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo actualizar el camaje.", variant: "destructive" });
+    },
+  });
+
+  const handleEditBedConfig = (roomId: string, currentConfig: string) => {
+    setBedConfigRoomId(roomId);
+    setBedConfigValue(currentConfig || "");
+    setBedConfigDialogOpen(true);
+  };
+
   const selectedRoom = rooms?.find(r => r.id === selectedRoomId);
   const selectedRoomTasks = selectedRoomId ? getTasksForRoom(selectedRoomId) : [];
 
@@ -527,6 +572,7 @@ export default function Housekeeping() {
                       updateRoomStatusMutation.mutate({ roomId, status })
                     }
                     onOpenDetails={handleOpenDetails}
+                    onEditBedConfig={handleEditBedConfig}
                   />
                 ))}
             </div>
@@ -715,6 +761,42 @@ export default function Housekeeping() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bedConfigDialogOpen} onOpenChange={setBedConfigDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cambiar Camaje</DialogTitle>
+            <DialogDescription>
+              Habitación {rooms?.find(r => r.id === bedConfigRoomId)?.roomNumber || ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <Label>Tipo de camaje</Label>
+            <Select value={bedConfigValue} onValueChange={setBedConfigValue}>
+              <SelectTrigger data-testid="select-bed-config-housekeeping">
+                <SelectValue placeholder="Seleccionar camaje" />
+              </SelectTrigger>
+              <SelectContent>
+                {bedConfigOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBedConfigDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => bedConfigRoomId && updateBedConfigMutation.mutate({ roomId: bedConfigRoomId, bedConfig: bedConfigValue })}
+              disabled={updateBedConfigMutation.isPending}
+              data-testid="button-save-bed-config"
+            >
+              {updateBedConfigMutation.isPending ? "Guardando..." : "Guardar"}
             </Button>
           </DialogFooter>
         </DialogContent>

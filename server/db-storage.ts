@@ -344,7 +344,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getReservationsForCheckIn(): Promise<ReservationWithDetails[]> {
-    const allRes = await db.select().from(reservations).where(eq(reservations.status, "confirmed"));
+    const todayStr = getArgentinaToday();
+    const tomorrow = new Date(todayStr + "T12:00:00");
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+    const allRes = await db.select().from(reservations).where(
+      and(
+        or(eq(reservations.status, "confirmed"), eq(reservations.status, "pending")),
+        lte(reservations.checkInDate, tomorrowStr),
+        gte(reservations.checkInDate, todayStr)
+      )
+    );
     const results: ReservationWithDetails[] = [];
     for (const r of allRes) {
       results.push(await this.enrichReservation(r));
@@ -634,6 +644,56 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    const allBlocks = await db.select().from(groupRoomBlocks);
+    const allRoomTypes = await db.select().from(roomTypes);
+    const roomTypesMap = new Map(allRoomTypes.map(rt => [rt.id, rt]));
+    const allReservationsFull = await db.select().from(reservations).where(
+      ne(reservations.status, "cancelled")
+    );
+    
+    const unassignedGroupBlocks: Array<{
+      groupId: string;
+      groupName: string;
+      groupCode: string;
+      roomTypeName: string;
+      quantity: number;
+      assigned: number;
+      checkIn: string;
+      checkOut: string;
+    }> = [];
+    
+    for (const group of allGroups) {
+      if (group.status === "cancelled" || group.status === "finished") continue;
+      const groupBlocks = allBlocks.filter(b => b.groupId === group.id);
+      const groupLinks = allGroupLinks.filter(l => l.groupId === group.id);
+      
+      for (const block of groupBlocks) {
+        const blockCheckIn = block.blockCheckInDate || group.checkInDate;
+        const blockCheckOut = block.blockCheckOutDate || group.checkOutDate;
+        
+        if (blockCheckOut <= startDate || blockCheckIn >= endDate) continue;
+        
+        const assignedCount = groupLinks.filter(l => {
+          const res = allReservationsFull.find(r => r.id === l.reservationId);
+          return res && res.roomTypeId === block.roomTypeId;
+        }).length;
+        
+        if (assignedCount < block.quantity) {
+          const rt = roomTypesMap.get(block.roomTypeId);
+          unassignedGroupBlocks.push({
+            groupId: group.id,
+            groupName: group.name,
+            groupCode: group.groupCode,
+            roomTypeName: rt?.name || "Desconocido",
+            quantity: block.quantity,
+            assigned: assignedCount,
+            checkIn: blockCheckIn,
+            checkOut: blockCheckOut,
+          });
+        }
+      }
+    }
+
     return {
       rooms: allRooms,
       days,
@@ -642,6 +702,7 @@ export class DatabaseStorage implements IStorage {
       cellGroupBlocks,
       reservations: reservationsMap,
       cellReservations,
+      unassignedGroupBlocks,
     };
   }
 

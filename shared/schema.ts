@@ -292,6 +292,16 @@ export type PlanningData = {
   cellReservations: Record<string, Record<string, string>>; // roomId -> date -> reservationId
   groupBlocks: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }>;
   cellGroupBlocks: Record<string, Record<string, string>>; // roomId -> date -> groupBlockId
+  unassignedGroupBlocks?: Array<{
+    groupId: string;
+    groupName: string;
+    groupCode: string;
+    roomTypeName: string;
+    quantity: number;
+    assigned: number;
+    checkIn: string;
+    checkOut: string;
+  }>;
 };
 
 // Users (for authentication)

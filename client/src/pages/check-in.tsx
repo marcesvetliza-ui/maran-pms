@@ -186,6 +186,9 @@ export default function CheckInPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
       toast({
         title: "Check-in realizado",
         description: `El huesped ${selectedReservation?.guest?.firstName} ${selectedReservation?.guest?.lastName} ha sido registrado exitosamente.`,
@@ -284,6 +287,9 @@ export default function CheckInPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
       toast({
         title: "Walk-in exitoso",
         description: `${selectedGuest?.firstName} ${selectedGuest?.lastName} ha sido registrado en la habitacion.`,

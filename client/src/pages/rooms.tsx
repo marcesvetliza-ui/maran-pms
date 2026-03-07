@@ -327,6 +327,12 @@ export default function RoomsPage() {
     const matchesStatus = statusFilter === "all" || room.status === statusFilter;
     const matchesType = typeFilter === "all" || room.roomTypeId === typeFilter;
     return matchesSearch && matchesStatus && matchesType;
+  })?.sort((a, b) => {
+    if (a.floor !== b.floor) return a.floor - b.floor;
+    const numA = parseInt(a.roomNumber.replace(/\D/g, ''), 10) || 0;
+    const numB = parseInt(b.roomNumber.replace(/\D/g, ''), 10) || 0;
+    if (numA !== numB) return numA - numB;
+    return a.roomNumber.localeCompare(b.roomNumber);
   });
 
   const handleEditRoom = (room: RoomWithType) => {

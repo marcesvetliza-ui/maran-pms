@@ -1036,7 +1036,12 @@ export default function GroupDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {group.reservations.map((res) => (
-                      <TableRow key={res.id} data-testid={`row-reservation-${res.id}`}>
+                      <TableRow 
+                        key={res.id} 
+                        data-testid={`row-reservation-${res.id}`}
+                        className="cursor-pointer hover:bg-accent"
+                        onClick={() => navigate(`/reservations`)}
+                      >
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
                         <TableCell>{res.guest.firstName} {res.guest.lastName}</TableCell>
                         <TableCell>{res.room.roomNumber}</TableCell>

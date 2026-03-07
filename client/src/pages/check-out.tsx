@@ -160,7 +160,9 @@ export default function CheckOutPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning"
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
 
       const methods = folio?.payments?.map(p => paymentMethodLabels[p.method as PaymentMethod] || p.method) || [];
