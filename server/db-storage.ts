@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 
-function getArgentinaToday(): string {
+export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 }
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull } from "drizzle-orm";

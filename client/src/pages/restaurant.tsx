@@ -758,7 +758,8 @@ export default function RestaurantPage() {
       const tableOrder = orders.find((o) => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
       if (tableOrder) {
         setCurrentOrder(tableOrder);
-        setOrderView("menu");
+        const orderItems = (tableOrder as any).items || [];
+        setOrderView(orderItems.length > 0 ? "comanda" : "menu");
         setSelectedCategory(null);
         setIsOrderDialogOpen(true);
       }

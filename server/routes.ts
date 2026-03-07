@@ -4,7 +4,7 @@ import path from "path";
 import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import passport from "passport";
-import { storage } from "./db-storage";
+import { storage, getArgentinaToday } from "./db-storage";
 import { insertGuestReviewSchema } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
@@ -323,7 +323,25 @@ export async function registerRoutes(
   app.get("/api/rooms", async (req, res) => {
     try {
       const rooms = await storage.getRooms();
-      res.json(rooms);
+      const today = getArgentinaToday();
+      const allReservations = await storage.getReservations();
+      const checkedInReservations = allReservations.filter(r => r.status === "checked_in");
+
+      const roomsWithReconciled = await Promise.all(rooms.map(async (room) => {
+        const activeRes = checkedInReservations.find(r => r.roomId === room.id && r.checkInDate <= today && r.checkOutDate >= today);
+
+        if (room.status === "occupied" && !activeRes) {
+          await storage.updateRoom(room.id, { status: "dirty" });
+          return { ...room, status: "dirty" as const };
+        }
+        if ((room.status === "available" || room.status === "dirty") && activeRes) {
+          await storage.updateRoom(room.id, { status: "occupied" });
+          return { ...room, status: "occupied" as const };
+        }
+        return room;
+      }));
+
+      res.json(roomsWithReconciled);
     } catch (error) {
       res.status(500).json({ error: "Error fetching rooms" });
     }
