@@ -604,6 +604,19 @@ export async function refreshRealData() {
       console.log(`Inserted ${missingRooms.length} missing rooms`);
     }
 
+    const existingRoomsFull = await db.select().from(rooms);
+    for (const real of realRooms) {
+      const existing = existingRoomsFull.find(r => r.id === real.id);
+      if (existing && (!existing.roomTypeId || existing.floor !== real.floor)) {
+        await db.update(rooms).set({
+          roomTypeId: real.roomTypeId,
+          floor: real.floor,
+          status: real.status,
+        }).where(eq(rooms.id, real.id));
+        console.log(`Fixed room ${real.roomNumber} (type/floor were wrong)`);
+      }
+    }
+
     const realRoomIds = realRooms.map(r => r.id);
     const extraRooms = existingRoomIds.filter(id => !realRoomIds.includes(id));
     for (const extraId of extraRooms) {
