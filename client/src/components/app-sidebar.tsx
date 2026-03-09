@@ -37,6 +37,7 @@ import {
   FileText,
   Wallet,
   FileCode,
+  Plane,
 } from "lucide-react";
 import {
   Sidebar,
@@ -373,6 +374,18 @@ export function AppSidebar() {
                   <Link href="/companies">
                     <Building2 className="h-5 w-5" />
                     <span>Empresas</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/agencies"}
+                  data-testid="nav-agencies"
+                >
+                  <Link href="/agencies">
+                    <Plane className="h-5 w-5" />
+                    <span>Agencias</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

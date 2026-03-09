@@ -1,0 +1,666 @@
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp } from "lucide-react";
+import { insertAgencySchema, type Agency } from "@shared/schema";
+
+const agencyFormSchema = insertAgencySchema.extend({
+  razonSocial: z.string().min(1, "Razón social requerida"),
+  cuilCuit: z.string().min(1, "CUIT requerido"),
+});
+
+type AgencyFormData = z.infer<typeof agencyFormSchema>;
+
+interface AgencyReportItem {
+  agency: Agency;
+  totalReservations: number;
+  totalRevenue: number;
+  commissionRate: number;
+  totalCommission: number;
+  totalNights: number;
+}
+
+interface AgencyStats {
+  totalReservations: number;
+  totalRevenue: number;
+  commissionRate: number;
+  totalCommission: number;
+  totalNights: number;
+  activeReservations: number;
+}
+
+export default function AgenciesPage() {
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [editingAgency, setEditingAgency] = useState<Agency | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedAgencyId, setSelectedAgencyId] = useState<string | null>(null);
+  const [reportFrom, setReportFrom] = useState("");
+  const [reportTo, setReportTo] = useState("");
+
+  const { data: agencies = [], isLoading } = useQuery<Agency[]>({
+    queryKey: ["/api/agencies"],
+  });
+
+  const { data: agencyStats } = useQuery<AgencyStats>({
+    queryKey: ["/api/agencies", selectedAgencyId, "stats"],
+    queryFn: async () => {
+      const res = await fetch(`/api/agencies/${selectedAgencyId}/stats`);
+      return res.json();
+    },
+    enabled: !!selectedAgencyId,
+  });
+
+  const { data: reportData = [], isLoading: reportLoading } = useQuery<AgencyReportItem[]>({
+    queryKey: ["/api/agencies/report", reportFrom, reportTo],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (reportFrom) params.set("from", reportFrom);
+      if (reportTo) params.set("to", reportTo);
+      const res = await fetch(`/api/agencies/report?${params}`);
+      return res.json();
+    },
+  });
+
+  const form = useForm<AgencyFormData>({
+    resolver: zodResolver(agencyFormSchema),
+    defaultValues: {
+      razonSocial: "",
+      nombreFantasia: "",
+      cuilCuit: "",
+      condicionIva: "responsable_inscripto",
+      direccion: "",
+      localidad: "",
+      provincia: "",
+      codigoPostal: "",
+      telefono: "",
+      email: "",
+      contactName: "",
+      contactEmail: "",
+      contactPhone: "",
+      commissionRate: "10",
+      creditLimit: "0",
+      paymentTermDays: 30,
+      notes: "",
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: AgencyFormData) => {
+      const res = await apiRequest("POST", "/api/agencies", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agencies"] });
+      toast({ title: "Agencia creada correctamente" });
+      setShowForm(false);
+      form.reset();
+    },
+    onError: () => {
+      toast({ title: "Error al crear agencia", variant: "destructive" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: AgencyFormData }) => {
+      const res = await apiRequest("PATCH", `/api/agencies/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agencies"] });
+      toast({ title: "Agencia actualizada correctamente" });
+      setShowForm(false);
+      setEditingAgency(null);
+      form.reset();
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar agencia", variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/agencies/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agencies"] });
+      toast({ title: "Agencia eliminada correctamente" });
+    },
+    onError: () => {
+      toast({ title: "Error al eliminar agencia", variant: "destructive" });
+    },
+  });
+
+  const handleDelete = (agency: Agency) => {
+    if (window.confirm(`¿Estás seguro de eliminar "${agency.razonSocial}"?`)) {
+      deleteMutation.mutate(agency.id);
+    }
+  };
+
+  const filteredAgencies = agencies.filter((a) =>
+    a.razonSocial.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    a.nombreFantasia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    a.cuilCuit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    a.contactName?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleEdit = (agency: Agency) => {
+    setEditingAgency(agency);
+    form.reset({
+      razonSocial: agency.razonSocial,
+      nombreFantasia: agency.nombreFantasia || "",
+      cuilCuit: agency.cuilCuit || "",
+      condicionIva: agency.condicionIva || "responsable_inscripto",
+      direccion: agency.direccion || "",
+      localidad: agency.localidad || "",
+      provincia: agency.provincia || "",
+      codigoPostal: agency.codigoPostal || "",
+      telefono: agency.telefono || "",
+      email: agency.email || "",
+      contactName: agency.contactName || "",
+      contactEmail: agency.contactEmail || "",
+      contactPhone: agency.contactPhone || "",
+      commissionRate: agency.commissionRate || "0",
+      creditLimit: agency.creditLimit || "0",
+      paymentTermDays: agency.paymentTermDays || 30,
+      notes: agency.notes || "",
+    });
+    setShowForm(true);
+  };
+
+  const handleSubmit = (data: AgencyFormData) => {
+    if (editingAgency) {
+      updateMutation.mutate({ id: editingAgency.id, data });
+    } else {
+      createMutation.mutate(data);
+    }
+  };
+
+  const handleOpenNew = () => {
+    setEditingAgency(null);
+    form.reset({
+      razonSocial: "",
+      nombreFantasia: "",
+      cuilCuit: "",
+      condicionIva: "responsable_inscripto",
+      direccion: "",
+      localidad: "",
+      provincia: "",
+      codigoPostal: "",
+      telefono: "",
+      email: "",
+      contactName: "",
+      contactEmail: "",
+      contactPhone: "",
+      commissionRate: "10",
+      creditLimit: "0",
+      paymentTermDays: 30,
+      notes: "",
+    });
+    setShowForm(true);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6" data-testid="page-agencies">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold" data-testid="text-page-title">Agencias de Viajes</h1>
+          <p className="text-muted-foreground">Gestión de agencias, comisiones y volumen</p>
+        </div>
+        <Button onClick={handleOpenNew} data-testid="button-add-agency">
+          <Plus className="h-4 w-4 mr-2" />
+          Nueva Agencia
+        </Button>
+      </div>
+
+      <Tabs defaultValue="list">
+        <TabsList>
+          <TabsTrigger value="list" data-testid="tab-agencies-list">
+            <Plane className="h-4 w-4 mr-2" />
+            Agencias
+          </TabsTrigger>
+          <TabsTrigger value="report" data-testid="tab-agencies-report">
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Reporte de Comisiones
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list" className="space-y-4">
+          <div className="flex items-center gap-4">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre, CUIT o contacto..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+                data-testid="input-search-agency"
+              />
+            </div>
+            <Badge variant="outline">{agencies.length} agencias</Badge>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Razón Social</TableHead>
+                    <TableHead>Nombre Fantasía</TableHead>
+                    <TableHead>CUIT</TableHead>
+                    <TableHead>Comisión %</TableHead>
+                    <TableHead>Contacto</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead className="w-[120px]">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredAgencies.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        {searchTerm ? "No se encontraron agencias" : "No hay agencias registradas"}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredAgencies.map((agency) => (
+                      <TableRow key={agency.id} data-testid={`row-agency-${agency.id}`}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Plane className="h-4 w-4 text-muted-foreground" />
+                            {agency.razonSocial}
+                          </div>
+                        </TableCell>
+                        <TableCell>{agency.nombreFantasia || "-"}</TableCell>
+                        <TableCell>{agency.cuilCuit || "-"}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{agency.commissionRate}%</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="text-sm">{agency.contactName || "-"}</p>
+                            {agency.contactEmail && (
+                              <p className="text-xs text-muted-foreground">{agency.contactEmail}</p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={agency.isActive === "true" ? "default" : "outline"}>
+                            {agency.isActive === "true" ? "Activa" : "Inactiva"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setSelectedAgencyId(agency.id === selectedAgencyId ? null : agency.id)}
+                              data-testid={`button-stats-agency-${agency.id}`}
+                            >
+                              <BarChart3 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleEdit(agency)}
+                              data-testid={`button-edit-agency-${agency.id}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDelete(agency)}
+                              data-testid={`button-delete-agency-${agency.id}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {selectedAgencyId && agencyStats && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">
+                  Estadísticas: {agencies.find(a => a.id === selectedAgencyId)?.nombreFantasia || agencies.find(a => a.id === selectedAgencyId)?.razonSocial}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                      <CalendarDays className="h-4 w-4" />
+                      Reservas Totales
+                    </div>
+                    <p className="text-2xl font-bold" data-testid="text-agency-total-reservations">{agencyStats.totalReservations}</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                      <DollarSign className="h-4 w-4" />
+                      Facturación Total
+                    </div>
+                    <p className="text-2xl font-bold" data-testid="text-agency-total-revenue">
+                      ${agencyStats.totalRevenue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                      <TrendingUp className="h-4 w-4" />
+                      Comisión Estimada
+                    </div>
+                    <p className="text-2xl font-bold" data-testid="text-agency-total-commission">
+                      ${agencyStats.totalCommission.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                      <CalendarDays className="h-4 w-4" />
+                      Noches Totales
+                    </div>
+                    <p className="text-2xl font-bold" data-testid="text-agency-total-nights">{agencyStats.totalNights}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="report" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                Reporte Global de Comisiones
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm text-muted-foreground">Desde</label>
+                  <Input
+                    type="date"
+                    value={reportFrom}
+                    onChange={(e) => setReportFrom(e.target.value)}
+                    data-testid="input-report-from"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-muted-foreground">Hasta</label>
+                  <Input
+                    type="date"
+                    value={reportTo}
+                    onChange={(e) => setReportTo(e.target.value)}
+                    data-testid="input-report-to"
+                  />
+                </div>
+              </div>
+
+              {reportLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Agencia</TableHead>
+                      <TableHead className="text-right">Reservas</TableHead>
+                      <TableHead className="text-right">Noches</TableHead>
+                      <TableHead className="text-right">Facturación</TableHead>
+                      <TableHead className="text-right">Comisión %</TableHead>
+                      <TableHead className="text-right">Comisión $</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {reportData.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                          No hay datos para el período seleccionado
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      <>
+                        {reportData.map((item) => (
+                          <TableRow key={item.agency.id} data-testid={`row-report-${item.agency.id}`}>
+                            <TableCell className="font-medium">
+                              {item.agency.nombreFantasia || item.agency.razonSocial}
+                            </TableCell>
+                            <TableCell className="text-right">{item.totalReservations}</TableCell>
+                            <TableCell className="text-right">{item.totalNights}</TableCell>
+                            <TableCell className="text-right">
+                              ${item.totalRevenue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Badge variant="secondary">{item.commissionRate}%</Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              ${item.totalCommission.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="bg-accent/30 font-bold">
+                          <TableCell>TOTAL</TableCell>
+                          <TableCell className="text-right">
+                            {reportData.reduce((s, i) => s + i.totalReservations, 0)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {reportData.reduce((s, i) => s + i.totalNights, 0)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            ${reportData.reduce((s, i) => s + i.totalRevenue, 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell className="text-right">-</TableCell>
+                          <TableCell className="text-right">
+                            ${reportData.reduce((s, i) => s + i.totalCommission, 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          </TableCell>
+                        </TableRow>
+                      </>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setEditingAgency(null); } }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingAgency ? "Editar Agencia" : "Nueva Agencia"}</DialogTitle>
+            <DialogDescription>
+              {editingAgency ? "Modificá los datos de la agencia" : "Completá los datos para registrar una nueva agencia"}
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={form.control} name="razonSocial" render={({ field }) => (
+                  <FormItem className="col-span-2">
+                    <FormLabel>Razón Social *</FormLabel>
+                    <FormControl><Input {...field} data-testid="input-agency-razon-social" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="nombreFantasia" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nombre Fantasía</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-nombre-fantasia" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="cuilCuit" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>CUIT *</FormLabel>
+                    <FormControl><Input {...field} placeholder="XX-XXXXXXXX-X" data-testid="input-agency-cuit" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="commissionRate" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Comisión %</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? "10"} type="number" step="0.01" data-testid="input-agency-commission" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="condicionIva" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Condición IVA</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || "responsable_inscripto"}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-agency-iva">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
+                        <SelectItem value="monotributo">Monotributista</SelectItem>
+                        <SelectItem value="exento">Exento</SelectItem>
+                        <SelectItem value="consumidor_final">Consumidor Final</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="direccion" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Dirección</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-direccion" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="localidad" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Localidad</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-localidad" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="provincia" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Provincia</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-provincia" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="codigoPostal" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Código Postal</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-cp" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="telefono" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Teléfono</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-telefono" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="email" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email</FormLabel>
+                    <FormControl><Input {...field} value={field.value ?? ""} type="email" data-testid="input-agency-email" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-medium mb-3">Persona de Contacto</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <FormField control={form.control} name="contactName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nombre</FormLabel>
+                      <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-contact-name" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="contactEmail" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-contact-email" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="contactPhone" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Teléfono</FormLabel>
+                      <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-contact-phone" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-medium mb-3">Condiciones Comerciales</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField control={form.control} name="creditLimit" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Límite de Crédito</FormLabel>
+                      <FormControl><Input {...field} value={field.value ?? "0"} type="number" data-testid="input-agency-credit-limit" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="paymentTermDays" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Plazo de Pago (días)</FormLabel>
+                      <FormControl><Input {...field} value={field.value ?? 30} type="number" data-testid="input-agency-payment-term" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              </div>
+
+              <FormField control={form.control} name="notes" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Notas</FormLabel>
+                  <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-agency-notes" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingAgency(null); }}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-save-agency">
+                  {(createMutation.isPending || updateMutation.isPending) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  {editingAgency ? "Guardar Cambios" : "Crear Agencia"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

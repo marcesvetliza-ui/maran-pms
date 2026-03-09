@@ -90,6 +90,36 @@ export const insertCompanySchema = createInsertSchema(companies).omit({ id: true
 export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type Company = typeof companies.$inferSelect;
 
+// Travel Agencies
+export const agencies = pgTable("agencies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  razonSocial: text("razon_social").notNull(),
+  nombreFantasia: text("nombre_fantasia"),
+  direccion: text("direccion"),
+  pais: text("pais").default("Argentina"),
+  codigoPostal: text("codigo_postal"),
+  localidad: text("localidad"),
+  provincia: text("provincia"),
+  telefono: text("telefono"),
+  email: text("email"),
+  cuilCuit: text("cuil_cuit").notNull(),
+  numeroFiscal: text("numero_fiscal"),
+  condicionIva: text("condicion_iva").$type<IvaCondition>().default("responsable_inscripto"),
+  contactName: text("contact_name"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  commissionRate: decimal("commission_rate", { precision: 5, scale: 2 }).default("0"),
+  creditLimit: decimal("credit_limit", { precision: 12, scale: 2 }).default("0"),
+  paymentTermDays: integer("payment_term_days").default(30),
+  notes: text("notes"),
+  isActive: text("is_active").default("true"),
+  createdAt: timestamp("created_at"),
+});
+
+export const insertAgencySchema = createInsertSchema(agencies).omit({ id: true });
+export type InsertAgency = z.infer<typeof insertAgencySchema>;
+export type Agency = typeof agencies.$inferSelect;
+
 // Guests
 export type GuestSex = "masculino" | "femenino" | "otro" | "no_especifica";
 export type GuestSegment = "LEISURE" | "CORP" | "SPORT" | "CONGRESS" | "OTHER";
@@ -112,6 +142,7 @@ export const guests = pgTable("guests", {
   segment: text("segment").$type<GuestSegment>().default("LEISURE"),
   cuilCuit: text("cuil_cuit"),
   companyId: varchar("company_id"),
+  agencyId: varchar("agency_id"),
   fechaAlta: timestamp("fecha_alta"),
   vehiculoPatente: text("vehiculo_patente"),
   vehiculoMarca: text("vehiculo_marca"),
@@ -148,6 +179,7 @@ export const reservations = pgTable("reservations", {
   reservationCode: text("reservation_code").notNull(),
   guestId: varchar("guest_id").notNull(),
   companyId: varchar("company_id"),
+  agencyId: varchar("agency_id"),
   roomTypeId: varchar("room_type_id").notNull(),
   roomId: varchar("room_id").notNull(),
   ratePlanId: varchar("rate_plan_id"),
@@ -278,6 +310,7 @@ export type GuestWithCompany = Guest & {
 export type ReservationWithDetails = Reservation & {
   guest: Guest;
   company?: Company;
+  agency?: Agency;
   room: Room & { roomType?: RoomType };
   ratePlan?: RatePlan;
   charges?: Charge[];

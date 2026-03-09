@@ -46,9 +46,9 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Package } from "@shared/schema";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
-import { CompanySelector } from "@/components/entity-selector";
+import { CompanySelector, AgencySelector } from "@/components/entity-selector";
 
 function getLocalToday() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -275,6 +275,8 @@ function QuickReservationDialog({
   const [newGuest, setNewGuest] = useState({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [agencyId, setAgencyId] = useState<string | null>(null);
+  const [selectedAgency, setSelectedAgency] = useState<Agency | null>(null);
   const [packageId, setPackageId] = useState("");
 
   const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
@@ -349,6 +351,8 @@ function QuickReservationDialog({
     setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
     setCompanyId(null);
     setSelectedCompany(null);
+    setAgencyId(null);
+    setSelectedAgency(null);
     setPackageId("");
   };
 
@@ -421,6 +425,7 @@ function QuickReservationDialog({
       source,
       ratePlanId: ratePlanId || null,
       companyId: companyId || null,
+      agencyId: agencyId || null,
       bedTypeNotes: bedConfig || null,
       baseRatePerNight: effectiveRate,
       finalRatePerNight: effectiveRate,
@@ -537,6 +542,28 @@ function QuickReservationDialog({
             onClear={() => {
               setSelectedCompany(null);
               setCompanyId(null);
+            }}
+          />
+
+          <AgencySelector
+            selectedAgency={selectedAgency}
+            onSelect={(agency) => {
+              setSelectedAgency(agency);
+              setAgencyId(agency.id);
+            }}
+            onCreateNew={async (data) => {
+              try {
+                const res = await apiRequest("POST", "/api/agencies", data);
+                const created = await res.json();
+                setSelectedAgency(created);
+                setAgencyId(created.id);
+              } catch {
+                toast({ title: "Error", description: "No se pudo crear la agencia.", variant: "destructive" });
+              }
+            }}
+            onClear={() => {
+              setSelectedAgency(null);
+              setAgencyId(null);
             }}
           />
 

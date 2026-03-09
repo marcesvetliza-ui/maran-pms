@@ -31,6 +31,7 @@ import MaintenancePage from "@/pages/maintenance";
 import AdministrationPage from "@/pages/administration";
 import PackagesPage from "@/pages/packages";
 import CompaniesPage from "@/pages/companies";
+import AgenciesPage from "@/pages/agencies";
 import WebCheckinPublicPage from "@/pages/web-checkin-public";
 import ChatbotDashboardPage from "@/pages/chatbot-dashboard";
 import HospitalityPage from "@/pages/hospitality";
@@ -88,6 +89,7 @@ function Router() {
       <Route path="/administration" component={AdministrationPage} />
       <Route path="/packages" component={PackagesPage} />
       <Route path="/companies" component={CompaniesPage} />
+      <Route path="/agencies" component={AgenciesPage} />
       <Route path="/chatbot" component={ChatbotDashboardPage} />
       <Route path="/hospitality" component={HospitalityPage} />
       <Route path="/reports" component={ReportsPage} />

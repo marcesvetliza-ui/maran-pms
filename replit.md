@@ -6,7 +6,7 @@ Maran Suite System is a comprehensive full-stack hospitality management suite de
 
 Key capabilities include:
 - A central dashboard for operational oversight.
-- Management of rooms, room types, guests, and companies.
+- Management of rooms, room types, guests, companies, and travel agencies.
 - A complete reservation workflow with a visual planning calendar.
 - Integrated Restaurant POS, SPA, and Events management modules.
 - Housekeeping, Maintenance, and Inventory management functionalities.
@@ -74,6 +74,7 @@ Preferred communication style: Simple, everyday language.
 - **Reports Module**: Page at `/reports` with 8 tabbed reports (Occupancy, Revenue by Type, By Channel, Reservations, Payments, Frequent Guests, Housekeeping, Restaurant) with period selector, CSV export, print functionality.
 - **Cash Register & Shift Audit Module**: Page at `/cash-register` with tabs per area, tracking shifts, movements, and closing summaries. Features opening/closing shifts, manual movement registration, automatic payment recording, history, and configurable settings.
 - **Staff Help Chatbot**: Floating help button with a slide-in chat panel powered by OpenAI gpt-4o-mini, providing step-by-step answers from the hotel operations manual.
+- **Travel Agencies Module**: Page at `/agencies` with CRUD table, commission rate tracking, per-agency stats (reservations, revenue, commission), and global commission report with date filtering. `AgencySelector` component in reservation forms (reservations page + planning quick reservation). `agencyId` FK on reservations and guests tables.
 
 ### Authentication & Authorization
 - **Strategy**: Passport.js with local strategy.

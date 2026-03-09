@@ -10,6 +10,8 @@ import {
   type RatePlanWithRoomType,
   type Company,
   type InsertCompany,
+  type Agency,
+  type InsertAgency,
   type Guest,
   type InsertGuest,
   type BedType,
@@ -217,6 +219,14 @@ export interface IStorage {
   createCompany(company: InsertCompany): Promise<Company>;
   updateCompany(id: string, company: Partial<InsertCompany>): Promise<Company | undefined>;
   deleteCompany(id: string): Promise<boolean>;
+
+  // Agencies
+  getAgencies(): Promise<Agency[]>;
+  getAgency(id: string): Promise<Agency | undefined>;
+  searchAgencies(query: string): Promise<Agency[]>;
+  createAgency(agency: InsertAgency): Promise<Agency>;
+  updateAgency(id: string, agency: Partial<InsertAgency>): Promise<Agency | undefined>;
+  deleteAgency(id: string): Promise<boolean>;
 
   // Guests
   getGuests(): Promise<Guest[]>;
@@ -1528,6 +1538,73 @@ export class MemStorage implements IStorage {
     if (!company) return false;
     company.isActive = "false";
     this.companies.set(id, company);
+    return true;
+  }
+
+  private agencies = new Map<string, Agency>();
+
+  async getAgencies(): Promise<Agency[]> {
+    return Array.from(this.agencies.values()).filter((a) => a.isActive === "true");
+  }
+
+  async getAgency(id: string): Promise<Agency | undefined> {
+    return this.agencies.get(id);
+  }
+
+  async searchAgencies(query: string): Promise<Agency[]> {
+    const lowerQuery = query.toLowerCase();
+    return Array.from(this.agencies.values()).filter((a) =>
+      a.isActive === "true" && (
+        a.razonSocial.toLowerCase().includes(lowerQuery) ||
+        a.nombreFantasia?.toLowerCase().includes(lowerQuery) ||
+        a.cuilCuit.toLowerCase().includes(lowerQuery)
+      )
+    );
+  }
+
+  async createAgency(insertAgency: InsertAgency): Promise<Agency> {
+    const id = randomUUID();
+    const agency: Agency = {
+      id,
+      razonSocial: insertAgency.razonSocial,
+      nombreFantasia: insertAgency.nombreFantasia ?? null,
+      direccion: insertAgency.direccion ?? null,
+      pais: insertAgency.pais ?? "Argentina",
+      codigoPostal: insertAgency.codigoPostal ?? null,
+      localidad: insertAgency.localidad ?? null,
+      provincia: insertAgency.provincia ?? null,
+      telefono: insertAgency.telefono ?? null,
+      email: insertAgency.email ?? null,
+      cuilCuit: insertAgency.cuilCuit,
+      numeroFiscal: insertAgency.numeroFiscal ?? null,
+      condicionIva: (insertAgency.condicionIva ?? "responsable_inscripto") as any,
+      contactName: insertAgency.contactName ?? null,
+      contactEmail: insertAgency.contactEmail ?? null,
+      contactPhone: insertAgency.contactPhone ?? null,
+      commissionRate: insertAgency.commissionRate ?? "0",
+      creditLimit: insertAgency.creditLimit ?? "0",
+      paymentTermDays: insertAgency.paymentTermDays ?? 30,
+      notes: insertAgency.notes ?? null,
+      isActive: insertAgency.isActive ?? "true",
+      createdAt: new Date(),
+    };
+    this.agencies.set(id, agency);
+    return agency;
+  }
+
+  async updateAgency(id: string, updates: Partial<InsertAgency>): Promise<Agency | undefined> {
+    const agency = this.agencies.get(id);
+    if (!agency) return undefined;
+    const updatedAgency: Agency = { ...agency, ...updates } as Agency;
+    this.agencies.set(id, updatedAgency);
+    return updatedAgency;
+  }
+
+  async deleteAgency(id: string): Promise<boolean> {
+    const agency = this.agencies.get(id);
+    if (!agency) return false;
+    agency.isActive = "false";
+    this.agencies.set(id, agency);
     return true;
   }
 

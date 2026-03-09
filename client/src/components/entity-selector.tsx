@@ -7,8 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, User, Building2, Plus, X, Check } from "lucide-react";
-import type { Guest, Company, InsertGuest, InsertCompany } from "@shared/schema";
+import { Search, User, Building2, Plus, X, Check, Plane } from "lucide-react";
+import type { Guest, Company, InsertGuest, InsertCompany, Agency, InsertAgency } from "@shared/schema";
 
 interface GuestSelectorProps {
   onSelect: (guest: Guest) => void;
@@ -718,6 +718,263 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
             >
               <Plus className="h-4 w-4 mr-2" />
               Crear Empresa
+            </Button>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+}
+
+interface AgencySelectorProps {
+  onSelect: (agency: Agency) => void;
+  onCreateNew: (agency: InsertAgency) => void;
+  selectedAgency?: Agency | null;
+  onClear?: () => void;
+}
+
+export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear }: AgencySelectorProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [mode, setMode] = useState<"search" | "create">("search");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  const [newAgency, setNewAgency] = useState({
+    razonSocial: "",
+    nombreFantasia: "",
+    cuilCuit: "",
+    commissionRate: "10",
+    contactName: "",
+    contactEmail: "",
+    contactPhone: "",
+  });
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const { data: searchResults = [], isLoading } = useQuery<Agency[]>({
+    queryKey: ["/api/agencies/search", debouncedQuery],
+    queryFn: async () => {
+      if (!debouncedQuery || debouncedQuery.length < 2) return [];
+      const res = await fetch(`/api/agencies/search?q=${encodeURIComponent(debouncedQuery)}`);
+      return res.json();
+    },
+    enabled: debouncedQuery.length >= 2,
+  });
+
+  const handleCreateAgency = () => {
+    if (!newAgency.razonSocial || !newAgency.cuilCuit) return;
+    onCreateNew({
+      razonSocial: newAgency.razonSocial,
+      cuilCuit: newAgency.cuilCuit,
+      nombreFantasia: newAgency.nombreFantasia || null,
+      commissionRate: newAgency.commissionRate || "0",
+      contactName: newAgency.contactName || null,
+      contactEmail: newAgency.contactEmail || null,
+      contactPhone: newAgency.contactPhone || null,
+      isActive: "true",
+    });
+    setNewAgency({
+      razonSocial: "",
+      nombreFantasia: "",
+      cuilCuit: "",
+      commissionRate: "10",
+      contactName: "",
+      contactEmail: "",
+      contactPhone: "",
+    });
+    setMode("search");
+  };
+
+  if (selectedAgency) {
+    return (
+      <Card className="bg-accent/30">
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Plane className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">
+                {selectedAgency.nombreFantasia || selectedAgency.razonSocial}
+              </span>
+              <Badge variant="outline" className="text-xs">
+                CUIT {selectedAgency.cuilCuit}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                {selectedAgency.commissionRate}% com.
+              </Badge>
+            </div>
+            {onClear && (
+              <Button size="icon" variant="ghost" onClick={onClear} data-testid="button-clear-agency">
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Plane className="h-4 w-4" />
+          Agencia de Viajes (Opcional)
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Tabs value={mode} onValueChange={(v) => setMode(v as "search" | "create")}>
+          <TabsList className="grid w-full grid-cols-2 mb-4">
+            <TabsTrigger value="search" data-testid="tab-search-agency">
+              <Search className="h-4 w-4 mr-2" />
+              Buscar Existente
+            </TabsTrigger>
+            <TabsTrigger value="create" data-testid="tab-create-agency">
+              <Plus className="h-4 w-4 mr-2" />
+              Crear Nueva
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="search" className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre, CUIT..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+                data-testid="input-search-agency"
+              />
+            </div>
+
+            {isLoading && (
+              <p className="text-sm text-muted-foreground text-center py-4">Buscando...</p>
+            )}
+
+            {searchResults.length > 0 && (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {searchResults.map((agency) => (
+                  <div
+                    key={agency.id}
+                    className="p-3 rounded-md border hover-elevate active-elevate-2 cursor-pointer"
+                    onClick={() => onSelect(agency)}
+                    data-testid={`agency-result-${agency.id}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-medium">
+                          {agency.nombreFantasia || agency.razonSocial}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          CUIT {agency.cuilCuit}
+                        </p>
+                      </div>
+                      <Badge variant="secondary" className="text-xs">
+                        {agency.commissionRate}%
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {debouncedQuery.length >= 2 && searchResults.length === 0 && !isLoading && (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No se encontraron agencias.
+                <Button variant="ghost" className="p-0 ml-1 h-auto text-primary underline" onClick={() => setMode("create")}>
+                  Crear nueva
+                </Button>
+              </p>
+            )}
+          </TabsContent>
+
+          <TabsContent value="create" className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="agencyRazonSocial">Razón Social *</Label>
+                <Input
+                  id="agencyRazonSocial"
+                  value={newAgency.razonSocial}
+                  onChange={(e) => setNewAgency({ ...newAgency, razonSocial: e.target.value })}
+                  placeholder="Agencia S.R.L."
+                  data-testid="input-agency-razonsocial"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agencyNombreFantasia">Nombre Fantasía</Label>
+                <Input
+                  id="agencyNombreFantasia"
+                  value={newAgency.nombreFantasia}
+                  onChange={(e) => setNewAgency({ ...newAgency, nombreFantasia: e.target.value })}
+                  placeholder="Viajes Express"
+                  data-testid="input-agency-nombrefantasia"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="agencyCuit">CUIT *</Label>
+                <Input
+                  id="agencyCuit"
+                  value={newAgency.cuilCuit}
+                  onChange={(e) => setNewAgency({ ...newAgency, cuilCuit: e.target.value })}
+                  placeholder="XX-XXXXXXXX-X"
+                  data-testid="input-agency-cuit"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agencyCommission">Comisión %</Label>
+                <Input
+                  id="agencyCommission"
+                  type="number"
+                  value={newAgency.commissionRate}
+                  onChange={(e) => setNewAgency({ ...newAgency, commissionRate: e.target.value })}
+                  placeholder="10"
+                  data-testid="input-agency-commission"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="agencyContactName">Contacto</Label>
+                <Input
+                  id="agencyContactName"
+                  value={newAgency.contactName}
+                  onChange={(e) => setNewAgency({ ...newAgency, contactName: e.target.value })}
+                  data-testid="input-agency-contact-name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agencyContactEmail">Email</Label>
+                <Input
+                  id="agencyContactEmail"
+                  value={newAgency.contactEmail}
+                  onChange={(e) => setNewAgency({ ...newAgency, contactEmail: e.target.value })}
+                  data-testid="input-agency-contact-email"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agencyContactPhone">Teléfono</Label>
+                <Input
+                  id="agencyContactPhone"
+                  value={newAgency.contactPhone}
+                  onChange={(e) => setNewAgency({ ...newAgency, contactPhone: e.target.value })}
+                  data-testid="input-agency-contact-phone"
+                />
+              </div>
+            </div>
+
+            <Button
+              onClick={handleCreateAgency}
+              disabled={!newAgency.razonSocial || !newAgency.cuilCuit}
+              className="w-full"
+              data-testid="button-create-agency"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Crear Agencia
             </Button>
           </TabsContent>
         </Tabs>

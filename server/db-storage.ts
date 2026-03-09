@@ -12,6 +12,7 @@ import {
   type RoomType, type InsertRoomType,
   type RatePlan, type InsertRatePlan, type RatePlanWithRoomType,
   type Company, type InsertCompany,
+  type Agency, type InsertAgency,
   type Guest, type InsertGuest,
   type BedType, type InsertBedType,
   type Reservation, type InsertReservation,
@@ -79,7 +80,7 @@ import {
   type CashClosingSummary, type InsertCashClosingSummary,
   type OrderStatus,
   type SpaPaymentMethod,
-  users, rooms, roomTypes, ratePlans, companies, guests, bedTypes,
+  users, rooms, roomTypes, ratePlans, companies, agencies, guests, bedTypes,
   reservations, charges, payments, cancelledReservationLogs,
   otaChannels, otaReservationLogs,
   groups, groupRoomBlocks, groupReservationLinks,
@@ -237,6 +238,40 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async getAgencies(): Promise<Agency[]> {
+    return db.select().from(agencies);
+  }
+
+  async getAgency(id: string): Promise<Agency | undefined> {
+    const [agency] = await db.select().from(agencies).where(eq(agencies.id, id));
+    return agency;
+  }
+
+  async searchAgencies(query: string): Promise<Agency[]> {
+    return db.select().from(agencies).where(
+      or(
+        ilike(agencies.razonSocial, `%${query}%`),
+        ilike(agencies.nombreFantasia, `%${query}%`),
+        ilike(agencies.cuilCuit, `%${query}%`)
+      )
+    );
+  }
+
+  async createAgency(agency: InsertAgency): Promise<Agency> {
+    const [created] = await db.insert(agencies).values(agency as any).returning();
+    return created;
+  }
+
+  async updateAgency(id: string, agency: Partial<InsertAgency>): Promise<Agency | undefined> {
+    const [updated] = await db.update(agencies).set(agency as any).where(eq(agencies.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAgency(id: string): Promise<boolean> {
+    const result = await db.delete(agencies).where(eq(agencies.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async getGuests(): Promise<Guest[]> {
     return db.select().from(guests);
   }
@@ -304,9 +339,13 @@ export class DatabaseStorage implements IStorage {
     const roomType = room ? (await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId)))[0] : undefined;
     const ratePlan = reservation.ratePlanId ? (await db.select().from(ratePlans).where(eq(ratePlans.id, reservation.ratePlanId)))[0] : undefined;
     const chargesList = await db.select().from(charges).where(eq(charges.reservationId, reservation.id));
+    const company = reservation.companyId ? (await db.select().from(companies).where(eq(companies.id, reservation.companyId)))[0] : undefined;
+    const agency = reservation.agencyId ? (await db.select().from(agencies).where(eq(agencies.id, reservation.agencyId)))[0] : undefined;
     return {
       ...reservation,
       guest: guest!,
+      company,
+      agency,
       room: room ? { ...room, roomType } : undefined as any,
       ratePlan,
       charges: chargesList,

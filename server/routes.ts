@@ -483,6 +483,128 @@ export async function registerRoutes(
     }
   });
 
+  // Agencies
+  app.get("/api/agencies", async (req, res) => {
+    try {
+      const agencies = await storage.getAgencies();
+      res.json(agencies);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching agencies" });
+    }
+  });
+
+  app.get("/api/agencies/search", async (req, res) => {
+    try {
+      const query = req.query.q as string || "";
+      const agencies = await storage.searchAgencies(query);
+      res.json(agencies);
+    } catch (error) {
+      res.status(500).json({ error: "Error searching agencies" });
+    }
+  });
+
+  app.get("/api/agencies/report", async (req, res) => {
+    try {
+      const from = req.query.from as string;
+      const to = req.query.to as string;
+      const allAgencies = await storage.getAgencies();
+      const allReservations = await storage.getReservations();
+
+      const report = allAgencies.map(agency => {
+        let agencyReservations = allReservations.filter(r => r.agencyId === agency.id);
+        if (from) agencyReservations = agencyReservations.filter(r => r.checkInDate >= from);
+        if (to) agencyReservations = agencyReservations.filter(r => r.checkOutDate <= to);
+
+        const totalRevenue = agencyReservations.reduce((sum, r) => sum + parseFloat(r.totalRoomAmount || "0"), 0);
+        const commissionRate = parseFloat(agency.commissionRate || "0");
+        const totalCommission = totalRevenue * (commissionRate / 100);
+
+        return {
+          agency,
+          totalReservations: agencyReservations.length,
+          totalRevenue,
+          commissionRate,
+          totalCommission,
+          totalNights: agencyReservations.reduce((sum, r) => sum + (r.nights || 0), 0),
+        };
+      });
+
+      res.json(report);
+    } catch (error) {
+      res.status(500).json({ error: "Error generating agency report" });
+    }
+  });
+
+  app.get("/api/agencies/:id/stats", async (req, res) => {
+    try {
+      const agency = await storage.getAgency(req.params.id);
+      if (!agency) {
+        return res.status(404).json({ error: "Agency not found" });
+      }
+      const allReservations = await storage.getReservations();
+      const agencyReservations = allReservations.filter(r => r.agencyId === agency.id);
+      const totalRevenue = agencyReservations.reduce((sum, r) => sum + parseFloat(r.totalRoomAmount || "0"), 0);
+      const commissionRate = parseFloat(agency.commissionRate || "0");
+      const totalCommission = totalRevenue * (commissionRate / 100);
+
+      res.json({
+        totalReservations: agencyReservations.length,
+        totalRevenue,
+        commissionRate,
+        totalCommission,
+        totalNights: agencyReservations.reduce((sum, r) => sum + (r.nights || 0), 0),
+        activeReservations: agencyReservations.filter(r => ["confirmed", "checked_in", "pending"].includes(r.status)).length,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching agency stats" });
+    }
+  });
+
+  app.get("/api/agencies/:id", async (req, res) => {
+    try {
+      const agency = await storage.getAgency(req.params.id);
+      if (!agency) {
+        return res.status(404).json({ error: "Agency not found" });
+      }
+      res.json(agency);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching agency" });
+    }
+  });
+
+  app.post("/api/agencies", async (req, res) => {
+    try {
+      const agency = await storage.createAgency(req.body);
+      res.status(201).json(agency);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating agency" });
+    }
+  });
+
+  app.patch("/api/agencies/:id", async (req, res) => {
+    try {
+      const agency = await storage.updateAgency(req.params.id, req.body);
+      if (!agency) {
+        return res.status(404).json({ error: "Agency not found" });
+      }
+      res.json(agency);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating agency" });
+    }
+  });
+
+  app.delete("/api/agencies/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteAgency(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Agency not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting agency" });
+    }
+  });
+
   // Guests
   app.get("/api/guests", async (req, res) => {
     try {

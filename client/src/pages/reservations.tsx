@@ -64,8 +64,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { GuestSelector, CompanySelector } from "@/components/entity-selector";
-import type { ReservationWithDetails, Guest, Company, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType } from "@shared/schema";
+import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
+import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType } from "@shared/schema";
 
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -111,6 +111,9 @@ export function ReservationFormDialog({
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(
     reservation?.company || null
   );
+  const [selectedAgency, setSelectedAgency] = useState<Agency | null>(
+    reservation?.agency || null
+  );
 
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || "");
   
@@ -118,6 +121,7 @@ export function ReservationFormDialog({
     reservationCode: reservation?.reservationCode || "",
     guestId: reservation?.guestId || "",
     companyId: reservation?.companyId || "",
+    agencyId: reservation?.agencyId || "",
     roomTypeId: reservation?.roomTypeId || "",
     roomId: reservation?.roomId || "",
     ratePlanId: reservation?.ratePlanId || "",
@@ -148,11 +152,13 @@ export function ReservationFormDialog({
     if (open) {
       setSelectedGuest(reservation?.guest || null);
       setSelectedCompany(reservation?.company || null);
+      setSelectedAgency(reservation?.agency || null);
       setSelectedRoomTypeId(reservation?.roomTypeId || "");
       setFormData({
         reservationCode: reservation?.reservationCode || "",
         guestId: reservation?.guestId || "",
         companyId: reservation?.companyId || "",
+        agencyId: reservation?.agencyId || "",
         roomTypeId: reservation?.roomTypeId || "",
         roomId: reservation?.roomId || "",
         ratePlanId: reservation?.ratePlanId || "",
@@ -222,6 +228,29 @@ export function ReservationFormDialog({
       toast({
         title: "Error",
         description: "No se pudo crear la empresa.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const createAgencyMutation = useMutation({
+    mutationFn: async (agency: InsertAgency): Promise<Agency> => {
+      const res = await apiRequest("POST", "/api/agencies", agency);
+      return res.json();
+    },
+    onSuccess: (newAgency: Agency) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agencies"] });
+      setSelectedAgency(newAgency);
+      setFormData((prev) => ({ ...prev, agencyId: newAgency.id }));
+      toast({
+        title: "Agencia creada",
+        description: `${newAgency.razonSocial} ha sido registrada.`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo crear la agencia.",
         variant: "destructive",
       });
     },
@@ -443,6 +472,19 @@ export function ReservationFormDialog({
               onClear={() => {
                 setSelectedCompany(null);
                 setFormData((prev) => ({ ...prev, companyId: "" }));
+              }}
+            />
+
+            <AgencySelector
+              selectedAgency={selectedAgency}
+              onSelect={(agency) => {
+                setSelectedAgency(agency);
+                setFormData((prev) => ({ ...prev, agencyId: agency.id }));
+              }}
+              onCreateNew={(agency) => createAgencyMutation.mutate(agency)}
+              onClear={() => {
+                setSelectedAgency(null);
+                setFormData((prev) => ({ ...prev, agencyId: "" }));
               }}
             />
 
