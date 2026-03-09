@@ -359,7 +359,7 @@ function AssignRoomDialog({
         <DialogHeader>
           <DialogTitle>Asignar Habitación</DialogTitle>
           <DialogDescription>
-            Asigne una habitación {block.roomType.name} al grupo
+            Asigne una habitación {block.roomType?.name} al grupo
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -970,7 +970,7 @@ export default function GroupDetailPage() {
                     {group.blocks.map((block) => (
                       <TableRow key={block.id} data-testid={`row-block-${block.id}`}>
                         <TableCell className="font-medium">
-                          {block.roomType.name} ({block.roomType.code})
+                          {block.roomType?.name} ({block.roomType?.code})
                         </TableCell>
                         <TableCell>{block.quantity}</TableCell>
                         <TableCell>
@@ -1043,8 +1043,8 @@ export default function GroupDetailPage() {
                         onClick={() => navigate(`/reservations`)}
                       >
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
-                        <TableCell>{res.guest.firstName} {res.guest.lastName}</TableCell>
-                        <TableCell>{res.room.roomNumber}</TableCell>
+                        <TableCell>{res.guest?.firstName} {res.guest?.lastName}</TableCell>
+                        <TableCell>{res.room?.roomNumber}</TableCell>
                         <TableCell className="text-sm">
                           {new Date(res.checkInDate).toLocaleDateString("es-AR")} - {new Date(res.checkOutDate).toLocaleDateString("es-AR")}
                         </TableCell>
