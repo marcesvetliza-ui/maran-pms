@@ -4495,8 +4495,16 @@ Only respond with the JSON object.`;
   app.post("/api/maintenance/work-orders", async (req, res) => {
     try {
       const orderCode = storage.generateWorkOrderCode();
+      const body = { ...req.body };
+      if (body.scheduledDate === "") body.scheduledDate = null;
+      if (body.estimatedCost === "") body.estimatedCost = null;
+      if (body.roomId === "" || body.roomId === "none") body.roomId = null;
+      if (body.assignedToId === "" || body.assignedToId === "none") body.assignedToId = null;
+      if (body.location === "") body.location = null;
+      if (body.description === "") body.description = null;
+      if (body.notes === "") body.notes = null;
       const order = await storage.createWorkOrder({
-        ...req.body,
+        ...body,
         orderCode,
         reportedAt: new Date(),
       });
