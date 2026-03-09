@@ -75,6 +75,8 @@ Preferred communication style: Simple, everyday language.
 - **Cash Register & Shift Audit Module**: Page at `/cash-register` with tabs per area, tracking shifts, movements, and closing summaries. Features opening/closing shifts, manual movement registration, automatic payment recording, history, and configurable settings.
 - **Staff Help Chatbot**: Floating help button with a slide-in chat panel powered by OpenAI gpt-4o-mini, providing step-by-step answers from the hotel operations manual.
 - **Travel Agencies Module**: Page at `/agencies` with CRUD table, commission rate tracking, per-agency stats (reservations, revenue, commission), and global commission report with date filtering. `AgencySelector` component in reservation forms (reservations page + planning quick reservation). `agencyId` FK on reservations and guests tables.
+- **Administration Module**: Hub page at `/admin` with cards linking to financial sub-modules (Facturación, CC Empresas, CC Agencias, Comprobantes, Reportes, Caja). Sidebar reorganized: "Administración" → `/admin`, "Caja" moved to admin group, existing renamed to "Administración del Sistema".
+- **Cuenta Corriente Module**: `account_movements` table tracking cargo/pago/nota_credito/ajuste per company/agency. Auto-trigger on checkout with `cuenta_corriente` payment method creates cargo. Sheet UI in companies/agencies pages for viewing movements and registering payments. Summary API at `/api/account-summary` with real-time debt totals on admin page.
 
 ### Authentication & Authorization
 - **Strategy**: Passport.js with local strategy.

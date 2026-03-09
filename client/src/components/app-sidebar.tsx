@@ -38,6 +38,7 @@ import {
   Wallet,
   FileCode,
   Plane,
+  Receipt,
 } from "lucide-react";
 import {
   Sidebar,
@@ -477,18 +478,6 @@ export function AppSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/cash-register"}
-                  data-testid="nav-cash-register"
-                >
-                  <Link href="/cash-register">
-                    <Wallet className="h-5 w-5" />
-                    <span>Caja</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -540,12 +529,36 @@ export function AppSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
+                  isActive={location === "/admin"}
+                  data-testid="nav-admin"
+                >
+                  <Link href="/admin">
+                    <Receipt className="h-5 w-5" />
+                    <span>Administración</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/cash-register"}
+                  data-testid="nav-cash-register"
+                >
+                  <Link href="/cash-register">
+                    <Wallet className="h-5 w-5" />
+                    <span>Caja</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
                   isActive={location === "/administration"}
-                  data-testid="nav-administration"
+                  data-testid="nav-administration-system"
                 >
                   <Link href="/administration">
                     <Shield className="h-5 w-5" />
-                    <span>Administración</span>
+                    <span>Administración del Sistema</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

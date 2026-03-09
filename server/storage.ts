@@ -181,6 +181,9 @@ import {
   type InsertStayNote,
   type HospitalityAlert,
   type InsertHospitalityAlert,
+  type AccountMovement,
+  type InsertAccountMovement,
+  type AccountEntityType,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -701,6 +704,14 @@ export interface IStorage {
   createCashMovement(data: any): Promise<any>;
   registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType?: string, registeredBy?: string, receiptType?: string): Promise<any>;
   getCashSummary(area?: string, from?: string, to?: string): Promise<any[]>;
+
+  getAccountMovements(entityType: AccountEntityType, entityId: string): Promise<AccountMovement[]>;
+  getAccountBalance(entityType: AccountEntityType, entityId: string): Promise<number>;
+  createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement>;
+  getAccountSummary(): Promise<{
+    companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
+    agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
+  }>;
 }
 
 export class MemStorage implements IStorage {
@@ -5025,4 +5036,8 @@ export class MemStorage implements IStorage {
   async createCashMovement(_data: any): Promise<any> { return {}; }
   async registerCashMovement(_area: string, _sourceType: string, _sourceId: string | null, _sourceLabel: string, _paymentMethod: string, _amount: string, _movementType?: string, _registeredBy?: string, _receiptType?: string): Promise<any> { return {}; }
   async getCashSummary(_area?: string, _from?: string, _to?: string): Promise<any[]> { return []; }
+  async getAccountMovements(_entityType: AccountEntityType, _entityId: string): Promise<AccountMovement[]> { return []; }
+  async getAccountBalance(_entityType: AccountEntityType, _entityId: string): Promise<number> { return 0; }
+  async createAccountMovement(_data: InsertAccountMovement): Promise<AccountMovement> { return {} as AccountMovement; }
+  async getAccountSummary(): Promise<{ companies: any[]; agencies: any[] }> { return { companies: [], agencies: [] }; }
 }

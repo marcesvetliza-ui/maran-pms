@@ -526,6 +526,24 @@ export async function refreshRealData() {
   console.log("Refreshing real hotel data...");
 
   try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS account_movements (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        entity_type TEXT NOT NULL,
+        entity_id VARCHAR NOT NULL,
+        date DATE NOT NULL,
+        type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        reservation_id VARCHAR,
+        reservation_code TEXT,
+        guest_name TEXT,
+        reference TEXT,
+        created_by VARCHAR,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
     const existingRooms = await db.select({ id: rooms.id }).from(rooms);
     const existingRoomIds = existingRooms.map(r => r.id);
 

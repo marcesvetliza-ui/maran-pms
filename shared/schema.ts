@@ -234,7 +234,7 @@ export type Charge = typeof charges.$inferSelect;
 export type PaymentMethod = "efectivo" | "tarjeta_debito" | "tarjeta_credito" | "transferencia" | "mercadopago" | "cuenta_corriente";
 
 // Payments table (pagos adelantados y durante estadía)
-export type BillingTarget = "guest" | "company";
+export type BillingTarget = "guest" | "company" | "agency";
 
 export const payments = pgTable("payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1564,3 +1564,26 @@ export const cashClosingSummaries = pgTable("cash_closing_summaries", {
 export const insertCashClosingSummarySchema = createInsertSchema(cashClosingSummaries).omit({ id: true, closedAt: true });
 export type InsertCashClosingSummary = z.infer<typeof insertCashClosingSummarySchema>;
 export type CashClosingSummary = typeof cashClosingSummaries.$inferSelect;
+
+export type AccountMovementType = "cargo" | "pago" | "nota_credito" | "ajuste";
+export type AccountEntityType = "company" | "agency";
+
+export const accountMovements = pgTable("account_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  entityType: text("entity_type").$type<AccountEntityType>().notNull(),
+  entityId: varchar("entity_id").notNull(),
+  date: date("date").notNull(),
+  type: text("type").$type<AccountMovementType>().notNull(),
+  description: text("description").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  reservationId: varchar("reservation_id"),
+  reservationCode: text("reservation_code"),
+  guestName: text("guest_name"),
+  reference: text("reference"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAccountMovementSchema = createInsertSchema(accountMovements).omit({ id: true, createdAt: true });
+export type InsertAccountMovement = z.infer<typeof insertAccountMovementSchema>;
+export type AccountMovement = typeof accountMovements.$inferSelect;

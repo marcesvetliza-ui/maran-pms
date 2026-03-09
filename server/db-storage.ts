@@ -78,6 +78,7 @@ import {
   type CashShift, type InsertCashShift,
   type CashMovement, type InsertCashMovement,
   type CashClosingSummary, type InsertCashClosingSummary,
+  type AccountMovement, type InsertAccountMovement, type AccountEntityType,
   type OrderStatus,
   type SpaPaymentMethod,
   users, rooms, roomTypes, ratePlans, companies, agencies, guests, bedTypes,
@@ -99,6 +100,7 @@ import {
   systemNotifications, webCheckins,
   guestPreferences, stayNotes, hospitalityAlerts,
   cashRegisterConfigs, cashShifts, cashMovements, cashClosingSummaries,
+  accountMovements,
 } from "@shared/schema";
 
 export class DatabaseStorage implements IStorage {
@@ -3378,6 +3380,69 @@ export class DatabaseStorage implements IStorage {
       results.push({ ...s, shift });
     }
     return results;
+  }
+  async getAccountMovements(entityType: AccountEntityType, entityId: string): Promise<AccountMovement[]> {
+    return await db.select()
+      .from(accountMovements)
+      .where(
+        and(
+          eq(accountMovements.entityType, entityType),
+          eq(accountMovements.entityId, entityId)
+        )
+      )
+      .orderBy(desc(accountMovements.date), desc(accountMovements.createdAt));
+  }
+
+  async getAccountBalance(entityType: AccountEntityType, entityId: string): Promise<number> {
+    const movements = await this.getAccountMovements(entityType, entityId);
+    return movements.reduce((sum, m) => sum + parseFloat(m.amount), 0);
+  }
+
+  async createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement> {
+    const [created] = await db.insert(accountMovements).values(data as any).returning();
+    return created;
+  }
+
+  async getAccountSummary(): Promise<{
+    companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
+    agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
+  }> {
+    const allMovements = await db.select().from(accountMovements);
+    const allCompanies = await db.select().from(companies);
+    const allAgencies = await db.select().from(agencies);
+
+    const calcBalance = (entityType: string, entityId: string) =>
+      allMovements
+        .filter(m => m.entityType === entityType && m.entityId === entityId)
+        .reduce((sum, m) => sum + parseFloat(m.amount), 0);
+
+    const lastMovementDate = (entityType: string, entityId: string) => {
+      const movements = allMovements
+        .filter(m => m.entityType === entityType && m.entityId === entityId)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return movements[0]?.date || null;
+    };
+
+    return {
+      companies: allCompanies
+        .filter(c => c.isActive === "true")
+        .map(c => ({
+          id: c.id,
+          name: c.nombreFantasia || c.razonSocial,
+          balance: calcBalance("company", c.id),
+          lastMovement: lastMovementDate("company", c.id),
+        }))
+        .filter(c => c.balance !== 0),
+      agencies: allAgencies
+        .filter(a => a.isActive === "true")
+        .map(a => ({
+          id: a.id,
+          name: a.nombreFantasia || a.razonSocial,
+          balance: calcBalance("agency", a.id),
+          lastMovement: lastMovementDate("agency", a.id),
+        }))
+        .filter(a => a.balance !== 0),
+    };
   }
 }
 

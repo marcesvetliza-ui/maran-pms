@@ -9,13 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp } from "lucide-react";
-import { insertAgencySchema, type Agency } from "@shared/schema";
+import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp, Receipt } from "lucide-react";
+import { insertAgencySchema, type Agency, type AccountMovement } from "@shared/schema";
 
 const agencyFormSchema = insertAgencySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -50,6 +52,12 @@ export default function AgenciesPage() {
   const [selectedAgencyId, setSelectedAgencyId] = useState<string | null>(null);
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
+  const [viewingAccountAgency, setViewingAccountAgency] = useState<Agency | null>(null);
+  const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentDescription, setPaymentDescription] = useState("Pago recibido");
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
 
   const { data: agencies = [], isLoading } = useQuery<Agency[]>({
     queryKey: ["/api/agencies"],
@@ -72,6 +80,40 @@ export default function AgenciesPage() {
       if (reportTo) params.set("to", reportTo);
       const res = await fetch(`/api/agencies/report?${params}`);
       return res.json();
+    },
+  });
+
+  const { data: accountData, refetch: refetchAccount } = useQuery<{
+    movements: AccountMovement[];
+    balance: number;
+  }>({
+    queryKey: ["/api/agencies", viewingAccountAgency?.id, "account"],
+    queryFn: async () => {
+      const res = await fetch(`/api/agencies/${viewingAccountAgency!.id}/account`);
+      return res.json();
+    },
+    enabled: !!viewingAccountAgency,
+  });
+
+  const registerPaymentMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/agencies/${viewingAccountAgency!.id}/account/payment`, {
+        amount: paymentAmount,
+        description: paymentDescription,
+        reference: paymentReference || null,
+        date: paymentDate,
+      });
+    },
+    onSuccess: () => {
+      refetchAccount();
+      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
+      setRegisterPaymentOpen(false);
+      setPaymentAmount("");
+      setPaymentReference("");
+      toast({ title: "Pago registrado en cuenta corriente" });
+    },
+    onError: () => {
+      toast({ title: "Error al registrar pago", variant: "destructive" });
     },
   });
 
@@ -314,6 +356,15 @@ export default function AgenciesPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              onClick={() => setViewingAccountAgency(agency)}
+                              title="Ver cuenta corriente"
+                              data-testid={`button-account-agency-${agency.id}`}
+                            >
+                              <Receipt className="h-4 w-4 text-indigo-600" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => setSelectedAgencyId(agency.id === selectedAgencyId ? null : agency.id)}
                               data-testid={`button-stats-agency-${agency.id}`}
                             >
@@ -490,6 +541,155 @@ export default function AgenciesPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Sheet open={!!viewingAccountAgency} onOpenChange={(open) => { if (!open) setViewingAccountAgency(null); }}>
+        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle className="flex items-center gap-2">
+              <Plane className="h-5 w-5" />
+              {viewingAccountAgency?.nombreFantasia || viewingAccountAgency?.razonSocial}
+            </SheetTitle>
+            <SheetDescription>Cuenta corriente — movimientos y saldo</SheetDescription>
+          </SheetHeader>
+
+          <div className={`rounded-md p-4 mb-4 flex items-center justify-between gap-4 ${
+            (accountData?.balance || 0) > 0
+              ? "bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-800"
+              : "bg-green-50 border border-green-200 dark:bg-green-950/30 dark:border-green-800"
+          }`}>
+            <div>
+              <p className="text-sm text-muted-foreground">Saldo actual</p>
+              <p className={`text-3xl font-bold ${
+                (accountData?.balance || 0) > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
+              }`} data-testid="text-agency-account-balance">
+                ${Math.abs(accountData?.balance || 0).toFixed(2)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {(accountData?.balance || 0) > 0 ? "Saldo pendiente de cobro" : "Sin deuda pendiente"}
+              </p>
+              {parseFloat(viewingAccountAgency?.commissionRate || "0") > 0 && (
+                <p className="text-xs text-muted-foreground mt-1" data-testid="text-agency-commission-rate">
+                  Comisión pactada: {viewingAccountAgency?.commissionRate}%
+                </p>
+              )}
+            </div>
+            <Button
+              onClick={() => setRegisterPaymentOpen(true)}
+              disabled={(accountData?.balance || 0) <= 0}
+              data-testid="button-register-cc-payment"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Registrar pago
+            </Button>
+          </div>
+
+          {accountData?.movements && accountData.movements.length > 0 ? (
+            <div className="border rounded-md overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Descripción</TableHead>
+                    <TableHead>Ref.</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {accountData.movements.map((mov) => (
+                    <TableRow key={mov.id} data-testid={`movement-row-${mov.id}`}>
+                      <TableCell className="text-sm">{mov.date}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="text-sm">{mov.description}</p>
+                          {mov.guestName && (
+                            <p className="text-xs text-muted-foreground">{mov.guestName}</p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{mov.reference || "—"}</TableCell>
+                      <TableCell className={`text-right font-medium tabular-nums ${
+                        parseFloat(mov.amount) > 0 ? "text-red-600" : "text-green-600"
+                      }`}>
+                        {parseFloat(mov.amount) > 0 ? "+" : ""}${Math.abs(parseFloat(mov.amount)).toFixed(2)}
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          {parseFloat(mov.amount) > 0 ? "cargo" : "pago"}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <Receipt className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Sin movimientos en cuenta corriente</p>
+            </div>
+          )}
+
+          <Dialog open={registerPaymentOpen} onOpenChange={setRegisterPaymentOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Registrar pago recibido</DialogTitle>
+                <DialogDescription>
+                  {viewingAccountAgency?.nombreFantasia || viewingAccountAgency?.razonSocial} — Saldo actual: ${(accountData?.balance || 0).toFixed(2)}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div>
+                  <Label>Monto recibido</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="0.00"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    data-testid="input-cc-payment-amount"
+                  />
+                </div>
+                <div>
+                  <Label>Fecha</Label>
+                  <Input
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    data-testid="input-cc-payment-date"
+                  />
+                </div>
+                <div>
+                  <Label>Descripción</Label>
+                  <Input
+                    value={paymentDescription}
+                    onChange={(e) => setPaymentDescription(e.target.value)}
+                    placeholder="Ej: Pago por transferencia"
+                    data-testid="input-cc-payment-description"
+                  />
+                </div>
+                <div>
+                  <Label>Referencia (opcional)</Label>
+                  <Input
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="Nro. transferencia, cheque, etc."
+                    data-testid="input-cc-payment-reference"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setRegisterPaymentOpen(false)}>Cancelar</Button>
+                <Button
+                  onClick={() => registerPaymentMutation.mutate()}
+                  disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || registerPaymentMutation.isPending}
+                  data-testid="button-confirm-cc-payment"
+                >
+                  {registerPaymentMutation.isPending ? "Guardando..." : "Confirmar pago"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setEditingAgency(null); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

@@ -605,6 +605,88 @@ export async function registerRoutes(
     }
   });
 
+  // Account Movements (Cuenta Corriente)
+  app.get("/api/companies/:id/account", async (req, res) => {
+    try {
+      const movements = await storage.getAccountMovements("company", req.params.id);
+      const balance = await storage.getAccountBalance("company", req.params.id);
+      res.json({ movements, balance });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching account" });
+    }
+  });
+
+  app.get("/api/agencies/:id/account", async (req, res) => {
+    try {
+      const movements = await storage.getAccountMovements("agency", req.params.id);
+      const balance = await storage.getAccountBalance("agency", req.params.id);
+      res.json({ movements, balance });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching account" });
+    }
+  });
+
+  app.post("/api/companies/:id/account/payment", async (req, res) => {
+    try {
+      const company = await storage.getCompany(req.params.id);
+      if (!company) {
+        return res.status(404).json({ error: "Empresa no encontrada" });
+      }
+      const { amount, description, reference, date } = req.body;
+      if (!amount || parseFloat(amount) <= 0) {
+        return res.status(400).json({ error: "Monto inválido" });
+      }
+      const movement = await storage.createAccountMovement({
+        entityType: "company",
+        entityId: req.params.id,
+        date: date || new Date().toISOString().split("T")[0],
+        type: "pago",
+        description: description || "Pago recibido",
+        amount: (-parseFloat(amount)).toFixed(2),
+        reference: reference || null,
+        createdBy: req.body.createdBy || null,
+      });
+      res.json(movement);
+    } catch (error) {
+      res.status(500).json({ error: "Error registering payment" });
+    }
+  });
+
+  app.post("/api/agencies/:id/account/payment", async (req, res) => {
+    try {
+      const agency = await storage.getAgency(req.params.id);
+      if (!agency) {
+        return res.status(404).json({ error: "Agencia no encontrada" });
+      }
+      const { amount, description, reference, date } = req.body;
+      if (!amount || parseFloat(amount) <= 0) {
+        return res.status(400).json({ error: "Monto inválido" });
+      }
+      const movement = await storage.createAccountMovement({
+        entityType: "agency",
+        entityId: req.params.id,
+        date: date || new Date().toISOString().split("T")[0],
+        type: "pago",
+        description: description || "Pago recibido",
+        amount: (-parseFloat(amount)).toFixed(2),
+        reference: reference || null,
+        createdBy: req.body.createdBy || null,
+      });
+      res.json(movement);
+    } catch (error) {
+      res.status(500).json({ error: "Error registering payment" });
+    }
+  });
+
+  app.get("/api/account-summary", async (req, res) => {
+    try {
+      const summary = await storage.getAccountSummary();
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching summary" });
+    }
+  });
+
   // Guests
   app.get("/api/guests", async (req, res) => {
     try {
@@ -1189,6 +1271,42 @@ export async function registerRoutes(
         }
       }
       
+      // Check for cuenta_corriente payments and create account movement
+      const reservationPayments = await storage.getPayments(req.params.id);
+      const ccPayments = reservationPayments.filter(p => p.method === "cuenta_corriente");
+      if (ccPayments.length > 0) {
+        const guest = reservation.guest;
+        const guestName = guest ? `${guest.firstName} ${guest.lastName}` : "Huésped";
+        const roomNum = reservation.room?.roomNumber || reservation.roomId;
+        for (const ccPayment of ccPayments) {
+          if (ccPayment.billingTarget === "company" && reservation.companyId) {
+            await storage.createAccountMovement({
+              entityType: "company",
+              entityId: reservation.companyId,
+              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+              type: "cargo",
+              description: `Estadía ${reservation.reservationCode} — Hab. ${roomNum}`,
+              amount: parseFloat(ccPayment.amount).toFixed(2),
+              reservationId: reservation.id,
+              reservationCode: reservation.reservationCode,
+              guestName,
+            });
+          } else if (ccPayment.billingTarget === "agency" && reservation.agencyId) {
+            await storage.createAccountMovement({
+              entityType: "agency",
+              entityId: reservation.agencyId,
+              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+              type: "cargo",
+              description: `Estadía ${reservation.reservationCode} — Hab. ${roomNum}`,
+              amount: parseFloat(ccPayment.amount).toFixed(2),
+              reservationId: reservation.id,
+              reservationCode: reservation.reservationCode,
+              guestName,
+            });
+          }
+        }
+      }
+
       // Update reservation status
       await storage.updateReservation(req.params.id, { status: "checked_out" });
       
