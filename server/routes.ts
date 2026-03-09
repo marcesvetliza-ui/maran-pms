@@ -643,6 +643,15 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/reservations/generate-code", async (req, res) => {
+    try {
+      const code = storage.generateReservationCode();
+      res.json({ code });
+    } catch (error) {
+      res.status(500).json({ error: "Error generating reservation code" });
+    }
+  });
+
   app.get("/api/reservations/:id", async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
@@ -1122,16 +1131,6 @@ export async function registerRoutes(
       res.json(logs);
     } catch (error) {
       res.status(500).json({ error: "Error fetching cancelled reservation logs" });
-    }
-  });
-
-  // Generate reservation code
-  app.get("/api/reservations/generate-code", async (req, res) => {
-    try {
-      const code = storage.generateReservationCode();
-      res.json({ code });
-    } catch (error) {
-      res.status(500).json({ error: "Error generating reservation code" });
     }
   });
 

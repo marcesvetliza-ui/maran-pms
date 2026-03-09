@@ -1381,15 +1381,16 @@ function DraggableReservationCell({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      onClick={(e) => {
-        if (e?.defaultPrevented) return;
-        if (!isDragging) onClick();
-      }}
       className={`${className} ${isDragging ? "opacity-40 ring-2 ring-primary" : ""}`}
-      data-testid={testId}
       style={{ touchAction: "none" }}
     >
-      {children}
+      <div
+        onClick={() => { if (!isDragging) onClick(); }}
+        data-testid={testId}
+        className="w-full h-full"
+      >
+        {children}
+      </div>
     </div>
   );
 }
