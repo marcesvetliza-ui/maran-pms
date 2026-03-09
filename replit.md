@@ -145,6 +145,10 @@ Preferred communication style: Simple, everyday language.
 - [x] FIX-04: earlyCheckIn/lateCheckOut comparación boolean — ahora usa `!!` en vez de comparar con string "true"
 - [x] FIX-05: Fechas UTC vs Argentina — creado `getLocalToday()`/`toArgentinaDateStr()` en `@/lib/utils`, reemplazado `toISOString().split("T")[0]` en planning, reservations, check-in, check-out
 - [x] FIX-06: Error Boundary — agregado en `main.tsx` para evitar pantalla en blanco ante errores React
+- [x] FIX-07: Canal "agencia" — agregado como opción en ReservationSource, QuickReservationDialog y ReservationFormDialog
+- [x] FIX-08: PDF confirmación muestra early check-in / late check-out con costos y horarios dinámicos
+- [x] FIX-09: Drag & drop por celda (DroppableCell) — permite mover reservas a otra habitación Y otra fecha, con recálculo de noches y validación de conflictos
+- [x] FIX-10: Diálogo de confirmación de movimiento muestra cambio de fechas cuando aplica
 
 ### NOTAS
 - Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación

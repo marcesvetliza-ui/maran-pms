@@ -503,10 +503,15 @@ export function ReservationFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="directo">Directo</SelectItem>
-                  <SelectItem value="web">Web</SelectItem>
-                  <SelectItem value="ota">OTA (Booking, etc.)</SelectItem>
-                  <SelectItem value="empresa">Empresa</SelectItem>
                   <SelectItem value="telefono">Teléfono</SelectItem>
+                  <SelectItem value="web">Web</SelectItem>
+                  <SelectItem value="booking">Booking</SelectItem>
+                  <SelectItem value="expedia">Expedia</SelectItem>
+                  <SelectItem value="airbnb">Airbnb</SelectItem>
+                  <SelectItem value="despegar">Despegar</SelectItem>
+                  <SelectItem value="ota">OTA (otros)</SelectItem>
+                  <SelectItem value="empresa">Empresa</SelectItem>
+                  <SelectItem value="agencia">Agencia de Viajes</SelectItem>
                 </SelectContent>
               </Select>
             </div>

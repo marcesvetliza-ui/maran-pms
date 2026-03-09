@@ -469,6 +469,7 @@ function QuickReservationDialog({
     { value: "airbnb", label: "Airbnb" },
     { value: "despegar", label: "Despegar" },
     { value: "empresa", label: "Empresa" },
+    { value: "agencia", label: "Agencia de Viajes" },
   ];
 
   const roomRatePlans = ratePlans?.filter(rp => rp.roomTypeId === reservationData.roomTypeId) || [];
@@ -937,6 +938,28 @@ function ReservationDetailModal({
     const reservationCode = reservation.reservationCode || reservation.id;
     const company = (reservation as any).company?.razonSocial || (reservation as any).company?.nombreFantasia || "";
 
+    const earlyCheckIn = reservation.earlyCheckIn;
+    const earlyCheckInTime = reservation.earlyCheckInTime || "";
+    const earlyCheckInCharge = reservation.earlyCheckInCharge
+      ? parseFloat(String(reservation.earlyCheckInCharge))
+      : 0;
+
+    const lateCheckOut = reservation.lateCheckOut;
+    const lateCheckOutTime = reservation.lateCheckOutTime || "";
+    const lateCheckOutCharge = reservation.lateCheckOutCharge
+      ? parseFloat(String(reservation.lateCheckOutCharge))
+      : 0;
+
+    const formatMoney = (n: number) =>
+      `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+
+    const totalConExtras =
+      parseFloat(reservation.totalRoomAmount || "0") +
+      (earlyCheckIn ? earlyCheckInCharge : 0) +
+      (lateCheckOut ? lateCheckOutCharge : 0);
+
+    const totalConExtrasStr = formatMoney(totalConExtras);
+
     const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1007,16 +1030,24 @@ function ReservationDetailModal({
       <tr><td class="label-col">Categoría de Habitación / Type of Room</td><td class="value-col">${roomTypeName}</td></tr>
     </table>
     <div class="rates-grid">
-      <div class="rate-cell rate-label">Tarífa diaria / Daily rate</div><div class="rate-cell rate-value">${dailyRate}</div>
-      <div class="rate-cell rate-label">Tarífa diaria Cochera / Garage rate</div><div class="rate-cell rate-value">$0.00</div>
-      <div class="rate-cell rate-label">Total Alojamiento / Total rate</div><div class="rate-cell rate-value">${totalRate}</div>
-      <div class="rate-cell rate-label">Total Cochera / Garage</div><div class="rate-cell rate-value">$0.00</div>
+      <div class="rate-cell rate-label">Tarífa diaria / Daily rate</div>
+      <div class="rate-cell rate-value">${dailyRate}</div>
+      <div class="rate-cell rate-label">Total Alojamiento / Total room rate</div>
+      <div class="rate-cell rate-value">${totalRate}</div>
+      ${earlyCheckIn ? `
+      <div class="rate-cell rate-label" style="color:#b45309;">Early Check-in${earlyCheckInTime ? ` (${earlyCheckInTime} hs)` : ""}</div>
+      <div class="rate-cell rate-value" style="color:#b45309;">${formatMoney(earlyCheckInCharge)}</div>
+      ` : ""}
+      ${lateCheckOut ? `
+      <div class="rate-cell rate-label" style="color:#7c3aed;">Late Check-out${lateCheckOutTime ? ` (${lateCheckOutTime} hs)` : ""}</div>
+      <div class="rate-cell rate-value" style="color:#7c3aed;">${formatMoney(lateCheckOutCharge)}</div>
+      ` : ""}
     </div>
-    <div class="total-box"><span>Tarífa Total / Total rate:</span>${totalRate}</div>
+    <div class="total-box"><span>Tarífa Total / Total rate:</span>${totalConExtrasStr}</div>
     <div class="conditions">
       <p>La tarifa incluye desayuno buffet y gimnasio con turno previo.</p>
       <p>La cochera tiene costo adicional. El mismo se encuentra detallado en la parte superior.</p>
-      <p>Nuestro horario de Check in es a partir de las 15:00 Hs y el Check out es hasta las 10:00 Hs.</p>
+      <p>Nuestro horario de Check in es a partir de las ${earlyCheckIn && earlyCheckInTime ? earlyCheckInTime : "15:00"} Hs y el Check out es hasta las ${lateCheckOut && lateCheckOutTime ? lateCheckOutTime : "10:00"} Hs.</p>
       <p>Early Check in o Late Check out tienen costo adicional del 50% del valor de una noche.</p>
       <p>Importante: En el momento de ingreso, deberá acreditar su identidad con su respectivo DNI.</p>
     </div>
@@ -1447,19 +1478,39 @@ function DroppableRoomRow({
   isOver?: boolean;
   "data-testid"?: string;
 }) {
-  const { setNodeRef, isOver: over } = useDroppable({
-    id: `drop-${roomId}`,
-    data: { roomId },
-  });
-
   return (
     <tr
-      ref={setNodeRef}
-      className={`${className || ""} ${over ? "bg-primary/10 ring-1 ring-primary/30" : ""}`}
+      className={`${className || ""} ${isOver ? "bg-primary/10 ring-1 ring-primary/30" : ""}`}
       data-testid={testId}
     >
       {children}
     </tr>
+  );
+}
+
+function DroppableCell({
+  roomId,
+  day,
+  children,
+  className,
+}: {
+  roomId: string;
+  day: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `drop-${roomId}-${day}`,
+    data: { roomId, day },
+  });
+
+  return (
+    <td
+      ref={setNodeRef}
+      className={`${className || ""} ${isOver ? "bg-primary/10 ring-2 ring-primary/40" : ""}`}
+    >
+      {children}
+    </td>
   );
 }
 
@@ -1492,6 +1543,9 @@ export default function PlanningPage() {
     toRoomId: string;
     toRoomNumber: string;
     toRoomType: string;
+    newCheckIn: string;
+    newCheckOut: string;
+    dateChanged: boolean;
   } | null>(null);
 
   const pointerSensor = useSensor(PointerSensor, {
@@ -1500,13 +1554,32 @@ export default function PlanningPage() {
   const sensors = useSensors(pointerSensor);
 
   const moveReservationMutation = useMutation({
-    mutationFn: async ({ reservationId, roomId }: { reservationId: string; roomId: string }) => {
-      const res = await apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId });
+    mutationFn: async ({
+      reservationId,
+      roomId,
+      checkInDate,
+      checkOutDate,
+    }: {
+      reservationId: string;
+      roomId: string;
+      checkInDate?: string;
+      checkOutDate?: string;
+    }) => {
+      const payload: Record<string, string> = { roomId };
+      if (checkInDate) payload.checkInDate = checkInDate;
+      if (checkOutDate) {
+        payload.checkOutDate = checkOutDate;
+        const ci = new Date((checkInDate || "") + "T12:00:00");
+        const co = new Date(checkOutDate + "T12:00:00");
+        payload.nights = String(Math.round((co.getTime() - ci.getTime()) / (1000 * 60 * 60 * 24)));
+      }
+      const res = await apiRequest("PATCH", `/api/reservations/${reservationId}`, payload);
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
-      toast({ title: "Reserva movida", description: "La habitación fue actualizada correctamente." });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      toast({ title: "Reserva movida", description: "La habitación y fechas fueron actualizadas correctamente." });
       setMoveConfirm(null);
     },
     onError: (error: any) => {
@@ -1528,8 +1601,9 @@ export default function PlanningPage() {
     const reservationId = (active.data.current as any)?.reservationId;
     const fromRoomId = (active.data.current as any)?.roomId;
     const toRoomId = (over.data.current as any)?.roomId;
+    const toDay = (over.data.current as any)?.day as string | undefined;
 
-    if (!reservationId || !toRoomId || fromRoomId === toRoomId) return;
+    if (!reservationId || !toRoomId) return;
 
     const reservation = data.reservations[reservationId];
     if (!reservation) return;
@@ -1538,15 +1612,24 @@ export default function PlanningPage() {
     const fromRoom = data.rooms.find(r => r.id === fromRoomId);
     if (!toRoom || !fromRoom) return;
 
-    const checkInIdx = data.days.indexOf(reservation.checkIn);
-    const checkOutIdx = data.days.indexOf(reservation.checkOut);
-    const startIdx = Math.max(0, checkInIdx >= 0 ? checkInIdx : 0);
-    const endIdx = checkOutIdx >= 0 ? checkOutIdx - 1 : data.days.length - 1;
+    let newCheckIn = reservation.checkIn;
+    let newCheckOut = reservation.checkOut;
 
-    for (let i = startIdx; i <= endIdx; i++) {
-      const day = data.days[i];
-      const existingResId = data.cellReservations[toRoomId]?.[day];
-      if (existingResId && existingResId !== reservationId) {
+    if (toDay && toDay !== reservation.checkIn) {
+      const originalCheckIn = new Date(reservation.checkIn + "T12:00:00");
+      const originalCheckOut = new Date(reservation.checkOut + "T12:00:00");
+      const nights = Math.round(
+        (originalCheckOut.getTime() - originalCheckIn.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      newCheckIn = toDay;
+      const newCheckOutDate = new Date(toDay + "T12:00:00");
+      newCheckOutDate.setDate(newCheckOutDate.getDate() + nights);
+      newCheckOut = toArgentinaDateStr(newCheckOutDate);
+    }
+
+    for (const [cellDay, existingResId] of Object.entries(data.cellReservations[toRoomId] || {})) {
+      if (existingResId === reservationId) continue;
+      if (cellDay >= newCheckIn && cellDay < newCheckOut) {
         toast({
           title: "Habitación ocupada",
           description: `La habitación ${toRoom.roomNumber} tiene otra reserva en esas fechas.`,
@@ -1556,6 +1639,8 @@ export default function PlanningPage() {
       }
     }
 
+    if (fromRoomId === toRoomId && newCheckIn === reservation.checkIn) return;
+
     setMoveConfirm({
       reservationId,
       guestName: reservation.guestName,
@@ -1563,6 +1648,9 @@ export default function PlanningPage() {
       toRoomId: toRoom.id,
       toRoomNumber: toRoom.roomNumber,
       toRoomType: toRoom.roomType?.name ?? "",
+      newCheckIn,
+      newCheckOut,
+      dateChanged: newCheckIn !== reservation.checkIn,
     });
   };
 
@@ -1879,8 +1967,10 @@ export default function PlanningPage() {
                               const isClickable = status === "available";
 
                               return (
-                                <td
+                                <DroppableCell
                                   key={day}
+                                  roomId={room.id}
+                                  day={day}
                                   className={`p-0.5 border-b ${info.isToday ? "bg-primary/5" : ""}`}
                                 >
                                   <Tooltip>
@@ -1985,7 +2075,7 @@ export default function PlanningPage() {
                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
-                                </td>
+                                </DroppableCell>
                               );
                             })}
                           </DroppableRoomRow>
@@ -2071,6 +2161,15 @@ export default function PlanningPage() {
                   Hab. {moveConfirm.toRoomNumber}
                 </Badge>
               </div>
+              {moveConfirm.dateChanged && (
+                <div className="flex items-center gap-3 text-sm">
+                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Nuevas fechas:</span>
+                  <Badge variant="outline" className="text-orange-600 border-orange-300">
+                    {moveConfirm.newCheckIn} → {moveConfirm.newCheckOut}
+                  </Badge>
+                </div>
+              )}
               <p className="text-sm text-muted-foreground">
                 Tipo: {moveConfirm.toRoomType}
               </p>
@@ -2090,6 +2189,8 @@ export default function PlanningPage() {
                   moveReservationMutation.mutate({
                     reservationId: moveConfirm.reservationId,
                     roomId: moveConfirm.toRoomId,
+                    checkInDate: moveConfirm.newCheckIn,
+                    checkOutDate: moveConfirm.newCheckOut,
                   });
                 }
               }}
