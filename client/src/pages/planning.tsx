@@ -49,10 +49,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
-
-function getLocalToday() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-}
+import { getLocalToday, toArgentinaDateStr } from "@/lib/utils";
 
 function formatDate(dateStr: string) {
   const date = new Date(dateStr + "T12:00:00");
@@ -286,7 +283,7 @@ function QuickReservationDialog({
     if (reservationData) {
       const nextDay = new Date(reservationData.checkInDate + "T12:00:00");
       nextDay.setDate(nextDay.getDate() + 1);
-      setCheckOutDate(nextDay.toISOString().split("T")[0]);
+      setCheckOutDate(toArgentinaDateStr(nextDay));
       setBedConfig(reservationData.bedConfig || "");
     }
   }, [reservationData]);
@@ -644,7 +641,7 @@ function QuickReservationDialog({
                   if (pkg.nights && reservationData) {
                     const nextDay = new Date(reservationData.checkInDate + "T12:00:00");
                     nextDay.setDate(nextDay.getDate() + pkg.nights);
-                    setCheckOutDate(nextDay.toISOString().split("T")[0]);
+                    setCheckOutDate(toArgentinaDateStr(nextDay));
                   }
                 }
               }}>
@@ -793,8 +790,8 @@ function ReservationDetailModal({
     setEditCheckOut(reservation.checkOutDate);
     setEditChannel(reservation.source || "directo");
     setEditNotes(reservation.notes || "");
-    setEditEarlyCheckIn(reservation.earlyCheckIn === "true" || reservation.earlyCheckIn === true);
-    setEditLateCheckOut(reservation.lateCheckOut === "true" || reservation.lateCheckOut === true);
+    setEditEarlyCheckIn(!!reservation.earlyCheckIn);
+    setEditLateCheckOut(!!reservation.lateCheckOut);
     setEditRatePerNight(reservation.finalRatePerNight?.toString() || "");
     setIsEditing(true);
   };
@@ -1460,7 +1457,7 @@ export default function PlanningPage() {
     end.setDate(end.getDate() + 15);
     return {
       start: todayStr,
-      end: end.toISOString().split("T")[0],
+      end: toArgentinaDateStr(end),
     };
   });
 
@@ -1590,8 +1587,8 @@ export default function PlanningPage() {
     newStart.setDate(newStart.getDate() + days);
     newEnd.setDate(newEnd.getDate() + days);
     setDateRange({
-      start: newStart.toISOString().split("T")[0],
-      end: newEnd.toISOString().split("T")[0],
+      start: toArgentinaDateStr(newStart),
+      end: toArgentinaDateStr(newEnd),
     });
   };
 
@@ -1601,7 +1598,7 @@ export default function PlanningPage() {
     end.setDate(end.getDate() + 15);
     setDateRange({
       start: todayStr,
-      end: end.toISOString().split("T")[0],
+      end: toArgentinaDateStr(end),
     });
   };
 
@@ -1612,8 +1609,8 @@ export default function PlanningPage() {
     const end = new Date(date);
     end.setDate(end.getDate() + 14);
     setDateRange({
-      start: start.toISOString().split("T")[0],
-      end: end.toISOString().split("T")[0],
+      start: toArgentinaDateStr(start),
+      end: toArgentinaDateStr(end),
     });
   };
 
@@ -1891,7 +1888,7 @@ export default function PlanningPage() {
                                             {reservation.lateCheckOut && (() => {
                                               const coDate = new Date(reservation.checkOut + "T12:00:00");
                                               coDate.setDate(coDate.getDate() - 1);
-                                              const lastDay = coDate.toISOString().split("T")[0];
+                                              const lastDay = toArgentinaDateStr(coDate);
                                               return day === lastDay;
                                             })() && (
                                               <Sunset className="h-3 w-3 text-purple-400 flex-shrink-0" data-testid="icon-late-checkout" />

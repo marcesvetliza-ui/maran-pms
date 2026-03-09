@@ -138,6 +138,16 @@ Preferred communication style: Simple, everyday language.
 - [x] F03: Módulo completo de paquetes (noches + servicios) — already fully implemented (packages CRUD, items, duplication, status toggle)
 - [x] F04: Tarifas por cantidad de pasajeros (rate1pax-rate4pax fields on rate plans, auto-applied on reservation creation based on guest count)
 
+### FIXES APLICADOS (Marzo 2026 - Sesión Actual)
+- [x] FIX-01: Crash Planning en producción — eliminado `@dnd-kit/sortable` v10 (incompatible con `@dnd-kit/core` v6, no se usaba)
+- [x] FIX-02: Pagos no visibles en checkout — `enrichReservation` ahora incluye `payments` junto con `charges`
+- [x] FIX-03: Editar reserva/grupo/empresa/agencia borraba datos — `updateReservation/Group/Company/Agency` ahora filtran campos protegidos y undefined
+- [x] FIX-04: earlyCheckIn/lateCheckOut comparación boolean — ahora usa `!!` en vez de comparar con string "true"
+- [x] FIX-05: Fechas UTC vs Argentina — creado `getLocalToday()`/`toArgentinaDateStr()` en `@/lib/utils`, reemplazado `toISOString().split("T")[0]` en planning, reservations, check-in, check-out
+- [x] FIX-06: Error Boundary — agregado en `main.tsx` para evitar pantalla en blanco ante errores React
+
 ### NOTAS
 - Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación
 - Las tarifas por PAX se configuran en el plan tarifario
+- **Timezone**: Frontend usa `getLocalToday()`/`toArgentinaDateStr()` de `@/lib/utils`; Backend usa `getArgentinaToday()` de `server/db-storage.ts`
+- **Safe updates**: Todos los métodos `update*` en `db-storage.ts` filtran campos protegidos (id, createdAt, códigos) y valores undefined

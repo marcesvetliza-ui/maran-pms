@@ -229,7 +229,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateCompany(id: string, company: Partial<InsertCompany>): Promise<Company | undefined> {
-    const [updated] = await db.update(companies).set(company as any).where(eq(companies.id, id)).returning();
+    const safeData: Record<string, any> = {};
+    for (const [key, value] of Object.entries(company)) {
+      if (["id", "createdAt"].includes(key) || value === undefined) continue;
+      safeData[key] = value;
+    }
+    if (Object.keys(safeData).length === 0) return undefined;
+    const [updated] = await db.update(companies).set(safeData).where(eq(companies.id, id)).returning();
     return updated;
   }
 
@@ -263,7 +269,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateAgency(id: string, agency: Partial<InsertAgency>): Promise<Agency | undefined> {
-    const [updated] = await db.update(agencies).set(agency as any).where(eq(agencies.id, id)).returning();
+    const safeData: Record<string, any> = {};
+    for (const [key, value] of Object.entries(agency)) {
+      if (["id", "createdAt"].includes(key) || value === undefined) continue;
+      safeData[key] = value;
+    }
+    if (Object.keys(safeData).length === 0) return undefined;
+    const [updated] = await db.update(agencies).set(safeData).where(eq(agencies.id, id)).returning();
     return updated;
   }
 
@@ -339,6 +351,7 @@ export class DatabaseStorage implements IStorage {
     const roomType = room ? (await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId)))[0] : undefined;
     const ratePlan = reservation.ratePlanId ? (await db.select().from(ratePlans).where(eq(ratePlans.id, reservation.ratePlanId)))[0] : undefined;
     const chargesList = await db.select().from(charges).where(eq(charges.reservationId, reservation.id));
+    const paymentsList = await db.select().from(payments).where(eq(payments.reservationId, reservation.id));
     const company = reservation.companyId ? (await db.select().from(companies).where(eq(companies.id, reservation.companyId)))[0] : undefined;
     const agency = reservation.agencyId ? (await db.select().from(agencies).where(eq(agencies.id, reservation.agencyId)))[0] : undefined;
     return {
@@ -349,6 +362,7 @@ export class DatabaseStorage implements IStorage {
       room: room ? { ...room, roomType } : undefined as any,
       ratePlan,
       charges: chargesList,
+      payments: paymentsList,
     };
   }
 
@@ -436,7 +450,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
-    const [updated] = await db.update(reservations).set(reservation as any).where(eq(reservations.id, id)).returning();
+    const safeData: Record<string, any> = {};
+    const protectedFields = ["id", "createdAt", "reservationCode"];
+    const fkFields = ["guestId", "roomId", "roomTypeId"];
+    for (const [key, value] of Object.entries(reservation)) {
+      if (protectedFields.includes(key)) continue;
+      if (value === undefined) continue;
+      if (fkFields.includes(key) && value === "") continue;
+      safeData[key] = value;
+    }
+    if (Object.keys(safeData).length === 0) return undefined;
+    const [updated] = await db.update(reservations).set(safeData).where(eq(reservations.id, id)).returning();
     return updated;
   }
 
@@ -913,7 +937,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateGroup(id: string, group: Partial<InsertGroup>): Promise<Group | undefined> {
-    const [updated] = await db.update(groups).set(group as any).where(eq(groups.id, id)).returning();
+    const safeData: Record<string, any> = {};
+    for (const [key, value] of Object.entries(group)) {
+      if (["id", "createdAt", "groupCode"].includes(key) || value === undefined) continue;
+      safeData[key] = value;
+    }
+    if (Object.keys(safeData).length === 0) return undefined;
+    const [updated] = await db.update(groups).set(safeData).where(eq(groups.id, id)).returning();
     return updated;
   }
 

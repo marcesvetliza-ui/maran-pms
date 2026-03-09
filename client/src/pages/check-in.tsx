@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { getLocalToday } from "@/lib/utils";
 import {
   LogIn,
   Search,
@@ -82,7 +83,7 @@ export default function CheckInPage() {
   const [checkInNotes, setCheckInNotes] = useState<string>("");
   
   const [historyDate, setHistoryDate] = useState<string>(() => {
-    return new Date().toISOString().split("T")[0];
+    return getLocalToday();
   });
 
   const [webCheckinDialogOpen, setWebCheckinDialogOpen] = useState(false);
@@ -252,8 +253,10 @@ export default function CheckInPage() {
 
   const walkInMutation = useMutation({
     mutationFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const checkOutDate = new Date(Date.now() + nights * 86400000).toISOString().split("T")[0];
+      const today = getLocalToday();
+      const coDate = new Date();
+      coDate.setDate(coDate.getDate() + nights);
+      const checkOutDate = coDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       
       const res = await apiRequest("POST", "/api/reservations", {
         reservationCode: "", 

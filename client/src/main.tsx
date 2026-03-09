@@ -28,11 +28,9 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
         <div style={{ padding: "2rem", fontFamily: "system-ui" }}>
           <h1 style={{ color: "#dc2626" }}>Error en la aplicación</h1>
           <p>Ocurrió un error inesperado. Intente recargar la página.</p>
-          <pre style={{ background: "#f3f4f6", padding: "1rem", borderRadius: "0.5rem", overflow: "auto", fontSize: "0.875rem", marginTop: "1rem" }}>
+          <p style={{ color: "#6b7280", fontSize: "0.875rem", marginTop: "0.5rem" }}>
             {this.state.error?.message}
-            {"\n"}
-            {this.state.error?.stack}
-          </pre>
+          </p>
           <button
             onClick={() => { this.setState({ hasError: false, error: null }); window.location.href = "/"; }}
             style={{ marginTop: "1rem", padding: "0.5rem 1rem", background: "#2563eb", color: "white", border: "none", borderRadius: "0.375rem", cursor: "pointer" }}

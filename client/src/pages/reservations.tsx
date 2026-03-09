@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
+import { getLocalToday } from "@/lib/utils";
 import {
   CalendarCheck,
   Plus,
@@ -102,8 +103,10 @@ export function ReservationFormDialog({
   const { toast } = useToast();
   const isEditing = !!reservation;
 
-  const today = new Date().toISOString().split("T")[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+  const today = getLocalToday();
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(
     reservation?.guest || null
@@ -1007,7 +1010,7 @@ function ReservationDetailDialog({
     addChargeMutation.mutate({
       ...newCharge,
       reservationId: reservation.id,
-      date: new Date().toISOString().split("T")[0],
+      date: getLocalToday(),
     });
   };
 
@@ -1016,7 +1019,7 @@ function ReservationDetailDialog({
     addPaymentMutation.mutate({
       ...newPayment,
       reservationId: reservation.id,
-      date: new Date().toISOString().split("T")[0],
+      date: getLocalToday(),
     });
   };
 
@@ -2062,7 +2065,7 @@ export default function ReservationsPage() {
                     <Input
                       id="duplicate-checkin"
                       type="date"
-                      min={today.toISOString().split('T')[0]}
+                      min={getLocalToday()}
                       value={duplicateCheckIn}
                       onChange={(e) => setDuplicateCheckIn(e.target.value)}
                       data-testid="input-duplicate-checkin"
@@ -2076,7 +2079,7 @@ export default function ReservationsPage() {
                     <Input
                       id="duplicate-checkout"
                       type="date"
-                      min={duplicateCheckIn || today.toISOString().split('T')[0]}
+                      min={duplicateCheckIn || getLocalToday()}
                       value={duplicateCheckOut}
                       onChange={(e) => setDuplicateCheckOut(e.target.value)}
                       data-testid="input-duplicate-checkout"

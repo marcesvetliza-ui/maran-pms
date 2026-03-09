@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { getLocalToday } from "@/lib/utils";
 import {
   LogOut,
   Search,
@@ -111,7 +112,7 @@ export default function CheckOutPage() {
         reservationId: selectedReservation!.id,
         description: data.description,
         amount: data.amount,
-        date: new Date().toISOString().split("T")[0],
+        date: getLocalToday(),
         category: "otros",
       });
     },
@@ -130,7 +131,7 @@ export default function CheckOutPage() {
         reservationId: selectedReservation!.id,
         amount: data.amount,
         method: data.method,
-        date: new Date().toISOString().split("T")[0],
+        date: getLocalToday(),
         reference: data.reference || null,
         billingTarget: data.billingTarget,
       });
