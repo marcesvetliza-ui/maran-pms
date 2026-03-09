@@ -284,7 +284,7 @@ function QuickReservationDialog({
   const [notes, setNotes] = useState("");
   const [guestSearch, setGuestSearch] = useState("");
   const [showNewGuest, setShowNewGuest] = useState(false);
-  const [newGuest, setNewGuest] = useState({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
+  const [newGuest, setNewGuest] = useState({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "", vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "" });
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [agencyId, setAgencyId] = useState<string | null>(null);
@@ -360,7 +360,7 @@ function QuickReservationDialog({
     setNotes("");
     setGuestSearch("");
     setShowNewGuest(false);
-    setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" });
+    setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "", vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "" });
     setCompanyId(null);
     setSelectedCompany(null);
     setAgencyId(null);
@@ -396,6 +396,10 @@ function QuickReservationDialog({
           email: newGuest.email || null,
           nationality: "Argentina",
           segment: "LEISURE",
+          vehiculoPatente: newGuest.vehiculoPatente || null,
+          vehiculoMarca: newGuest.vehiculoMarca || null,
+          vehiculoModelo: newGuest.vehiculoModelo || null,
+          vehiculoColor: newGuest.vehiculoColor || null,
         });
         finalGuestId = created.id;
       } catch {
@@ -519,7 +523,7 @@ function QuickReservationDialog({
               <div className="border rounded-md p-3 space-y-2 bg-muted/30">
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium">Nuevo huésped</span>
-                  <Button variant="ghost" size="sm" onClick={() => { setShowNewGuest(false); setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "" }); }} data-testid="button-cancel-new-guest">
+                  <Button variant="ghost" size="sm" onClick={() => { setShowNewGuest(false); setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "", vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "" }); }} data-testid="button-cancel-new-guest">
                     Cancelar
                   </Button>
                 </div>
@@ -531,6 +535,12 @@ function QuickReservationDialog({
                   <Input placeholder="DNI" value={newGuest.documentNumber} onChange={(e) => setNewGuest({...newGuest, documentNumber: e.target.value})} data-testid="input-new-guest-dni" />
                   <Input placeholder="Teléfono" value={newGuest.phone} onChange={(e) => setNewGuest({...newGuest, phone: e.target.value})} data-testid="input-new-guest-phone" />
                   <Input placeholder="Email" value={newGuest.email} onChange={(e) => setNewGuest({...newGuest, email: e.target.value})} data-testid="input-new-guest-email" />
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  <Input placeholder="Patente" value={newGuest.vehiculoPatente} onChange={(e) => setNewGuest({...newGuest, vehiculoPatente: e.target.value})} data-testid="input-new-guest-vehiculo-patente" />
+                  <Input placeholder="Marca" value={newGuest.vehiculoMarca} onChange={(e) => setNewGuest({...newGuest, vehiculoMarca: e.target.value})} data-testid="input-new-guest-vehiculo-marca" />
+                  <Input placeholder="Modelo" value={newGuest.vehiculoModelo} onChange={(e) => setNewGuest({...newGuest, vehiculoModelo: e.target.value})} data-testid="input-new-guest-vehiculo-modelo" />
+                  <Input placeholder="Color" value={newGuest.vehiculoColor} onChange={(e) => setNewGuest({...newGuest, vehiculoColor: e.target.value})} data-testid="input-new-guest-vehiculo-color" />
                 </div>
               </div>
             )}

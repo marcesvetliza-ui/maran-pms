@@ -36,6 +36,10 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
     fechaNacimiento: "",
     sexo: "no_especifica" as "masculino" | "femenino" | "otro" | "no_especifica",
     cuilCuit: "",
+    vehiculoPatente: "",
+    vehiculoMarca: "",
+    vehiculoModelo: "",
+    vehiculoColor: "",
   });
 
   useEffect(() => {
@@ -69,6 +73,10 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       fechaNacimiento: newGuest.fechaNacimiento || null,
       sexo: newGuest.sexo,
       cuilCuit: newGuest.cuilCuit || null,
+      vehiculoPatente: newGuest.vehiculoPatente || null,
+      vehiculoMarca: newGuest.vehiculoMarca || null,
+      vehiculoModelo: newGuest.vehiculoModelo || null,
+      vehiculoColor: newGuest.vehiculoColor || null,
       companyId: null,
     });
     setNewGuest({
@@ -85,6 +93,10 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       fechaNacimiento: "",
       sexo: "no_especifica",
       cuilCuit: "",
+      vehiculoPatente: "",
+      vehiculoMarca: "",
+      vehiculoModelo: "",
+      vehiculoColor: "",
     });
     setMode("search");
   };
@@ -357,6 +369,54 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                   placeholder="1000"
                   data-testid="input-guest-codigopostal"
                 />
+              </div>
+            </div>
+
+            <div className="border-t pt-3 mt-1">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Datos del Vehículo (opcional)</Label>
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="vehiculoPatente">Patente</Label>
+                  <Input
+                    id="vehiculoPatente"
+                    value={newGuest.vehiculoPatente}
+                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoPatente: e.target.value })}
+                    placeholder="ABC 123"
+                    data-testid="input-guest-vehiculo-patente"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="vehiculoMarca">Marca</Label>
+                  <Input
+                    id="vehiculoMarca"
+                    value={newGuest.vehiculoMarca}
+                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoMarca: e.target.value })}
+                    placeholder="Toyota"
+                    data-testid="input-guest-vehiculo-marca"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="vehiculoModelo">Modelo</Label>
+                  <Input
+                    id="vehiculoModelo"
+                    value={newGuest.vehiculoModelo}
+                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoModelo: e.target.value })}
+                    placeholder="Corolla"
+                    data-testid="input-guest-vehiculo-modelo"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="vehiculoColor">Color</Label>
+                  <Input
+                    id="vehiculoColor"
+                    value={newGuest.vehiculoColor}
+                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoColor: e.target.value })}
+                    placeholder="Blanco"
+                    data-testid="input-guest-vehiculo-color"
+                  />
+                </div>
               </div>
             </div>
 
