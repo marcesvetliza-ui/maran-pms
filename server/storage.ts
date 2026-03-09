@@ -2101,6 +2101,7 @@ export class MemStorage implements IStorage {
         if (reservation) {
           cellReservations[room.id][day] = reservation.id;
           const isGroupRes = groupReservationIds.has(reservation.id);
+          const todayStr = new Date().toISOString().split("T")[0];
           
           if (isGroupRes) {
             occupancy[room.id].push("group_blocked");
@@ -2110,11 +2111,43 @@ export class MemStorage implements IStorage {
             } else {
               occupancy[room.id].push("checked_in");
             }
+          } else if (day === reservation.checkInDate && day === todayStr) {
+            occupancy[room.id].push("checkin_today");
           } else {
             occupancy[room.id].push("booked");
           }
         } else {
           occupancy[room.id].push("available");
+        }
+      }
+
+      for (let dayIndex = 0; dayIndex < days.length; dayIndex++) {
+        const day = days[dayIndex];
+        const currentStatus = occupancy[room.id][dayIndex];
+        if (currentStatus !== "available") continue;
+
+        const nextDay = days[dayIndex + 1];
+        if (nextDay) {
+          const earlyRes = activeReservations.find(r =>
+            r.roomId === room.id &&
+            r.checkInDate === nextDay &&
+            !!r.earlyCheckIn
+          );
+          if (earlyRes) {
+            occupancy[room.id][dayIndex] = "early_blocked";
+            cellReservations[room.id][day] = earlyRes.id;
+            continue;
+          }
+        }
+
+        const lateRes = activeReservations.find(r =>
+          r.roomId === room.id &&
+          r.checkOutDate === day &&
+          !!r.lateCheckOut
+        );
+        if (lateRes) {
+          occupancy[room.id][dayIndex] = "late_blocked";
+          cellReservations[room.id][day] = lateRes.id;
         }
       }
     }

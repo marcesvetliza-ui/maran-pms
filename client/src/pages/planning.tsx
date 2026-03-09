@@ -85,6 +85,12 @@ function getStatusColor(status: PlanningCellStatus): string {
       return "bg-yellow-100 dark:bg-yellow-900/40 border-yellow-200 dark:border-yellow-800";
     case "group_blocked":
       return "bg-indigo-100 dark:bg-indigo-900/40 border-indigo-200 dark:border-indigo-800";
+    case "checkin_today":
+      return "bg-teal-100 dark:bg-teal-900/40 border-teal-300 dark:border-teal-700";
+    case "early_blocked":
+      return "bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 border-dashed";
+    case "late_blocked":
+      return "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 border-dashed";
     default:
       return "bg-muted";
   }
@@ -108,6 +114,12 @@ function getStatusLabel(status: PlanningCellStatus): string {
       return "Limpieza";
     case "group_blocked":
       return "Grupo";
+    case "checkin_today":
+      return "Check-in hoy";
+    case "early_blocked":
+      return "Bloqueado (Early check-in)";
+    case "late_blocked":
+      return "Bloqueado (Late check-out)";
     default:
       return status;
   }
@@ -194,10 +206,13 @@ const bedConfigLabels: Record<string, string> = {
 function Legend() {
   const statusItems: { status: PlanningCellStatus; label: string }[] = [
     { status: "available", label: "Disponible" },
+    { status: "checkin_today", label: "Check-in hoy" },
     { status: "dirty", label: "Sucia" },
     { status: "cleaning", label: "Limpieza" },
     { status: "maintenance", label: "Mantenimiento" },
     { status: "group_blocked", label: "Grupo bloq." },
+    { status: "early_blocked", label: "Early check-in" },
+    { status: "late_blocked", label: "Late check-out" },
   ];
 
   const sourceItems: { source: ReservationSource; label: string }[] = [
@@ -1633,6 +1648,7 @@ export default function PlanningPage() {
   };
 
   const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
+    if (status === "early_blocked" || status === "late_blocked") return;
     if (status === "available") {
       setSelectedCell({
         roomId: room.id,
@@ -1869,14 +1885,16 @@ export default function PlanningPage() {
                                 >
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      {reservation ? (
+                                      {reservation && status !== "early_blocked" && status !== "late_blocked" ? (
                                         <DraggableReservationCell
                                           id={`drag-${reservationId}-${room.id}-${day}`}
                                           reservationId={reservationId!}
                                           roomId={room.id}
                                           onClick={() => handleCellClick(room, day, status, reservationId)}
                                           className={`h-8 rounded border flex items-center justify-center transition-all cursor-grab active:cursor-grabbing ${
-                                            getSourceColor(reservation.source)
+                                            status === "checkin_today"
+                                              ? getStatusColor("checkin_today")
+                                              : getSourceColor(reservation.source)
                                           } hover:ring-2 hover:ring-primary/50`}
                                           data-testid={`cell-${room.id}-${day}`}
                                         >
@@ -1895,6 +1913,20 @@ export default function PlanningPage() {
                                             )}
                                           </span>
                                         </DraggableReservationCell>
+                                      ) : status === "early_blocked" ? (
+                                        <div
+                                          className={`h-8 rounded border flex items-center justify-center ${getStatusColor("early_blocked")}`}
+                                          data-testid={`cell-${room.id}-${day}`}
+                                        >
+                                          <Sunrise className="h-3 w-3 text-orange-400" />
+                                        </div>
+                                      ) : status === "late_blocked" ? (
+                                        <div
+                                          className={`h-8 rounded border flex items-center justify-center ${getStatusColor("late_blocked")}`}
+                                          data-testid={`cell-${room.id}-${day}`}
+                                        >
+                                          <Sunset className="h-3 w-3 text-purple-400" />
+                                        </div>
                                       ) : (
                                         <div
                                           onClick={() => handleCellClick(room, day, status, reservationId)}

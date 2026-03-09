@@ -322,7 +322,7 @@ export type RoomWithType = Room & {
 };
 
 // Planning types
-export type PlanningCellStatus = "available" | "booked" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked";
+export type PlanningCellStatus = "available" | "booked" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked";
 
 export type PlanningData = {
   rooms: RoomWithType[];

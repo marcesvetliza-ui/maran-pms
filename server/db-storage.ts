@@ -731,12 +731,48 @@ export class DatabaseStorage implements IStorage {
           if (isGroupRes) {
             occupancy[room.id].push("group_blocked");
           } else if (reservation.status === "checked_in") {
-            occupancy[room.id].push("checked_in");
+            if (day === reservation.checkOutDate) {
+              occupancy[room.id].push("checkout_today");
+            } else {
+              occupancy[room.id].push("checked_in");
+            }
+          } else if (day === reservation.checkInDate && day === todayStr) {
+            occupancy[room.id].push("checkin_today");
           } else {
             occupancy[room.id].push("booked");
           }
         } else {
           occupancy[room.id].push("available");
+        }
+      }
+
+      for (let dayIndex = 0; dayIndex < days.length; dayIndex++) {
+        const day = days[dayIndex];
+        const currentStatus = occupancy[room.id][dayIndex];
+        if (currentStatus !== "available") continue;
+
+        const nextDay = days[dayIndex + 1];
+        if (nextDay) {
+          const earlyRes = allReservations.find(r =>
+            r.roomId === room.id &&
+            r.checkInDate === nextDay &&
+            !!r.earlyCheckIn
+          );
+          if (earlyRes) {
+            occupancy[room.id][dayIndex] = "early_blocked";
+            cellReservations[room.id][day] = earlyRes.id;
+            continue;
+          }
+        }
+
+        const lateRes = allReservations.find(r =>
+          r.roomId === room.id &&
+          r.checkOutDate === day &&
+          !!r.lateCheckOut
+        );
+        if (lateRes) {
+          occupancy[room.id][dayIndex] = "late_blocked";
+          cellReservations[room.id][day] = lateRes.id;
         }
       }
     }
