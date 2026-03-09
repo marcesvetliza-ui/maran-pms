@@ -1884,7 +1884,7 @@ export default function PlanningPage() {
                                             {reservation.earlyCheckIn && day === reservation.checkIn && (
                                               <Sunrise className="h-3 w-3 text-orange-400 flex-shrink-0" data-testid="icon-early-checkin" />
                                             )}
-                                            {reservation.isGroup ? "GRP" : reservation.guestName.split(" ")[0]}
+                                            {reservation.isGroup && reservation.groupName ? reservation.groupName : reservation.guestName.split(" ")[0]}
                                             {reservation.lateCheckOut && (() => {
                                               const coDate = new Date(reservation.checkOut + "T12:00:00");
                                               coDate.setDate(coDate.getDate() - 1);
@@ -1970,7 +1970,7 @@ export default function PlanningPage() {
                 <div className="h-8 rounded border bg-primary/20 border-primary flex items-center justify-center px-2 shadow-lg min-w-[60px]">
                   <Move className="h-3 w-3 mr-1 text-primary" />
                   <span className="text-[10px] font-semibold text-primary truncate">
-                    {dragActiveReservation.isGroup ? "GRP" : dragActiveReservation.guestName.split(" ")[0]}
+                    {dragActiveReservation.isGroup && dragActiveReservation.groupName ? dragActiveReservation.groupName : dragActiveReservation.guestName.split(" ")[0]}
                   </span>
                 </div>
               ) : null}
