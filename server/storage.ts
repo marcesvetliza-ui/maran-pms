@@ -244,7 +244,7 @@ export interface IStorage {
   deleteBedType(id: string): Promise<boolean>;
 
   // Reservations
-  getReservations(): Promise<ReservationWithDetails[]>;
+  getReservations(options?: { dateFrom?: string; dateTo?: string; dateMode?: string }): Promise<ReservationWithDetails[]>;
   getReservation(id: string): Promise<ReservationWithDetails | undefined>;
   getReservationByCode(code: string): Promise<ReservationWithDetails | undefined>;
   getRecentReservations(limit: number): Promise<ReservationWithDetails[]>;

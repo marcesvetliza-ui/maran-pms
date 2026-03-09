@@ -4,6 +4,7 @@ import { useLocation, useSearch } from "wouter";
 import { getLocalToday } from "@/lib/utils";
 import {
   CalendarCheck,
+  CalendarRange,
   Plus,
   Search,
   Filter,
@@ -1691,8 +1692,28 @@ export default function ReservationsPage() {
   const [duplicateCheckOut, setDuplicateCheckOut] = useState("");
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | undefined>();
 
+  const todayStr = getLocalToday();
+  const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all">("upcoming");
+  const [dateFrom, setDateFrom] = useState(todayStr);
+  const [dateTo, setDateTo] = useState("");
+
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
-    queryKey: ["/api/reservations"],
+    queryKey: ["/api/reservations", dateMode, dateFrom, dateTo],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (dateMode === "today") {
+        params.set("dateFrom", todayStr);
+        params.set("dateTo", todayStr);
+      } else if (dateMode === "range" && dateFrom) {
+        params.set("dateFrom", dateFrom);
+        if (dateTo) params.set("dateTo", dateTo);
+      } else if (dateMode === "all") {
+        params.set("dateMode", "all");
+      }
+      const res = await fetch(`/api/reservations?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch reservations");
+      return res.json();
+    },
   });
 
   useEffect(() => {
@@ -1763,14 +1784,16 @@ export default function ReservationsPage() {
     },
   });
 
-  const filteredReservations = reservations?.filter((res) => {
-    const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
-    const matchesSearch =
-      guestName.includes(searchQuery.toLowerCase()) ||
-      res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || res.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredReservations = reservations
+    ?.filter((res) => {
+      const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
+      const matchesSearch =
+        guestName.includes(searchQuery.toLowerCase()) ||
+        res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === "all" || res.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    })
+    ?.sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
 
   const handleEditReservation = (reservation: ReservationWithDetails) => {
     setSelectedReservation(reservation);
@@ -1817,34 +1840,102 @@ export default function ReservationsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por huésped o habitación..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-                data-testid="input-search-reservations"
-              />
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium text-muted-foreground mr-1">Ver:</span>
+              <Button
+                variant={dateMode === "upcoming" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("upcoming")}
+                data-testid="button-filter-upcoming"
+              >
+                Activas y futuras
+              </Button>
+              <Button
+                variant={dateMode === "today" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("today")}
+                data-testid="button-filter-today"
+              >
+                Hoy ({todayStr})
+              </Button>
+              <Button
+                variant={dateMode === "range" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("range")}
+                data-testid="button-filter-range"
+              >
+                <CalendarRange className="h-3.5 w-3.5 mr-1.5" />
+                Por fechas
+              </Button>
+              <Button
+                variant={dateMode === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("all")}
+                data-testid="button-filter-all"
+              >
+                Todas
+              </Button>
+              {dateMode === "range" && (
+                <div className="flex items-center gap-2 ml-2">
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="h-8 w-36 text-sm"
+                    data-testid="input-date-from"
+                  />
+                  <span className="text-muted-foreground text-sm">→</span>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="h-8 w-36 text-sm"
+                    data-testid="input-date-to"
+                  />
+                </div>
+              )}
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]" data-testid="select-filter-status">
-                <Filter className="mr-2 h-4 w-4" />
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="pending">Pendientes</SelectItem>
-                <SelectItem value="confirmed">Confirmadas</SelectItem>
-                <SelectItem value="checked_in">Check-in</SelectItem>
-                <SelectItem value="checked_out">Check-out</SelectItem>
-                <SelectItem value="cancelled">Canceladas</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por huésped o habitación..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                  data-testid="input-search-reservations"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[180px]" data-testid="select-filter-status">
+                  <Filter className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los estados</SelectItem>
+                  <SelectItem value="pending">Pendientes</SelectItem>
+                  <SelectItem value="confirmed">Confirmadas</SelectItem>
+                  <SelectItem value="checked_in">Check-in</SelectItem>
+                  <SelectItem value="checked_out">Check-out</SelectItem>
+                  <SelectItem value="cancelled">Canceladas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      {!isLoading && filteredReservations && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground px-1" data-testid="text-results-count">
+          <span>
+            {filteredReservations.length} reserva{filteredReservations.length !== 1 ? "s" : ""}
+            {dateMode === "today" && " para hoy"}
+            {dateMode === "upcoming" && " activas y futuras"}
+            {dateMode === "range" && dateFrom && ` desde ${dateFrom}${dateTo ? ` hasta ${dateTo}` : ""}`}
+          </span>
+        </div>
+      )}
 
       {/* Reservations Table */}
       {isLoading ? (

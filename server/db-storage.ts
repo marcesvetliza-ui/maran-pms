@@ -368,8 +368,40 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getReservations(): Promise<ReservationWithDetails[]> {
-    const allRes = await db.select().from(reservations).orderBy(desc(reservations.createdAt));
+  async getReservations(options?: {
+    dateFrom?: string;
+    dateTo?: string;
+    dateMode?: string;
+  }): Promise<ReservationWithDetails[]> {
+    const conditions = [];
+
+    if (options?.dateMode === "all") {
+    } else if (options?.dateFrom || options?.dateTo) {
+      if (options.dateFrom) {
+        conditions.push(gte(reservations.checkInDate, options.dateFrom));
+      }
+      if (options.dateTo) {
+        conditions.push(lte(reservations.checkInDate, options.dateTo));
+      }
+    } else {
+      const today = getArgentinaToday();
+      conditions.push(
+        or(
+          inArray(reservations.status, ["pending", "confirmed", "checked_in"]),
+          and(
+            gte(reservations.checkInDate, today),
+            ne(reservations.status, "cancelled")
+          )
+        )
+      );
+    }
+
+    let query = db.select().from(reservations);
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+
+    const allRes = await (query.orderBy(asc(reservations.checkInDate)) as any);
     const results: ReservationWithDetails[] = [];
     for (const r of allRes) {
       results.push(await this.enrichReservation(r));

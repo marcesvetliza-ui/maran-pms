@@ -718,7 +718,12 @@ export async function registerRoutes(
   // Reservations
   app.get("/api/reservations", async (req, res) => {
     try {
-      const reservations = await storage.getReservations();
+      const { dateFrom, dateTo, dateMode } = req.query;
+      const reservations = await storage.getReservations({
+        dateFrom: dateFrom as string | undefined,
+        dateTo: dateTo as string | undefined,
+        dateMode: dateMode as string | undefined,
+      });
       res.json(reservations);
     } catch (error) {
       res.status(500).json({ error: "Error fetching reservations" });
