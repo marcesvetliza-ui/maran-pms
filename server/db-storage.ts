@@ -179,7 +179,9 @@ export class DatabaseStorage implements IStorage {
     const allRooms = await db.select().from(rooms);
     const types = await db.select().from(roomTypes);
     const typesMap = new Map(types.map(t => [t.id, t]));
-    return allRooms.map(r => ({ ...r, roomType: typesMap.get(r.roomTypeId)! }));
+    return allRooms
+      .filter(r => typesMap.has(r.roomTypeId))
+      .map(r => ({ ...r, roomType: typesMap.get(r.roomTypeId)! }));
   }
 
   async getRoom(id: string): Promise<RoomWithType | undefined> {

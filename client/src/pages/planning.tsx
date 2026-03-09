@@ -1547,7 +1547,7 @@ export default function PlanningPage() {
       fromRoomNumber: fromRoom.roomNumber,
       toRoomId: toRoom.id,
       toRoomNumber: toRoom.roomNumber,
-      toRoomType: toRoom.roomType.name,
+      toRoomType: toRoom.roomType?.name ?? "",
     });
   };
 
@@ -1637,7 +1637,7 @@ export default function PlanningPage() {
       setSelectedCell({
         roomId: room.id,
         roomNumber: room.roomNumber,
-        roomTypeName: room.roomType.name,
+        roomTypeName: room.roomType?.name ?? "",
         roomTypeId: room.roomTypeId,
         bedConfig: room.bedConfig || "",
         checkInDate: day,
@@ -1812,7 +1812,7 @@ export default function PlanningPage() {
                                 <TooltipTrigger asChild>
                                   <div className="flex flex-col cursor-default" data-testid={`room-header-${room.id}`}>
                                     <span className="font-medium text-sm">{room.roomNumber}</span>
-                                    <span className="text-xs text-muted-foreground">{room.roomType.name}</span>
+                                    <span className="text-xs text-muted-foreground">{room.roomType?.name ?? ""}</span>
                                     {room.bedConfig && (
                                       <span className="text-[10px] text-muted-foreground">{room.bedConfig}</span>
                                     )}
@@ -1830,7 +1830,7 @@ export default function PlanningPage() {
                                 </TooltipTrigger>
                                 <TooltipContent side="right" className="max-w-[220px]">
                                   <div className="text-xs space-y-1">
-                                    <div className="font-semibold">{room.roomNumber} - {room.roomType.name}</div>
+                                    <div className="font-semibold">{room.roomNumber} - {room.roomType?.name ?? ""}</div>
                                     <div>Piso: {room.floor}</div>
                                     {room.bedConfig && (
                                       <div>Camaje: {bedConfigLabels[room.bedConfig] || room.bedConfig}</div>
@@ -1915,7 +1915,7 @@ export default function PlanningPage() {
                                     </TooltipTrigger>
                                     <TooltipContent side="top" className="max-w-[200px]">
                                       <div className="text-xs space-y-1">
-                                        <div className="font-semibold">{room.roomNumber} - {room.roomType.name}</div>
+                                        <div className="font-semibold">{room.roomNumber} - {room.roomType?.name ?? ""}</div>
                                         <div>Estado: {getStatusLabel(status)}</div>
                                         {reservation ? (
                                           <div className="border-t pt-1 mt-1">
