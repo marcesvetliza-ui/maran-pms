@@ -894,11 +894,26 @@ function ReservationDetailDialog({
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
   const [targetReservationId, setTargetReservationId] = useState<string>("");
+  const [editingChargeId, setEditingChargeId] = useState<string | null>(null);
   const [newCharge, setNewCharge] = useState({
     description: "",
     amount: "",
     category: "otros" as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
   });
+  const chargePresets = [
+    { label: "Cochera (por día)", description: "Cochera", amount: "2500", category: "otros" as const },
+    { label: "Media Pensión", description: "Media Pensión", amount: "4500", category: "restaurant" as const },
+    { label: "Pensión Completa", description: "Pensión Completa", amount: "8000", category: "restaurant" as const },
+    { label: "Desayuno adicional", description: "Desayuno adicional", amount: "1800", category: "restaurant" as const },
+    { label: "Cena", description: "Cena", amount: "3500", category: "restaurant" as const },
+    { label: "Frigobar", description: "Frigobar", amount: "1200", category: "minibar" as const },
+    { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" as const },
+    { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" as const },
+    { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" as const },
+    { label: "Cargo manual", description: "", amount: "", category: "otros" as const },
+  ];
+  const [chargeQty, setChargeQty] = useState(1);
+  const [selectedPreset, setSelectedPreset] = useState<typeof chargePresets[0] | null>(null);
   const [newPayment, setNewPayment] = useState({
     amount: "",
     method: "efectivo" as PaymentMethod,
@@ -1013,12 +1028,31 @@ function ReservationDetailDialog({
 
   const handleAddCharge = () => {
     if (!newCharge.description || !newCharge.amount) return;
+    const totalAmount = (parseFloat(newCharge.amount) * chargeQty).toFixed(2);
+    const descWithQty = chargeQty > 1 ? `${newCharge.description} (x${chargeQty})` : newCharge.description;
     addChargeMutation.mutate({
-      ...newCharge,
+      description: descWithQty,
+      amount: totalAmount,
+      category: newCharge.category,
       reservationId: reservation.id,
       date: getLocalToday(),
     });
+    setSelectedPreset(null);
+    setChargeQty(1);
   };
+
+  const updateChargeMutation = useMutation({
+    mutationFn: async ({ id, amount }: { id: string; amount: string }) => {
+      return apiRequest("PATCH", `/api/charges/${id}`, { amount });
+    },
+    onSuccess: () => {
+      refetchCharges();
+      toast({ title: "Cargo actualizado" });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar el cargo", variant: "destructive" });
+    },
+  });
 
   const handleAddPayment = () => {
     if (!newPayment.amount) return;
@@ -1179,49 +1213,120 @@ function ReservationDetailDialog({
               </div>
 
               {showAddCharge && (
-                <div className="p-3 border-b bg-muted/30">
-                  <div className="grid grid-cols-4 gap-2">
-                    <Input
-                      placeholder="Descripción"
-                      value={newCharge.description}
-                      onChange={(e) => setNewCharge({ ...newCharge, description: e.target.value })}
-                      className="col-span-2"
-                      data-testid="input-charge-description"
-                    />
-                    <Input
-                      type="number"
-                      placeholder="Monto"
-                      value={newCharge.amount}
-                      onChange={(e) => setNewCharge({ ...newCharge, amount: e.target.value })}
-                      data-testid="input-charge-amount"
-                    />
+                <div className="p-3 border-b bg-muted/30 space-y-3">
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">Tipo de cargo</Label>
                     <Select
-                      value={newCharge.category}
-                      onValueChange={(value) => setNewCharge({ ...newCharge, category: value as typeof newCharge.category })}
+                      value={selectedPreset?.label || ""}
+                      onValueChange={(val) => {
+                        const preset = chargePresets.find(p => p.label === val);
+                        if (preset) {
+                          setSelectedPreset(preset);
+                          setNewCharge({
+                            description: preset.description,
+                            amount: preset.amount,
+                            category: preset.category,
+                          });
+                          setChargeQty(1);
+                        }
+                      }}
                     >
-                      <SelectTrigger data-testid="select-charge-category">
-                        <SelectValue />
+                      <SelectTrigger data-testid="select-charge-preset">
+                        <SelectValue placeholder="Seleccionar tipo..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="restaurant">Restaurante</SelectItem>
-                        <SelectItem value="spa">Spa</SelectItem>
-                        <SelectItem value="minibar">Minibar</SelectItem>
-                        <SelectItem value="otros">Otros</SelectItem>
-                        <SelectItem value="adjustment">Ajuste</SelectItem>
+                        {chargePresets.map((p) => (
+                          <SelectItem key={p.label} value={p.label}>{p.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex justify-end gap-2 mt-2">
-                    <Button size="sm" variant="ghost" onClick={() => setShowAddCharge(false)}>
+
+                  <div className="grid grid-cols-4 gap-2 items-end">
+                    <div className="col-span-2">
+                      <Label className="text-xs text-muted-foreground mb-1 block">Descripción</Label>
+                      <Input
+                        placeholder="Descripción del cargo"
+                        value={newCharge.description}
+                        onChange={(e) => setNewCharge({ ...newCharge, description: e.target.value })}
+                        data-testid="input-charge-description"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Precio unit.</Label>
+                      <Input
+                        type="number"
+                        placeholder="0.00"
+                        value={newCharge.amount}
+                        onChange={(e) => setNewCharge({ ...newCharge, amount: e.target.value })}
+                        data-testid="input-charge-unit-price"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Cantidad</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={chargeQty}
+                        onChange={(e) => setChargeQty(Math.max(1, parseInt(e.target.value) || 1))}
+                        data-testid="input-charge-qty"
+                      />
+                    </div>
+                  </div>
+
+                  {newCharge.amount && chargeQty > 1 && (
+                    <div className="text-sm text-right text-muted-foreground">
+                      Total: <span className="font-semibold text-foreground">
+                        ${(parseFloat(newCharge.amount || "0") * chargeQty).toFixed(2)}
+                      </span>
+                      <span className="ml-1 text-xs">
+                        ({chargeQty} × ${parseFloat(newCharge.amount || "0").toFixed(2)})
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Categoría</Label>
+                      <Select
+                        value={newCharge.category}
+                        onValueChange={(value) => setNewCharge({ ...newCharge, category: value as typeof newCharge.category })}
+                      >
+                        <SelectTrigger data-testid="select-charge-category">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="restaurant">Restaurante</SelectItem>
+                          <SelectItem value="spa">Spa</SelectItem>
+                          <SelectItem value="minibar">Minibar / Frigobar</SelectItem>
+                          <SelectItem value="otros">Otros</SelectItem>
+                          <SelectItem value="adjustment">Ajuste</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setShowAddCharge(false);
+                        setSelectedPreset(null);
+                        setChargeQty(1);
+                        setNewCharge({ description: "", amount: "", category: "otros" });
+                      }}
+                    >
                       Cancelar
                     </Button>
-                    <Button 
-                      size="sm" 
-                      onClick={handleAddCharge} 
-                      disabled={addChargeMutation.isPending}
+                    <Button
+                      size="sm"
+                      onClick={handleAddCharge}
+                      disabled={!newCharge.description || !newCharge.amount || addChargeMutation.isPending}
                       data-testid="button-confirm-charge"
                     >
-                      Confirmar
+                      {addChargeMutation.isPending ? "Guardando..." : `Agregar${chargeQty > 1 ? ` (${chargeQty})` : ""}`}
                     </Button>
                   </div>
                 </div>
@@ -1230,13 +1335,44 @@ function ReservationDetailDialog({
               <div className="divide-y max-h-[150px] overflow-y-auto">
                 {consumptionCharges.map((charge) => (
                   <div key={charge.id} className="flex items-center justify-between p-3 text-sm" data-testid={`charge-row-${charge.id}`}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant="outline" className="text-xs">{categoryLabels[charge.category]}</Badge>
-                      <span>{charge.description}</span>
-                      <span className="text-muted-foreground text-xs">({charge.date})</span>
+                    <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+                      <Badge variant="outline" className="text-xs shrink-0">{categoryLabels[charge.category]}</Badge>
+                      <span className="truncate">{charge.description}</span>
+                      <span className="text-muted-foreground text-xs shrink-0">({charge.date})</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">${charge.amount}</span>
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      {editingChargeId === charge.id ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-muted-foreground text-xs">$</span>
+                          <Input
+                            type="number"
+                            className="h-6 w-20 text-xs p-1"
+                            defaultValue={parseFloat(charge.amount).toFixed(2)}
+                            autoFocus
+                            onBlur={(e) => {
+                              const val = e.target.value;
+                              if (val && parseFloat(val) !== parseFloat(charge.amount)) {
+                                updateChargeMutation.mutate({ id: charge.id, amount: parseFloat(val).toFixed(2) });
+                              }
+                              setEditingChargeId(null);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              if (e.key === "Escape") setEditingChargeId(null);
+                            }}
+                            data-testid={`input-edit-charge-${charge.id}`}
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          className="font-medium hover:text-primary hover:underline cursor-pointer tabular-nums"
+                          onClick={() => setEditingChargeId(charge.id)}
+                          title="Clic para editar monto"
+                          data-testid={`button-edit-charge-amount-${charge.id}`}
+                        >
+                          ${parseFloat(charge.amount).toFixed(2)}
+                        </button>
+                      )}
                       <Button 
                         size="icon" 
                         variant="ghost" 

@@ -149,6 +149,7 @@ Preferred communication style: Simple, everyday language.
 - [x] FIX-08: PDF confirmación muestra early check-in / late check-out con costos y horarios dinámicos
 - [x] FIX-09: Drag & drop por celda (DroppableCell) — permite mover reservas a otra habitación Y otra fecha, con recálculo de noches y validación de conflictos
 - [x] FIX-10: Diálogo de confirmación de movimiento muestra cambio de fechas cuando aplica
+- [x] FIX-11: Cargos predefinidos con cantidad en folio — selector de preset (cochera, media pensión, etc.), campo cantidad con multiplicador, edición inline de monto en cargos existentes
 
 ### NOTAS
 - Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación
