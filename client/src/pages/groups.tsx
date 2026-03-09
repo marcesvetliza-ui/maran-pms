@@ -109,7 +109,7 @@ function GroupFormDialog({
     eventDate: group?.eventDate || "",
     checkInDate: group?.checkInDate || today,
     checkOutDate: group?.checkOutDate || tomorrow,
-    status: group?.status || "tentative",
+    status: group?.status || "blocked",
     releaseDate: group?.releaseDate || "",
     notes: group?.notes || "",
   });
@@ -132,7 +132,7 @@ function GroupFormDialog({
         eventDate: group?.eventDate || "",
         checkInDate: group?.checkInDate || today,
         checkOutDate: group?.checkOutDate || tomorrow,
-        status: group?.status || "tentative",
+        status: group?.status || "blocked",
         releaseDate: group?.releaseDate || "",
         notes: group?.notes || "",
       });
@@ -412,25 +412,27 @@ function GroupFormDialog({
                 />
               </div>
 
-              <div>
-                <Label htmlFor="status">Estado</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value) => setFormData({ ...formData, status: value as GroupStatus })}
-                >
-                  <SelectTrigger data-testid="select-group-status">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="tentative">Tentativo</SelectItem>
-                    <SelectItem value="blocked">Bloqueado</SelectItem>
-                    <SelectItem value="confirmed">Confirmado</SelectItem>
-                    <SelectItem value="inhouse">En Casa</SelectItem>
-                    <SelectItem value="finished">Finalizado</SelectItem>
-                    <SelectItem value="cancelled">Cancelado</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {isEditing ? (
+                <div>
+                  <Label htmlFor="status">Estado</Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) => setFormData({ ...formData, status: value as GroupStatus })}
+                  >
+                    <SelectTrigger data-testid="select-group-status">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tentative">Tentativo</SelectItem>
+                      <SelectItem value="blocked">Bloqueado</SelectItem>
+                      <SelectItem value="confirmed">Confirmado</SelectItem>
+                      <SelectItem value="inhouse">En Casa</SelectItem>
+                      <SelectItem value="finished">Finalizado</SelectItem>
+                      <SelectItem value="cancelled">Cancelado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
 
               <div className="col-span-2">
                 <Label htmlFor="notes">Notas</Label>
@@ -645,6 +647,18 @@ export default function GroupsPage() {
     },
   });
 
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      apiRequest("PATCH", `/api/groups/${id}`, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
+      toast({ title: "Estado actualizado" });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar estado", variant: "destructive" });
+    },
+  });
+
   const filteredGroups = groups?.filter((group) => {
     const matchesSearch =
       group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -773,7 +787,29 @@ export default function GroupsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <GroupStatusBadge status={group.status} />
+                      <Select
+                        value={group.status}
+                        onValueChange={(value) =>
+                          updateStatusMutation.mutate({ id: group.id, status: value })
+                        }
+                      >
+                        <SelectTrigger
+                          className="h-7 w-36 text-xs border-0 bg-transparent p-0 focus:ring-0"
+                          data-testid={`select-status-${group.id}`}
+                        >
+                          <SelectValue>
+                            <GroupStatusBadge status={group.status} />
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="tentative"><GroupStatusBadge status="tentative" /></SelectItem>
+                          <SelectItem value="blocked"><GroupStatusBadge status="blocked" /></SelectItem>
+                          <SelectItem value="confirmed"><GroupStatusBadge status="confirmed" /></SelectItem>
+                          <SelectItem value="inhouse"><GroupStatusBadge status="inhouse" /></SelectItem>
+                          <SelectItem value="finished"><GroupStatusBadge status="finished" /></SelectItem>
+                          <SelectItem value="cancelled"><GroupStatusBadge status="cancelled" /></SelectItem>
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>

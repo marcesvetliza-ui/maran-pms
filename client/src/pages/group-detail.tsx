@@ -321,9 +321,11 @@ function AssignRoomDialog({
     queryKey: ["/api/rooms"],
   });
 
-  const availableRooms = rooms?.filter(
-    (r) => r.roomTypeId === block.roomTypeId && r.status === "available"
-  );
+  const availableRooms = rooms?.filter((r) => {
+    if (r.roomTypeId !== block.roomTypeId) return false;
+    if (r.status === "maintenance") return false;
+    return true;
+  });
 
   const assignMutation = useMutation({
     mutationFn: () =>
@@ -339,6 +341,9 @@ function AssignRoomDialog({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", group.id] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       toast({ title: "Habitación asignada exitosamente" });
       onSuccess();
       onOpenChange(false);
