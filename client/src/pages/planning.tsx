@@ -1382,7 +1382,7 @@ function DraggableReservationCell({
       {...listeners}
       {...attributes}
       onClick={(e) => {
-        if (e.defaultPrevented) return;
+        if (e?.defaultPrevented) return;
         if (!isDragging) onClick();
       }}
       className={`${className} ${isDragging ? "opacity-40 ring-2 ring-primary" : ""}`}
