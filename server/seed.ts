@@ -544,6 +544,51 @@ export async function refreshRealData() {
       )
     `);
 
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS maintenance_staff (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        phone TEXT,
+        email TEXT,
+        specialty TEXT,
+        is_active TEXT NOT NULL DEFAULT 'true'
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS work_orders (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        order_code TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        room_id VARCHAR,
+        location TEXT,
+        category TEXT NOT NULL DEFAULT 'general',
+        priority TEXT NOT NULL DEFAULT 'medium',
+        status TEXT NOT NULL DEFAULT 'pending',
+        assigned_to_id VARCHAR,
+        reported_by TEXT,
+        reported_at TIMESTAMP NOT NULL,
+        scheduled_date DATE,
+        completed_at TIMESTAMP,
+        completed_by TEXT,
+        estimated_cost DECIMAL(10,2),
+        actual_cost DECIMAL(10,2),
+        notes TEXT
+      )
+    `);
+
+    const existingStaff = await db.select({ id: maintenanceStaff.id }).from(maintenanceStaff);
+    if (existingStaff.length === 0) {
+      console.log("Seeding maintenance staff...");
+      await db.insert(maintenanceStaff).values([
+        { id: "ms1", name: "Carlos Rodriguez", phone: "+54 343 456-7890", email: "carlos.rodriguez@maransuites.com", specialty: "Plomeria y Electricidad", isActive: "true" },
+        { id: "ms2", name: "Miguel Fernandez", phone: "+54 343 456-7891", email: "miguel.fernandez@maransuites.com", specialty: "Climatizacion", isActive: "true" },
+        { id: "ms3", name: "Jorge Martinez", phone: "+54 343 456-7892", email: "jorge.martinez@maransuites.com", specialty: "Mobiliario y Carpinteria", isActive: "true" },
+        { id: "ms4", name: "Roberto Sanchez", phone: "+54 343 456-7893", email: "roberto.sanchez@maransuites.com", specialty: "General", isActive: "true" },
+      ]);
+    }
+
     const existingRooms = await db.select({ id: rooms.id }).from(rooms);
     const existingRoomIds = existingRooms.map(r => r.id);
 

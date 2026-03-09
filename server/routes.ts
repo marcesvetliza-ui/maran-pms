@@ -4502,6 +4502,7 @@ Only respond with the JSON object.`;
       });
       res.status(201).json(order);
     } catch (error) {
+      console.error("Error creating work order:", error);
       res.status(500).json({ error: "Error creating work order" });
     }
   });
