@@ -1122,6 +1122,33 @@ export const insertSpaTreatmentSchema = createInsertSchema(spaTreatments).omit({
 export type InsertSpaTreatment = z.infer<typeof insertSpaTreatmentSchema>;
 export type SpaTreatment = typeof spaTreatments.$inferSelect;
 
+// SPA Professionals
+export const spaProfessionals = pgTable("spa_professionals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  lastName: text("last_name"),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertSpaProfessionalSchema = createInsertSchema(spaProfessionals).omit({ id: true });
+export type InsertSpaProfessional = z.infer<typeof insertSpaProfessionalSchema>;
+export type SpaProfessional = typeof spaProfessionals.$inferSelect;
+
+// SPA Clients
+export const spaClients = pgTable("spa_clients", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name"),
+  phone: text("phone"),
+  email: text("email"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSpaClientSchema = createInsertSchema(spaClients).omit({ id: true, createdAt: true });
+export type InsertSpaClient = z.infer<typeof insertSpaClientSchema>;
+export type SpaClient = typeof spaClients.$inferSelect;
+
 // SPA Appointments (Turnos)
 export type SpaAppointmentStatus = "pending" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show";
 
@@ -1129,6 +1156,7 @@ export const spaAppointments = pgTable("spa_appointments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   cabinId: varchar("cabin_id").notNull(),
   treatmentId: varchar("treatment_id").notNull(),
+  professionalId: varchar("professional_id"),
   guestName: text("guest_name").notNull(),
   guestLastName: text("guest_last_name"),
   guestPhone: text("guest_phone"),

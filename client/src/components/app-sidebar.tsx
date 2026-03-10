@@ -39,6 +39,7 @@ import {
   FileCode,
   Plane,
   Receipt,
+  UserRound,
 } from "lucide-react";
 import {
   Sidebar,
@@ -419,6 +420,18 @@ export function AppSidebar() {
                   <Link href="/spa">
                     <Flower2 className="h-5 w-5" />
                     <span>SPA</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/spa-clients"}
+                  data-testid="nav-spa-clients"
+                >
+                  <Link href="/spa-clients">
+                    <UserRound className="h-5 w-5" />
+                    <span>Clientes SPA</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

@@ -56,7 +56,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Feature Specifications
 - **Reception/PMS Module**: Enhanced bed type management, advanced search, early/late check-in/out charges, multi-step check-out, mass check-in/out, group payment.
-- **SPA Module**: Cabin time overlap validation, streamlined edit/cancel processes, inventory management, weekly planning view, folio system.
+- **SPA Module**: Cabin time overlap validation, streamlined edit/cancel processes, inventory management, weekly planning view, folio system. Professionals CRUD (`spaProfessionals` table), SPA Clients DB (`spaClients` table) with dedicated page at `/spa-clients`, professional assignment on appointments (`professionalId`), client/reservation autocomplete in form, PDF confirmation print, room_charge auto-voucher close, Configuración tab with cabin and professional management.
 - **Restaurant Module**: Drag & drop floor plan editor, configurable reservation time slots, menu CRUD, detailed billing, recipe and cost calculation, waiter assignment, tableless areas, course-based ordering, bill splitting.
 - **Events Module**: Cancellation confirmations, room overlap validation, folio system with advanced payment options.
 - **Planning Calendar Enhancements**: Color-coded reservations by source, updated legend and tooltips. Drag & drop to move reservations between rooms (using @dnd-kit/core) with confirmation dialog and server-side overlap validation.

@@ -2222,23 +2222,38 @@ export default function RestaurantPage() {
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t">
                       <div className="space-y-2">
                         <Label>Tipo de Comprobante</Label>
-                        <Select value={effectiveReceiptType} onValueChange={setCloseReceiptType}>
-                          <SelectTrigger data-testid="select-receipt-type">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(activeReceiptTypes).map(([value, label]) => (
-                              <SelectItem key={value} value={value}>{label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {isTableless && (
-                          <p className="text-xs text-muted-foreground">Área sin mesas: solo Voucher</p>
+                        {effectivePaymentMethod === "cuenta_habitacion" ? (
+                          <div className="text-sm text-center text-muted-foreground bg-muted/50 rounded-md p-3">
+                            <Receipt className="h-4 w-4 mx-auto mb-1 text-blue-500" />
+                            Cargo a habitación.<br />
+                            <span className="text-xs">Se emitirá Voucher automáticamente.</span>
+                          </div>
+                        ) : (
+                          <>
+                            <Select value={effectiveReceiptType} onValueChange={setCloseReceiptType}>
+                              <SelectTrigger data-testid="select-receipt-type">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(activeReceiptTypes).map(([value, label]) => (
+                                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {isTableless && (
+                              <p className="text-xs text-muted-foreground">Área sin mesas: solo Voucher</p>
+                            )}
+                          </>
                         )}
                       </div>
                       <div className="space-y-2">
                         <Label>Forma de Pago</Label>
-                        <Select value={effectivePaymentMethod} onValueChange={setClosePaymentMethod}>
+                        <Select value={effectivePaymentMethod} onValueChange={(v) => {
+                          setClosePaymentMethod(v);
+                          if (v === "cuenta_habitacion") {
+                            setCloseReceiptType("voucher");
+                          }
+                        }}>
                           <SelectTrigger data-testid="select-payment-method">
                             <SelectValue />
                           </SelectTrigger>
@@ -2441,7 +2456,7 @@ export default function RestaurantPage() {
                       const disc = parseFloat(closeDiscount || "0");
                       closeOrderMutation.mutate({
                         orderId: currentOrder.id,
-                        receiptType: closeReceiptType,
+                        receiptType: closePaymentMethod === "cuenta_habitacion" ? "voucher" : closeReceiptType,
                         paymentMethod: closePaymentMethod,
                         discount: disc > 0 ? disc : undefined,
                         discountType: disc > 0 ? closeDiscountType : undefined,

@@ -16,6 +16,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks } from "date-fns";
 import { es } from "date-fns/locale";
+import { Label } from "@/components/ui/label";
 import { 
   Plus, 
   ChevronLeft, 
@@ -37,6 +38,9 @@ import {
   LayoutGrid,
   AlertTriangle,
   Package,
+  Settings,
+  CheckCircle2,
+  Printer,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -56,10 +60,28 @@ type SpaTreatment = {
   isActive: string | null;
 };
 
+type SpaProfessional = {
+  id: string;
+  name: string;
+  lastName: string | null;
+  isActive: string | null;
+};
+
+type SpaClientType = {
+  id: string;
+  firstName: string;
+  lastName: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+  createdAt: string;
+};
+
 type SpaAppointment = {
   id: string;
   cabinId: string;
   treatmentId: string;
+  professionalId: string | null;
   guestName: string;
   guestLastName: string | null;
   guestPhone: string | null;
@@ -179,6 +201,7 @@ TIME_SLOTS.push("22:00");
 const appointmentFormSchema = z.object({
   cabinId: z.string().min(1, "Seleccione un gabinete"),
   treatmentId: z.string().min(1, "Seleccione un tratamiento"),
+  professionalId: z.string().optional(),
   guestName: z.string().min(1, "El nombre es requerido"),
   guestLastName: z.string().optional(),
   guestPhone: z.string().optional(),
@@ -204,7 +227,7 @@ type SpaTreatmentCategory = {
 };
 
 type ViewMode = "daily" | "weekly";
-type SpaTab = "agenda" | "tratamientos" | "insumos";
+type SpaTab = "agenda" | "tratamientos" | "insumos" | "configuracion";
 
 export default function SpaPage() {
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
@@ -230,6 +253,14 @@ export default function SpaPage() {
   const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
   const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
+  const [cabinDialogOpen, setCabinDialogOpen] = useState(false);
+  const [editingCabin, setEditingCabin] = useState<SpaCabin | null>(null);
+  const [cabinName, setCabinName] = useState("");
+  const [cabinDescription, setCabinDescription] = useState("");
+  const [professionalDialogOpen, setProfessionalDialogOpen] = useState(false);
+  const [editingProfessional, setEditingProfessional] = useState<SpaProfessional | null>(null);
+  const [professionalName, setProfessionalName] = useState("");
+  const [professionalLastName, setProfessionalLastName] = useState("");
   const { toast } = useToast();
 
   const { data: cabins = [], isLoading: cabinsLoading } = useQuery<SpaCabin[]>({
@@ -242,6 +273,16 @@ export default function SpaPage() {
 
   const { data: treatmentCategories = [] } = useQuery<SpaTreatmentCategory[]>({
     queryKey: ["/api/spa/treatment-categories"],
+  });
+
+  const { data: professionals = [] } = useQuery<SpaProfessional[]>({
+    queryKey: ["/api/spa/professionals"],
+  });
+
+  const activeProfessionals = professionals.filter(p => p.isActive === "true");
+
+  const { data: spaClients = [] } = useQuery<SpaClientType[]>({
+    queryKey: ["/api/spa/clients"],
   });
 
   const { data: checkedInReservations = [] } = useQuery<Reservation[]>({
@@ -307,6 +348,7 @@ export default function SpaPage() {
     defaultValues: {
       cabinId: "",
       treatmentId: "",
+      professionalId: "",
       guestName: "",
       guestLastName: "",
       guestPhone: "",
@@ -334,6 +376,7 @@ export default function SpaPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...data,
+          professionalId: data.professionalId || null,
           endTime,
           status: "confirmed",
         }),
@@ -350,7 +393,7 @@ export default function SpaPage() {
       toast({ title: "Turno creado correctamente" });
       setIsNewDialogOpen(false);
       form.reset({
-        cabinId: "", treatmentId: "", guestName: "", guestLastName: "",
+        cabinId: "", treatmentId: "", professionalId: "", guestName: "", guestLastName: "",
         guestPhone: "", guestEmail: "", appointmentDate: dateStr,
         startTime: "", reservationId: "", notes: "",
       });
@@ -376,6 +419,7 @@ export default function SpaPage() {
         body: JSON.stringify({
           cabinId: data.cabinId,
           treatmentId: data.treatmentId,
+          professionalId: data.professionalId || null,
           guestName: data.guestName,
           guestLastName: data.guestLastName || null,
           guestPhone: data.guestPhone || null,
@@ -457,14 +501,21 @@ export default function SpaPage() {
         amount, method, isAdvance, reservationId: reservationId || null,
       });
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       refetchAccount();
-      toast({ title: "Pago registrado" });
       setIsAddPaymentOpen(false);
       setPaymentAmount("");
       setPaymentMethod("");
       setPaymentReservationId("");
       setIsPaymentAdvance(false);
+      toast({ title: "Pago registrado" });
+
+      if (variables.method === "room_charge" && selectedAccount) {
+        closeAccountMutation.mutate({
+          accountId: selectedAccount.id,
+          receiptType: "voucher",
+        });
+      }
     },
   });
 
@@ -560,6 +611,55 @@ export default function SpaPage() {
     setIsTreatmentDialogOpen(true);
   };
 
+  const saveCabinMutation = useMutation({
+    mutationFn: async (data: { name: string; description: string }) => {
+      return apiRequest(editingCabin ? "PATCH" : "POST",
+        editingCabin ? `/api/spa/cabins/${editingCabin.id}` : "/api/spa/cabins",
+        data
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/cabins"] });
+      toast({ title: editingCabin ? "Gabinete actualizado" : "Gabinete creado" });
+      setCabinDialogOpen(false);
+      setEditingCabin(null);
+      setCabinName("");
+      setCabinDescription("");
+    },
+    onError: () => {
+      toast({ title: "Error al guardar gabinete", variant: "destructive" });
+    },
+  });
+
+  const saveProfessionalMutation = useMutation({
+    mutationFn: async (data: { name: string; lastName: string }) => {
+      return apiRequest(editingProfessional ? "PATCH" : "POST",
+        editingProfessional ? `/api/spa/professionals/${editingProfessional.id}` : "/api/spa/professionals",
+        data
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/professionals"] });
+      toast({ title: editingProfessional ? "Profesional actualizado" : "Profesional creado" });
+      setProfessionalDialogOpen(false);
+      setEditingProfessional(null);
+      setProfessionalName("");
+      setProfessionalLastName("");
+    },
+    onError: () => {
+      toast({ title: "Error al guardar profesional", variant: "destructive" });
+    },
+  });
+
+  const toggleProfessionalMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: string }) => {
+      return apiRequest("PATCH", `/api/spa/professionals/${id}`, { isActive });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/professionals"] });
+    },
+  });
+
   const handlePreviousDay = () => setSelectedDate(addDays(selectedDate, -1));
   const handleNextDay = () => setSelectedDate(addDays(selectedDate, 1));
   const handleToday = () => setSelectedDate(startOfDay(new Date()));
@@ -570,7 +670,7 @@ export default function SpaPage() {
     setIsEditMode(false);
     setEditingAppointmentId(null);
     form.reset({
-      cabinId, treatmentId: "", guestName: "", guestLastName: "",
+      cabinId, treatmentId: "", professionalId: "", guestName: "", guestLastName: "",
       guestPhone: "", guestEmail: "", appointmentDate: dateStr,
       startTime: time, reservationId: "", notes: "",
     });
@@ -583,6 +683,7 @@ export default function SpaPage() {
     form.reset({
       cabinId: apt.cabinId,
       treatmentId: apt.treatmentId,
+      professionalId: apt.professionalId || "",
       guestName: apt.guestName,
       guestLastName: apt.guestLastName || "",
       guestPhone: apt.guestPhone || "",
@@ -682,6 +783,79 @@ export default function SpaPage() {
     return "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300";
   };
 
+  const handleReservationAutoFill = (reservationId: string) => {
+    const res = checkedInReservations.find(r => r.id === reservationId);
+    if (res?.guest) {
+      form.setValue("guestName", res.guest.firstName || "");
+      form.setValue("guestLastName", res.guest.lastName || "");
+      form.setValue("guestPhone", res.guest.phone || "");
+      form.setValue("guestEmail", res.guest.email || "");
+    }
+  };
+
+  const handleSpaClientAutoFill = (clientId: string) => {
+    const client = spaClients.find(c => c.id === clientId);
+    if (client) {
+      form.setValue("guestName", client.firstName);
+      form.setValue("guestLastName", client.lastName || "");
+      form.setValue("guestPhone", client.phone || "");
+      form.setValue("guestEmail", client.email || "");
+    }
+  };
+
+  const printSpaConfirmation = (apt: SpaAppointment) => {
+    const treatment = treatments.find(t => t.id === apt.treatmentId);
+    const cabin = cabins.find(c => c.id === apt.cabinId);
+    const professional = professionals.find(p => p.id === apt.professionalId);
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    const esc = (str: string) => {
+      const d = printWindow.document.createElement("div");
+      d.textContent = str;
+      return d.innerHTML;
+    };
+
+    const clientName = esc(`${apt.guestName} ${apt.guestLastName || ""}`);
+    const dateStr = esc(format(parseISO(apt.appointmentDate), "EEEE d 'de' MMMM yyyy", { locale: es }));
+    const timeRange = esc(`${apt.startTime} - ${apt.endTime}`);
+    const treatmentName = esc(treatment?.name || "N/A");
+    const duration = `${treatment?.durationMinutes || 0} minutos`;
+    const cabinName = esc(cabin?.name || "N/A");
+    const profName = professional ? esc(`${professional.name} ${professional.lastName || ""}`) : "";
+    const price = `$${treatment ? parseFloat(treatment.price).toLocaleString() : "0"}`;
+    const notes = apt.notes ? esc(apt.notes) : "";
+
+    printWindow.document.write(`
+      <html><head><title>Confirmación SPA</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+        h1 { text-align: center; color: #333; border-bottom: 2px solid #333; padding-bottom: 10px; }
+        .info { margin: 15px 0; }
+        .info label { font-weight: bold; display: inline-block; width: 140px; }
+        .footer { margin-top: 30px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #ccc; padding-top: 10px; }
+      </style></head><body>
+      <h1>Confirmación de Turno SPA</h1>
+      <h2 style="text-align:center;color:#666;">Maran Suites & Towers</h2>
+      <div class="info"><label>Cliente:</label> ${clientName}</div>
+      <div class="info"><label>Fecha:</label> ${dateStr}</div>
+      <div class="info"><label>Horario:</label> ${timeRange}</div>
+      <div class="info"><label>Tratamiento:</label> ${treatmentName}</div>
+      <div class="info"><label>Duración:</label> ${duration}</div>
+      <div class="info"><label>Gabinete:</label> ${cabinName}</div>
+      ${profName ? `<div class="info"><label>Profesional:</label> ${profName}</div>` : ""}
+      <div class="info"><label>Precio:</label> ${price}</div>
+      ${notes ? `<div class="info"><label>Notas:</label> ${notes}</div>` : ""}
+      <div class="footer">
+        <p>Le agradecemos por elegir nuestro SPA. ¡Lo esperamos!</p>
+        <p>Por cancelaciones, comunicarse con al menos 2 horas de anticipación.</p>
+      </div>
+      </body></html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
   if (cabinsLoading || appointmentsLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -727,6 +901,14 @@ export default function SpaPage() {
             data-testid="tab-insumos"
           >
             <Package className="h-4 w-4 mr-1" /> Insumos
+          </Button>
+          <Button
+            variant={activeTab === "configuracion" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("configuracion")}
+            data-testid="tab-configuracion"
+          >
+            <Settings className="h-4 w-4 mr-1" /> Configuración
           </Button>
         </div>
       </div>
@@ -1046,6 +1228,138 @@ export default function SpaPage() {
         </Card>
       )}
 
+      {activeTab === "configuracion" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <CardTitle className="text-lg">Gabinetes</CardTitle>
+              <Button size="sm" onClick={() => { setEditingCabin(null); setCabinName(""); setCabinDescription(""); setCabinDialogOpen(true); }} data-testid="button-new-cabin">
+                <Plus className="h-4 w-4 mr-1" /> Nuevo
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {cabins.map((cabin) => (
+                  <div key={cabin.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`cabin-row-${cabin.id}`}>
+                    <div>
+                      <p className="text-sm font-medium">{cabin.name}</p>
+                      {cabin.description && <p className="text-xs text-muted-foreground">{cabin.description}</p>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={cabin.isActive === "true" ? "default" : "secondary"}>
+                        {cabin.isActive === "true" ? "Activo" : "Inactivo"}
+                      </Badge>
+                      <Button variant="ghost" size="icon" onClick={() => {
+                        setEditingCabin(cabin);
+                        setCabinName(cabin.name);
+                        setCabinDescription(cabin.description || "");
+                        setCabinDialogOpen(true);
+                      }} data-testid={`button-edit-cabin-${cabin.id}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {cabins.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay gabinetes configurados</p>}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <CardTitle className="text-lg">Profesionales</CardTitle>
+              <Button size="sm" onClick={() => { setEditingProfessional(null); setProfessionalName(""); setProfessionalLastName(""); setProfessionalDialogOpen(true); }} data-testid="button-new-professional">
+                <Plus className="h-4 w-4 mr-1" /> Nuevo
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {professionals.map((prof) => (
+                  <div key={prof.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`professional-row-${prof.id}`}>
+                    <div>
+                      <p className="text-sm font-medium">{prof.name} {prof.lastName || ""}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleProfessionalMutation.mutate({ id: prof.id, isActive: prof.isActive === "true" ? "false" : "true" })}
+                        data-testid={`button-toggle-professional-${prof.id}`}
+                      >
+                        {prof.isActive === "true" ? (
+                          <Badge variant="default"><CheckCircle2 className="h-3 w-3 mr-1" /> Activo</Badge>
+                        ) : (
+                          <Badge variant="secondary">Inactivo</Badge>
+                        )}
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => {
+                        setEditingProfessional(prof);
+                        setProfessionalName(prof.name);
+                        setProfessionalLastName(prof.lastName || "");
+                        setProfessionalDialogOpen(true);
+                      }} data-testid={`button-edit-professional-${prof.id}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {professionals.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay profesionales configurados</p>}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Dialog open={cabinDialogOpen} onOpenChange={setCabinDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingCabin ? "Editar Gabinete" : "Nuevo Gabinete"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Nombre</Label>
+              <Input value={cabinName} onChange={(e) => setCabinName(e.target.value)} data-testid="input-cabin-name" />
+            </div>
+            <div>
+              <Label>Descripción</Label>
+              <Input value={cabinDescription} onChange={(e) => setCabinDescription(e.target.value)} data-testid="input-cabin-description" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCabinDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={() => saveCabinMutation.mutate({ name: cabinName, description: cabinDescription })} disabled={!cabinName || saveCabinMutation.isPending} data-testid="button-save-cabin">
+              {saveCabinMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {editingCabin ? "Guardar" : "Crear"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={professionalDialogOpen} onOpenChange={setProfessionalDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingProfessional ? "Editar Profesional" : "Nuevo Profesional"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Nombre</Label>
+              <Input value={professionalName} onChange={(e) => setProfessionalName(e.target.value)} data-testid="input-professional-name" />
+            </div>
+            <div>
+              <Label>Apellido</Label>
+              <Input value={professionalLastName} onChange={(e) => setProfessionalLastName(e.target.value)} data-testid="input-professional-lastname" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProfessionalDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={() => saveProfessionalMutation.mutate({ name: professionalName, lastName: professionalLastName })} disabled={!professionalName || saveProfessionalMutation.isPending} data-testid="button-save-professional">
+              {saveProfessionalMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {editingProfessional ? "Guardar" : "Crear"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* New / Edit Appointment Dialog */}
       <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); } }}>
         <DialogContent className="max-w-md">
@@ -1110,10 +1424,25 @@ export default function SpaPage() {
                 </FormItem>
               )} />
 
+              <FormField control={form.control} name="professionalId" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Profesional (opcional)</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value || undefined}>
+                    <FormControl><SelectTrigger data-testid="select-professional"><SelectValue placeholder="Sin asignar" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {activeProfessionals.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name} {p.lastName || ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
               <FormField control={form.control} name="reservationId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Huésped del Hotel (opcional)</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value || undefined}>
+                  <Select onValueChange={(val) => { field.onChange(val); handleReservationAutoFill(val); }} value={field.value || undefined}>
                     <FormControl><SelectTrigger data-testid="select-reservation"><SelectValue placeholder="Sin asociar" /></SelectTrigger></FormControl>
                     <SelectContent>
                       {checkedInReservations.map((res) => (
@@ -1126,6 +1455,20 @@ export default function SpaPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {spaClients.length > 0 && (
+                <div>
+                  <Label className="text-sm font-medium">Cliente SPA (opcional)</Label>
+                  <Select onValueChange={handleSpaClientAutoFill}>
+                    <SelectTrigger data-testid="select-spa-client"><SelectValue placeholder="Seleccionar cliente registrado" /></SelectTrigger>
+                    <SelectContent>
+                      {spaClients.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.firstName} {c.lastName || ""} {c.phone ? `- ${c.phone}` : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="guestName" render={({ field }) => (
@@ -1230,6 +1573,14 @@ export default function SpaPage() {
                   <p className="text-sm text-muted-foreground">
                     {cabins.find(c => c.id === selectedAppointment.cabinId)?.name || "N/A"}
                   </p>
+                  {selectedAppointment.professionalId && (
+                    <>
+                      <h4 className="text-sm font-medium">Profesional</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {(() => { const p = professionals.find(p => p.id === selectedAppointment.professionalId); return p ? `${p.name} ${p.lastName || ""}` : "N/A"; })()}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1270,6 +1621,9 @@ export default function SpaPage() {
               )}
 
               <DialogFooter className="flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => printSpaConfirmation(selectedAppointment)} data-testid="button-print-confirmation">
+                  <Printer className="h-4 w-4 mr-1" /> Imprimir
+                </Button>
                 {["pending", "confirmed"].includes(selectedAppointment.status) && (
                   <Button variant="outline" size="sm" onClick={() => handleEditAppointment(selectedAppointment)} data-testid="button-edit-appointment">
                     <Pencil className="h-4 w-4 mr-1" /> Editar
@@ -1433,26 +1787,33 @@ export default function SpaPage() {
 
                 {selectedAccount.status === "open" && (
                   <div className="border-t pt-4 space-y-3">
-                    <div>
-                      <label className="text-sm font-medium">Comprobante</label>
-                      <Select value={receiptType} onValueChange={setReceiptType}>
-                        <SelectTrigger data-testid="select-receipt-type">
-                          <SelectValue placeholder="Seleccionar comprobante" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ticket">Ticket</SelectItem>
-                          <SelectItem value="factura_a">Factura A</SelectItem>
-                          <SelectItem value="factura_b">Factura B</SelectItem>
-                          <SelectItem value="factura_c">Factura C</SelectItem>
-                          <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
-                          <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {selectedAccount.payments.some(p => p.method === "room_charge") ? (
+                      <p className="text-sm text-muted-foreground text-center">Cargo a habitación. Se emitirá Voucher automáticamente.</p>
+                    ) : (
+                      <div>
+                        <label className="text-sm font-medium">Comprobante</label>
+                        <Select value={receiptType} onValueChange={setReceiptType}>
+                          <SelectTrigger data-testid="select-receipt-type">
+                            <SelectValue placeholder="Seleccionar comprobante" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ticket">Ticket</SelectItem>
+                            <SelectItem value="factura_a">Factura A</SelectItem>
+                            <SelectItem value="factura_b">Factura B</SelectItem>
+                            <SelectItem value="factura_c">Factura C</SelectItem>
+                            <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
+                            <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <Button
                       className="w-full"
-                      disabled={accountBalance > 0 || !receiptType || closeAccountMutation.isPending}
-                      onClick={() => closeAccountMutation.mutate({ accountId: selectedAccount.id, receiptType })}
+                      disabled={accountBalance > 0 || (!receiptType && !selectedAccount.payments.some(p => p.method === "room_charge")) || closeAccountMutation.isPending}
+                      onClick={() => closeAccountMutation.mutate({
+                        accountId: selectedAccount.id,
+                        receiptType: selectedAccount.payments.some(p => p.method === "room_charge") ? "voucher" : receiptType,
+                      })}
                       data-testid="button-close-folio"
                     >
                       {closeAccountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

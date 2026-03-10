@@ -40,6 +40,7 @@ import DashboardExecutivePage from "@/pages/dashboard-executive";
 import CashRegisterPage from "@/pages/cash-register";
 import SourceCodePage from "@/pages/source-code";
 import AdminPage from "@/pages/admin";
+import SpaClientsPage from "@/pages/spa-clients";
 import LoginPage from "@/pages/login";
 import HelpChat from "@/components/help-chat";
 import { LogOut, User } from "lucide-react";
@@ -85,6 +86,7 @@ function Router() {
       <Route path="/restaurant" component={RestaurantPage} />
       <Route path="/inventory" component={InventoryPage} />
       <Route path="/spa" component={SpaPage} />
+      <Route path="/spa-clients" component={SpaClientsPage} />
       <Route path="/events" component={EventsPage} />
       <Route path="/maintenance" component={MaintenancePage} />
       <Route path="/administration" component={AdministrationPage} />

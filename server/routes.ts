@@ -8,8 +8,8 @@ import { storage, getArgentinaToday } from "./db-storage";
 import { insertGuestReviewSchema } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
-import { systemUsers } from "@shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
+import { eq, sql, desc } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 
 function timeToMinutes(time: string): number {
@@ -3444,7 +3444,7 @@ Only respond with the JSON object.`;
 
   app.post("/api/spa/appointments", async (req, res) => {
     try {
-      const { cabinId, treatmentId, guestName, guestLastName, guestPhone, guestEmail, reservationId, appointmentDate, startTime, endTime, status, notes } = req.body;
+      const { cabinId, treatmentId, professionalId, guestName, guestLastName, guestPhone, guestEmail, reservationId, appointmentDate, startTime, endTime, status, notes } = req.body;
       
       if (!cabinId || !treatmentId || !guestName || !appointmentDate || !startTime || !endTime) {
         return res.status(400).json({ error: "cabinId, treatmentId, guestName, appointmentDate, startTime, and endTime are required" });
@@ -3471,6 +3471,7 @@ Only respond with the JSON object.`;
       const appointment = await storage.createSpaAppointment({
         cabinId,
         treatmentId,
+        professionalId: professionalId || null,
         guestName,
         guestLastName: guestLastName || null,
         guestPhone: guestPhone || null,
@@ -3784,6 +3785,85 @@ Only respond with the JSON object.`;
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting account item" });
+    }
+  });
+
+  // SPA Professionals
+  app.get("/api/spa/professionals", async (req, res) => {
+    try {
+      const professionals = await db.select().from(spaProfessionals);
+      res.json(professionals);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching professionals" });
+    }
+  });
+
+  app.post("/api/spa/professionals", async (req, res) => {
+    try {
+      const [created] = await db.insert(spaProfessionals).values(req.body).returning();
+      res.json(created);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating professional" });
+    }
+  });
+
+  app.patch("/api/spa/professionals/:id", async (req, res) => {
+    try {
+      const [updated] = await db.update(spaProfessionals)
+        .set(req.body)
+        .where(eq(spaProfessionals.id, req.params.id))
+        .returning();
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating professional" });
+    }
+  });
+
+  // SPA Clients
+  app.get("/api/spa/clients", async (req, res) => {
+    try {
+      const { search } = req.query;
+      const clients = await db.select().from(spaClients).orderBy(desc(spaClients.createdAt));
+      if (search) {
+        const s = (search as string).toLowerCase();
+        return res.json(clients.filter(c =>
+          c.firstName.toLowerCase().includes(s) ||
+          (c.lastName || "").toLowerCase().includes(s) ||
+          (c.phone || "").includes(s) ||
+          (c.email || "").toLowerCase().includes(s)
+        ));
+      }
+      res.json(clients);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa clients" });
+    }
+  });
+
+  app.post("/api/spa/clients", async (req, res) => {
+    try {
+      const [created] = await db.insert(spaClients).values(req.body).returning();
+      res.json(created);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating spa client" });
+    }
+  });
+
+  app.patch("/api/spa/clients/:id", async (req, res) => {
+    try {
+      const [updated] = await db.update(spaClients)
+        .set(req.body).where(eq(spaClients.id, req.params.id)).returning();
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating spa client" });
+    }
+  });
+
+  app.delete("/api/spa/clients/:id", async (req, res) => {
+    try {
+      await db.delete(spaClients).where(eq(spaClients.id, req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting spa client" });
     }
   });
 

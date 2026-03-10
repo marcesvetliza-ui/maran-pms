@@ -578,6 +578,31 @@ export async function refreshRealData() {
       )
     `);
 
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spa_professionals (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        last_name TEXT,
+        is_active TEXT DEFAULT 'true'
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spa_clients (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        first_name TEXT NOT NULL,
+        last_name TEXT,
+        phone TEXT,
+        email TEXT,
+        notes TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE spa_appointments ADD COLUMN IF NOT EXISTS professional_id VARCHAR
+    `);
+
     const existingStaff = await db.select({ id: maintenanceStaff.id }).from(maintenanceStaff);
     if (existingStaff.length === 0) {
       console.log("Seeding maintenance staff...");
