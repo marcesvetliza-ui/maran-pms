@@ -1508,6 +1508,24 @@ export default function PlanningPage() {
   const [newReservationOpen, setNewReservationOpen] = useState(false);
   const [newReservationDefaults, setNewReservationDefaults] = useState<{ roomId?: string; roomTypeId?: string; checkInDate?: string } | null>(null);
 
+  const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string } | null>(null);
+
+  const updateBedConfigMutation = useMutation({
+    mutationFn: async ({ roomId, bedConfig }: { roomId: string; bedConfig: string }) => {
+      const res = await apiRequest("PATCH", `/api/rooms/${roomId}`, { bedConfig });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setEditingBedConfig(null);
+      toast({ title: "Camaje actualizado" });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar camaje", variant: "destructive" });
+    },
+  });
+
   const [dragActiveId, setDragActiveId] = useState<string | null>(null);
   const [moveConfirm, setMoveConfirm] = useState<{
     reservationId: string;
@@ -1888,7 +1906,17 @@ export default function PlanningPage() {
                                     <span className="font-medium text-sm">{room.roomNumber}</span>
                                     <span className="text-xs text-muted-foreground">{room.roomType?.name ?? ""}</span>
                                     {room.bedConfig && (
-                                      <span className="text-[10px] text-muted-foreground">{room.bedConfig}</span>
+                                      <span
+                                        className="text-[10px] text-muted-foreground underline decoration-dotted cursor-pointer hover:text-foreground"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "" });
+                                        }}
+                                        title="Click para cambiar camaje"
+                                        data-testid={`button-edit-bedconfig-${room.id}`}
+                                      >
+                                        {bedConfigLabels[room.bedConfig] || room.bedConfig}
+                                      </span>
                                     )}
                                     {room.features && room.features.length > 0 && (
                                       <div className="flex flex-row items-center gap-0.5 mt-0.5">
@@ -2179,6 +2207,51 @@ export default function PlanningPage() {
               data-testid="button-confirm-move"
             >
               {moveReservationMutation.isPending ? "Moviendo..." : "Confirmar Movimiento"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingBedConfig} onOpenChange={(open) => !open && setEditingBedConfig(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Cambiar Camaje — Hab. {editingBedConfig?.roomNumber}</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Label className="text-sm mb-2 block">Configuración de camas</Label>
+            <Select
+              value={editingBedConfig?.current || ""}
+              onValueChange={(value) => setEditingBedConfig(prev => prev ? { ...prev, current: value } : null)}
+            >
+              <SelectTrigger data-testid="select-bedconfig">
+                <SelectValue placeholder="Seleccionar" />
+              </SelectTrigger>
+              <SelectContent>
+                {[
+                  { value: "MAT", label: "Matrimonial" },
+                  { value: "TWIN", label: "Twin (2 camas)" },
+                  { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
+                  { value: "TWIN_CC", label: "Twin + Cama cuna" },
+                  { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
+                  { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
+                ].map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingBedConfig(null)}>Cancelar</Button>
+            <Button
+              onClick={() => {
+                if (editingBedConfig) {
+                  updateBedConfigMutation.mutate({ roomId: editingBedConfig.roomId, bedConfig: editingBedConfig.current });
+                }
+              }}
+              disabled={updateBedConfigMutation.isPending}
+              data-testid="button-confirm-bedconfig"
+            >
+              {updateBedConfigMutation.isPending ? "Guardando..." : "Guardar"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -155,6 +155,8 @@ Preferred communication style: Simple, everyday language.
 - [x] FIX-12: Fechas dd/mm/aaaa — `formatDateAR()` en `@/lib/utils`, aplicado en reservations, check-in, check-out, folio (cargos/pagos)
 - [x] FIX-13: Filtro historial en Reservas — botón "Ver historial" oculta checked_out y cancelled pasados por defecto, búsqueda incluye reservationCode
 - [x] FIX-14: Colores planning simplificados — 3 grupos (OTA indigo, Directo azul, Empresa/Agencia verde) con canal real en tooltip
+- [x] FIX-15: Overbooking prevention — POST/PATCH /api/reservations valida solapamiento via checkOverbooking antes de crear/editar, error 409 con mensaje descriptivo
+- [x] FIX-16: Camaje clickeable en Planning — click en bedConfig de columna izquierda abre dialog con selector para cambiar configuración de camas
 
 ### NOTAS
 - Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación

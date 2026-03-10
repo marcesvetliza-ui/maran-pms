@@ -893,6 +893,21 @@ export async function registerRoutes(
         reservationCode: req.body.reservationCode || storage.generateReservationCode(),
         createdAt: req.body.createdAt ? new Date(req.body.createdAt) : new Date(),
       };
+
+      if (data.roomId && data.checkInDate && data.checkOutDate) {
+        const hasConflict = await storage.checkOverbooking(
+          data.roomId,
+          data.checkInDate,
+          data.checkOutDate
+        );
+        if (hasConflict) {
+          const room = await storage.getRoom(data.roomId);
+          return res.status(409).json({
+            error: `La habitación ${room?.roomNumber || data.roomId} ya tiene una reserva en esas fechas.`,
+          });
+        }
+      }
+
       const reservation = await storage.createReservation(data);
 
       const today = new Date().toISOString().split("T")[0];
@@ -945,24 +960,23 @@ export async function registerRoutes(
         }
       }
 
+      const finalRoomId = req.body.roomId || existing.roomId;
+      const finalCheckIn = req.body.checkInDate || existing.checkInDate;
+      const finalCheckOut = req.body.checkOutDate || existing.checkOutDate;
       const roomChanged = req.body.roomId && req.body.roomId !== existing.roomId;
       const datesChanged = (req.body.checkInDate && req.body.checkInDate !== existing.checkInDate) ||
                            (req.body.checkOutDate && req.body.checkOutDate !== existing.checkOutDate);
       if (roomChanged || datesChanged) {
-        const allReservations = await storage.getReservations();
-        const targetRoomId = req.body.roomId || existing.roomId;
-        const checkIn = req.body.checkInDate || existing.checkInDate;
-        const checkOut = req.body.checkOutDate || existing.checkOutDate;
-        const conflict = allReservations.find(r =>
-          r.id !== req.params.id &&
-          r.roomId === targetRoomId &&
-          r.status !== "cancelled" &&
-          r.checkInDate < checkOut &&
-          r.checkOutDate > checkIn
+        const hasConflict = await storage.checkOverbooking(
+          finalRoomId,
+          finalCheckIn,
+          finalCheckOut,
+          req.params.id
         );
-        if (conflict) {
+        if (hasConflict) {
+          const room = await storage.getRoom(finalRoomId);
           return res.status(409).json({
-            error: "La habitación destino tiene otra reserva en esas fechas.",
+            error: `La habitación ${room?.roomNumber || finalRoomId} ya tiene una reserva en esas fechas.`,
           });
         }
       }

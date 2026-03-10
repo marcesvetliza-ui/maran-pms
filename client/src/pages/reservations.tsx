@@ -423,10 +423,19 @@ export function ReservationFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
+    onError: (error: any) => {
+      let message = "No se pudo guardar la reserva. Intente nuevamente.";
+      try {
+        const text = error?.message || "";
+        const jsonStart = text.indexOf("{");
+        if (jsonStart >= 0) {
+          const parsed = JSON.parse(text.substring(jsonStart));
+          message = parsed.error || message;
+        }
+      } catch {}
       toast({
         title: "Error",
-        description: "No se pudo guardar la reserva. Intente nuevamente.",
+        description: message,
         variant: "destructive",
       });
     },
