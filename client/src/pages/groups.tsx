@@ -113,6 +113,7 @@ function GroupFormDialog({
     status: group?.status || "blocked",
     releaseDate: group?.releaseDate || "",
     notes: group?.notes || "",
+    color: group?.color || "#6366f1",
   });
 
   const [blocks, setBlocks] = useState<BlockDraft[]>([]);
@@ -136,6 +137,7 @@ function GroupFormDialog({
         status: group?.status || "blocked",
         releaseDate: group?.releaseDate || "",
         notes: group?.notes || "",
+        color: group?.color || "#6366f1",
       });
     }
   }, [open, group, today, tomorrow]);
@@ -331,6 +333,28 @@ function GroupFormDialog({
                   required
                   data-testid="input-group-name"
                 />
+              </div>
+
+              <div className="col-span-2">
+                <Label>Color del grupo</Label>
+                <div className="flex gap-2 flex-wrap mt-2">
+                  {[
+                    "#6366f1", "#8b5cf6", "#ec4899", "#ef4444", "#f97316",
+                    "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#84cc16",
+                  ].map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 ${
+                        formData.color === color ? "border-foreground scale-110" : "border-transparent"
+                      }`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => setFormData({ ...formData, color })}
+                      data-testid={`button-color-${color.replace("#", "")}`}
+                      title={color}
+                    />
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -775,7 +799,16 @@ export default function GroupsPage() {
               <TableBody>
                 {filteredGroups.map((group) => (
                   <TableRow key={group.id} data-testid={`row-group-${group.id}`}>
-                    <TableCell className="font-mono text-sm">{group.groupCode}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: group.color || "#6366f1" }}
+                          title={`Color del grupo: ${group.color || "#6366f1"}`}
+                        />
+                        <span className="font-mono text-sm">{group.groupCode}</span>
+                      </div>
+                    </TableCell>
                     <TableCell className="font-medium">{group.name}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1 text-sm">

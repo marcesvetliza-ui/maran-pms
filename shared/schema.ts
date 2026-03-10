@@ -435,6 +435,7 @@ export const groups = pgTable("groups", {
   status: text("status").$type<GroupStatus>().notNull().default("tentative"),
   releaseDate: date("release_date"),
   notes: text("notes"),
+  color: text("color").default("#6366f1"),
   createdAt: timestamp("created_at").notNull(),
   createdBy: varchar("created_by"),
 });

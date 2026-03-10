@@ -2042,7 +2042,7 @@ export class MemStorage implements IStorage {
     const occupancy: Record<string, PlanningCellStatus[]> = {};
     const cellReservations: Record<string, Record<string, string>> = {};
     const cellGroupBlocks: Record<string, Record<string, string>> = {};
-    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null }> = {};
+    const reservationsMap: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null }> = {};
     const groupBlocksMap: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }> = {};
 
     // Filter active reservations (not cancelled or checked_out)
@@ -2056,6 +2056,8 @@ export class MemStorage implements IStorage {
       if (guest) {
         const isGroupReservation = groupReservationIds.has(res.id);
         let groupName: string | undefined;
+        let groupId: string | undefined;
+        let groupColor: string | undefined;
         
         if (isGroupReservation) {
           const link = allGroupLinks.find(l => l.reservationId === res.id);
@@ -2063,6 +2065,8 @@ export class MemStorage implements IStorage {
             const group = this.groups.get(link.groupId);
             if (group) {
               groupName = group.name;
+              groupId = group.id;
+              groupColor = (group as any).color || "#6366f1";
             }
           }
         }
@@ -2076,6 +2080,8 @@ export class MemStorage implements IStorage {
           source: res.source as ReservationSource,
           isGroup: isGroupReservation,
           groupName,
+          groupId,
+          groupColor,
           earlyCheckIn: res.earlyCheckIn ?? false,
           earlyCheckInTime: res.earlyCheckInTime ?? null,
           lateCheckOut: res.lateCheckOut ?? false,

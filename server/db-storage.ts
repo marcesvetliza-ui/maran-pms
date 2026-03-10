@@ -677,11 +677,17 @@ export class DatabaseStorage implements IStorage {
       if (guest) {
         const isGroupReservation = groupReservationIds.has(res.id);
         let groupName: string | undefined;
+        let groupId: string | undefined;
+        let groupColor: string | undefined;
         if (isGroupReservation) {
           const link = allGroupLinks.find(l => l.reservationId === res.id);
           if (link) {
             const group = groupsMap.get(link.groupId);
-            if (group) groupName = group.name;
+            if (group) {
+              groupName = group.name;
+              groupId = group.id;
+              groupColor = group.color || "#6366f1";
+            }
           }
         }
         reservationsMap[res.id] = {
@@ -693,6 +699,8 @@ export class DatabaseStorage implements IStorage {
           source: res.source as ReservationSource,
           isGroup: isGroupReservation,
           groupName,
+          groupId,
+          groupColor,
           earlyCheckIn: res.earlyCheckIn ?? false,
           earlyCheckInTime: res.earlyCheckInTime ?? null,
           lateCheckOut: res.lateCheckOut ?? false,

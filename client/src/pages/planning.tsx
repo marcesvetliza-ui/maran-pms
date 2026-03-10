@@ -138,6 +138,18 @@ function getSourceColor(source: ReservationSource): string {
   return "bg-gray-200 dark:bg-gray-800/60 border-gray-300 dark:border-gray-700";
 }
 
+function getGroupCellStyle(groupColor: string | undefined): React.CSSProperties {
+  if (!groupColor) return {};
+  const hex = groupColor.replace("#", "");
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  return {
+    backgroundColor: `rgba(${r}, ${g}, ${b}, 0.25)`,
+    borderColor: `rgba(${r}, ${g}, ${b}, 0.7)`,
+  };
+}
+
 function getSourceLabel(source: ReservationSource): string {
   if (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(source)) {
     return "OTA";
@@ -208,6 +220,11 @@ function Legend() {
             <span className="text-xs text-muted-foreground">{label}</span>
           </div>
         ))}
+      </div>
+      <div className="flex items-center gap-2 mt-1">
+        <span className="text-xs text-muted-foreground italic">
+          Los grupos se muestran con su color asignado individual
+        </span>
       </div>
     </div>
   );
@@ -1400,6 +1417,7 @@ function DraggableReservationCell({
   roomId,
   children,
   className,
+  style,
   onClick,
   "data-testid": testId,
 }: {
@@ -1408,6 +1426,7 @@ function DraggableReservationCell({
   roomId: string;
   children: React.ReactNode;
   className: string;
+  style?: React.CSSProperties;
   onClick: () => void;
   "data-testid"?: string;
 }) {
@@ -1422,7 +1441,7 @@ function DraggableReservationCell({
       {...listeners}
       {...attributes}
       className={`${className} ${isDragging ? "opacity-40 ring-2 ring-primary" : ""}`}
-      style={{ touchAction: "none" }}
+      style={{ touchAction: "none", ...style }}
     >
       <div
         onClick={() => { if (!isDragging) onClick(); }}
@@ -1980,17 +1999,22 @@ export default function PlanningPage() {
                                           roomId={room.id}
                                           onClick={() => handleCellClick(room, day, status, reservationId)}
                                           className={`h-8 rounded border flex items-center justify-center transition-all cursor-grab active:cursor-grabbing ${
-                                            status === "checkin_today"
-                                              ? getStatusColor("checkin_today")
-                                              : getSourceColor(reservation.source)
+                                            reservation.isGroup
+                                              ? ""
+                                              : status === "checkin_today"
+                                                ? getStatusColor("checkin_today")
+                                                : getSourceColor(reservation.source)
                                           } hover:ring-2 hover:ring-primary/50`}
+                                          style={reservation.isGroup ? getGroupCellStyle(reservation.groupColor) : undefined}
                                           data-testid={`cell-${room.id}-${day}`}
                                         >
                                           <span className="text-[10px] font-medium truncate px-1 max-w-[56px] inline-flex items-center gap-0.5">
                                             {reservation.earlyCheckIn && day === reservation.checkIn && (
                                               <Sunrise className="h-3 w-3 text-orange-400 flex-shrink-0" data-testid="icon-early-checkin" />
                                             )}
-                                            {reservation.isGroup && reservation.groupName ? reservation.groupName : reservation.guestName.split(" ")[0]}
+                                            {reservation.guestName === "Sin Asignar" || !reservation.guestName
+                                              ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
+                                              : reservation.guestName.split(" ")[0]}
                                             {reservation.lateCheckOut && (() => {
                                               const coDate = new Date(reservation.checkOut + "T12:00:00");
                                               coDate.setDate(coDate.getDate() - 1);
@@ -2090,7 +2114,9 @@ export default function PlanningPage() {
                 <div className="h-8 rounded border bg-primary/20 border-primary flex items-center justify-center px-2 shadow-lg min-w-[60px]">
                   <Move className="h-3 w-3 mr-1 text-primary" />
                   <span className="text-[10px] font-semibold text-primary truncate">
-                    {dragActiveReservation.isGroup && dragActiveReservation.groupName ? dragActiveReservation.groupName : dragActiveReservation.guestName.split(" ")[0]}
+                    {dragActiveReservation.guestName === "Sin Asignar" || !dragActiveReservation.guestName
+                      ? dragActiveReservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
+                      : dragActiveReservation.guestName.split(" ")[0]}
                   </span>
                 </div>
               ) : null}

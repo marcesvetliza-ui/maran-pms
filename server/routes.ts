@@ -1748,7 +1748,7 @@ export async function registerRoutes(
 
   app.post("/api/groups", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
       
       if (!name || !checkInDate || !checkOutDate) {
         return res.status(400).json({ error: "Name, checkInDate, and checkOutDate are required" });
@@ -1767,6 +1767,7 @@ export async function registerRoutes(
         status: status || "tentative",
         releaseDate: releaseDate || null,
         notes: notes || null,
+        color: color || "#6366f1",
         createdAt: new Date(),
         createdBy: null,
       });
@@ -1778,7 +1779,7 @@ export async function registerRoutes(
 
   app.patch("/api/groups/:id", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
       const updateData: Record<string, unknown> = {};
       
       if (name !== undefined) updateData.name = name;
@@ -1791,6 +1792,7 @@ export async function registerRoutes(
       if (status !== undefined) updateData.status = status;
       if (releaseDate !== undefined) updateData.releaseDate = releaseDate;
       if (notes !== undefined) updateData.notes = notes;
+      if (color !== undefined) updateData.color = color;
 
       const group = await storage.updateGroup(req.params.id, updateData);
       if (!group) {

@@ -545,6 +545,7 @@ export async function refreshRealData() {
     `);
 
     await db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS is_editable TEXT DEFAULT 'false'`);
+    await db.execute(sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#6366f1'`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS maintenance_staff (
