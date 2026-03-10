@@ -126,61 +126,29 @@ function getStatusLabel(status: PlanningCellStatus): string {
 }
 
 function getSourceColor(source: ReservationSource): string {
-  switch (source) {
-    case "directo":
-      return "bg-blue-200 dark:bg-blue-800/60 border-blue-300 dark:border-blue-700";
-    case "telefono":
-      return "bg-sky-200 dark:bg-sky-800/60 border-sky-300 dark:border-sky-700";
-    case "web":
-      return "bg-cyan-200 dark:bg-cyan-800/60 border-cyan-300 dark:border-cyan-700";
-    case "booking":
-      return "bg-indigo-200 dark:bg-indigo-800/60 border-indigo-300 dark:border-indigo-700";
-    case "expedia":
-      return "bg-yellow-200 dark:bg-yellow-800/60 border-yellow-300 dark:border-yellow-700";
-    case "airbnb":
-      return "bg-rose-200 dark:bg-rose-800/60 border-rose-300 dark:border-rose-700";
-    case "despegar":
-      return "bg-orange-200 dark:bg-orange-800/60 border-orange-300 dark:border-orange-700";
-    case "hotelbeds":
-      return "bg-purple-200 dark:bg-purple-800/60 border-purple-300 dark:border-purple-700";
-    case "agoda":
-      return "bg-red-200 dark:bg-red-800/60 border-red-300 dark:border-red-700";
-    case "ota":
-      return "bg-violet-200 dark:bg-violet-800/60 border-violet-300 dark:border-violet-700";
-    case "empresa":
-      return "bg-emerald-200 dark:bg-emerald-800/60 border-emerald-300 dark:border-emerald-700";
-    default:
-      return "bg-gray-200 dark:bg-gray-800/60 border-gray-300 dark:border-gray-700";
+  if (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(source)) {
+    return "bg-indigo-200 dark:bg-indigo-800/60 border-indigo-300 dark:border-indigo-700";
   }
+  if (["directo", "telefono", "web"].includes(source)) {
+    return "bg-blue-200 dark:bg-blue-800/60 border-blue-300 dark:border-blue-700";
+  }
+  if (["empresa", "agencia"].includes(source)) {
+    return "bg-emerald-200 dark:bg-emerald-800/60 border-emerald-300 dark:border-emerald-700";
+  }
+  return "bg-gray-200 dark:bg-gray-800/60 border-gray-300 dark:border-gray-700";
 }
 
 function getSourceLabel(source: ReservationSource): string {
-  switch (source) {
-    case "directo":
-      return "Directo";
-    case "telefono":
-      return "Teléfono";
-    case "web":
-      return "Web";
-    case "booking":
-      return "Booking";
-    case "expedia":
-      return "Expedia";
-    case "airbnb":
-      return "Airbnb";
-    case "despegar":
-      return "Despegar";
-    case "hotelbeds":
-      return "Hotelbeds";
-    case "agoda":
-      return "Agoda";
-    case "ota":
-      return "OTA";
-    case "empresa":
-      return "Empresa";
-    default:
-      return source;
+  if (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(source)) {
+    return "OTA";
   }
+  if (["directo", "telefono", "web"].includes(source)) {
+    return "Directo";
+  }
+  if (["empresa", "agencia"].includes(source)) {
+    return "Empresa";
+  }
+  return source;
 }
 
 const featureIconMap: Record<string, { icon: typeof Accessibility; label: string }> = {
@@ -216,17 +184,9 @@ function Legend() {
   ];
 
   const sourceItems: { source: ReservationSource; label: string }[] = [
-    { source: "directo", label: "Directo" },
-    { source: "telefono", label: "Teléfono" },
-    { source: "web", label: "Web" },
-    { source: "booking", label: "Booking" },
-    { source: "expedia", label: "Expedia" },
-    { source: "airbnb", label: "Airbnb" },
-    { source: "despegar", label: "Despegar" },
-    { source: "hotelbeds", label: "Hotelbeds" },
-    { source: "agoda", label: "Agoda" },
-    { source: "ota", label: "OTA" },
-    { source: "empresa", label: "Empresa" },
+    { source: "directo", label: "Directo (tel / web / presencial)" },
+    { source: "booking", label: "OTAs (Booking, Expedia, Airbnb, etc.)" },
+    { source: "empresa", label: "Empresa / Agencia" },
   ];
 
   return (
@@ -2061,7 +2021,7 @@ export default function PlanningPage() {
                                               {reservation.checkIn} a {reservation.checkOut}
                                             </div>
                                             <div className="text-muted-foreground">
-                                              Origen: {getSourceLabel(reservation.source)}
+                                              Origen: {getSourceLabel(reservation.source)} ({reservation.source})
                                             </div>
                                             {reservation.earlyCheckIn && (
                                               <div className="text-orange-400 font-medium">

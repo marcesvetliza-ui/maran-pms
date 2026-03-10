@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { getLocalToday } from "@/lib/utils";
+import { getLocalToday, formatDateAR } from "@/lib/utils";
 import {
   LogOut,
   Search,
@@ -290,13 +290,13 @@ export default function CheckOutPage() {
                   <TableBody>
                     <TableRow className="bg-muted/50">
                       <TableCell className="font-medium">Alojamiento ({folio?.nights || selectedReservation.nights} noches)</TableCell>
-                      <TableCell>{selectedReservation.checkInDate} → {selectedReservation.checkOutDate}</TableCell>
+                      <TableCell>{formatDateAR(selectedReservation.checkInDate)} → {formatDateAR(selectedReservation.checkOutDate)}</TableCell>
                       <TableCell className="text-right font-medium">${(folio?.roomTotal || parseFloat(selectedReservation.totalRoomAmount || "0")).toFixed(2)}</TableCell>
                     </TableRow>
                     {folio?.charges?.map((charge) => (
                       <TableRow key={charge.id} data-testid={`charge-row-${charge.id}`}>
                         <TableCell>{charge.description}</TableCell>
-                        <TableCell>{charge.date}</TableCell>
+                        <TableCell>{formatDateAR(charge.date)}</TableCell>
                         <TableCell className="text-right">${parseFloat(charge.amount).toFixed(2)}</TableCell>
                       </TableRow>
                     ))}
@@ -328,7 +328,7 @@ export default function CheckOutPage() {
                     <TableBody>
                       {folio.payments.map((payment) => (
                         <TableRow key={payment.id} data-testid={`payment-row-${payment.id}`}>
-                          <TableCell>{payment.date}</TableCell>
+                          <TableCell>{formatDateAR(payment.date)}</TableCell>
                           <TableCell>{paymentMethodLabels[payment.method as PaymentMethod] || payment.method}</TableCell>
                           <TableCell className="text-right">${parseFloat(payment.amount).toFixed(2)}</TableCell>
                         </TableRow>
@@ -714,11 +714,11 @@ export default function CheckOutPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex items-center gap-2 text-sm">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span>Desde: {reservation.checkInDate}</span>
+                    <span>Desde: {formatDateAR(reservation.checkInDate)}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Clock className="h-4 w-4 text-muted-foreground" />
-                    <span>Hasta: {reservation.checkOutDate}</span>
+                    <span>Hasta: {formatDateAR(reservation.checkOutDate)}</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-muted rounded-lg">

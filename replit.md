@@ -152,6 +152,9 @@ Preferred communication style: Simple, everyday language.
 - [x] FIX-09: Drag & drop por celda (DroppableCell) — permite mover reservas a otra habitación Y otra fecha, con recálculo de noches y validación de conflictos
 - [x] FIX-10: Diálogo de confirmación de movimiento muestra cambio de fechas cuando aplica
 - [x] FIX-11: Cargos predefinidos con cantidad en folio — selector de preset (cochera, media pensión, etc.), campo cantidad con multiplicador, edición inline de monto en cargos existentes
+- [x] FIX-12: Fechas dd/mm/aaaa — `formatDateAR()` en `@/lib/utils`, aplicado en reservations, check-in, check-out, folio (cargos/pagos)
+- [x] FIX-13: Filtro historial en Reservas — botón "Ver historial" oculta checked_out y cancelled pasados por defecto, búsqueda incluye reservationCode
+- [x] FIX-14: Colores planning simplificados — 3 grupos (OTA indigo, Directo azul, Empresa/Agencia verde) con canal real en tooltip
 
 ### NOTAS
 - Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación

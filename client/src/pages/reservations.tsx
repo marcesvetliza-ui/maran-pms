@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
-import { getLocalToday } from "@/lib/utils";
+import { getLocalToday, formatDateAR } from "@/lib/utils";
 import {
   CalendarCheck,
   CalendarRange,
@@ -24,6 +24,7 @@ import {
   Sunrise,
   Sunset,
   DollarSign,
+  History,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1132,12 +1133,12 @@ function ReservationDetailDialog({
               <div className="p-3 border rounded-lg">
                 <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">Check-in</p>
-                <p className="font-semibold text-sm" data-testid="text-checkin">{reservation.checkInDate}</p>
+                <p className="font-semibold text-sm" data-testid="text-checkin">{formatDateAR(reservation.checkInDate)}</p>
               </div>
               <div className="p-3 border rounded-lg">
                 <Calendar className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">Check-out</p>
-                <p className="font-semibold text-sm" data-testid="text-checkout">{reservation.checkOutDate}</p>
+                <p className="font-semibold text-sm" data-testid="text-checkout">{formatDateAR(reservation.checkOutDate)}</p>
               </div>
               <div className="p-3 border rounded-lg">
                 <User className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
@@ -1338,7 +1339,7 @@ function ReservationDetailDialog({
                     <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
                       <Badge variant="outline" className="text-xs shrink-0">{categoryLabels[charge.category]}</Badge>
                       <span className="truncate">{charge.description}</span>
-                      <span className="text-muted-foreground text-xs shrink-0">({charge.date})</span>
+                      <span className="text-muted-foreground text-xs shrink-0">({formatDateAR(charge.date)})</span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
                       {editingChargeId === charge.id ? (
@@ -1497,7 +1498,7 @@ function ReservationDetailDialog({
                         <Badge variant="secondary" className="text-xs">Empresa</Badge>
                       )}
                       {payment.reference && <span className="text-muted-foreground">{payment.reference}</span>}
-                      <span className="text-muted-foreground text-xs">({payment.date})</span>
+                      <span className="text-muted-foreground text-xs">({formatDateAR(payment.date)})</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-green-600">${parseFloat(payment.amount).toFixed(2)}</span>
@@ -1772,7 +1773,7 @@ function CancelReservationDialog({
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Fechas:</span>
               <span className="font-medium">
-                {reservation.checkInDate} - {reservation.checkOutDate}
+                {formatDateAR(reservation.checkInDate)} - {formatDateAR(reservation.checkOutDate)}
               </span>
             </div>
           </div>
@@ -1825,6 +1826,7 @@ export default function ReservationsPage() {
   const searchParams = useSearch();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [showHistory, setShowHistory] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -1930,8 +1932,16 @@ export default function ReservationsPage() {
       const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
       const matchesSearch =
         guestName.includes(searchQuery.toLowerCase()) ||
-        res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase());
+        res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        res.reservationCode?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === "all" || res.status === statusFilter;
+
+      if (!showHistory) {
+        const isPast = res.checkOutDate < todayStr && res.status === "checked_out";
+        const isCancelledOld = res.checkOutDate < todayStr && res.status === "cancelled";
+        if (isPast || isCancelledOld) return false;
+      }
+
       return matchesSearch && matchesStatus;
     })
     ?.sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
@@ -1998,7 +2008,7 @@ export default function ReservationsPage() {
                 onClick={() => setDateMode("today")}
                 data-testid="button-filter-today"
               >
-                Hoy ({todayStr})
+                Hoy ({formatDateAR(todayStr)})
               </Button>
               <Button
                 variant={dateMode === "range" ? "default" : "outline"}
@@ -2062,6 +2072,15 @@ export default function ReservationsPage() {
                   <SelectItem value="cancelled">Canceladas</SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                variant={showHistory ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowHistory(!showHistory)}
+                data-testid="button-toggle-history"
+              >
+                <History className="h-4 w-4 mr-1" />
+                {showHistory ? "Ocultar historial" : "Ver historial"}
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -2073,7 +2092,7 @@ export default function ReservationsPage() {
             {filteredReservations.length} reserva{filteredReservations.length !== 1 ? "s" : ""}
             {dateMode === "today" && " para hoy"}
             {dateMode === "upcoming" && " activas y futuras"}
-            {dateMode === "range" && dateFrom && ` desde ${dateFrom}${dateTo ? ` hasta ${dateTo}` : ""}`}
+            {dateMode === "range" && dateFrom && ` desde ${formatDateAR(dateFrom)}${dateTo ? ` hasta ${formatDateAR(dateTo)}` : ""}`}
           </span>
         </div>
       )}
@@ -2126,8 +2145,8 @@ export default function ReservationsPage() {
                     </div>
                   </TableCell>
                   <TableCell>{reservation.room?.roomNumber}</TableCell>
-                  <TableCell>{reservation.checkInDate}</TableCell>
-                  <TableCell>{reservation.checkOutDate}</TableCell>
+                  <TableCell>{formatDateAR(reservation.checkInDate)}</TableCell>
+                  <TableCell>{formatDateAR(reservation.checkOutDate)}</TableCell>
                   <TableCell>{reservation.numberOfGuests}</TableCell>
                   <TableCell>
                     <ReservationStatusBadge status={reservation.status} />

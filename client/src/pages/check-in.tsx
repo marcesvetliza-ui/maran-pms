@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { getLocalToday } from "@/lib/utils";
+import { getLocalToday, formatDateAR } from "@/lib/utils";
 import {
   LogIn,
   Search,
@@ -461,11 +461,11 @@ export default function CheckInPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="flex items-center gap-2 text-sm">
                         <Calendar className="h-4 w-4 text-muted-foreground" />
-                        <span>{reservation.checkInDate}</span>
+                        <span>{formatDateAR(reservation.checkInDate)}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm">
                         <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span>{reservation.checkOutDate}</span>
+                        <span>{formatDateAR(reservation.checkOutDate)}</span>
                       </div>
                     </div>
                     <div className="pt-2">
@@ -742,7 +742,7 @@ export default function CheckInPage() {
                         <div>
                           <p className="font-medium text-sm">{res.guest?.firstName} {res.guest?.lastName}</p>
                           <p className="text-xs text-muted-foreground">
-                            Hab. {res.room?.roomNumber} | {res.checkInDate} - {res.checkOutDate}
+                            Hab. {res.room?.roomNumber} | {formatDateAR(res.checkInDate)} - {formatDateAR(res.checkOutDate)}
                           </p>
                         </div>
                       </div>
@@ -809,7 +809,7 @@ export default function CheckInPage() {
                           <p className="font-medium text-sm">{wc.reservation?.guestName || "Huésped"}</p>
                           <p className="text-xs text-muted-foreground">
                             {wc.reservation?.roomNumber ? `Hab. ${wc.reservation.roomNumber} | ` : ""}
-                            {wc.reservation?.checkInDate || ""} - {wc.reservation?.checkOutDate || ""}
+                            {formatDateAR(wc.reservation?.checkInDate) || ""} - {formatDateAR(wc.reservation?.checkOutDate) || ""}
                           </p>
                         </div>
                       </div>
@@ -950,11 +950,11 @@ export default function CheckInPage() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="flex items-center gap-2 text-sm">
                           <Calendar className="h-4 w-4 text-muted-foreground" />
-                          <span>Entrada: {reservation.checkInDate}</span>
+                          <span>Entrada: {formatDateAR(reservation.checkInDate)}</span>
                         </div>
                         <div className="flex items-center gap-2 text-sm">
                           <Clock className="h-4 w-4 text-muted-foreground" />
-                          <span>Salida: {reservation.checkOutDate}</span>
+                          <span>Salida: {formatDateAR(reservation.checkOutDate)}</span>
                         </div>
                       </div>
                     </CardContent>
@@ -994,7 +994,7 @@ export default function CheckInPage() {
               <div className="bg-muted/50 rounded-lg p-3 text-sm">
                 <p className="font-medium">{webCheckinReservation.guest?.firstName} {webCheckinReservation.guest?.lastName}</p>
                 <p className="text-muted-foreground">
-                  Hab. {webCheckinReservation.room?.roomNumber} | {webCheckinReservation.checkInDate} - {webCheckinReservation.checkOutDate}
+                  Hab. {webCheckinReservation.room?.roomNumber} | {formatDateAR(webCheckinReservation.checkInDate)} - {formatDateAR(webCheckinReservation.checkOutDate)}
                 </p>
               </div>
               {generateLinkMutation.isError ? (
