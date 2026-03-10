@@ -1,7 +1,7 @@
-import { useState, useEffect, Fragment, forwardRef } from "react";
+import { useState, useEffect, useRef, Fragment, forwardRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2 } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -1506,6 +1506,27 @@ function DroppableCell({
 export default function PlanningPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const planningRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = async () => {
+    if (!document.fullscreenElement) {
+      await planningRef.current?.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      await document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
   const [dateRange, setDateRange] = useState(() => {
     const todayStr = getLocalToday();
     const end = new Date(todayStr + "T12:00:00");
@@ -1782,7 +1803,7 @@ export default function PlanningPage() {
   });
 
   return (
-    <div className="flex flex-col gap-4 p-6 h-full">
+    <div ref={planningRef} className={`flex flex-col gap-4 p-6 h-full ${isFullscreen ? "bg-background overflow-auto" : ""}`}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-planning-title">
@@ -1829,6 +1850,19 @@ export default function PlanningPage() {
             data-testid="button-next-week"
           >
             <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+            data-testid="button-fullscreen-planning"
+          >
+            {isFullscreen ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
           </Button>
         </div>
       </div>

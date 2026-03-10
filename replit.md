@@ -67,7 +67,7 @@ Preferred communication style: Simple, everyday language.
 - **Chatbot Webhook Integration**: `POST /api/webhook/chatbot` endpoint for creating notifications and housekeeping tasks. Includes a **MARA Chatbot Dashboard** page.
 - **Web Check-in**: Public mobile-first 4-step wizard at `/web-checkin/:token` for guests to self check-in, integrates with check-in page for link generation and status tracking.
 - **Hospitality Module**: Guest preference CRM at `/hospitality` with preferences, stay notes, and auto-generated alerts. Integrations with check-in/guest detail dialogs and notification bell.
-- **Group Mass Actions**: Group detail page with mass check-in, mass check-out, group payment, and consolidated group invoice.
+- **Group Mass Actions**: Group detail page with mass check-in, mass check-out, group payment, consolidated group invoice, and mass room assignment (AssignBlockDialog with N rows per block).
 - **Printable Rooming List**: Group detail page feature for printing room assignments.
 - **Package Module Enhancements**: Package cards show validity/discount, quick actions for duplication and status toggle.
 - **Executive Dashboard**: Page at `/executive` with period selector, KPI cards (Occupancy %, Revenue, ADR, RevPAR) with YoY comparison, charts, real-time room status, today's operations summary.

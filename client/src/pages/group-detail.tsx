@@ -18,9 +18,12 @@ import {
   Printer,
   AlertCircle,
   CheckCircle,
+  CheckCircle2,
   CreditCard,
   DollarSign,
   ExternalLink,
+  X,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -289,7 +292,7 @@ function AddBlockDialog({
   );
 }
 
-function AssignRoomDialog({
+function AssignBlockDialog({
   group,
   block,
   open,
@@ -303,198 +306,200 @@ function AssignRoomDialog({
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
-  const [selectedRoomId, setSelectedRoomId] = useState("");
-  const [guestFirstName, setGuestFirstName] = useState("Sin Asignar");
-  const [guestLastName, setGuestLastName] = useState("");
-  
-  // Get default dates from block or group
+
+  const assignedCount = group.reservations.filter(r =>
+    r.room?.roomTypeId === block.roomTypeId
+  ).length;
+  const pending = Math.max(0, block.quantity - assignedCount);
+
   const defaultCheckIn = block.blockCheckInDate || group.checkInDate;
   const defaultCheckOut = block.blockCheckOutDate || group.checkOutDate;
-  const defaultRate = block.agreedRate || "";
-  
-  const [useCustomDates, setUseCustomDates] = useState(false);
-  const [checkInDate, setCheckInDate] = useState(defaultCheckIn);
-  const [checkOutDate, setCheckOutDate] = useState(defaultCheckOut);
-  const [useCustomRate, setUseCustomRate] = useState(false);
-  const [agreedRate, setAgreedRate] = useState(defaultRate);
+
+  const [rows, setRows] = useState<Array<{
+    roomId: string;
+    firstName: string;
+    lastName: string;
+  }>>(
+    Array.from({ length: pending }, () => ({ roomId: "", firstName: "Sin Asignar", lastName: "" }))
+  );
 
   const { data: rooms } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
   });
 
-  const availableRooms = rooms?.filter((r) => {
-    if (r.roomTypeId !== block.roomTypeId) return false;
-    if (r.status === "maintenance") return false;
-    return true;
-  });
+  const availableRooms = rooms?.filter(
+    (r) => r.roomTypeId === block.roomTypeId && r.status !== "maintenance"
+  ) || [];
 
-  const assignMutation = useMutation({
-    mutationFn: () =>
-      apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
-        roomId: selectedRoomId,
-        guestFirstName,
-        guestLastName,
-        checkInDate: useCustomDates ? checkInDate : undefined,
-        checkOutDate: useCustomDates ? checkOutDate : undefined,
-        agreedRate: useCustomRate ? agreedRate : undefined,
-        ratePlanId: block.ratePlanId,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", group.id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Habitación asignada exitosamente" });
+  const chosenRoomIds = rows.map(r => r.roomId).filter(Boolean);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleAssignAll = async () => {
+    const validRows = rows.filter(r => r.roomId);
+    if (validRows.length === 0) {
+      toast({ title: "Seleccioná al menos una habitación", variant: "destructive" });
+      return;
+    }
+
+    setIsSubmitting(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const row of validRows) {
+      try {
+        await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
+          roomId: row.roomId,
+          guestFirstName: row.firstName || "Sin Asignar",
+          guestLastName: row.lastName || "",
+          ratePlanId: block.ratePlanId,
+        });
+        successCount++;
+      } catch {
+        failCount++;
+      }
+    }
+
+    setIsSubmitting(false);
+    queryClient.invalidateQueries({ queryKey: ["/api/groups", group.id] });
+    queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+    queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
+    queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+
+    if (failCount === 0) {
+      toast({ title: `${successCount} habitación(es) asignada(s) exitosamente` });
       onSuccess();
       onOpenChange(false);
-      setSelectedRoomId("");
-      setGuestFirstName("Sin Asignar");
-      setGuestLastName("");
-      setUseCustomDates(false);
-      setUseCustomRate(false);
-    },
-    onError: () => {
-      toast({ title: "Error al asignar habitación", variant: "destructive" });
-    },
-  });
+    } else {
+      toast({
+        title: `${successCount} asignadas, ${failCount} fallaron`,
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Asignar Habitación</DialogTitle>
+          <DialogTitle>
+            Asignar Habitaciones — {block.roomType?.name}
+          </DialogTitle>
           <DialogDescription>
-            Asigne una habitación {block.roomType?.name} al grupo
+            Bloque de {block.quantity} habitaciones. {assignedCount} ya asignadas, {pending} pendientes.
+            {defaultCheckIn && ` Check-in: ${new Date(defaultCheckIn).toLocaleDateString("es-AR")} | Check-out: ${new Date(defaultCheckOut).toLocaleDateString("es-AR")}`}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div>
-            <Label>Habitación *</Label>
-            <Select value={selectedRoomId} onValueChange={setSelectedRoomId}>
-              <SelectTrigger data-testid="select-assign-room">
-                <SelectValue placeholder="Seleccionar habitación" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableRooms?.length === 0 ? (
-                  <SelectItem value="" disabled>
-                    No hay habitaciones disponibles
-                  </SelectItem>
-                ) : (
-                  availableRooms?.map((room) => (
-                    <SelectItem key={room.id} value={room.id}>
-                      {room.roomNumber} - Piso {room.floor}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Nombre Ocupante</Label>
-              <Input
-                value={guestFirstName}
-                onChange={(e) => setGuestFirstName(e.target.value)}
-                placeholder="Nombre"
-                data-testid="input-assign-firstname"
-              />
+        <div className="space-y-3 py-2">
+          {rows.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
+              <p>Todas las habitaciones del bloque ya están asignadas.</p>
             </div>
-            <div>
-              <Label>Apellido Ocupante</Label>
-              <Input
-                value={guestLastName}
-                onChange={(e) => setGuestLastName(e.target.value)}
-                placeholder="Apellido"
-                data-testid="input-assign-lastname"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pt-2">
-            <input
-              type="checkbox"
-              id="useCustomDatesAssign"
-              checked={useCustomDates}
-              onChange={(e) => setUseCustomDates(e.target.checked)}
-              className="h-4 w-4"
-              data-testid="checkbox-assign-custom-dates"
-            />
-            <Label htmlFor="useCustomDatesAssign" className="font-normal">
-              Usar fechas personalizadas
-            </Label>
-          </div>
-
-          {useCustomDates && (
-            <div className="grid grid-cols-2 gap-4 rounded-md border p-3 bg-muted/30">
-              <div>
-                <Label>Check-in</Label>
-                <Input
-                  type="date"
-                  value={checkInDate}
-                  onChange={(e) => setCheckInDate(e.target.value)}
-                  data-testid="input-assign-checkin"
-                />
+          ) : (
+            <>
+              <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
+                <span>Habitación</span>
+                <span>Nombre</span>
+                <span>Apellido</span>
+                <span></span>
               </div>
-              <div>
-                <Label>Check-out</Label>
-                <Input
-                  type="date"
-                  value={checkOutDate}
-                  onChange={(e) => setCheckOutDate(e.target.value)}
-                  data-testid="input-assign-checkout"
-                />
-              </div>
-            </div>
+              {rows.map((row, index) => (
+                <div key={index} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-center">
+                  <Select
+                    value={row.roomId}
+                    onValueChange={(value) => {
+                      const updated = [...rows];
+                      updated[index].roomId = value;
+                      setRows(updated);
+                    }}
+                  >
+                    <SelectTrigger data-testid={`select-room-${index}`}>
+                      <SelectValue placeholder="Seleccionar hab." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableRooms
+                        .filter(r => !chosenRoomIds.includes(r.id) || r.id === row.roomId)
+                        .map((room) => (
+                          <SelectItem key={room.id} value={room.id}>
+                            Hab. {room.roomNumber} — Piso {room.floor}
+                          </SelectItem>
+                        ))
+                      }
+                      {availableRooms.filter(r => !chosenRoomIds.includes(r.id) || r.id === row.roomId).length === 0 && (
+                        <SelectItem value="_none" disabled>Sin disponibilidad</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+
+                  <Input
+                    placeholder="Nombre"
+                    value={row.firstName}
+                    onChange={(e) => {
+                      const updated = [...rows];
+                      updated[index].firstName = e.target.value;
+                      setRows(updated);
+                    }}
+                    data-testid={`input-firstname-${index}`}
+                  />
+
+                  <Input
+                    placeholder="Apellido"
+                    value={row.lastName}
+                    onChange={(e) => {
+                      const updated = [...rows];
+                      updated[index].lastName = e.target.value;
+                      setRows(updated);
+                    }}
+                    data-testid={`input-lastname-${index}`}
+                  />
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => setRows(rows.filter((_, i) => i !== index))}
+                    title="Quitar fila"
+                    data-testid={`button-remove-row-${index}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+
+              {rows.length < availableRooms.length && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setRows([...rows, { roomId: "", firstName: "Sin Asignar", lastName: "" }])}
+                  data-testid="button-add-assignment-row"
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Agregar otra habitación
+                </Button>
+              )}
+            </>
           )}
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="useCustomRateAssign"
-              checked={useCustomRate}
-              onChange={(e) => setUseCustomRate(e.target.checked)}
-              className="h-4 w-4"
-              data-testid="checkbox-assign-custom-rate"
-            />
-            <Label htmlFor="useCustomRateAssign" className="font-normal">
-              Usar tarifa personalizada
-            </Label>
-          </div>
-
-          {useCustomRate && (
-            <div className="rounded-md border p-3 bg-muted/30">
-              <Label>Tarifa por Noche</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                value={agreedRate}
-                onChange={(e) => setAgreedRate(e.target.value)}
-                placeholder="0.00"
-                data-testid="input-assign-rate"
-              />
-            </div>
-          )}
-
-          <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-            <p>Fechas predeterminadas: {new Date(defaultCheckIn).toLocaleDateString("es-AR")} - {new Date(defaultCheckOut).toLocaleDateString("es-AR")}</p>
-            {defaultRate && <p>Tarifa del bloque: ${defaultRate}/noche</p>}
-          </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button
-            onClick={() => assignMutation.mutate()}
-            disabled={!selectedRoomId || !guestFirstName || !guestLastName || assignMutation.isPending}
-            data-testid="button-confirm-assign"
-          >
-            {assignMutation.isPending ? "Asignando..." : "Asignar Habitación"}
-          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          {rows.length > 0 && (
+            <Button
+              onClick={handleAssignAll}
+              disabled={isSubmitting || rows.every(r => !r.roomId)}
+              data-testid="button-confirm-assign-all"
+            >
+              {isSubmitting ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Asignando...</>
+              ) : (
+                `Asignar ${rows.filter(r => r.roomId).length} habitación(es)`
+              )}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1097,7 +1102,7 @@ export default function GroupDetailPage() {
       )}
 
       {assigningBlock && (
-        <AssignRoomDialog
+        <AssignBlockDialog
           group={group}
           block={assigningBlock}
           open={!!assigningBlock}
