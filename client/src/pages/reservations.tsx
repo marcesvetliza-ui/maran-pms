@@ -25,6 +25,7 @@ import {
   Sunset,
   DollarSign,
   History,
+  Lock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -913,6 +914,18 @@ function ReservationDetailDialog({
   onEdit?: () => void;
 }) {
   const { toast } = useToast();
+  const isLocked = (() => {
+    const closed = ["checked_out", "cancelled"];
+    if (!closed.includes(reservation.status)) return false;
+    const today = getLocalToday();
+    const refDate = reservation.checkOutDate
+      ? String(reservation.checkOutDate).slice(0, 10)
+      : reservation.checkInDate
+        ? String(reservation.checkInDate).slice(0, 10)
+        : null;
+    if (!refDate) return false;
+    return refDate < today;
+  })();
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
@@ -1130,6 +1143,13 @@ function ReservationDetailDialog({
           <DialogDescription>Detalle de la reservación</DialogDescription>
         </DialogHeader>
 
+        {isLocked && (
+          <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md text-sm text-amber-700 dark:text-amber-300" data-testid="banner-locked-reservation">
+            <Lock className="h-4 w-4 shrink-0" />
+            <span>Reserva cerrada — no se puede modificar (solo lectura)</span>
+          </div>
+        )}
+
         <Tabs defaultValue="datos" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
@@ -1246,10 +1266,12 @@ function ReservationDetailDialog({
             <div className="border rounded-lg">
               <div className="flex items-center justify-between p-3 border-b bg-muted/50">
                 <h4 className="font-semibold">Consumos / Cargos Adicionales</h4>
+                {!isLocked && (
                 <Button size="sm" variant="outline" onClick={() => setShowAddCharge(!showAddCharge)} data-testid="button-add-charge">
                   <Plus className="h-4 w-4 mr-1" />
                   Agregar
                 </Button>
+                )}
               </div>
 
               {showAddCharge && (
@@ -1387,25 +1409,29 @@ function ReservationDetailDialog({
                       <span className="font-medium tabular-nums" data-testid={`text-charge-amount-${charge.id}`}>
                         ${parseFloat(charge.amount).toFixed(2)}
                       </span>
-                      <Button 
-                        size="icon" 
-                        variant="ghost" 
-                        className="h-6 w-6"
-                        onClick={() => setTransferringChargeId(charge.id)}
-                        title="Transferir a otra habitación"
-                        data-testid={`button-transfer-charge-${charge.id}`}
-                      >
-                        <ArrowRightLeft className="h-3 w-3 text-blue-600" />
-                      </Button>
-                      <Button 
-                        size="icon" 
-                        variant="ghost" 
-                        className="h-6 w-6"
-                        onClick={() => deleteChargeMutation.mutate(charge.id)}
-                        data-testid={`button-delete-charge-${charge.id}`}
-                      >
-                        <Trash2 className="h-3 w-3 text-destructive" />
-                      </Button>
+                      {!isLocked && (
+                        <>
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-6 w-6"
+                          onClick={() => setTransferringChargeId(charge.id)}
+                          title="Transferir a otra habitación"
+                          data-testid={`button-transfer-charge-${charge.id}`}
+                        >
+                          <ArrowRightLeft className="h-3 w-3 text-blue-600" />
+                        </Button>
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-6 w-6"
+                          onClick={() => deleteChargeMutation.mutate(charge.id)}
+                          data-testid={`button-delete-charge-${charge.id}`}
+                        >
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1424,6 +1450,7 @@ function ReservationDetailDialog({
             <div className="border rounded-lg">
               <div className="flex items-center justify-between p-3 border-b bg-muted/50">
                 <h4 className="font-semibold">Pagos / Anticipos</h4>
+                {!isLocked && (
                 <Button size="sm" variant="outline" onClick={() => {
                   if (!showAddPayment) {
                     const amt = balance > 0 ? balance.toFixed(2) : "";
@@ -1435,6 +1462,7 @@ function ReservationDetailDialog({
                   <Plus className="h-4 w-4 mr-1" />
                   Registrar Pago
                 </Button>
+                )}
               </div>
 
               {showAddPayment && (
@@ -1564,6 +1592,7 @@ function ReservationDetailDialog({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-green-600">${parseFloat(payment.amount).toFixed(2)}</span>
+                      {!isLocked && (
                       <Button 
                         size="icon" 
                         variant="ghost" 
@@ -1573,6 +1602,7 @@ function ReservationDetailDialog({
                       >
                         <Trash2 className="h-3 w-3 text-destructive" />
                       </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1608,7 +1638,7 @@ function ReservationDetailDialog({
                     ${balance.toFixed(2)}
                   </span>
                 </div>
-                {balance > 0.01 && !showAddPayment && (
+                {balance > 0.01 && !showAddPayment && !isLocked && (
                   <Button 
                     size="sm" 
                     className="w-full mt-2" 
@@ -2012,6 +2042,15 @@ export default function ReservationsPage() {
     })
     ?.sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
 
+  const isResLocked = (r: ReservationWithDetails) => {
+    const closed = ["checked_out", "cancelled"];
+    if (!closed.includes(r.status)) return false;
+    const t = getLocalToday();
+    const d = r.checkOutDate ? String(r.checkOutDate).slice(0, 10) : r.checkInDate ? String(r.checkInDate).slice(0, 10) : null;
+    if (!d) return false;
+    return d < t;
+  };
+
   const handleEditReservation = (reservation: ReservationWithDetails) => {
     setSelectedReservation(reservation);
     setDialogOpen(true);
@@ -2230,10 +2269,12 @@ export default function ReservationsPage() {
                           <Eye className="mr-2 h-4 w-4" />
                           Ver Detalle
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleEditReservation(reservation)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Editar
-                        </DropdownMenuItem>
+                        {!isResLocked(reservation) && (
+                          <DropdownMenuItem onClick={() => handleEditReservation(reservation)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Editar
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem 
                           onClick={() => handleDuplicateReservation(reservation)}
                           data-testid={`duplicate-reservation-${reservation.id}`}
@@ -2241,47 +2282,57 @@ export default function ReservationsPage() {
                           <Copy className="mr-2 h-4 w-4" />
                           Duplicar
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {reservation.status === "pending" && (
+                        {!isResLocked(reservation) && (
+                          <>
+                          <DropdownMenuSeparator />
+                          {reservation.status === "pending" && (
+                            <DropdownMenuItem
+                              onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "confirmed" })}
+                            >
+                              <Check className="mr-2 h-4 w-4 text-green-600" />
+                              Confirmar
+                            </DropdownMenuItem>
+                          )}
+                          {reservation.status === "confirmed" && (
+                            <DropdownMenuItem
+                              onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "checked_in" })}
+                            >
+                              <LogIn className="mr-2 h-4 w-4 text-blue-600" />
+                              Hacer Check-in
+                            </DropdownMenuItem>
+                          )}
+                          {reservation.status === "checked_in" && (
+                            <DropdownMenuItem
+                              onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "checked_out" })}
+                            >
+                              <LogOut className="mr-2 h-4 w-4 text-orange-600" />
+                              Hacer Check-out
+                            </DropdownMenuItem>
+                          )}
+                          {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
+                            <DropdownMenuItem
+                              onClick={() => handleCancelReservation(reservation)}
+                            >
+                              <X className="mr-2 h-4 w-4 text-red-600" />
+                              Anular Reserva
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "confirmed" })}
+                            className="text-destructive"
+                            onClick={() => deleteMutation.mutate(reservation.id)}
                           >
-                            <Check className="mr-2 h-4 w-4 text-green-600" />
-                            Confirmar
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Eliminar
+                          </DropdownMenuItem>
+                          </>
+                        )}
+                        {isResLocked(reservation) && (
+                          <DropdownMenuItem disabled>
+                            <Lock className="mr-2 h-4 w-4" />
+                            Reserva cerrada
                           </DropdownMenuItem>
                         )}
-                        {reservation.status === "confirmed" && (
-                          <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "checked_in" })}
-                          >
-                            <LogIn className="mr-2 h-4 w-4 text-blue-600" />
-                            Hacer Check-in
-                          </DropdownMenuItem>
-                        )}
-                        {reservation.status === "checked_in" && (
-                          <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "checked_out" })}
-                          >
-                            <LogOut className="mr-2 h-4 w-4 text-orange-600" />
-                            Hacer Check-out
-                          </DropdownMenuItem>
-                        )}
-                        {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
-                          <DropdownMenuItem
-                            onClick={() => handleCancelReservation(reservation)}
-                          >
-                            <X className="mr-2 h-4 w-4 text-red-600" />
-                            Anular Reserva
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => deleteMutation.mutate(reservation.id)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Eliminar
-                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

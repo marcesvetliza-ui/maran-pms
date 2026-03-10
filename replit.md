@@ -83,3 +83,12 @@ Preferred communication style: Simple, everyday language.
 - **Vite**: Frontend build tool and development server.
 - **esbuild**: Fast bundling in production.
 - **TypeScript**: Type safety across the stack.
+
+### Important Implementation Notes
+- **Timezone**: Frontend uses `getLocalToday()`/`toArgentinaDateStr()` from `@/lib/utils`; Server uses `getArgentinaToday()` from `server/db-storage.ts`
+- **ID Strategy**: `bedTypeId` is varchar/UUID — must NOT use parseInt/Number()
+- **isEditable/isActive stored as string**: Compare with `=== "true"` (not boolean)
+- **Precios bloqueados**: Los precios NO se pueden modificar al cargar — vienen del catálogo/tarifa correspondiente. Cada área tiene un ítem especial para cargos libres: Hotel/SPA = "Cargo editable", Restaurant/Eventos = "Fuera de menú" (isEditable flag)
+- **Reservas cerradas bloqueadas**: Las reservas con status checked_out/cancelled cuya fecha de referencia (checkOutDate o checkInDate) sea anterior a hoy quedan en solo lectura. Backend rechaza con 403 en PATCH/DELETE/cancel/charges/payments. Frontend oculta botones de edición y muestra banner "Reserva cerrada"
+- **Safe updates**: Todos los métodos `update*` en `db-storage.ts` filtran campos protegidos (id, createdAt, códigos) y valores undefined
+- **DB push**: Use `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE...ADD COLUMN IF NOT EXISTS` via `refreshRealData()` in `server/seed.ts`

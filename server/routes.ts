@@ -17,6 +17,19 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
+function isReservationLocked(reservation: { status: string; checkOutDate: string | Date | null; checkInDate?: string | Date | null }): boolean {
+  const closedStatuses = ["checked_out", "cancelled"];
+  if (!closedStatuses.includes(reservation.status)) return false;
+  const today = getArgentinaToday();
+  const refDate = reservation.checkOutDate
+    ? String(reservation.checkOutDate).slice(0, 10)
+    : reservation.checkInDate
+      ? String(reservation.checkInDate).slice(0, 10)
+      : null;
+  if (!refDate) return false;
+  return refDate < today;
+}
+
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
@@ -943,6 +956,9 @@ export async function registerRoutes(
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+      if (isReservationLocked(existing)) {
+        return res.status(403).json({ error: "No se puede modificar una reserva cerrada de días anteriores" });
+      }
 
       delete req.body.createdAt;
       delete req.body.id;
@@ -1116,6 +1132,13 @@ export async function registerRoutes(
 
   app.delete("/api/reservations/:id", async (req, res) => {
     try {
+      const existing = await storage.getReservation(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Reservation not found" });
+      }
+      if (isReservationLocked(existing)) {
+        return res.status(403).json({ error: "No se puede eliminar una reserva cerrada de días anteriores" });
+      }
       const deleted = await storage.deleteReservation(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Reservation not found" });
@@ -1341,6 +1364,9 @@ export async function registerRoutes(
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+      if (isReservationLocked(reservation)) {
+        return res.status(403).json({ error: "No se puede anular una reserva cerrada de días anteriores" });
+      }
       
       // Log the cancellation
       await storage.createCancelledReservationLog({
@@ -1428,6 +1454,12 @@ export async function registerRoutes(
 
   app.post("/api/charges", async (req, res) => {
     try {
+      if (req.body.reservationId) {
+        const reservation = await storage.getReservation(req.body.reservationId);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se puede agregar cargos a una reserva cerrada de días anteriores" });
+        }
+      }
       const charge = await storage.createCharge(req.body);
       res.status(201).json(charge);
     } catch (error) {
@@ -1437,10 +1469,17 @@ export async function registerRoutes(
 
   app.patch("/api/charges/:id", async (req, res) => {
     try {
-      const charge = await storage.updateCharge(req.params.id, req.body);
-      if (!charge) {
+      const existing = await storage.getCharge(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Charge not found" });
       }
+      if (existing.reservationId) {
+        const reservation = await storage.getReservation(existing.reservationId);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se puede modificar cargos de una reserva cerrada de días anteriores" });
+        }
+      }
+      const charge = await storage.updateCharge(req.params.id, req.body);
       res.json(charge);
     } catch (error) {
       res.status(500).json({ error: "Error updating charge" });
@@ -1449,10 +1488,17 @@ export async function registerRoutes(
 
   app.delete("/api/charges/:id", async (req, res) => {
     try {
-      const deleted = await storage.deleteCharge(req.params.id);
-      if (!deleted) {
+      const existing = await storage.getCharge(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Charge not found" });
       }
+      if (existing.reservationId) {
+        const reservation = await storage.getReservation(existing.reservationId);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se puede eliminar cargos de una reserva cerrada de días anteriores" });
+        }
+      }
+      const deleted = await storage.deleteCharge(req.params.id);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting charge" });
@@ -1473,6 +1519,12 @@ export async function registerRoutes(
       const charge = await storage.getCharge(req.params.id);
       if (!charge) {
         return res.status(404).json({ error: "Charge not found" });
+      }
+      if (charge.reservationId) {
+        const sourceRes = await storage.getReservation(charge.reservationId);
+        if (sourceRes && isReservationLocked(sourceRes)) {
+          return res.status(403).json({ error: "No se puede transferir cargos de una reserva cerrada de días anteriores" });
+        }
       }
       
       // Prevent transferring to same reservation
@@ -1523,6 +1575,12 @@ export async function registerRoutes(
 
   app.post("/api/payments", async (req, res) => {
     try {
+      if (req.body.reservationId) {
+        const reservation = await storage.getReservation(req.body.reservationId);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se puede agregar pagos a una reserva cerrada de días anteriores" });
+        }
+      }
       if (req.body.billingTarget && !["guest", "company"].includes(req.body.billingTarget)) {
         req.body.billingTarget = "guest";
       }
@@ -1569,6 +1627,14 @@ export async function registerRoutes(
 
   app.delete("/api/payments/:id", async (req, res) => {
     try {
+      const payResult = await db.execute(sql`SELECT reservation_id FROM payments WHERE id = ${req.params.id}`);
+      const payRow = payResult.rows?.[0] as any;
+      if (payRow?.reservation_id) {
+        const reservation = await storage.getReservation(payRow.reservation_id);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se puede eliminar pagos de una reserva cerrada de días anteriores" });
+        }
+      }
       const deleted = await storage.deletePayment(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Payment not found" });
