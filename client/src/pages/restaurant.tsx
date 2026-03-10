@@ -2112,7 +2112,7 @@ export default function RestaurantPage() {
               </div>
               {isEditableItem && (
                 <div className="space-y-2 mt-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md">
-                  <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">Ítem personalizado — completar descripción y precio</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">Fuera de menú — completar descripción y precio</p>
                   <div>
                     <Label className="text-xs">Descripción *</Label>
                     <Input
@@ -3149,7 +3149,7 @@ export default function RestaurantPage() {
                           data-testid="switch-menu-item-editable"
                         />
                       </FormControl>
-                      <FormLabel className="cursor-pointer !mt-0">Precio editable</FormLabel>
+                      <FormLabel className="cursor-pointer !mt-0">Fuera de menú</FormLabel>
                     </FormItem>
                   )}
                 />

@@ -1839,26 +1839,39 @@ export default function SpaPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium">Tipo</label>
-              <Select value={chargeType} onValueChange={setChargeType}>
+              <label className="text-sm font-medium">Servicio / Concepto</label>
+              <Select value={chargeType} onValueChange={(val) => {
+                setChargeType(val);
+                if (val === "cargo_editable") {
+                  setChargeDescription("");
+                  setChargePrice("");
+                } else {
+                  const treatment = treatments.find(t => t.id === val);
+                  if (treatment) {
+                    setChargeDescription(treatment.name);
+                    setChargePrice(treatment.price);
+                  }
+                }
+              }}>
                 <SelectTrigger data-testid="select-charge-type">
-                  <SelectValue />
+                  <SelectValue placeholder="Seleccionar servicio..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="product">Producto</SelectItem>
-                  <SelectItem value="service">Servicio Extra</SelectItem>
-                  <SelectItem value="extra">Consumo (pileta, toalla, etc.)</SelectItem>
+                  {treatments.filter(t => t.isActive === "true").map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.name} — ${parseFloat(t.price).toFixed(2)}</SelectItem>
+                  ))}
+                  <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
               <label className="text-sm font-medium">Descripción</label>
-              <Input value={chargeDescription} onChange={(e) => setChargeDescription(e.target.value)} placeholder="Ej: Toalla extra" data-testid="input-charge-description" />
+              <Input value={chargeDescription} onChange={(e) => setChargeDescription(e.target.value)} placeholder="Ej: Toalla extra" disabled={chargeType !== "cargo_editable"} data-testid="input-charge-description" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium">Precio Unit.</label>
-                <Input type="number" step="0.01" value={chargePrice} onChange={(e) => setChargePrice(e.target.value)} data-testid="input-charge-price" />
+                <Input type="number" step="0.01" value={chargePrice} onChange={(e) => setChargePrice(e.target.value)} disabled={chargeType !== "cargo_editable"} data-testid="input-charge-price" />
               </div>
               <div>
                 <label className="text-sm font-medium">Cantidad</label>
@@ -1876,7 +1889,7 @@ export default function SpaPage() {
                       description: chargeDescription,
                       quantity: parseInt(chargeQuantity) || 1,
                       unitPrice: chargePrice,
-                      itemType: chargeType,
+                      itemType: chargeType === "cargo_editable" ? "extra" : "service",
                     });
                   }
                 }}

@@ -917,7 +917,6 @@ function ReservationDetailDialog({
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
   const [targetReservationId, setTargetReservationId] = useState<string>("");
-  const [editingChargeId, setEditingChargeId] = useState<string | null>(null);
   const [newCharge, setNewCharge] = useState({
     description: "",
     amount: "",
@@ -933,7 +932,7 @@ function ReservationDetailDialog({
     { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" as const },
     { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" as const },
     { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" as const },
-    { label: "Cargo manual", description: "", amount: "", category: "otros" as const },
+    { label: "Cargo editable", description: "", amount: "", category: "otros" as const },
   ];
   const [chargeQty, setChargeQty] = useState(1);
   const [selectedPreset, setSelectedPreset] = useState<typeof chargePresets[0] | null>(null);
@@ -1067,18 +1066,6 @@ function ReservationDetailDialog({
     setChargeQty(1);
   };
 
-  const updateChargeMutation = useMutation({
-    mutationFn: async ({ id, amount }: { id: string; amount: string }) => {
-      return apiRequest("PATCH", `/api/charges/${id}`, { amount });
-    },
-    onSuccess: () => {
-      refetchCharges();
-      toast({ title: "Cargo actualizado" });
-    },
-    onError: () => {
-      toast({ title: "Error al actualizar el cargo", variant: "destructive" });
-    },
-  });
 
   const handleAddPayment = () => {
     if (!newPayment.amount) return;
@@ -1302,6 +1289,7 @@ function ReservationDetailDialog({
                         placeholder="Descripción del cargo"
                         value={newCharge.description}
                         onChange={(e) => setNewCharge({ ...newCharge, description: e.target.value })}
+                        disabled={selectedPreset?.label !== "Cargo editable"}
                         data-testid="input-charge-description"
                       />
                     </div>
@@ -1312,6 +1300,7 @@ function ReservationDetailDialog({
                         placeholder="0.00"
                         value={newCharge.amount}
                         onChange={(e) => setNewCharge({ ...newCharge, amount: e.target.value })}
+                        disabled={selectedPreset?.label !== "Cargo editable"}
                         data-testid="input-charge-unit-price"
                       />
                     </div>
@@ -1345,6 +1334,7 @@ function ReservationDetailDialog({
                       <Select
                         value={newCharge.category}
                         onValueChange={(value) => setNewCharge({ ...newCharge, category: value as typeof newCharge.category })}
+                        disabled={selectedPreset?.label !== "Cargo editable"}
                       >
                         <SelectTrigger data-testid="select-charge-category">
                           <SelectValue />
@@ -1376,7 +1366,7 @@ function ReservationDetailDialog({
                     <Button
                       size="sm"
                       onClick={handleAddCharge}
-                      disabled={!newCharge.description || !newCharge.amount || addChargeMutation.isPending}
+                      disabled={!selectedPreset || !newCharge.description || !newCharge.amount || addChargeMutation.isPending}
                       data-testid="button-confirm-charge"
                     >
                       {addChargeMutation.isPending ? "Guardando..." : `Agregar${chargeQty > 1 ? ` (${chargeQty})` : ""}`}
@@ -1394,38 +1384,9 @@ function ReservationDetailDialog({
                       <span className="text-muted-foreground text-xs shrink-0">({formatDateAR(charge.date)})</span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
-                      {editingChargeId === charge.id ? (
-                        <div className="flex items-center gap-1">
-                          <span className="text-muted-foreground text-xs">$</span>
-                          <Input
-                            type="number"
-                            className="h-6 w-20 text-xs p-1"
-                            defaultValue={parseFloat(charge.amount).toFixed(2)}
-                            autoFocus
-                            onBlur={(e) => {
-                              const val = e.target.value;
-                              if (val && parseFloat(val) !== parseFloat(charge.amount)) {
-                                updateChargeMutation.mutate({ id: charge.id, amount: parseFloat(val).toFixed(2) });
-                              }
-                              setEditingChargeId(null);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                              if (e.key === "Escape") setEditingChargeId(null);
-                            }}
-                            data-testid={`input-edit-charge-${charge.id}`}
-                          />
-                        </div>
-                      ) : (
-                        <button
-                          className="font-medium hover:text-primary hover:underline cursor-pointer tabular-nums"
-                          onClick={() => setEditingChargeId(charge.id)}
-                          title="Clic para editar monto"
-                          data-testid={`button-edit-charge-amount-${charge.id}`}
-                        >
-                          ${parseFloat(charge.amount).toFixed(2)}
-                        </button>
-                      )}
+                      <span className="font-medium tabular-nums" data-testid={`text-charge-amount-${charge.id}`}>
+                        ${parseFloat(charge.amount).toFixed(2)}
+                      </span>
                       <Button 
                         size="icon" 
                         variant="ghost" 

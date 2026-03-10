@@ -271,6 +271,8 @@ export default function EventsPage() {
   const [selectedEvent, setSelectedEvent] = useState<HotelEvent | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
   const [isChargeDialogOpen, setIsChargeDialogOpen] = useState(false);
+  const [isChargeEditable, setIsChargeEditable] = useState(false);
+  const [isTableChargeEditable, setIsTableChargeEditable] = useState(false);
   const [prefilledRoomId, setPrefilledRoomId] = useState<string>("");
   const [prefilledDate, setPrefilledDate] = useState<string>("");
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -1561,6 +1563,7 @@ export default function EventsPage() {
                       size="sm"
                       onClick={() => {
                         chargeForm.reset();
+                        setIsChargeEditable(false);
                         setIsChargeDialogOpen(true);
                       }}
                       data-testid="button-add-charge"
@@ -1972,29 +1975,38 @@ export default function EventsPage() {
           <DialogHeader>
             <DialogTitle>Agregar Cargo</DialogTitle>
             <DialogDescription>
-              Seleccione un tipo predefinido o ingrese manualmente
+              Seleccione un tipo de cargo. Use "Fuera de menú" para cargos con precio libre.
             </DialogDescription>
           </DialogHeader>
           <Form {...chargeForm}>
             <form onSubmit={chargeForm.handleSubmit(onSubmitCharge)} className="space-y-4">
               <div className="space-y-4">
                 <div>
-                  <FormLabel>Tipo Predefinido</FormLabel>
+                  <FormLabel>Tipo de Cargo</FormLabel>
                   <Select
                     onValueChange={(value) => {
-                      chargeForm.setValue("chargeTypeId", value);
-                      handleChargeTypeSelect(value);
+                      if (value === "fuera_de_menu") {
+                        setIsChargeEditable(true);
+                        chargeForm.setValue("chargeTypeId", "");
+                        chargeForm.setValue("description", "");
+                        chargeForm.setValue("unitPrice", "");
+                      } else {
+                        setIsChargeEditable(false);
+                        chargeForm.setValue("chargeTypeId", value);
+                        handleChargeTypeSelect(value);
+                      }
                     }}
                   >
                     <SelectTrigger data-testid="select-charge-type">
-                      <SelectValue placeholder="Seleccionar tipo (opcional)" />
+                      <SelectValue placeholder="Seleccionar tipo..." />
                     </SelectTrigger>
                     <SelectContent>
                       {chargeTypes.filter(ct => ct.isActive).map((ct) => (
                         <SelectItem key={ct.id} value={ct.id}>
-                          {ct.name} - ${ct.defaultPrice}
+                          {ct.name} — ${ct.defaultPrice}
                         </SelectItem>
                       ))}
+                      <SelectItem value="fuera_de_menu">Fuera de menú (libre)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2006,7 +2018,7 @@ export default function EventsPage() {
                     <FormItem>
                       <FormLabel>Descripcion</FormLabel>
                       <FormControl>
-                        <Input placeholder="Descripcion del cargo" {...field} data-testid="input-charge-description" />
+                        <Input placeholder="Descripcion del cargo" {...field} disabled={!isChargeEditable} data-testid="input-charge-description" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -2041,7 +2053,7 @@ export default function EventsPage() {
                       <FormItem>
                         <FormLabel>Precio Unitario</FormLabel>
                         <FormControl>
-                          <Input placeholder="0.00" {...field} data-testid="input-charge-price" />
+                          <Input placeholder="0.00" {...field} disabled={!isChargeEditable} data-testid="input-charge-price" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -2196,10 +2208,35 @@ export default function EventsPage() {
                 {selectedTable.status === "open" && (
                   <div className="mt-3 pt-3 border-t space-y-2">
                     <p className="text-sm font-medium">Agregar Cargo</p>
+                    <Select onValueChange={(val) => {
+                      if (val === "fuera_de_menu") {
+                        setIsTableChargeEditable(true);
+                        setTableChargeDesc("");
+                        setTableChargePrice("");
+                      } else {
+                        setIsTableChargeEditable(false);
+                        const ct = chargeTypes.find(c => c.id === val);
+                        if (ct) {
+                          setTableChargeDesc(ct.name);
+                          setTableChargePrice(ct.defaultPrice);
+                        }
+                      }
+                    }}>
+                      <SelectTrigger data-testid="select-table-charge-type">
+                        <SelectValue placeholder="Seleccionar tipo..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chargeTypes.filter(ct => ct.isActive).map(ct => (
+                          <SelectItem key={ct.id} value={ct.id}>{ct.name} — ${ct.defaultPrice}</SelectItem>
+                        ))}
+                        <SelectItem value="fuera_de_menu">Fuera de menú (libre)</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Input
                       placeholder="Descripcion"
                       value={tableChargeDesc}
                       onChange={(e) => setTableChargeDesc(e.target.value)}
+                      disabled={!isTableChargeEditable}
                       data-testid="input-table-charge-desc"
                     />
                     <div className="grid grid-cols-2 gap-2">
@@ -2217,6 +2254,7 @@ export default function EventsPage() {
                         placeholder="Precio Unit."
                         value={tableChargePrice}
                         onChange={(e) => setTableChargePrice(e.target.value)}
+                        disabled={!isTableChargeEditable}
                         data-testid="input-table-charge-price"
                       />
                     </div>

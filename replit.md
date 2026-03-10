@@ -1,19 +1,9 @@
 # Maran Suite System - Hotel Management System
 
 ## Overview
-
-Maran Suite System is a comprehensive full-stack hospitality management suite designed for Maran Suites & Towers, a 66-room, 12-floor hotel (Floors 2-12: Floor 2 has 6 rooms, Floors 3-9 have 7 each, Floor 10 has 5, Floors 11-12 have 3 each). The system, developed in Spanish (es) and adhering to Material Design principles, aims to be a modular commercial product. It provides a unified platform for managing various hotel operations, including guest services, reservations, and internal management.
-
-Key capabilities include:
-- A central dashboard for operational oversight.
-- Management of rooms, room types, guests, companies, and travel agencies.
-- A complete reservation workflow with a visual planning calendar.
-- Integrated Restaurant POS, SPA, and Events management modules.
-- Housekeeping, Maintenance, and Inventory management functionalities.
-- A comprehensive administration module.
+Maran Suite System is a comprehensive full-stack hospitality management suite for Maran Suites & Towers, a 66-room hotel. Developed in Spanish and adhering to Material Design, it aims to be a modular commercial product. The system unifies various hotel operations including guest services, reservations, and internal management, providing a central dashboard and modules for Restaurant POS, SPA, Events, Housekeeping, Maintenance, Inventory, and Administration. Its core purpose is to streamline hotel management, enhance guest experience, and provide robust operational control.
 
 ## User Preferences
-
 Preferred communication style: Simple, everyday language.
 
 ## System Architecture
@@ -30,23 +20,15 @@ Preferred communication style: Simple, everyday language.
 - **Runtime**: Node.js with Express.
 - **Language**: TypeScript (ESM modules).
 - **API Style**: RESTful JSON API.
-- **Development**: Vite middleware integration for HMR.
 
 ### Data Layer
 - **ORM**: Drizzle ORM for PostgreSQL via `node-postgres` (`pg`).
-- **Storage Layer**: Implemented using Drizzle queries against PostgreSQL, exported from `server/storage.ts`.
-- **Seed Data**: `server/seed.ts` populates demo data on first startup.
 - **Schema**: Defined in `shared/schema.ts`, shared across client and server.
 - **Validation**: Zod schemas generated from Drizzle schemas.
 
 ### Core Data Models
 - **ID Strategy**: All tables use `varchar` primary keys with UUID generation.
 - **Key Entities**: Room Types, Rooms, Guests, Reservations, Payments.
-
-### Project Structure
-- `client/`: React frontend application.
-- `server/`: Express backend.
-- `shared/`: Shared code, including Drizzle schema and TypeScript types.
 
 ### Design Patterns
 - **Path Aliases**: `@/*` for client, `@shared/*` for shared code.
@@ -55,39 +37,30 @@ Preferred communication style: Simple, everyday language.
 - **Theme System**: CSS variables for dynamic light/dark mode theming.
 
 ### Feature Specifications
-- **Reception/PMS Module**: Enhanced bed type management, advanced search, early/late check-in/out charges, multi-step check-out, mass check-in/out, group payment.
-- **SPA Module**: Cabin time overlap validation, streamlined edit/cancel processes, inventory management, weekly planning view, folio system. Professionals CRUD (`spaProfessionals` table), SPA Clients DB (`spaClients` table) with dedicated page at `/spa-clients`, professional assignment on appointments (`professionalId`), client/reservation autocomplete in form, PDF confirmation print, room_charge auto-voucher close, Configuración tab with cabin and professional management.
-- **Restaurant Module**: Drag & drop floor plan editor, configurable reservation time slots, menu CRUD, detailed billing, recipe and cost calculation, waiter assignment, tableless areas, course-based ordering, bill splitting, editable-price menu items (`isEditable` flag) with custom name/price at order time.
-- **Events Module**: Cancellation confirmations, room overlap validation, folio system with advanced payment options.
-- **Planning Calendar Enhancements**: Color-coded reservations by source, updated legend and tooltips. Drag & drop to move reservations between rooms (using @dnd-kit/core) with confirmation dialog and server-side overlap validation. Group reservations shown with unique group color (assigned via color picker in group form), guest name displayed in cells instead of "GRP".
-- **Rate Editing**: Manual override of `baseRatePerNight`, automatic `finalRatePerNight` calculation.
-- **Payments Section**: Separate tracking of payments and charges in the folio, multiple payment methods, split payments (multi-row form with "Agregar método" for splitting across methods).
-- **Guest Vehicle Data**: Optional fields for vehicle details.
-- **System Notifications**: Internal notification system with real-time unread count, chatbot and web check-in types, area-based filtering, priority levels.
-- **Chatbot Webhook Integration**: `POST /api/webhook/chatbot` endpoint for creating notifications and housekeeping tasks. Includes a **MARA Chatbot Dashboard** page.
-- **Web Check-in**: Public mobile-first 4-step wizard at `/web-checkin/:token` for guests to self check-in, integrates with check-in page for link generation and status tracking.
-- **Hospitality Module**: Guest preference CRM at `/hospitality` with preferences, stay notes, and auto-generated alerts. Integrations with check-in/guest detail dialogs and notification bell.
-- **Group Mass Actions**: Group detail page with mass check-in, mass check-out, group payment, consolidated group invoice, and mass room assignment (AssignBlockDialog with N rows per block).
-- **Printable Rooming List**: Group detail page feature for printing room assignments.
-- **Package Module Enhancements**: Package cards show validity/discount, quick actions for duplication and status toggle.
-- **Executive Dashboard**: Page at `/executive` with period selector, KPI cards (Occupancy %, Revenue, ADR, RevPAR) with YoY comparison, charts, real-time room status, today's operations summary.
-- **Reports Module**: Page at `/reports` with 8 tabbed reports (Occupancy, Revenue by Type, By Channel, Reservations, Payments, Frequent Guests, Housekeeping, Restaurant) with period selector, CSV export, print functionality.
-- **Cash Register & Shift Audit Module**: Page at `/cash-register` with tabs per area, tracking shifts, movements, and closing summaries. Features opening/closing shifts, manual movement registration, automatic payment recording, history, and configurable settings.
-- **Staff Help Chatbot**: Floating help button with a slide-in chat panel powered by OpenAI gpt-4o-mini, providing step-by-step answers from the hotel operations manual.
-- **Travel Agencies Module**: Page at `/agencies` with CRUD table, commission rate tracking, per-agency stats (reservations, revenue, commission), and global commission report with date filtering. `AgencySelector` component in reservation forms (reservations page + planning quick reservation). `agencyId` FK on reservations and guests tables.
-- **Administration Module**: Hub page at `/admin` with cards linking to financial sub-modules (Facturación, CC Empresas, CC Agencias, Comprobantes, Reportes, Caja). Sidebar reorganized: "Administración" → `/admin`, "Caja" moved to admin group, existing renamed to "Administración del Sistema".
-- **Cuenta Corriente Module**: `account_movements` table tracking cargo/pago/nota_credito/ajuste per company/agency. Auto-trigger on checkout with `cuenta_corriente` payment method creates cargo. Sheet UI in companies/agencies pages for viewing movements and registering payments. Summary API at `/api/account-summary` with real-time debt totals on admin page.
+- **Core PMS**: Enhanced bed type management, advanced search, early/late check-in/out charges, multi-step check-out, mass check-in/out, group payment.
+- **Planning Calendar**: Visual calendar with color-coded reservations, drag & drop functionality for moving reservations with conflict validation, group reservation display.
+- **SPA Module**: Cabin time overlap validation, inventory management, weekly planning, folio system, professional and client management.
+- **Restaurant Module**: Drag & drop floor plan editor, configurable reservation slots, menu CRUD, recipe/cost calculation, bill splitting, "Fuera de menú" items.
+- **Events Module**: Cancellation confirmations, room overlap validation, advanced payment folio system.
+- **Financial & Payments**: Manual `baseRatePerNight` override, automatic `finalRatePerNight` calculation, separate tracking of payments and charges, multiple payment methods, split payments.
+- **Guest Management**: Optional vehicle data, Guest preference CRM with stay notes and alerts.
+- **System Notifications**: Internal notification system with real-time updates, chatbot and web check-in types, area-based filtering, priority levels.
+- **Web Check-in**: Public mobile-first 4-step wizard for guest self check-in.
+- **Group Management**: Mass check-in/out/payment, consolidated invoice, mass room assignment, printable rooming list.
+- **Package Module**: Package cards with validity/discount display, quick actions.
+- **Dashboards & Reports**: Executive dashboard with KPIs, YoY comparison, charts, real-time room status. Comprehensive reports module with various tabbed reports, period selectors, CSV export.
+- **Cash Register & Shift Audit**: Tracks shifts, movements, closing summaries, manual movement registration, automatic payment recording.
+- **Staff Help Chatbot**: Floating help button with OpenAI gpt-4o-mini powered chat, providing answers from hotel operations manual.
+- **Travel Agencies Module**: CRUD for agencies, commission tracking, per-agency stats, global commission report, agency selection in reservation forms.
+- **Administration Module**: Hub for financial sub-modules (Facturación, CC Empresas, CC Agencias, Comprobantes, Reportes, Caja).
+- **Cuenta Corriente Module**: Tracks `account_movements` (cargo/pago/nota_credito/ajuste) per company/agency, auto-triggers on checkout, provides real-time debt totals.
 
 ### Authentication & Authorization
 - **Strategy**: Passport.js with local strategy.
 - **Password Hashing**: bcrypt.
-- **Session Store**: connect-pg-simple storing sessions in PostgreSQL.
-- **Session Duration**: 8 hours.
-- **Auth Module**: `server/auth.ts` for authentication utilities.
-- **Auth Routes**: `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, `/api/auth/setup`.
-- **Protected Routes**: All `/api/*` routes require authentication except specific public and auth routes.
+- **Session Store**: `connect-pg-simple` storing sessions in PostgreSQL (8-hour duration).
+- **Protected Routes**: All `/api/*` routes require authentication except public and specific auth routes.
 - **Role-Based Access**: Admin-only routes for system management.
-- **Default Admin**: username: `admin`, password: `maran2026` (via `/api/auth/setup`).
 
 ## External Dependencies
 
@@ -110,56 +83,3 @@ Preferred communication style: Simple, everyday language.
 - **Vite**: Frontend build tool and development server.
 - **esbuild**: Fast bundling in production.
 - **TypeScript**: Type safety across the stack.
-
-## Pendientes y Observaciones (Marzo 2026)
-
-### BUGS CRÍTICOS (Prioridad Alta)
-- [x] B01: Editar/modificar reserva de grupo — PATCH route verified correct, group metadata editing works
-- [x] B02: Reservas de grupo clickeables desde detalle de grupo (navega a Reservas)
-- [x] B03: Al vincular empresa — form uses spread operator correctly, preserves fields
-- [x] B04: Early/late check-in icons — late checkout icon now shows on last occupied day (checkOut-1)
-- [x] B05: Botón "Hoy" inicia desde hoy (no desde ayer)
-- [x] B06: Colores de estado se actualizan — planning query invalidated from check-in/out/reservations pages
-- [x] B07: Ordenamiento de habitaciones por piso y número
-- [x] B08: Check-in filtra por fecha actual (hoy y mañana, solo confirmed/pending)
-- [x] B09: Reserva rápida desde planning permite asociar empresa (CompanySelector)
-- [x] B10: Editar camaje desde housekeeping (popover → dialog con Select)
-- [x] B11: Bloqueos de grupo sin asignar se muestran como alerta en planning
-
-### MEJORAS OPERATIVAS (Prioridad Media)
-- [x] M01: Facturar desde saldo pendiente en folio — "Pagar Saldo Pendiente" button pre-fills balance, "Registrar Pago" pre-fills amount
-- [x] M02: Facturación independiente huésped/empresa — billingTarget field on payments (guest/company), selector in folio & check-out
-- [x] M03: Eliminar opción "check in"/"check out" del dropdown de estado de reserva
-- [x] M04: Paquetes en reservas rápidas desde planning — package selector auto-fills rate and nights
-- [x] M05: Check-in/out/facturación grupal masiva — already fully implemented (mass check-in, check-out, group payment)
-- [x] M06: Rooming list imprimible desde grupo — already fully implemented with printRoomingList
-
-### FUNCIONALIDADES NUEVAS (Prioridad Baja / Próxima Etapa)
-- [x] F01: Inventario/stock de items para consumos y cargos — already fully implemented (categories, suppliers, items, movements, low-stock alerts)
-- [x] F02: Reportes contables ampliados y comprobantes — new "Facturación" tab in Reports with guest/company breakdown, pie chart by method, detailed receipts table, CSV export
-- [x] F03: Módulo completo de paquetes (noches + servicios) — already fully implemented (packages CRUD, items, duplication, status toggle)
-- [x] F04: Tarifas por cantidad de pasajeros (rate1pax-rate4pax fields on rate plans, auto-applied on reservation creation based on guest count)
-
-### FIXES APLICADOS (Marzo 2026 - Sesión Actual)
-- [x] FIX-01: Crash Planning en producción — eliminado `@dnd-kit/sortable` v10 (incompatible con `@dnd-kit/core` v6, no se usaba)
-- [x] FIX-02: Pagos no visibles en checkout — `enrichReservation` ahora incluye `payments` junto con `charges`
-- [x] FIX-03: Editar reserva/grupo/empresa/agencia borraba datos — `updateReservation/Group/Company/Agency` ahora filtran campos protegidos y undefined
-- [x] FIX-04: earlyCheckIn/lateCheckOut comparación boolean — ahora usa `!!` en vez de comparar con string "true"
-- [x] FIX-05: Fechas UTC vs Argentina — creado `getLocalToday()`/`toArgentinaDateStr()` en `@/lib/utils`, reemplazado `toISOString().split("T")[0]` en planning, reservations, check-in, check-out
-- [x] FIX-06: Error Boundary — agregado en `main.tsx` para evitar pantalla en blanco ante errores React
-- [x] FIX-07: Canal "agencia" — agregado como opción en ReservationSource, QuickReservationDialog y ReservationFormDialog
-- [x] FIX-08: PDF confirmación muestra early check-in / late check-out con costos y horarios dinámicos
-- [x] FIX-09: Drag & drop por celda (DroppableCell) — permite mover reservas a otra habitación Y otra fecha, con recálculo de noches y validación de conflictos
-- [x] FIX-10: Diálogo de confirmación de movimiento muestra cambio de fechas cuando aplica
-- [x] FIX-11: Cargos predefinidos con cantidad en folio — selector de preset (cochera, media pensión, etc.), campo cantidad con multiplicador, edición inline de monto en cargos existentes
-- [x] FIX-12: Fechas dd/mm/aaaa — `formatDateAR()` en `@/lib/utils`, aplicado en reservations, check-in, check-out, folio (cargos/pagos)
-- [x] FIX-13: Filtro historial en Reservas — botón "Ver historial" oculta checked_out y cancelled pasados por defecto, búsqueda incluye reservationCode
-- [x] FIX-14: Colores planning simplificados — 3 grupos (OTA indigo, Directo azul, Empresa/Agencia verde) con canal real en tooltip
-- [x] FIX-15: Overbooking prevention — POST/PATCH /api/reservations valida solapamiento via checkOverbooking antes de crear/editar, error 409 con mensaje descriptivo
-- [x] FIX-16: Camaje clickeable en Planning — click en bedConfig de columna izquierda abre dialog con selector para cambiar configuración de camas
-
-### NOTAS
-- Tipos de habitación (ej. "Suite para dos") se pueden agregar desde Administración > Tipos de Habitación
-- Las tarifas por PAX se configuran en el plan tarifario
-- **Timezone**: Frontend usa `getLocalToday()`/`toArgentinaDateStr()` de `@/lib/utils`; Backend usa `getArgentinaToday()` de `server/db-storage.ts`
-- **Safe updates**: Todos los métodos `update*` en `db-storage.ts` filtran campos protegidos (id, createdAt, códigos) y valores undefined
