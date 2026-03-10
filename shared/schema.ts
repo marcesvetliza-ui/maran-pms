@@ -809,6 +809,7 @@ export const menuItems = pgTable("menu_items", {
   preparationTime: integer("preparation_time"),
   isAvailable: text("is_available").default("true"),
   isActive: text("is_active").default("true"),
+  isEditable: text("is_editable").default("false"),
   allergens: text("allergens").array(),
   displayOrder: integer("display_order").default(0),
 });

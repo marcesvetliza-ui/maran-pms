@@ -944,6 +944,9 @@ function ReservationDetailDialog({
     notes: "",
     billingTarget: "guest" as "guest" | "company",
   });
+  const [paymentRows, setPaymentRows] = useState<Array<{ amount: string; method: string; reference: string; billingTarget: string }>>([
+    { amount: "", method: "efectivo", reference: "", billingTarget: "guest" },
+  ]);
 
   // Fetch active reservations for transfer target selection
   const { data: activeReservations, isError: isActiveReservationsError, isLoading: isActiveReservationsLoading } = useQuery<ReservationWithDetails[]>({
@@ -999,7 +1002,7 @@ function ReservationDetailDialog({
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (paymentData: { amount: string; method: PaymentMethod; reference?: string; notes?: string; reservationId: string; date: string }) => {
+    mutationFn: async (paymentData: { amount: string; method: PaymentMethod; reference?: string; notes?: string; billingTarget?: string; reservationId: string; date: string }) => {
       return apiRequest("POST", "/api/payments", paymentData);
     },
     onSuccess: () => {
@@ -1084,6 +1087,33 @@ function ReservationDetailDialog({
       reservationId: reservation.id,
       date: getLocalToday(),
     });
+  };
+
+  const handleAddMultiPayment = async () => {
+    const validRows = paymentRows.filter(r => r.amount && parseFloat(r.amount) > 0);
+    if (validRows.length === 0) return;
+    let successCount = 0;
+    for (const row of validRows) {
+      try {
+        await addPaymentMutation.mutateAsync({
+          amount: row.amount,
+          method: row.method as PaymentMethod,
+          reference: row.reference || undefined,
+          notes: undefined,
+          billingTarget: row.billingTarget as "guest" | "company",
+          reservationId: reservation.id,
+          date: getLocalToday(),
+        });
+        successCount++;
+      } catch {
+        if (successCount > 0) {
+          toast({ title: `${successCount} pago(s) registrado(s), pero hubo un error en los restantes`, variant: "destructive" });
+        }
+        return;
+      }
+    }
+    setShowAddPayment(false);
+    setPaymentRows([{ amount: "", method: "efectivo", reference: "", billingTarget: "guest" }]);
   };
 
   const categoryLabels: Record<string, string> = {
@@ -1435,7 +1465,9 @@ function ReservationDetailDialog({
                 <h4 className="font-semibold">Pagos / Anticipos</h4>
                 <Button size="sm" variant="outline" onClick={() => {
                   if (!showAddPayment) {
-                    setNewPayment({ ...newPayment, amount: balance > 0 ? balance.toFixed(2) : "" });
+                    const amt = balance > 0 ? balance.toFixed(2) : "";
+                    setNewPayment({ ...newPayment, amount: amt });
+                    setPaymentRows([{ amount: amt, method: "efectivo", reference: "", billingTarget: "guest" }]);
                   }
                   setShowAddPayment(!showAddPayment);
                 }} data-testid="button-add-payment">
@@ -1445,67 +1477,114 @@ function ReservationDetailDialog({
               </div>
 
               {showAddPayment && (
-                <div className="p-3 border-b bg-muted/30">
-                  <div className="grid grid-cols-2 gap-2 mb-2">
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                      <Input
-                        type="number"
-                        placeholder="Monto"
-                        value={newPayment.amount}
-                        onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
-                        className="pl-7"
-                        data-testid="input-payment-amount"
-                      />
+                <div className="p-3 border-b bg-muted/30 space-y-2">
+                  {paymentRows.map((row, index) => (
+                    <div key={index} className="space-y-1">
+                      <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">$</span>
+                          <Input
+                            type="number"
+                            placeholder="Monto"
+                            value={row.amount}
+                            onChange={(e) => {
+                              const updated = [...paymentRows];
+                              updated[index].amount = e.target.value;
+                              setPaymentRows(updated);
+                            }}
+                            className="pl-7"
+                            data-testid={`input-payment-amount-${index}`}
+                          />
+                        </div>
+                        <Select
+                          value={row.method}
+                          onValueChange={(value) => {
+                            const updated = [...paymentRows];
+                            updated[index].method = value;
+                            setPaymentRows(updated);
+                          }}
+                        >
+                          <SelectTrigger data-testid={`select-payment-method-${index}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="efectivo">Efectivo</SelectItem>
+                            <SelectItem value="tarjeta_debito">Débito</SelectItem>
+                            <SelectItem value="tarjeta_credito">Crédito</SelectItem>
+                            <SelectItem value="transferencia">Transferencia</SelectItem>
+                            <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                            <SelectItem value="cuenta_corriente">Cta. Cte.</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <div className="flex gap-1 items-center">
+                          <Input
+                            placeholder="Ref."
+                            value={row.reference}
+                            onChange={(e) => {
+                              const updated = [...paymentRows];
+                              updated[index].reference = e.target.value;
+                              setPaymentRows(updated);
+                            }}
+                            className="flex-1"
+                            data-testid={`input-payment-reference-${index}`}
+                          />
+                          <Select
+                            value={row.billingTarget}
+                            onValueChange={(value) => {
+                              const updated = [...paymentRows];
+                              updated[index].billingTarget = value;
+                              setPaymentRows(updated);
+                            }}
+                          >
+                            <SelectTrigger className="w-[90px]" data-testid={`select-billing-target-${index}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="guest">Huésped</SelectItem>
+                              <SelectItem value="company">Empresa</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {paymentRows.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive"
+                            onClick={() => setPaymentRows(paymentRows.filter((_, i) => i !== index))}
+                            data-testid={`button-remove-payment-row-${index}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <Select
-                      value={newPayment.method}
-                      onValueChange={(value) => setNewPayment({ ...newPayment, method: value as PaymentMethod })}
+                  ))}
+                  <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs"
+                      onClick={() => setPaymentRows([...paymentRows, { amount: "", method: "efectivo", reference: "", billingTarget: "guest" }])}
+                      data-testid="button-add-payment-row"
                     >
-                      <SelectTrigger data-testid="select-payment-method">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="efectivo">Efectivo</SelectItem>
-                        <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                        <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                        <SelectItem value="transferencia">Transferencia</SelectItem>
-                        <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                        <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      <Plus className="h-3 w-3 mr-1" />
+                      Agregar método
+                    </Button>
+                    <span>
+                      Total: ${paymentRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0).toFixed(2)}
+                    </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 mb-2">
-                    <Input
-                      placeholder="Referencia (Nº comprobante, etc.)"
-                      value={newPayment.reference}
-                      onChange={(e) => setNewPayment({ ...newPayment, reference: e.target.value })}
-                      data-testid="input-payment-reference"
-                    />
-                    <Select
-                      value={newPayment.billingTarget}
-                      onValueChange={(value) => setNewPayment({ ...newPayment, billingTarget: value as "guest" | "company" })}
-                    >
-                      <SelectTrigger data-testid="select-billing-target">
-                        <SelectValue placeholder="Facturar a" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="guest">Huésped</SelectItem>
-                        <SelectItem value="company">Empresa</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => setShowAddPayment(false)}>
+                  <div className="flex justify-end gap-2 mt-2">
+                    <Button size="sm" variant="ghost" onClick={() => { setShowAddPayment(false); setPaymentRows([{ amount: "", method: "efectivo", reference: "", billingTarget: "guest" }]); }}>
                       Cancelar
                     </Button>
                     <Button 
                       size="sm" 
-                      onClick={handleAddPayment} 
-                      disabled={addPaymentMutation.isPending}
+                      onClick={handleAddMultiPayment} 
+                      disabled={addPaymentMutation.isPending || paymentRows.every(r => !r.amount)}
                       data-testid="button-confirm-payment"
                     >
-                      Confirmar Pago
+                      Confirmar
                     </Button>
                   </div>
                 </div>
@@ -1574,6 +1653,7 @@ function ReservationDetailDialog({
                     className="w-full mt-2" 
                     onClick={() => {
                       setNewPayment({ amount: balance.toFixed(2), method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
+                      setPaymentRows([{ amount: balance.toFixed(2), method: "efectivo", reference: "", billingTarget: "guest" }]);
                       setShowAddPayment(true);
                     }}
                     data-testid="button-pay-balance"

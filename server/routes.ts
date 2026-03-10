@@ -2691,18 +2691,35 @@ Only respond with the JSON object.`;
   // Order Items
   app.post("/api/restaurant/orders/:orderId/items", async (req, res) => {
     try {
-      const { menuItemId, quantity, notes, course } = req.body;
+      const { menuItemId, quantity, notes, course, customPrice, customName } = req.body;
       const menuItem = await storage.getMenuItem(menuItemId);
       if (!menuItem) return res.status(404).json({ error: "Menu item not found" });
       
       const order = await storage.getRestaurantOrder(req.params.orderId);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const unitPrice = menuItem.price;
+      let finalCustomPrice = undefined;
+      let finalCustomName = undefined;
+      if (customPrice || customName) {
+        if ((menuItem as any).isEditable !== "true") {
+          return res.status(400).json({ error: "Este ítem no permite precio personalizado" });
+        }
+        if (customPrice) {
+          const parsed = parseFloat(customPrice);
+          if (isNaN(parsed) || parsed <= 0) {
+            return res.status(400).json({ error: "El precio personalizado debe ser un número positivo" });
+          }
+          finalCustomPrice = parsed.toFixed(2);
+        }
+        finalCustomName = customName;
+      }
+
+      const unitPrice = finalCustomPrice || menuItem.price;
       const subtotal = (parseFloat(unitPrice) * (quantity || 1)).toFixed(2);
       const itemCourse = course || 1;
       const activeCourse = order.activeCourse || 1;
       const itemStatus = itemCourse <= activeCourse ? "pending" : "waiting_course";
+      const itemNotes = customName ? `[${customName}] ${notes || ""}`.trim() : notes;
       
       const item = await storage.createOrderItem({
         orderId: req.params.orderId,
@@ -2710,7 +2727,7 @@ Only respond with the JSON object.`;
         quantity: quantity || 1,
         unitPrice,
         subtotal,
-        notes,
+        notes: itemNotes,
         course: itemCourse,
         status: itemStatus,
       });

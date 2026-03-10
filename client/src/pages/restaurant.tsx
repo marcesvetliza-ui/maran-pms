@@ -252,6 +252,7 @@ const menuItemFormSchema = z.object({
   price: z.coerce.number().min(0, "El precio debe ser positivo"),
   preparationTime: z.coerce.number().min(0).optional(),
   isAvailable: z.string().default("true"),
+  isEditable: z.string().default("false"),
 });
 
 type MenuItemFormValues = z.infer<typeof menuItemFormSchema>;
@@ -321,6 +322,9 @@ export default function RestaurantPage() {
   const [directOrderAreaId, setDirectOrderAreaId] = useState("");
   const [itemCourse, setItemCourse] = useState(1);
   const [itemQuantity, setItemQuantity] = useState(1);
+  const [customItemPrice, setCustomItemPrice] = useState("");
+  const [customItemName, setCustomItemName] = useState("");
+  const [isEditableItem, setIsEditableItem] = useState(false);
   const [isSplitMode, setIsSplitMode] = useState(false);
   const [splitParts, setSplitParts] = useState(2);
   const [splitReceiptType, setSplitReceiptType] = useState("ticket");
@@ -353,6 +357,7 @@ export default function RestaurantPage() {
       price: 0,
       preparationTime: 0,
       isAvailable: "true",
+      isEditable: "false",
     },
   });
 
@@ -460,12 +465,14 @@ export default function RestaurantPage() {
   });
 
   const addItemMutation = useMutation({
-    mutationFn: async (data: { orderId: string; menuItemId: string; quantity: number; notes?: string; course?: number }) => {
+    mutationFn: async (data: { orderId: string; menuItemId: string; quantity: number; notes?: string; course?: number; customPrice?: string; customName?: string }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/items`, {
         menuItemId: data.menuItemId,
         quantity: data.quantity,
         notes: data.notes,
         course: data.course || 1,
+        customPrice: data.customPrice,
+        customName: data.customName,
       });
       return res.json();
     },
@@ -474,6 +481,9 @@ export default function RestaurantPage() {
       setPendingItem(null);
       setItemNotes("");
       setItemQuantity(1);
+      setIsEditableItem(false);
+      setCustomItemName("");
+      setCustomItemPrice("");
       toast({ title: "Item agregado" });
     },
   });
@@ -768,12 +778,18 @@ export default function RestaurantPage() {
 
   const handleConfirmItem = () => {
     if (currentOrder && pendingItem) {
+      if (isEditableItem && (!customItemName.trim() || !customItemPrice)) {
+        toast({ title: "Complete descripción y precio", variant: "destructive" });
+        return;
+      }
       addItemMutation.mutate({
         orderId: currentOrder.id,
         menuItemId: pendingItem.id,
         quantity: itemQuantity,
         notes: itemNotes || undefined,
         course: itemCourse,
+        customPrice: isEditableItem ? customItemPrice : undefined,
+        customName: isEditableItem ? customItemName : undefined,
       });
     }
   };
@@ -782,6 +798,9 @@ export default function RestaurantPage() {
     setPendingItem(null);
     setItemNotes("");
     setItemQuantity(1);
+    setIsEditableItem(false);
+    setCustomItemName("");
+    setCustomItemPrice("");
   };
 
   const getUpdatedOrder = () => {
@@ -835,6 +854,7 @@ export default function RestaurantPage() {
         price: parseFloat(item.price),
         preparationTime: item.preparationTime || 0,
         isAvailable: item.isAvailable || "true",
+        isEditable: (item as any).isEditable || "false",
       });
     } else {
       setEditingMenuItem(null);
@@ -845,6 +865,7 @@ export default function RestaurantPage() {
         price: 0,
         preparationTime: 0,
         isAvailable: "true",
+        isEditable: "false",
       });
     }
     setIsMenuItemDialogOpen(true);
@@ -1823,9 +1844,14 @@ export default function RestaurantPage() {
                         {courseItems.map((item) => (
                           <div key={item.id} className={`flex items-center justify-between p-3 border rounded-md mb-1 ${item.status === "waiting_course" ? "opacity-50 border-dashed" : ""}`}>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium">{item.menuItem?.name || "Item"}</span>
+                              <span className="font-medium">
+                                {item.notes?.startsWith("[") ? item.notes.match(/^\[(.+?)\]/)?.[1] || item.menuItem?.name || "Item" : item.menuItem?.name || "Item"}
+                              </span>
                               <span className="text-muted-foreground">x{item.quantity}</span>
-                              {item.notes && <span className="text-xs text-muted-foreground italic">({item.notes})</span>}
+                              {item.notes && !item.notes.startsWith("[") && <span className="text-xs text-muted-foreground italic">({item.notes})</span>}
+                              {item.notes?.startsWith("[") && item.notes.replace(/^\[.+?\]\s*/, "") && (
+                                <span className="text-xs text-muted-foreground italic">({item.notes.replace(/^\[.+?\]\s*/, "")})</span>
+                              )}
                               {item.status === "waiting_course" && <Badge variant="outline" className="text-[10px]">Esperando</Badge>}
                             </div>
                             <div className="flex items-center gap-2">
@@ -1895,9 +1921,14 @@ export default function RestaurantPage() {
                         {courseItems.map((item) => (
                           <div key={item.id} className={`flex items-center justify-between p-2 border rounded mb-1 ${item.status === "waiting_course" ? "opacity-50 border-dashed bg-muted/30" : "bg-background"}`}>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm">{item.menuItem?.name || "Item"}</span>
+                              <span className="font-medium text-sm">
+                                {item.notes?.startsWith("[") ? item.notes.match(/^\[(.+?)\]/)?.[1] || item.menuItem?.name || "Item" : item.menuItem?.name || "Item"}
+                              </span>
                               <Badge variant="outline" className="text-xs">x{item.quantity}</Badge>
-                              {item.notes && <span className="text-xs text-muted-foreground italic">({item.notes})</span>}
+                              {item.notes && !item.notes.startsWith("[") && <span className="text-xs text-muted-foreground italic">({item.notes})</span>}
+                              {item.notes?.startsWith("[") && item.notes.replace(/^\[.+?\]\s*/, "") && (
+                                <span className="text-xs text-muted-foreground italic">({item.notes.replace(/^\[.+?\]\s*/, "")})</span>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-semibold">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
@@ -2002,7 +2033,18 @@ export default function RestaurantPage() {
                       <button
                         key={item.id}
                         className="p-3 border rounded-md text-left hover-elevate flex items-center justify-between"
-                        onClick={() => setPendingItem(item)}
+                        onClick={() => {
+                          setPendingItem(item);
+                          if ((item as any).isEditable === "true") {
+                            setIsEditableItem(true);
+                            setCustomItemName(item.name);
+                            setCustomItemPrice("");
+                          } else {
+                            setIsEditableItem(false);
+                            setCustomItemName("");
+                            setCustomItemPrice("");
+                          }
+                        }}
                         data-testid={`select-item-${item.id}`}
                       >
                         <span className="font-medium">{item.name}</span>
@@ -2068,6 +2110,31 @@ export default function RestaurantPage() {
                   })()}
                 </div>
               </div>
+              {isEditableItem && (
+                <div className="space-y-2 mt-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md">
+                  <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">Ítem personalizado — completar descripción y precio</p>
+                  <div>
+                    <Label className="text-xs">Descripción *</Label>
+                    <Input
+                      value={customItemName}
+                      onChange={(e) => setCustomItemName(e.target.value)}
+                      placeholder="Ej: Milanesa napolitana especial"
+                      data-testid="input-custom-item-name"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Precio *</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={customItemPrice}
+                      onChange={(e) => setCustomItemPrice(e.target.value)}
+                      placeholder="0.00"
+                      data-testid="input-custom-item-price"
+                    />
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="item-notes">Observaciones (opcional)</Label>
                 <Textarea
@@ -3053,22 +3120,40 @@ export default function RestaurantPage() {
                   )}
                 />
               </div>
-              <FormField
-                control={menuItemForm.control}
-                name="isAvailable"
-                render={({ field }) => (
-                  <FormItem className="flex items-center gap-3 p-3 border rounded-md">
-                    <FormControl>
-                      <Switch
-                        checked={field.value === "true"}
-                        onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
-                        data-testid="switch-menu-item-available"
-                      />
-                    </FormControl>
-                    <FormLabel className="cursor-pointer !mt-0">Disponible</FormLabel>
-                  </FormItem>
-                )}
-              />
+              <div className="flex gap-4">
+                <FormField
+                  control={menuItemForm.control}
+                  name="isAvailable"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center gap-3 p-3 border rounded-md flex-1">
+                      <FormControl>
+                        <Switch
+                          checked={field.value === "true"}
+                          onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
+                          data-testid="switch-menu-item-available"
+                        />
+                      </FormControl>
+                      <FormLabel className="cursor-pointer !mt-0">Disponible</FormLabel>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={menuItemForm.control}
+                  name="isEditable"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center gap-3 p-3 border rounded-md flex-1">
+                      <FormControl>
+                        <Switch
+                          checked={field.value === "true"}
+                          onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
+                          data-testid="switch-menu-item-editable"
+                        />
+                      </FormControl>
+                      <FormLabel className="cursor-pointer !mt-0">Precio editable</FormLabel>
+                    </FormItem>
+                  )}
+                />
+              </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsMenuItemDialogOpen(false)}>Cancelar</Button>
                 <Button
