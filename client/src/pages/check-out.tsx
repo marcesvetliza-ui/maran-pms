@@ -81,6 +81,7 @@ export default function CheckOutPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
+  const [showAllCheckouts, setShowAllCheckouts] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [wizardStep, setWizardStep] = useState(0);
   const [addChargeOpen, setAddChargeOpen] = useState(false);
@@ -193,12 +194,17 @@ export default function CheckOutPage() {
     },
   });
 
+  const today = getLocalToday();
   const filteredReservations = reservations?.filter((res) => {
     const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
-    return (
+    const matchesSearch =
       guestName.includes(searchQuery.toLowerCase()) ||
-      res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+      res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (showAllCheckouts) return true;
+    const isToday = res.checkOutDate === today;
+    const isOverdue = res.checkOutDate < today;
+    return isToday || isOverdue;
   });
 
   const startCheckout = (reservation: ReservationWithDetails) => {
@@ -215,7 +221,7 @@ export default function CheckOutPage() {
     setFinalSummary(null);
   };
 
-  const today = new Date().toLocaleDateString("es-ES", {
+  const todayDisplay = new Date().toLocaleDateString("es-ES", {
     weekday: "long",
     year: "numeric",
     month: "long",
@@ -633,7 +639,7 @@ export default function CheckOutPage() {
         <h1 className="text-3xl font-bold tracking-tight" data-testid="text-checkout-title">
           Check-out
         </h1>
-        <p className="text-muted-foreground capitalize">{today}</p>
+        <p className="text-muted-foreground capitalize">{todayDisplay}</p>
       </div>
 
       <Card className="bg-orange-50 border-orange-200 dark:bg-orange-900/20 dark:border-orange-800">
@@ -655,15 +661,25 @@ export default function CheckOutPage() {
 
       <Card>
         <CardContent className="p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar por nombre de huésped o número de habitación..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-              data-testid="input-search-checkout"
-            />
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre de huésped o número de habitación..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+                data-testid="input-search-checkout"
+              />
+            </div>
+            <Button
+              variant={showAllCheckouts ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowAllCheckouts(!showAllCheckouts)}
+              data-testid="button-toggle-all-checkouts"
+            >
+              {showAllCheckouts ? "Solo hoy" : "Ver todos"}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -695,9 +711,16 @@ export default function CheckOutPage() {
                       <CardDescription>{reservation.guest?.phone || reservation.guest?.email}</CardDescription>
                     </div>
                   </div>
-                  <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-400">
-                    Alojado
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-400">
+                      Alojado
+                    </Badge>
+                    {reservation.checkOutDate === today ? (
+                      <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400" data-testid={`badge-today-${reservation.id}`}>Hoy</Badge>
+                    ) : reservation.checkOutDate < today ? (
+                      <Badge className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-400" data-testid={`badge-overdue-${reservation.id}`}>Vencido</Badge>
+                    ) : null}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">

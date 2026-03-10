@@ -14,6 +14,7 @@ import {
   Eye,
   DoorOpen,
   Hotel,
+  History,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -630,6 +631,7 @@ export default function GroupsPage() {
   const [showFormDialog, setShowFormDialog] = useState(false);
   const [editingGroup, setEditingGroup] = useState<GroupWithDetails | undefined>();
   const [deleteConfirmGroup, setDeleteConfirmGroup] = useState<GroupWithDetails | null>(null);
+  const [showGroupHistory, setShowGroupHistory] = useState(false);
 
   const { data: groups, isLoading } = useQuery<GroupWithDetails[]>({
     queryKey: ["/api/groups"],
@@ -659,12 +661,17 @@ export default function GroupsPage() {
     },
   });
 
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const filteredGroups = groups?.filter((group) => {
     const matchesSearch =
       group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       group.groupCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
       group.contactName?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || group.status === statusFilter;
+    if (!showGroupHistory) {
+      const isOld = group.checkOutDate < today && ["finished", "cancelled"].includes(group.status);
+      if (isOld) return false;
+    }
     return matchesSearch && matchesStatus;
   });
 
@@ -722,6 +729,15 @@ export default function GroupsPage() {
               <SelectItem value="cancelled">Cancelado</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            variant={showGroupHistory ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowGroupHistory(!showGroupHistory)}
+            data-testid="button-toggle-group-history"
+          >
+            <History className="h-4 w-4 mr-1" />
+            {showGroupHistory ? "Ocultar historial" : "Ver historial"}
+          </Button>
         </div>
         <Button onClick={() => { setEditingGroup(undefined); setShowFormDialog(true); }} data-testid="button-new-group">
           <Plus className="mr-2 h-4 w-4" />
@@ -859,8 +875,14 @@ export default function GroupsPage() {
       <GroupFormDialog
         group={editingGroup}
         open={showFormDialog}
-        onOpenChange={setShowFormDialog}
-        onSuccess={() => setEditingGroup(undefined)}
+        onOpenChange={(open) => {
+          setShowFormDialog(open);
+          if (!open) setEditingGroup(undefined);
+        }}
+        onSuccess={() => {
+          setEditingGroup(undefined);
+          queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
+        }}
       />
 
       <Dialog open={!!deleteConfirmGroup} onOpenChange={() => setDeleteConfirmGroup(null)}>

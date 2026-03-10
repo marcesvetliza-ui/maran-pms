@@ -93,6 +93,7 @@ export function ReservationFormDialog({
   open,
   onOpenChange,
   onSuccess,
+  defaultValues,
 }: {
   reservation?: ReservationWithDetails;
   guests: Guest[];
@@ -101,6 +102,11 @@ export function ReservationFormDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  defaultValues?: {
+    roomId?: string;
+    roomTypeId?: string;
+    checkInDate?: string;
+  };
 }) {
   const { toast } = useToast();
   const isEditing = !!reservation;
@@ -158,17 +164,24 @@ export function ReservationFormDialog({
       setSelectedGuest(reservation?.guest || null);
       setSelectedCompany(reservation?.company || null);
       setSelectedAgency(reservation?.agency || null);
-      setSelectedRoomTypeId(reservation?.roomTypeId || "");
+      setSelectedRoomTypeId(reservation?.roomTypeId || defaultValues?.roomTypeId || "");
       setFormData({
         reservationCode: reservation?.reservationCode || "",
         guestId: reservation?.guestId || "",
         companyId: reservation?.companyId || "",
         agencyId: reservation?.agencyId || "",
-        roomTypeId: reservation?.roomTypeId || "",
-        roomId: reservation?.roomId || "",
+        roomTypeId: reservation?.roomTypeId || defaultValues?.roomTypeId || "",
+        roomId: reservation?.roomId || defaultValues?.roomId || "",
         ratePlanId: reservation?.ratePlanId || "",
-        checkInDate: reservation?.checkInDate || today,
-        checkOutDate: reservation?.checkOutDate || tomorrow,
+        checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
+        checkOutDate: reservation?.checkOutDate || (() => {
+          if (defaultValues?.checkInDate) {
+            const d = new Date(defaultValues.checkInDate + "T12:00:00");
+            d.setDate(d.getDate() + 1);
+            return d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+          }
+          return tomorrow;
+        })(),
         nights: reservation?.nights || 1,
         numberOfGuests: reservation?.numberOfGuests || 1,
         status: reservation?.status || "pending",
@@ -1868,6 +1881,9 @@ export default function ReservationsPage() {
         setSelectedReservation(reservation);
         setDetailDialogOpen(true);
         navigate("/reservations", { replace: true });
+      } else if (dateMode !== "all") {
+        setDateMode("all");
+        setShowHistory(true);
       }
     }
   }, [searchParams, reservations, navigate]);

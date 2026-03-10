@@ -20,6 +20,7 @@ import {
   CheckCircle,
   CreditCard,
   DollarSign,
+  ExternalLink,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1037,6 +1038,7 @@ export default function GroupDetailPage() {
                       <TableHead>Habitación</TableHead>
                       <TableHead>Fechas</TableHead>
                       <TableHead>Estado</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1045,7 +1047,7 @@ export default function GroupDetailPage() {
                         key={res.id} 
                         data-testid={`row-reservation-${res.id}`}
                         className="cursor-pointer hover:bg-accent"
-                        onClick={() => navigate(`/reservations`)}
+                        onClick={() => navigate(`/reservations?view=${res.id}`)}
                       >
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
                         <TableCell>{res.guest?.firstName} {res.guest?.lastName}</TableCell>
@@ -1057,6 +1059,15 @@ export default function GroupDetailPage() {
                           <Badge variant={res.status === "confirmed" ? "default" : "secondary"}>
                             {res.status}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" className="h-7 w-7"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/reservations?view=${res.id}`); }}
+                            data-testid={`button-view-reservation-${res.id}`}
+                            title="Ver detalle de reserva"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}

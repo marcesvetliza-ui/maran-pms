@@ -1505,6 +1505,9 @@ export default function PlanningPage() {
   const [editReservationOpen, setEditReservationOpen] = useState(false);
   const [editingReservationData, setEditingReservationData] = useState<ReservationWithDetails | null>(null);
 
+  const [newReservationOpen, setNewReservationOpen] = useState(false);
+  const [newReservationDefaults, setNewReservationDefaults] = useState<{ roomId?: string; roomTypeId?: string; checkInDate?: string } | null>(null);
+
   const [dragActiveId, setDragActiveId] = useState<string | null>(null);
   const [moveConfirm, setMoveConfirm] = useState<{
     reservationId: string;
@@ -1708,15 +1711,12 @@ export default function PlanningPage() {
   const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
     if (status === "early_blocked" || status === "late_blocked") return;
     if (status === "available") {
-      setSelectedCell({
+      setNewReservationDefaults({
         roomId: room.id,
-        roomNumber: room.roomNumber,
-        roomTypeName: room.roomType?.name ?? "",
         roomTypeId: room.roomTypeId,
-        bedConfig: room.bedConfig || "",
         checkInDate: day,
       });
-      setQuickReservationOpen(true);
+      setNewReservationOpen(true);
     } else {
       const resolvedId = reservationId || findReservationForRoomAndDay(room.id, day);
       if (resolvedId) {
@@ -2072,11 +2072,22 @@ export default function PlanningPage() {
         </CardContent>
       </Card>
 
-      <QuickReservationDialog
-        open={quickReservationOpen}
-        onOpenChange={setQuickReservationOpen}
-        reservationData={selectedCell}
+      <ReservationFormDialog
+        reservation={undefined}
         guests={guests}
+        rooms={allRooms}
+        roomTypes={roomTypes}
+        open={newReservationOpen}
+        onOpenChange={(open) => {
+          setNewReservationOpen(open);
+          if (!open) setNewReservationDefaults(null);
+        }}
+        defaultValues={newReservationDefaults || undefined}
+        onSuccess={() => {
+          setNewReservationDefaults(null);
+          queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+        }}
       />
 
       <ReservationDetailModal
