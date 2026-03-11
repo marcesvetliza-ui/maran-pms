@@ -43,6 +43,7 @@ import AdminPage from "@/pages/admin";
 import SpaClientsPage from "@/pages/spa-clients";
 import AccountingSuppliersPage from "@/pages/accounting-suppliers";
 import PurchaseInvoicesPage from "@/pages/purchase-invoices";
+import AdminConsultasPage from "@/pages/admin-consultas";
 import LoginPage from "@/pages/login";
 import HelpChat from "@/components/help-chat";
 import { LogOut, User } from "lucide-react";
@@ -104,6 +105,7 @@ function Router() {
       <Route path="/source-code" component={SourceCodePage} />
       <Route path="/accounting-suppliers" component={AccountingSuppliersPage} />
       <Route path="/purchase-invoices" component={PurchaseInvoicesPage} />
+      <Route path="/admin/consultas" component={AdminConsultasPage} />
       <Route component={NotFound} />
     </Switch>
   );

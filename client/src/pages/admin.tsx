@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Clock,
   CheckCircle2,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -107,6 +108,16 @@ export default function AdminPage() {
       status: "available" as const,
       color: "text-teal-600",
       bg: "bg-teal-50 dark:bg-teal-950/30",
+      extra: null,
+    },
+    {
+      title: "Consultas Contables",
+      description: "SIRCAR, Libro IVA Compras/Ventas, Mayor de Cuentas, Retenciones IIBB, Cuenta Corriente Proveedores.",
+      icon: Download,
+      href: "/admin/consultas",
+      status: "available" as const,
+      color: "text-rose-600",
+      bg: "bg-rose-50 dark:bg-rose-950/30",
       extra: null,
     },
   ];

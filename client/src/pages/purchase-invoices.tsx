@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
   FileText, Plus, Trash2, Search, ArrowLeft, Building2,
-  CreditCard, Landmark, Receipt, ChevronRight, CheckCircle2, Clock,
+  CreditCard, Landmark, Receipt, ChevronRight, CheckCircle2, Clock, FileDown,
 } from "lucide-react";
 import { Link } from "wouter";
 import { getLocalToday } from "@/lib/utils";
@@ -504,6 +504,7 @@ function PaymentOrderDialog({
 }) {
   const { toast } = useToast();
   const [selectedInvoices, setSelectedInvoices] = useState<number[]>([]);
+  const [createdOpId, setCreatedOpId] = useState<number | null>(null);
   const [form, setForm] = useState({
     fecha: getLocalToday(),
     formaPago: "transferencia",
@@ -544,15 +545,25 @@ function PaymentOrderDialog({
 
   const createMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/payment-orders", data),
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers", supplier?.id, "cuenta-corriente"] });
-      onClose();
-      toast({ title: "Orden de Pago generada", description: "Las facturas seleccionadas fueron canceladas." });
+      setCreatedOpId(data?.id ?? null);
+      toast({ title: "Orden de Pago generada", description: `OP ${data?.numero || ""} emitida correctamente.` });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
+
+  const handleDownloadOpPdf = () => {
+    if (!createdOpId) return;
+    window.open(`/api/payment-orders/${createdOpId}/pdf`, "_blank");
+  };
+
+  const handleDownloadCertPdf = () => {
+    if (!createdOpId) return;
+    window.open(`/api/exports/cert-retencion/${createdOpId}`, "_blank");
+  };
 
   const handleSubmit = () => {
     if (!selectedInvoices.length) {
@@ -649,11 +660,25 @@ function PaymentOrderDialog({
           </Card>
         </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={createMut.isPending || !selectedInvoices.length} data-testid="btn-submit-payment-order">
-            Emitir Orden de Pago
-          </Button>
+        <DialogFooter className="flex flex-wrap gap-2">
+          {createdOpId ? (
+            <>
+              <Button variant="outline" size="sm" onClick={handleDownloadOpPdf} className="gap-2" data-testid="btn-op-pdf">
+                <FileDown className="h-4 w-4" /> OP PDF
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleDownloadCertPdf} className="gap-2" data-testid="btn-cert-retencion-pdf">
+                <FileDown className="h-4 w-4" /> Cert. Retención
+              </Button>
+              <Button onClick={onClose} data-testid="btn-close-op-dialog">Cerrar</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+              <Button onClick={handleSubmit} disabled={createMut.isPending || !selectedInvoices.length} data-testid="btn-submit-payment-order">
+                {createMut.isPending ? "Generando..." : "Emitir Orden de Pago"}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

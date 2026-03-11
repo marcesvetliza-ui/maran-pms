@@ -12,6 +12,7 @@ import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
+import { registerExportRoutes } from "./exports";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -6478,6 +6479,8 @@ Only respond with the JSON object.`;
       res.status(500).json({ error: e.message });
     }
   });
+
+  registerExportRoutes(app);
 
   return httpServer;
 }
