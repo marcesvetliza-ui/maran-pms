@@ -1,0 +1,148 @@
+2026-03-10 21:07:37.31
+8b04702f
+System
+starting up user application
+2026-03-10 21:07:37.31
+8b04702f
+System
+forwarding local port 5000 to external port 80 (mapped as 1104)
+2026-03-10 21:07:37.31
+8b04702f
+System
+metasidecar: loaded enterprise status from environment is_enterprise=false
+2026-03-10 21:07:38.65
+8b04702f
+User
+Database already seeded
+2026-03-10 21:07:38.65
+8b04702f
+User
+Refreshing real hotel data...
+2026-03-10 21:07:39.35
+8b04702f
+User
+Real hotel data refreshed successfully!
+2026-03-10 21:07:39.46
+8b04702f
+User
+12:07:39 AM [express] serving on port 5000
+2026-03-10 21:07:40.93
+8b04702f
+User
+12:07:40 AM [express] GET /api/notifications/unread-count 304 in 60ms :: {"count":0}
+2026-03-10 21:07:41.25
+8b04702f
+User
+12:07:41 AM [express] GET /api/executive/stats 200 in 249ms :: {"occupancyRate":14,"occupiedRooms":9,"availableRooms":45,"totalRooms":66,"totalRevenue":0,"accommodationRevenue":0,"extrasRevenue":0,"adr":0,"revpar":0,"byChannel":[{"source":"directo","reservations":11,"revenue":1650875,"percentage":100},{"source":"agencia","reservations":1,"revenue":255,"percentage":0},{"source":"expedia","reservations":2,"revenue":170,"percentage":0},{"source":"empresa","reservations":1,"revenue":150,"percentage":0}],"previousYear":{"occupancyRate":0,"totalRevenue":0,"adr":0,"revpar":0},"todayCheckIns":6,"todayCheckOuts":3,"pendingCheckIns":3,"roomsByStatus":{"available":45,"occupied":9,"dirty":11,"cleaning":1,"maintenance":0,"oos":0}}
+2026-03-10 21:26:51.42
+8b04702f
+System
+system: received signal terminated
+2026-03-10 21:26:51.43
+8b04702f
+System
+command finished with error [node ./dist/index.cjs]: signal: terminated
+2026-03-10 21:26:51.47
+8b04702f
+System
+main done, exiting
+2026-03-10 22:23:53.92
+8b04702f
+System
+starting up user application
+2026-03-10 22:23:53.92
+8b04702f
+System
+metasidecar: loaded enterprise status from environment is_enterprise=false
+2026-03-10 22:23:53.92
+8b04702f
+System
+forwarding local port 5000 to external port 80 (mapped as 1104)
+2026-03-10 22:23:54.83
+8b04702f
+User
+Database already seeded
+2026-03-10 22:23:54.84
+8b04702f
+User
+Refreshing real hotel data...
+2026-03-10 22:23:55.52
+8b04702f
+User
+Real hotel data refreshed successfully!
+2026-03-10 22:23:55.56
+8b04702f
+User
+1:23:55 AM [express] serving on port 5000
+2026-03-10 22:23:59.34
+8b04702f
+User
+1:23:59 AM [express] GET /api/auth/me 304 in 26ms :: {"id":"su1","username":"admin","email":"admin@maransuites.com","fullName":"Administrador Sistema","role":"admin","department":"Sistemas","phone":"+54 343 400-0001","isActive":"true"}
+2026-03-10 22:24:00.30
+8b04702f
+User
+1:24:00 AM [express] GET /api/notifications/unread-count 304 in 51ms :: {"count":0}
+2026-03-10 22:24:00.31
+8b04702f
+User
+1:24:00 AM [express] GET /api/executive/stats 304 in 227ms :: {"occupancyRate":14,"occupiedRooms":9,"availableRooms":45,"totalRooms":66,"totalRevenue":0,"accommodationRevenue":0,"extrasRevenue":0,"adr":0,"revpar":0,"byChannel":[{"source":"directo","reservations":11,"revenue":1650875,"percentage":100},{"source":"agencia","reservations":1,"revenue":255,"percentage":0},{"source":"expedia","reservations":2,"revenue":170,"percentage":0},{"source":"empresa","reservations":1,"revenue":150,"percentage":0}],"previousYear":{"occupancyRate":0,"totalRevenue":0,"adr":0,"revpar":0},"todayCheckIns":6,"todayCheckOuts":3,"pendingCheckIns":3,"roomsByStatus":{"available":45,"occupied":9,"dirty":11,"cleaning":1,"maintenance":0,"oos":0}}
+2026-03-10 22:24:00.34
+8b04702f
+User
+1:24:00 AM [express] GET /api/reports/occupancy 200 in 92ms :: [{"date":"2026-03-11","available":58,"occupied":8,"occupancy":12,"totalRooms":66}]
+2026-03-10 22:24:00.91
+8b04702f
+User
+1:24:00 AM [express] GET /api/executive/stats 304 in 219ms :: {"occupancyRate":14,"occupiedRooms":9,"availableRooms":45,"totalRooms":66,"totalRevenue":0,"accommodationRevenue":0,"extrasRevenue":0,"adr":0,"revpar":0,"byChannel":[{"source":"directo","reservations":11,"revenue":1650875,"percentage":100},{"source":"agencia","reservations":1,"revenue":255,"percentage":0},{"source":"expedia","reservations":2,"revenue":170,"percentage":0},{"source":"empresa","reservations":1,"revenue":150,"percentage":0}],"previousYear":{"occupancyRate":0,"totalRevenue":0,"adr":0,"revpar":0},"todayCheckIns":6,"todayCheckOuts":3,"pendingCheckIns":3,"roomsByStatus":{"available":45,"occupied":9,"dirty":11,"cleaning":1,"maintenance":0,"oos":0}}
+2026-03-10 22:39:07.39
+8b04702f
+System
+system: received signal terminated
+2026-03-10 22:39:07.40
+8b04702f
+System
+main done, exiting
+2026-03-10 22:39:07.40
+8b04702f
+System
+command finished with error [node ./dist/index.cjs]: signal: terminated
+2026-03-10 22:49:23.87
+8b04702f
+System
+starting up user application
+2026-03-10 22:49:23.87
+8b04702f
+System
+metasidecar: loaded enterprise status from environment is_enterprise=false
+2026-03-10 22:49:23.87
+8b04702f
+System
+forwarding local port 5000 to external port 80 (mapped as 1104)
+2026-03-10 22:49:24.80
+8b04702f
+User
+Database already seeded
+2026-03-10 22:49:24.80
+8b04702f
+User
+Refreshing real hotel data...
+2026-03-10 22:49:25.46
+8b04702f
+User
+Real hotel data refreshed successfully!
+2026-03-10 22:49:25.52
+8b04702f
+User
+1:49:25 AM [express] serving on port 5000
+2026-03-10 23:04:27.39
+8b04702f
+System
+system: received signal terminated
+2026-03-10 23:04:27.40
+8b04702f
+System
+command finished with error [node ./dist/index.cjs]: signal: terminated
+2026-03-10 23:04:27.50
+8b04702f
+System
+main done, exiting
