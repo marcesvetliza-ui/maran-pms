@@ -250,6 +250,28 @@ function NotificationBell() {
   );
 }
 
+function TurnoAlert() {
+  const { data: autocreados = [] } = useQuery<any[]>({
+    queryKey: ["/api/cash/shifts/autocreados"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/cash/shifts/autocreados");
+      return res.json();
+    },
+    refetchInterval: 60000,
+  });
+  if (!autocreados.length) return null;
+  return (
+    <span title={`${autocreados.length} turno(s) sin operador asignado`}
+      className="relative p-1.5 rounded-md flex items-center justify-center text-yellow-500"
+      data-testid="badge-turno-alert">
+      <AlertTriangle className="h-5 w-5" />
+      <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-yellow-500 px-1 text-[10px] font-bold text-white">
+        {autocreados.length}
+      </span>
+    </span>
+  );
+}
+
 export function AppSidebar() {
   const [location] = useLocation();
   const [hotelOpen, setHotelOpen] = useState(
@@ -269,6 +291,7 @@ export function AppSidebar() {
             <span className="text-lg font-semibold text-sidebar-foreground">Maran Suites</span>
             <span className="text-xs text-muted-foreground">Sistema de Gestión</span>
           </div>
+          <TurnoAlert />
           <NotificationBell />
         </div>
       </SidebarHeader>

@@ -1541,13 +1541,15 @@ export const cashShifts = pgTable("cash_shifts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   area: text("area").notNull(),
   shiftNumber: integer("shift_number").notNull(),
-  openedBy: text("opened_by").notNull(),
+  openedBy: text("opened_by"),
   closedBy: text("closed_by"),
   openedAt: timestamp("opened_at").notNull().defaultNow(),
   closedAt: timestamp("closed_at"),
   status: text("status").notNull().default("open"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
+  autoCreado: boolean("auto_creado").default(false),
+  turnoAnteriorId: varchar("turno_anterior_id"),
 });
 
 export const insertCashShiftSchema = createInsertSchema(cashShifts).omit({ id: true, closedBy: true, closedAt: true, status: true, createdAt: true });

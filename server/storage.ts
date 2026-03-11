@@ -698,7 +698,11 @@ export interface IStorage {
   getCashShifts(area?: string, status?: string): Promise<any[]>;
   getCurrentShift(area: string): Promise<any>;
   openShift(data: any): Promise<any>;
-  closeShift(shiftId: string, closedBy: string, notes?: string): Promise<any>;
+  closeShift(shiftId: string, closedBy: string, efectivoContado: number, operadorSiguiente: string | null, enviarAAdministracion: boolean, notes?: string): Promise<any>;
+  getOrCreateActiveTurno(area: string): Promise<any>;
+  initCashShifts(): Promise<void>;
+  tomarTurno(shiftId: string, operador: string): Promise<any>;
+  getAutocreadoShifts(): Promise<any[]>;
   getShiftDetail(shiftId: string): Promise<any>;
   getCashMovements(shiftId: string): Promise<any[]>;
   createCashMovement(data: any): Promise<any>;
@@ -5036,7 +5040,11 @@ export class MemStorage implements IStorage {
   async getCashShifts(_area?: string, _status?: string): Promise<any[]> { return []; }
   async getCurrentShift(_area: string): Promise<any> { return undefined; }
   async openShift(_data: any): Promise<any> { return {}; }
-  async closeShift(_shiftId: string, _closedBy: string, _notes?: string): Promise<any> { return {}; }
+  async closeShift(_shiftId: string, _closedBy: string, _efectivoContado: number = 0, _operadorSiguiente: string | null = null, _enviarAAdministracion: boolean = false, _notes?: string): Promise<any> { return {}; }
+  async getOrCreateActiveTurno(_area: string): Promise<any> { return {}; }
+  async initCashShifts(): Promise<void> {}
+  async tomarTurno(_shiftId: string, _operador: string): Promise<any> { return {}; }
+  async getAutocreadoShifts(): Promise<any[]> { return []; }
   async getShiftDetail(_shiftId: string): Promise<any> { return {}; }
   async getCashMovements(_shiftId: string): Promise<any[]> { return []; }
   async createCashMovement(_data: any): Promise<any> { return {}; }

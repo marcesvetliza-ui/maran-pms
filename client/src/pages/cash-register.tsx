@@ -50,15 +50,17 @@ type CashConfig = {
 };
 
 type CashShift = {
-  id: number;
+  id: string;
   area: string;
   shiftNumber: number;
-  openedBy: string;
+  openedBy?: string | null;
   closedBy?: string;
   openedAt: string;
   closedAt?: string;
   notes?: string;
   status: string;
+  autoCreado?: boolean;
+  turnoAnteriorId?: string | null;
 };
 
 type CashMovement = {
@@ -200,17 +202,41 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const { toast } = useToast();
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
   const [closeShiftDialog, setCloseShiftDialog] = useState(false);
+  const [closeStep, setCloseStep] = useState<1 | 2>(1);
   const [movementDialog, setMovementDialog] = useState(false);
+  const [tomarTurnoDialog, setTomarTurnoDialog] = useState(false);
   const [openedBy, setOpenedBy] = useState("");
   const [openNotes, setOpenNotes] = useState("");
   const [closedBy, setClosedBy] = useState("");
   const [closeNotes, setCloseNotes] = useState("");
+  const [operadorSiguiente, setOperadorSiguiente] = useState("");
+  const [enviarAdmin, setEnviarAdmin] = useState(true);
+  const [billetes1000, setBilletes1000] = useState(0);
+  const [billetes500, setBilletes500] = useState(0);
+  const [billetes200, setBilletes200] = useState(0);
+  const [billetes100, setBilletes100] = useState(0);
+  const [billetes50, setBilletes50] = useState(0);
+  const [monedas, setMonedas] = useState(0);
   const [movType, setMovType] = useState("income");
   const [movDesc, setMovDesc] = useState("");
   const [movMethod, setMovMethod] = useState("cash");
   const [movAmount, setMovAmount] = useState("");
   const [movReceipt, setMovReceipt] = useState("");
-  const [closingSummaryData, setClosingSummaryData] = useState<{ shift: CashShift; movements: CashMovement[] } | null>(null);
+  const [closingSummaryData, setClosingSummaryData] = useState<{ shift: CashShift; movements: CashMovement[]; turnoNuevo?: CashShift } | null>(null);
+
+  const efectivoContado =
+    billetes1000 * 1000 + billetes500 * 500 + billetes200 * 200 +
+    billetes100 * 100 + billetes50 * 50 + monedas;
+
+  function resetCloseDialog() {
+    setCloseStep(1);
+    setClosedBy("");
+    setCloseNotes("");
+    setOperadorSiguiente("");
+    setEnviarAdmin(true);
+    setBilletes1000(0); setBilletes500(0); setBilletes200(0);
+    setBilletes100(0); setBilletes50(0); setMonedas(0);
+  }
 
   const { data: currentShift, isLoading: shiftLoading } = useQuery<CashShift | null>({
     queryKey: ["/api/cash/shifts/current", `?area=${area}`],
@@ -235,6 +261,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     },
     enabled: !!currentShift?.id,
   });
+
+  const efectivoSistema = movements.filter(m => m.paymentMethod === "cash").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+  const diferencia = efectivoContado - efectivoSistema;
 
   const openShiftMutation = useMutation({
     mutationFn: async () => {
@@ -289,18 +318,37 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     mutationFn: async () => {
       return apiRequest("POST", `/api/cash/shifts/${currentShift!.id}/close`, {
         closedBy,
+        efectivoContado,
+        operadorSiguiente: operadorSiguiente.trim() || null,
+        enviarAAdministracion: enviarAdmin,
         notes: closeNotes || undefined,
       });
     },
-    onSuccess: () => {
-      setClosingSummaryData({ shift: { ...currentShift!, closedBy, closedAt: new Date().toISOString() }, movements });
+    onSuccess: (result: any) => {
+      setClosingSummaryData({ shift: { ...currentShift!, closedBy, closedAt: new Date().toISOString() }, movements, turnoNuevo: result.turnoNuevo });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/summary"] });
-      toast({ title: "Turno cerrado", description: `El turno de ${config.areaLabel} fue cerrado` });
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/autocreados"] });
+      toast({ title: "Turno cerrado", description: `Turno #${currentShift!.shiftNumber} cerrado. Nuevo turno abierto automáticamente.` });
       setCloseShiftDialog(false);
-      setClosedBy("");
-      setCloseNotes("");
+      resetCloseDialog();
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const tomarTurnoMutation = useMutation({
+    mutationFn: async (operador: string) => {
+      return apiRequest("PATCH", `/api/cash/shifts/${currentShift!.id}/tomar`, { operador });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/autocreados"] });
+      toast({ title: "Turno tomado", description: "El operador fue asignado al turno activo." });
+      setTomarTurnoDialog(false);
+      setOpenedBy("");
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -341,17 +389,35 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               </Button>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-4">
-              <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                Turno abierto
-              </Badge>
+            <div className="flex flex-wrap items-center gap-3">
+              {currentShift.autoCreado && !currentShift.openedBy ? (
+                <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
+                  ⚠ Turno autocreado — sin operador
+                </Badge>
+              ) : (
+                <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                  Turno abierto
+                </Badge>
+              )}
               <span className="text-sm text-muted-foreground flex items-center gap-1">
                 <Clock className="h-4 w-4" />
-                {formatTime(currentShift.openedAt)} - {currentShift.openedBy}
+                {formatTime(currentShift.openedAt)}
+                {currentShift.openedBy ? ` — ${currentShift.openedBy}` : ""}
               </span>
               <span className="text-sm" data-testid={`text-shift-info-${area}`}>
-                Turno {currentShift.shiftNumber} de {config.shiftsPerDay}
+                Turno #{currentShift.shiftNumber}
               </span>
+              {(!currentShift.openedBy || currentShift.autoCreado) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setTomarTurnoDialog(true)}
+                  data-testid={`btn-tomar-turno-${area}`}
+                  className="text-yellow-700 border-yellow-400 hover:bg-yellow-50"
+                >
+                  Tomar turno
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
@@ -557,40 +623,116 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={closeShiftDialog} onOpenChange={setCloseShiftDialog}>
+      <Dialog open={closeShiftDialog} onOpenChange={(open) => { if (!open) { setCloseShiftDialog(false); resetCloseDialog(); } }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Cerrar Turno - {config.areaLabel}</DialogTitle>
+            <DialogTitle>
+              Cerrar Turno — {config.areaLabel}
+              {currentShift && <span className="ml-2 text-sm font-normal text-muted-foreground">Turno #{currentShift.shiftNumber}</span>}
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <SummaryTable movements={movements} />
-            <div>
-              <label className="text-sm font-medium">Cerrado por *</label>
-              <Input
-                value={closedBy}
-                onChange={(e) => setClosedBy(e.target.value)}
-                placeholder="Nombre de quien cierra"
-                data-testid={`input-closed-by-${area}`}
-              />
+
+          {closeStep === 1 && (
+            <div className="space-y-4">
+              <SummaryTable movements={movements} />
+
+              <div className="border rounded-lg p-4 space-y-2 bg-muted/20">
+                <p className="text-sm font-semibold">Conteo de efectivo físico</p>
+                {[
+                  { label: "Billetes $1.000", val: billetes1000, set: setBilletes1000, mult: 1000 },
+                  { label: "Billetes $500",   val: billetes500,  set: setBilletes500,  mult: 500  },
+                  { label: "Billetes $200",   val: billetes200,  set: setBilletes200,  mult: 200  },
+                  { label: "Billetes $100",   val: billetes100,  set: setBilletes100,  mult: 100  },
+                  { label: "Billetes $50",    val: billetes50,   set: setBilletes50,   mult: 50   },
+                  { label: "Monedas ($)",     val: monedas,      set: setMonedas,      mult: 1    },
+                ].map(({ label, val, set, mult }) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <span className="text-xs w-36 shrink-0">{label}</span>
+                    <Input type="number" min={0} value={val || ""} onChange={e => set(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-20 h-7 text-sm" />
+                    {mult > 1 && <span className="text-xs text-muted-foreground">= ${(val * mult).toLocaleString("es-AR")}</span>}
+                  </div>
+                ))}
+                <div className="border-t pt-2 flex justify-between text-sm font-semibold">
+                  <span>Total contado:</span>
+                  <span>${efectivoContado.toLocaleString("es-AR")}</span>
+                </div>
+                <div className={`flex justify-between text-sm ${diferencia !== 0 ? "text-red-600" : "text-green-600"}`}>
+                  <span>Sistema (efectivo):</span>
+                  <span>${efectivoSistema.toLocaleString("es-AR")}</span>
+                </div>
+                {diferencia !== 0 && (
+                  <div className="flex justify-between text-sm font-semibold text-red-600">
+                    <span>Diferencia:</span>
+                    <span>{diferencia > 0 ? "+" : ""}{diferencia.toLocaleString("es-AR")}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id={`enviar-admin-${area}`} checked={enviarAdmin} onChange={e => setEnviarAdmin(e.target.checked)} className="w-4 h-4" />
+                <label htmlFor={`enviar-admin-${area}`} className="text-sm">Enviar efectivo a Caja Administración</label>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Cerrado por *</label>
+                <Input value={closedBy} onChange={e => setClosedBy(e.target.value)} placeholder="Nombre de quien cierra" data-testid={`input-closed-by-${area}`} />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Observaciones</label>
+                <Textarea value={closeNotes} onChange={e => setCloseNotes(e.target.value)} placeholder="Observaciones opcionales" data-testid={`input-close-notes-${area}`} />
+              </div>
             </div>
-            <div>
-              <label className="text-sm font-medium">Observaciones</label>
-              <Textarea
-                value={closeNotes}
-                onChange={(e) => setCloseNotes(e.target.value)}
-                placeholder="Observaciones opcionales"
-                data-testid={`input-close-notes-${area}`}
-              />
+          )}
+
+          {closeStep === 2 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-green-700">
+                <span className="text-lg">✓</span>
+                <span className="font-medium">Turno #{currentShift?.shiftNumber} listo para cerrarse</span>
+              </div>
+              <div className="border rounded-lg p-4 bg-muted/20 space-y-1">
+                <p className="text-sm font-semibold">Próximo turno</p>
+                <p className="text-xs text-muted-foreground">El sistema abrirá automáticamente el siguiente turno con saldo inicial $0.</p>
+                <p className="text-xs text-muted-foreground mt-1">Efectivo contado: <strong>${efectivoContado.toLocaleString("es-AR")}</strong> {enviarAdmin ? "(se registrará en Caja Adm.)" : ""}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium">¿Quién toma el siguiente turno? <span className="text-muted-foreground font-normal">(opcional)</span></label>
+                <Input value={operadorSiguiente} onChange={e => setOperadorSiguiente(e.target.value)} placeholder="Dejar vacío si no hay relevo inmediato" data-testid={`input-next-operator-${area}`} />
+              </div>
             </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            {closeStep === 2 && (
+              <Button variant="outline" onClick={() => setCloseStep(1)}>← Atrás</Button>
+            )}
+            {closeStep === 1 && area === "recepcion" ? (
+              <Button onClick={() => setCloseStep(2)} disabled={!closedBy.trim()} data-testid={`btn-next-close-step-${area}`}>
+                Siguiente →
+              </Button>
+            ) : (
+              <Button variant="destructive" onClick={() => closeShiftMutation.mutate()}
+                disabled={!closedBy.trim() || closeShiftMutation.isPending} data-testid={`btn-confirm-close-shift-${area}`}>
+                {closeShiftMutation.isPending ? "Cerrando..." : "Confirmar y cerrar turno"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={tomarTurnoDialog} onOpenChange={setTomarTurnoDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Tomar turno — {config.areaLabel}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Este turno fue creado automáticamente. Ingresá tu nombre para tomarlo.</p>
+            <Input value={openedBy} onChange={e => setOpenedBy(e.target.value)} placeholder="Tu nombre" data-testid={`input-tomar-turno-operador-${area}`} autoFocus />
           </div>
           <DialogFooter>
-            <Button
-              variant="destructive"
-              onClick={() => closeShiftMutation.mutate()}
-              disabled={!closedBy.trim() || closeShiftMutation.isPending}
-              data-testid={`btn-confirm-close-shift-${area}`}
-            >
-              Confirmar cierre
+            <Button onClick={() => tomarTurnoMutation.mutate(openedBy)} disabled={!openedBy.trim() || tomarTurnoMutation.isPending} data-testid={`btn-confirm-tomar-turno-${area}`}>
+              {tomarTurnoMutation.isPending ? "Guardando..." : "Tomar turno"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -5868,12 +5868,41 @@ Only respond with the JSON object.`;
 
   app.post("/api/cash/shifts/:id/close", requireAuth, async (req, res) => {
     try {
-      const { closedBy, notes } = req.body;
+      const { closedBy, efectivoContado = 0, operadorSiguiente = null, enviarAAdministracion = false, notes } = req.body;
       if (!closedBy) return res.status(400).json({ error: "closedBy is required" });
-      const result = await storage.closeShift(req.params.id, closedBy, notes);
+      const result = await storage.closeShift(req.params.id, closedBy, parseFloat(efectivoContado) || 0, operadorSiguiente || null, !!enviarAAdministracion, notes);
       res.json(result);
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Error closing shift" });
+    }
+  });
+
+  app.patch("/api/cash/shifts/:id/tomar", requireAuth, async (req, res) => {
+    try {
+      const { operador } = req.body;
+      if (!operador?.trim()) return res.status(400).json({ error: "operador is required" });
+      const shift = await storage.tomarTurno(req.params.id, operador.trim());
+      res.json(shift);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Error al tomar turno" });
+    }
+  });
+
+  app.get("/api/cash/shifts/autocreados", requireAuth, async (_req, res) => {
+    try {
+      const shifts = await storage.getAutocreadoShifts();
+      res.json(shifts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/cash/init-shifts", requireAuth, async (_req, res) => {
+    try {
+      await storage.initCashShifts();
+      res.json({ ok: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 

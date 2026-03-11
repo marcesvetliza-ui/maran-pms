@@ -3250,34 +3250,40 @@ export class DatabaseStorage implements IStorage {
     return shift;
   }
 
-  async openShift(data: InsertCashShift): Promise<CashShift> {
-    const existing = await this.getCurrentShift(data.area);
-    if (existing) {
-      throw new Error("Ya hay un turno abierto para esta área");
-    }
-
+  private async _nextShiftNumber(area: string): Promise<number> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayShifts = await db.select({ cnt: count() }).from(cashShifts)
-      .where(and(
-        eq(cashShifts.area, data.area),
-        gte(cashShifts.openedAt, today)
-      ));
-    const shiftNumber = (todayShifts[0]?.cnt || 0) + 1;
+    const rows = await db.select({ cnt: count() }).from(cashShifts)
+      .where(and(eq(cashShifts.area, area), gte(cashShifts.openedAt, today)));
+    return (rows[0]?.cnt || 0) + 1;
+  }
 
+  async openShift(data: InsertCashShift): Promise<CashShift> {
+    const existing = await this.getCurrentShift(data.area);
+    if (existing) throw new Error("Ya hay un turno abierto para esta área");
+    const shiftNumber = await this._nextShiftNumber(data.area);
     const [shift] = await db.insert(cashShifts).values({
       id: randomUUID(),
       area: data.area,
       shiftNumber,
-      openedBy: data.openedBy,
+      openedBy: data.openedBy || null,
       notes: data.notes || null,
       openedAt: new Date(),
       status: "open",
+      autoCreado: (data as any).autoCreado ?? false,
+      turnoAnteriorId: (data as any).turnoAnteriorId ?? null,
     }).returning();
     return shift;
   }
 
-  async closeShift(shiftId: string, closedBy: string, notes?: string): Promise<{ shift: CashShift; summary: CashClosingSummary }> {
+  async closeShift(
+    shiftId: string,
+    closedBy: string,
+    efectivoContado: number = 0,
+    operadorSiguiente: string | null = null,
+    enviarAAdministracion: boolean = false,
+    notes?: string,
+  ): Promise<{ shift: CashShift; summary: CashClosingSummary; turnoNuevo: CashShift }> {
     const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, shiftId));
     if (!shift) throw new Error("Turno no encontrado");
     if (shift.status !== "open") throw new Error("El turno ya está cerrado");
@@ -3289,7 +3295,6 @@ export class DatabaseStorage implements IStorage {
       mercadopago: 0, current_account: 0, room_charge: 0,
     };
     let totalGeneral = 0;
-
     for (const m of movements) {
       const amt = parseFloat(m.amount);
       const sign = m.movementType === "expense" ? -1 : 1;
@@ -3298,11 +3303,13 @@ export class DatabaseStorage implements IStorage {
       totalGeneral += amt * sign;
     }
 
+    const diferencia = efectivoContado - totals.cash;
+
     const [summary] = await db.insert(cashClosingSummaries).values({
       id: randomUUID(),
       shiftId,
       area: shift.area,
-      totalCash: totals.cash.toFixed(2),
+      totalCash: efectivoContado > 0 ? efectivoContado.toFixed(2) : totals.cash.toFixed(2),
       totalDebitCard: totals.debit_card.toFixed(2),
       totalCreditCard: totals.credit_card.toFixed(2),
       totalTransfer: totals.transfer.toFixed(2),
@@ -3312,7 +3319,7 @@ export class DatabaseStorage implements IStorage {
       totalGeneral: totalGeneral.toFixed(2),
       transactionCount: movements.length,
       closedBy,
-      notes: notes || null,
+      notes: notes || (diferencia !== 0 ? `Diferencia efectivo: $${diferencia.toFixed(2)}` : null),
     }).returning();
 
     const [updatedShift] = await db.update(cashShifts)
@@ -3320,7 +3327,97 @@ export class DatabaseStorage implements IStorage {
       .where(eq(cashShifts.id, shiftId))
       .returning();
 
-    return { shift: updatedShift, summary };
+    // Enviar efectivo a Caja de Administración si corresponde
+    if (enviarAAdministracion && efectivoContado > 0) {
+      try {
+        const now = new Date();
+        const fecha = now.toISOString().split("T")[0];
+        const hora = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+        await db.execute(sql`
+          INSERT INTO admin_cash_movements (fecha, hora, tipo, concepto, importe, signo, area_origen, operador, anulado)
+          VALUES (${fecha}, ${hora},
+            ${"ingreso_" + shift.area},
+            ${"Rendición " + shift.area.charAt(0).toUpperCase() + shift.area.slice(1) + " — Turno #" + updatedShift.shiftNumber + " (" + closedBy + ")"},
+            ${efectivoContado.toFixed(2)}, '+', ${shift.area}, ${closedBy}, false)
+        `);
+      } catch (e) {
+        console.warn("[CashShift] No se pudo registrar en Caja Admin:", (e as any).message);
+      }
+    }
+
+    // Crear automáticamente el siguiente turno
+    const nextNum = await this._nextShiftNumber(shift.area);
+    const [turnoNuevo] = await db.insert(cashShifts).values({
+      id: randomUUID(),
+      area: shift.area,
+      shiftNumber: nextNum,
+      openedBy: operadorSiguiente || null,
+      openedAt: new Date(),
+      status: "open",
+      autoCreado: !operadorSiguiente,
+      turnoAnteriorId: shiftId,
+    }).returning();
+
+    return { shift: updatedShift, summary, turnoNuevo };
+  }
+
+  async getOrCreateActiveTurno(area: string): Promise<CashShift> {
+    const [turnoActivo] = await db.select().from(cashShifts)
+      .where(and(eq(cashShifts.area, area), eq(cashShifts.status, "open")))
+      .orderBy(desc(cashShifts.openedAt))
+      .limit(1);
+
+    if (turnoActivo) return turnoActivo;
+
+    console.warn(`[CashShift] No había turno abierto para ${area}. Autocreando.`);
+    const nextNum = await this._nextShiftNumber(area);
+    const [turnoNuevo] = await db.insert(cashShifts).values({
+      id: randomUUID(),
+      area,
+      shiftNumber: nextNum,
+      openedBy: null,
+      openedAt: new Date(),
+      status: "open",
+      autoCreado: true,
+    }).returning();
+    return turnoNuevo;
+  }
+
+  async initCashShifts(): Promise<void> {
+    const areas = ["recepcion", "restaurant", "spa"];
+    for (const area of areas) {
+      const [existing] = await db.select().from(cashShifts)
+        .where(and(eq(cashShifts.area, area), eq(cashShifts.status, "open")))
+        .limit(1);
+      if (!existing) {
+        const nextNum = await this._nextShiftNumber(area);
+        await db.insert(cashShifts).values({
+          id: randomUUID(),
+          area,
+          shiftNumber: nextNum,
+          openedBy: null,
+          openedAt: new Date(),
+          status: "open",
+          autoCreado: true,
+        });
+        console.log(`[Init] Turno inicial creado para área: ${area}`);
+      }
+    }
+  }
+
+  async tomarTurno(shiftId: string, operador: string): Promise<CashShift> {
+    const [shift] = await db.update(cashShifts)
+      .set({ openedBy: operador, autoCreado: false })
+      .where(and(eq(cashShifts.id, shiftId), eq(cashShifts.status, "open")))
+      .returning();
+    if (!shift) throw new Error("Turno no encontrado o ya cerrado");
+    return shift;
+  }
+
+  async getAutocreadoShifts(): Promise<CashShift[]> {
+    return db.select().from(cashShifts)
+      .where(and(eq(cashShifts.status, "open"), eq(cashShifts.autoCreado, true)))
+      .orderBy(desc(cashShifts.openedAt));
   }
 
   async getShiftDetail(shiftId: string): Promise<{ shift: CashShift; movements: CashMovement[]; summary: CashClosingSummary | null }> {
@@ -3350,15 +3447,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string): Promise<CashMovement> {
-    const currentShift = await this.getCurrentShift(area);
-    const label = currentShift ? sourceLabel : `${sourceLabel} (sin turno asignado)`;
+    const turno = await this.getOrCreateActiveTurno(area);
     const [movement] = await db.insert(cashMovements).values({
       id: randomUUID(),
-      shiftId: currentShift?.id || null,
+      shiftId: turno.id,
       area,
       sourceType,
       sourceId,
-      sourceLabel: label,
+      sourceLabel,
       paymentMethod,
       amount,
       movementType,

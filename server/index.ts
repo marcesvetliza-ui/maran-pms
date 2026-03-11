@@ -77,6 +77,12 @@ app.use((req, res, next) => {
   } catch (err) {
     console.error("Refresh real data error:", err);
   }
+  try {
+    const { storage } = await import("./db-storage");
+    await storage.initCashShifts();
+  } catch (err) {
+    console.error("Init cash shifts error:", err);
+  }
 
   await registerRoutes(httpServer, app);
 
