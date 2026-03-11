@@ -1800,3 +1800,50 @@ export const iibbRetentions = pgTable("iibb_retentions", {
 export const insertIibbRetentionSchema = createInsertSchema(iibbRetentions).omit({ id: true, createdAt: true });
 export type InsertIibbRetention = z.infer<typeof insertIibbRetentionSchema>;
 export type IibbRetention = typeof iibbRetentions.$inferSelect;
+
+// ─── Caja de Administración ──────────────────────────────────────────────────
+
+export const adminCashMovements = pgTable("admin_cash_movements", {
+  id: serial("id").primaryKey(),
+  fecha: date("fecha").notNull(),
+  hora: text("hora"),
+  tipo: text("tipo").notNull(),
+  concepto: text("concepto").notNull(),
+  importe: numeric("importe", { precision: 14, scale: 2 }).notNull(),
+  signo: text("signo").notNull(),
+  cuentaContableId: integer("cuenta_contable_id").references(() => accountingAccounts.id),
+  centroCosto: text("centro_costo"),
+  paymentOrderId: integer("payment_order_id").references(() => paymentOrders.id),
+  areaOrigen: text("area_origen"),
+  cierreOrigenId: integer("cierre_origen_id"),
+  anulado: boolean("anulado").default(false),
+  motivoAnulacion: text("motivo_anulacion"),
+  operador: text("operador"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertAdminCashMovementSchema = createInsertSchema(adminCashMovements).omit({ id: true, createdAt: true });
+export type InsertAdminCashMovement = z.infer<typeof insertAdminCashMovementSchema>;
+export type AdminCashMovement = typeof adminCashMovements.$inferSelect;
+
+export const adminCashArqueos = pgTable("admin_cash_arqueos", {
+  id: serial("id").primaryKey(),
+  fecha: date("fecha").notNull().unique(),
+  saldoSistema: numeric("saldo_sistema", { precision: 14, scale: 2 }).notNull(),
+  saldoFisico: numeric("saldo_fisico", { precision: 14, scale: 2 }).notNull(),
+  diferencia: numeric("diferencia", { precision: 14, scale: 2 }).notNull(),
+  observaciones: text("observaciones"),
+  operador: text("operador"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertAdminCashArqueoSchema = createInsertSchema(adminCashArqueos).omit({ id: true, createdAt: true });
+export type InsertAdminCashArqueo = z.infer<typeof insertAdminCashArqueoSchema>;
+export type AdminCashArqueo = typeof adminCashArqueos.$inferSelect;
+
+export const adminCashConfig = pgTable("admin_cash_config", {
+  id: serial("id").primaryKey(),
+  fondoFijo: numeric("fondo_fijo", { precision: 14, scale: 2 }).default("0"),
+  alertaBajo: numeric("alerta_bajo", { precision: 14, scale: 2 }).default("0"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});

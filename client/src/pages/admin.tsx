@@ -11,6 +11,7 @@ import {
   Clock,
   CheckCircle2,
   Download,
+  Landmark,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,16 @@ export default function AdminPage() {
       status: "available" as const,
       color: "text-rose-600",
       bg: "bg-rose-50 dark:bg-rose-950/30",
+      extra: null,
+    },
+    {
+      title: "Caja de Administración",
+      description: "Consolida efectivo de todas las áreas. Gastos de caja chica, arqueos, rendición diaria y cierre mensual.",
+      icon: Landmark,
+      href: "/admin/caja",
+      status: "available" as const,
+      color: "text-emerald-600",
+      bg: "bg-emerald-50 dark:bg-emerald-950/30",
       extra: null,
     },
   ];
