@@ -6309,7 +6309,50 @@ Only respond with the JSON object.`;
         )
         RETURNING *
       `);
-      const invoice = result.rows[0] as any;
+      const rawInvoice = result.rows[0] as any;
+
+      // Mapear snake_case → camelCase para generarAsiento
+      const invoice: any = {
+        id: rawInvoice.id,
+        tipoComprobante: rawInvoice.tipo_comprobante,
+        supplierId: rawInvoice.supplier_id,
+        proveedorNombre: rawInvoice.proveedor_nombre,
+        proveedorCuit: rawInvoice.proveedor_cuit,
+        puntoVenta: rawInvoice.punto_venta,
+        numeroComprobante: rawInvoice.numero_comprobante,
+        numeroComprobanteExt: rawInvoice.numero_comprobante_ext,
+        fechaEmision: rawInvoice.fecha_emision,
+        periodo: rawInvoice.periodo,
+        condicionPago: rawInvoice.condicion_pago,
+        montoNeto: rawInvoice.monto_neto,
+        alicuotaIva: rawInvoice.alicuota_iva,
+        montoIva27: rawInvoice.monto_iva27,
+        montoIva21: rawInvoice.monto_iva21,
+        montoIva105: rawInvoice.monto_iva105,
+        montoIva5: rawInvoice.monto_iva5,
+        montoIva25: rawInvoice.monto_iva25,
+        montoExento: rawInvoice.monto_exento,
+        montoNoGravado: rawInvoice.monto_no_gravado,
+        impuestosInternos: rawInvoice.impuestos_internos,
+        ley25413: rawInvoice.ley_25413,
+        percepcionIibb: rawInvoice.percepcion_iibb,
+        percepcionIva: rawInvoice.percepcion_iva,
+        percepcionGanancias: rawInvoice.percepcion_ganancias,
+        retencionIibb: rawInvoice.retencion_iibb,
+        retencionGanancias: rawInvoice.retencion_ganancias,
+        retencionIva: rawInvoice.retencion_iva,
+        retencionSuss: rawInvoice.retencion_suss,
+        retencionMunicipal: rawInvoice.retencion_municipal,
+        monotributoCompBC: rawInvoice.monotributo_comp_bc,
+        montoTotal: rawInvoice.monto_total,
+        cuentaContableId: rawInvoice.cuenta_contable_id,
+        centroCosto: rawInvoice.centro_costo,
+        estado: rawInvoice.estado,
+        asientoId: rawInvoice.asiento_id,
+        observaciones: rawInvoice.observaciones,
+        createdAt: rawInvoice.created_at,
+        updatedAt: rawInvoice.updated_at,
+      };
 
       // Generar asiento automático
       try {
@@ -6334,7 +6377,7 @@ Only respond with the JSON object.`;
         }
       }
 
-      res.status(201).json(invoice);
+      res.status(201).json(rawInvoice);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

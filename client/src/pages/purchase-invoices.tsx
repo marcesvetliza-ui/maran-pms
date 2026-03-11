@@ -426,7 +426,7 @@ function InvoiceDialog({
                     <SelectContent>
                       <SelectItem value="">— Sin clasificar —</SelectItem>
                       {accounts
-                        .filter((a) => a.tipo === "detalle" && (a.codigo.startsWith("5") || a.codigo.startsWith("6") || a.codigo.startsWith("7")))
+                        .filter((a) => a.tipo === "egreso")
                         .map((a) => (
                           <SelectItem key={a.id} value={String(a.id)}>
                             {a.codigo} — {a.nombre}
