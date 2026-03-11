@@ -434,14 +434,10 @@ export class DatabaseStorage implements IStorage {
 
   async getReservationsForCheckIn(): Promise<ReservationWithDetails[]> {
     const todayStr = getArgentinaToday();
-    const tomorrow = new Date(todayStr + "T12:00:00");
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split("T")[0];
     const allRes = await db.select().from(reservations).where(
       and(
         or(eq(reservations.status, "confirmed"), eq(reservations.status, "pending")),
-        lte(reservations.checkInDate, tomorrowStr),
-        gte(reservations.checkInDate, todayStr)
+        eq(reservations.checkInDate, todayStr)
       )
     );
     const results: ReservationWithDetails[] = [];

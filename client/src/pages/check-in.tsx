@@ -320,7 +320,9 @@ export default function CheckInPage() {
     setWalkInNotes("");
   };
 
+  const today = getLocalToday();
   const filteredReservations = reservations?.filter((res) => {
+    if (res.checkInDate !== today) return false;
     const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
     return (
       guestName.includes(searchQuery.toLowerCase()) ||
@@ -348,7 +350,7 @@ export default function CheckInPage() {
 
   const canSubmitWalkIn = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0;
 
-  const today = new Date().toLocaleDateString("es-ES", {
+  const todayDisplay = new Date().toLocaleDateString("es-ES", {
     weekday: "long",
     year: "numeric",
     month: "long",
@@ -361,7 +363,7 @@ export default function CheckInPage() {
         <h1 className="text-3xl font-bold tracking-tight" data-testid="text-checkin-title">
           Check-in
         </h1>
-        <p className="text-muted-foreground capitalize">{today}</p>
+        <p className="text-muted-foreground capitalize">{todayDisplay}</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "reservations" | "walkin" | "webcheckin" | "history")}>
