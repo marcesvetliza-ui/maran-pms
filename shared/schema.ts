@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1846,4 +1846,68 @@ export const adminCashConfig = pgTable("admin_cash_config", {
   fondoFijo: numeric("fondo_fijo", { precision: 14, scale: 2 }).default("0"),
   alertaBajo: numeric("alerta_bajo", { precision: 14, scale: 2 }).default("0"),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// ─── Facturación Electrónica ──────────────────────────────────────────────────
+
+export const billingConfig = pgTable("billing_config", {
+  id: serial("id").primaryKey(),
+  modoArca: boolean("modo_arca").default(false),
+  cuit: text("cuit").default("33-68110008-9"),
+  razonSocial: text("razon_social").default("MARAN S.A."),
+  domicilioComercial: text("domicilio_comercial").default("Alameda de la Federación 698"),
+  localidad: text("localidad").default("Paraná"),
+  provincia: text("provincia").default("Entre Ríos"),
+  cp: text("cp").default("3100"),
+  condicionIva: text("condicion_iva").default("Responsable Inscripto"),
+  inicioActividades: text("inicio_actividades").default("01/01/2000"),
+  puntoVenta: integer("punto_venta").default(1),
+  tipoPuntoVenta: text("tipo_punto_venta").default("online"),
+  arcaCert: text("arca_cert"),
+  arcaKey: text("arca_key"),
+  arcaCuit: text("arca_cuit"),
+  logoUrl: text("logo_url"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const salesInvoices = pgTable("sales_invoices", {
+  id: serial("id").primaryKey(),
+  tipoComprobante: text("tipo_comprobante").notNull(),
+  puntoVenta: integer("punto_venta").notNull(),
+  numero: integer("numero").notNull(),
+  fechaEmision: date("fecha_emision").notNull(),
+  fechaVtoPago: date("fecha_vto_pago"),
+  clienteRazonSocial: text("cliente_razon_social").notNull(),
+  clienteCuit: text("cliente_cuit"),
+  clienteDni: text("cliente_dni"),
+  clienteCondicionIva: text("cliente_condicion_iva").notNull(),
+  clienteDomicilio: text("cliente_domicilio"),
+  montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }).notNull(),
+  montoIva21: numeric("monto_iva21", { precision: 14, scale: 2 }).default("0"),
+  montoIva105: numeric("monto_iva105", { precision: 14, scale: 2 }).default("0"),
+  montoExento: numeric("monto_exento", { precision: 14, scale: 2 }).default("0"),
+  montoNoGravado: numeric("monto_no_gravado", { precision: 14, scale: 2 }).default("0"),
+  montoTotal: numeric("monto_total", { precision: 14, scale: 2 }).notNull(),
+  cae: text("cae"),
+  caeFechaVto: date("cae_fecha_vto"),
+  modoFicticio: boolean("modo_ficticio").default(true),
+  estado: text("estado").default("emitida"),
+  reservaId: integer("reserva_id"),
+  folioId: integer("folio_id"),
+  notaCreditoId: integer("nota_credito_id"),
+  concepto: text("concepto").default("2"),
+  items: jsonb("items"),
+  operador: text("operador"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertSalesInvoiceSchema = createInsertSchema(salesInvoices).omit({ id: true, createdAt: true });
+export type InsertSalesInvoice = z.infer<typeof insertSalesInvoiceSchema>;
+export type SalesInvoice = typeof salesInvoices.$inferSelect;
+
+export const invoiceCounters = pgTable("invoice_counters", {
+  id: serial("id").primaryKey(),
+  tipoComprobante: text("tipo_comprobante").notNull(),
+  puntoVenta: integer("punto_venta").notNull(),
+  ultimoNumero: integer("ultimo_numero").default(0),
 });

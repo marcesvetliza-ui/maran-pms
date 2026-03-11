@@ -122,6 +122,16 @@ export default function AdminPage() {
       extra: null,
     },
     {
+      title: "Facturación Electrónica",
+      description: "Emisión de Facturas A/B, Notas de Crédito, CAE ficticio y modo ARCA para producción.",
+      icon: Receipt,
+      href: "/billing",
+      status: "available" as const,
+      color: "text-violet-600",
+      bg: "bg-violet-50 dark:bg-violet-950/30",
+      extra: null,
+    },
+    {
       title: "Caja de Administración",
       description: "Consolida efectivo de todas las áreas. Gastos de caja chica, arqueos, rendición diaria y cierre mensual.",
       icon: Landmark,

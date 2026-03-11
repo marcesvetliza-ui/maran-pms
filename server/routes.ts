@@ -14,6 +14,7 @@ import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
 import { registerExportRoutes } from "./exports";
 import { registerAdminCashRoutes } from "./adminCash";
+import { registerBillingRoutes } from "./billing/routes";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -6483,6 +6484,7 @@ Only respond with the JSON object.`;
 
   registerExportRoutes(app);
   registerAdminCashRoutes(app);
+  registerBillingRoutes(app);
 
   return httpServer;
 }
