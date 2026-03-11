@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Download,
   Landmark,
+  BarChart2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -139,6 +140,16 @@ export default function AdminPage() {
       status: "available" as const,
       color: "text-emerald-600",
       bg: "bg-emerald-50 dark:bg-emerald-950/30",
+      extra: null,
+    },
+    {
+      title: "Reportes Gerenciales",
+      description: "Estado de Resultados, KPIs hoteleros (RevPAR, ADR, Ocupación), Ingresos por área, Costos, Ranking proveedores y Comparativo mensual.",
+      icon: BarChart2,
+      href: "/admin/reportes",
+      status: "available" as const,
+      color: "text-sky-600",
+      bg: "bg-sky-50 dark:bg-sky-950/30",
       extra: null,
     },
   ];
