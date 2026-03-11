@@ -1,45 +1,44 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   LayoutDashboard,
-  CalendarCheck,
-  DoorOpen,
-  Users,
+  TrendingUp,
+  BarChart2,
+  CalendarDays,
+  BookOpen,
+  Zap,
   LogIn,
   LogOut,
-  Settings,
-  Hotel,
-  CalendarDays,
-  DollarSign,
-  Globe,
-  CalendarPlus,
-  Users2,
-  MessageSquare,
-  Sparkles,
-  UtensilsCrossed,
+  BedDouble,
+  Tag,
   Package,
-  Flower2,
-  PartyPopper,
-  Wrench,
-  Shield,
-  Gift,
+  Globe,
+  Users,
+  Star,
+  User,
   Building2,
-  ChevronDown,
-  Boxes,
+  Briefcase,
+  UtensilsCrossed,
+  Sparkles,
+  Heart,
+  CalendarCheck,
+  Brush,
+  Wrench,
+  ClipboardList,
+  HandHeart,
+  MessageCircle,
+  Calculator,
+  Landmark,
+  Settings,
+  Shield,
+  Code2,
+  Hotel,
   Bell,
   CheckCheck,
   AlertTriangle,
   Smartphone,
   Bot,
-  Heart,
-  BarChart3,
-  FileText,
-  Wallet,
-  FileCode,
-  Plane,
-  Receipt,
-  UserRound,
 } from "lucide-react";
 import {
   Sidebar,
@@ -51,16 +50,8 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubItem,
-  SidebarMenuSubButton,
   SidebarFooter,
 } from "@/components/ui/sidebar";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Popover,
   PopoverContent,
@@ -72,21 +63,79 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { SystemNotification } from "@shared/schema";
 
-const hotelSubItems = [
-  { title: "Planning", url: "/planning", icon: CalendarDays },
-  { title: "Reservas", url: "/reservations", icon: CalendarCheck },
-  { title: "Reserva Rápida", url: "/new-reservation", icon: CalendarPlus },
-  { title: "Check-in", url: "/check-in", icon: LogIn },
-  { title: "Check-out", url: "/check-out", icon: LogOut },
-  { title: "Habitaciones", url: "/rooms", icon: DoorOpen },
-  { title: "Tarifas", url: "/rate-plans", icon: DollarSign },
-  { title: "Paquetes", url: "/packages", icon: Gift },
-  { title: "Canales OTA", url: "/ota-channels", icon: Globe },
-  { title: "Grupos", url: "/groups", icon: Users2 },
-  { title: "Reseñas", url: "/reviews", icon: MessageSquare },
+const menuSections = [
+  {
+    titulo: "Gerencia",
+    items: [
+      { label: "Dashboard",  icon: LayoutDashboard, href: "/"          },
+      { label: "Ejecutivo",  icon: TrendingUp,       href: "/executive" },
+      { label: "Reportes",   icon: BarChart2,        href: "/reports"   },
+    ],
+  },
+  {
+    titulo: "Hotel",
+    items: [
+      { label: "Planning",        icon: CalendarDays, href: "/planning"         },
+      { label: "Reservas",        icon: BookOpen,     href: "/reservations"     },
+      { label: "Reserva rápida",  icon: Zap,          href: "/new-reservation"  },
+      { label: "Check in",        icon: LogIn,        href: "/check-in"         },
+      { label: "Check out",       icon: LogOut,       href: "/check-out"        },
+      { label: "Habitaciones",    icon: BedDouble,    href: "/rooms"            },
+      { label: "Tarifas",         icon: Tag,          href: "/rate-plans"       },
+      { label: "Paquetes",        icon: Package,      href: "/packages"         },
+      { label: "Canales OTAs",    icon: Globe,        href: "/ota-channels"     },
+      { label: "Grupos",          icon: Users,        href: "/groups"           },
+      { label: "Reseñas",         icon: Star,         href: "/reviews"          },
+    ],
+  },
+  {
+    titulo: "Base de datos",
+    items: [
+      { label: "Huéspedes", icon: User,      href: "/guests"    },
+      { label: "Empresas",  icon: Building2, href: "/companies" },
+      { label: "Agencias",  icon: Briefcase, href: "/agencies"  },
+    ],
+  },
+  {
+    titulo: "Servicios",
+    items: [
+      { label: "Restaurant",    icon: UtensilsCrossed, href: "/restaurant"  },
+      { label: "Spa",           icon: Sparkles,        href: "/spa"          },
+      { label: "Clientes Spa",  icon: Heart,           href: "/spa-clients"  },
+      { label: "Eventos",       icon: CalendarCheck,   href: "/events"       },
+    ],
+  },
+  {
+    titulo: "Operaciones",
+    items: [
+      { label: "Housekeeping",  icon: Brush,        href: "/housekeeping" },
+      { label: "Mantenimiento", icon: Wrench,       href: "/maintenance"  },
+      { label: "Inventario",    icon: ClipboardList, href: "/inventory"   },
+    ],
+  },
+  {
+    titulo: "Experiencia al huésped",
+    items: [
+      { label: "Hospitalidad", icon: HandHeart,     href: "/hospitality" },
+      { label: "MARA Chatbot", icon: MessageCircle, href: "/chatbot"      },
+    ],
+  },
+  {
+    titulo: "Administración",
+    items: [
+      { label: "Administración", icon: Calculator, href: "/admin"          },
+      { label: "Caja",           icon: Landmark,   href: "/cash-register"  },
+    ],
+  },
+  {
+    titulo: "Configuración",
+    items: [
+      { label: "Configuración",          icon: Settings, href: "/settings"        },
+      { label: "Administración sistema", icon: Shield,   href: "/administration"  },
+      { label: "Código fuente",          icon: Code2,    href: "/source-code"     },
+    ],
+  },
 ];
-
-const hotelPaths = hotelSubItems.map((i) => i.url);
 
 function formatTimeAgo(date: Date | string): string {
   const now = new Date();
@@ -139,7 +188,7 @@ function NotificationBell() {
   });
 
   const markReadMutation = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: number | string) => {
       await apiRequest("PATCH", `/api/notifications/${id}/read`);
     },
     onSuccess: () => {
@@ -169,7 +218,10 @@ function NotificationBell() {
         >
           <Bell className="h-5 w-5 text-sidebar-foreground" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground" data-testid="badge-notification-count">
+            <span
+              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground"
+              data-testid="badge-notification-count"
+            >
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
@@ -214,7 +266,11 @@ function NotificationBell() {
                     <div className="mt-0.5">{getNotificationIcon(n.type)}</div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className={`text-sm font-medium truncate ${!n.isRead ? "text-foreground" : "text-muted-foreground"}`}>
+                        <span
+                          className={`text-sm font-medium truncate ${
+                            !n.isRead ? "text-foreground" : "text-muted-foreground"
+                          }`}
+                        >
                           {n.title}
                         </span>
                         {n.priority === "urgent" && (
@@ -261,9 +317,11 @@ function TurnoAlert() {
   });
   if (!autocreados.length) return null;
   return (
-    <span title={`${autocreados.length} turno(s) sin operador asignado`}
+    <span
+      title={`${autocreados.length} turno(s) sin operador asignado`}
       className="relative p-1.5 rounded-md flex items-center justify-center text-yellow-500"
-      data-testid="badge-turno-alert">
+      data-testid="badge-turno-alert"
+    >
       <AlertTriangle className="h-5 w-5" />
       <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-yellow-500 px-1 text-[10px] font-bold text-white">
         {autocreados.length}
@@ -274,358 +332,59 @@ function TurnoAlert() {
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const [hotelOpen, setHotelOpen] = useState(
-    hotelPaths.includes(location) || location.startsWith("/groups/")
-  );
-
-  const isHotelActive = hotelPaths.includes(location) || location.startsWith("/groups/");
 
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground shrink-0">
             <Hotel className="h-6 w-6" />
           </div>
-          <div className="flex flex-col flex-1">
-            <span className="text-lg font-semibold text-sidebar-foreground">Maran Suites</span>
+          <div className="flex flex-col flex-1 min-w-0">
+            <span className="text-lg font-semibold text-sidebar-foreground leading-tight">Maran Suites</span>
             <span className="text-xs text-muted-foreground">Sistema de Gestión</span>
           </div>
           <TurnoAlert />
           <NotificationBell />
         </div>
       </SidebarHeader>
+
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/"}
-                  data-testid="nav-dashboard"
-                >
-                  <Link href="/">
-                    <LayoutDashboard className="h-5 w-5" />
-                    <span>Dashboard</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/executive"}
-                  data-testid="nav-executive"
-                >
-                  <Link href="/executive">
-                    <BarChart3 className="h-5 w-5" />
-                    <span>Ejecutivo</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/reports"}
-                  data-testid="nav-reports"
-                >
-                  <Link href="/reports">
-                    <FileText className="h-5 w-5" />
-                    <span>Reportes</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <Collapsible open={hotelOpen} onOpenChange={setHotelOpen} className="group/collapsible">
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      isActive={isHotelActive}
-                      data-testid="nav-hotel"
-                    >
-                      <Hotel className="h-5 w-5" />
-                      <span>Hotel</span>
-                      <ChevronDown className="ml-auto h-4 w-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub>
-                      {hotelSubItems.map((item) => (
-                        <SidebarMenuSubItem key={item.url}>
-                          <SidebarMenuSubButton
-                            asChild
-                            isActive={location === item.url || (item.url === "/groups" && location.startsWith("/groups/"))}
-                            data-testid={`nav-${item.url.replace("/", "")}`}
-                          >
-                            <Link href={item.url}>
-                              <item.icon className="h-4 w-4" />
-                              <span>{item.title}</span>
-                            </Link>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      ))}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Base de Datos</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/guests"}
-                  data-testid="nav-guests"
-                >
-                  <Link href="/guests">
-                    <Users className="h-5 w-5" />
-                    <span>Huéspedes</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/companies"}
-                  data-testid="nav-companies"
-                >
-                  <Link href="/companies">
-                    <Building2 className="h-5 w-5" />
-                    <span>Empresas</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/agencies"}
-                  data-testid="nav-agencies"
-                >
-                  <Link href="/agencies">
-                    <Plane className="h-5 w-5" />
-                    <span>Agencias</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Servicios</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/restaurant"}
-                  data-testid="nav-restaurant"
-                >
-                  <Link href="/restaurant">
-                    <UtensilsCrossed className="h-5 w-5" />
-                    <span>Restaurante</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/spa"}
-                  data-testid="nav-spa"
-                >
-                  <Link href="/spa">
-                    <Flower2 className="h-5 w-5" />
-                    <span>SPA</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/spa-clients"}
-                  data-testid="nav-spa-clients"
-                >
-                  <Link href="/spa-clients">
-                    <UserRound className="h-5 w-5" />
-                    <span>Clientes SPA</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/events"}
-                  data-testid="nav-events"
-                >
-                  <Link href="/events">
-                    <PartyPopper className="h-5 w-5" />
-                    <span>Eventos</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Operaciones</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/housekeeping"}
-                  data-testid="nav-housekeeping"
-                >
-                  <Link href="/housekeeping">
-                    <Sparkles className="h-5 w-5" />
-                    <span>Housekeeping</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/maintenance"}
-                  data-testid="nav-maintenance"
-                >
-                  <Link href="/maintenance">
-                    <Wrench className="h-5 w-5" />
-                    <span>Mantenimiento</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/inventory"}
-                  data-testid="nav-inventory"
-                >
-                  <Link href="/inventory">
-                    <Boxes className="h-5 w-5" />
-                    <span>Inventario</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Experiencia del Huésped</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/hospitality"}
-                  data-testid="nav-hospitality"
-                >
-                  <Link href="/hospitality">
-                    <Heart className="h-5 w-5" />
-                    <span>Hospitalidad</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Comunicaciones</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/chatbot"}
-                  data-testid="nav-chatbot"
-                >
-                  <Link href="/chatbot">
-                    <Bot className="h-5 w-5" />
-                    <span>MARA Chatbot</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Administración</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/admin"}
-                  data-testid="nav-admin"
-                >
-                  <Link href="/admin">
-                    <Receipt className="h-5 w-5" />
-                    <span>Administración</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/cash-register"}
-                  data-testid="nav-cash-register"
-                >
-                  <Link href="/cash-register">
-                    <Wallet className="h-5 w-5" />
-                    <span>Caja</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/administration"}
-                  data-testid="nav-administration-system"
-                >
-                  <Link href="/administration">
-                    <Shield className="h-5 w-5" />
-                    <span>Administración del Sistema</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={location === "/source-code"}
-                  data-testid="nav-source-code"
-                >
-                  <Link href="/source-code">
-                    <FileCode className="h-5 w-5" />
-                    <span>Código Fuente</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {menuSections.map((section) => (
+          <SidebarGroup key={section.titulo} className="py-0">
+            <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-4 py-1.5 mt-2">
+              {section.titulo}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {section.items.map((item) => {
+                  const isActive =
+                    item.href === "/"
+                      ? location === "/"
+                      : location === item.href || location.startsWith(item.href + "/");
+                  const testId = `nav-${item.href.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
+                  return (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        data-testid={testId}
+                      >
+                        <Link href={item.href}>
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
-      <SidebarFooter className="p-4">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild data-testid="nav-settings">
-              <Link href="/settings">
-                <Settings className="h-5 w-5" />
-                <span>Configuración</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
+
+      <SidebarFooter />
     </Sidebar>
   );
 }
