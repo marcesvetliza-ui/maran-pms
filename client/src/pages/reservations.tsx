@@ -717,12 +717,14 @@ export function ReservationFormDialog({
                     min={0}
                     step="0.01"
                     value={formData.baseRatePerNight || ""}
-                    onChange={(e) => handleBaseRateChange(e.target.value)}
+                    readOnly
                     placeholder="0.00"
-                    className="pl-7"
+                    className="pl-7 bg-muted cursor-not-allowed"
                     data-testid="input-base-rate"
+                    title="La tarifa se establece automáticamente según el plan tarifario"
                   />
                 </div>
+                <p className="text-xs text-muted-foreground">Definida por el plan tarifario seleccionado</p>
               </div>
             </div>
 
@@ -914,18 +916,7 @@ function ReservationDetailDialog({
   onEdit?: () => void;
 }) {
   const { toast } = useToast();
-  const isLocked = (() => {
-    const closed = ["checked_out", "cancelled"];
-    if (!closed.includes(reservation.status)) return false;
-    const today = getLocalToday();
-    const refDate = reservation.checkOutDate
-      ? String(reservation.checkOutDate).slice(0, 10)
-      : reservation.checkInDate
-        ? String(reservation.checkInDate).slice(0, 10)
-        : null;
-    if (!refDate) return false;
-    return refDate < today;
-  })();
+  const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
@@ -2043,12 +2034,7 @@ export default function ReservationsPage() {
     ?.sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
 
   const isResLocked = (r: ReservationWithDetails) => {
-    const closed = ["checked_out", "cancelled"];
-    if (!closed.includes(r.status)) return false;
-    const t = getLocalToday();
-    const d = r.checkOutDate ? String(r.checkOutDate).slice(0, 10) : r.checkInDate ? String(r.checkInDate).slice(0, 10) : null;
-    if (!d) return false;
-    return d < t;
+    return r.status === "checked_out" || r.status === "cancelled";
   };
 
   const handleEditReservation = (reservation: ReservationWithDetails) => {

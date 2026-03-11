@@ -17,17 +17,8 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
-function isReservationLocked(reservation: { status: string; checkOutDate: string | Date | null; checkInDate?: string | Date | null }): boolean {
-  const closedStatuses = ["checked_out", "cancelled"];
-  if (!closedStatuses.includes(reservation.status)) return false;
-  const today = getArgentinaToday();
-  const refDate = reservation.checkOutDate
-    ? String(reservation.checkOutDate).slice(0, 10)
-    : reservation.checkInDate
-      ? String(reservation.checkInDate).slice(0, 10)
-      : null;
-  if (!refDate) return false;
-  return refDate < today;
+function isReservationLocked(reservation: { status: string }): boolean {
+  return reservation.status === "checked_out" || reservation.status === "cancelled";
 }
 
 const openai = new OpenAI({
