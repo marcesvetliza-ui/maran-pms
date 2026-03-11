@@ -11,6 +11,7 @@ import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
+import { generarAsiento, generarAsientoOP } from "./accounting";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -6037,6 +6038,444 @@ Only respond with the JSON object.`;
     } catch (error) {
       console.error("Error in help chat:", error);
       res.status(500).json({ error: "Error al procesar la consulta" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // MÓDULO CONTABLE — Proveedores Contables
+  // ═══════════════════════════════════════════════════════════════
+
+  app.get("/api/accounting-suppliers", requireAuth, async (req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT s.*,
+          COALESCE(SUM(CASE WHEN pi.estado = 'pendiente' THEN pi.monto_total::numeric ELSE 0 END), 0) AS saldo_cc
+        FROM accounting_suppliers s
+        LEFT JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+        WHERE s.activo = true
+        GROUP BY s.id
+        ORDER BY s.razon_social
+      `);
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/accounting-suppliers/cuenta-corriente", requireAuth, async (req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
+          COUNT(pi.id) AS facturas_pendientes,
+          COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
+        FROM accounting_suppliers s
+        INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+        GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
+        ORDER BY total_saldo DESC
+      `);
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/accounting-suppliers/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await db.execute(sql`SELECT * FROM accounting_suppliers WHERE id = ${id}`);
+      if (!result.rows.length) return res.status(404).json({ error: "Proveedor no encontrado" });
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/accounting-suppliers/:id/cuenta-corriente", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const supplier = await db.execute(sql`SELECT * FROM accounting_suppliers WHERE id = ${id}`);
+      if (!supplier.rows.length) return res.status(404).json({ error: "Proveedor no encontrado" });
+
+      const facturas = await db.execute(sql`
+        SELECT * FROM purchase_invoices
+        WHERE supplier_id = ${id} AND estado = 'pendiente'
+        ORDER BY fecha_emision DESC
+      `);
+
+      const ops = await db.execute(sql`
+        SELECT po.*, array_agg(poi.invoice_id) AS invoice_ids
+        FROM payment_orders po
+        LEFT JOIN payment_order_items poi ON poi.payment_order_id = po.id
+        WHERE po.supplier_id = ${id}
+        GROUP BY po.id
+        ORDER BY po.fecha DESC
+      `);
+
+      res.json({
+        supplier: supplier.rows[0],
+        facturasPendientes: facturas.rows,
+        historialOPs: ops.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/accounting-suppliers", requireAuth, async (req, res) => {
+    try {
+      const { razonSocial, cuit, condicionIva, domicilio, localidad, provincia, cp,
+        alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco } = req.body;
+      if (!razonSocial || !cuit || !condicionIva) {
+        return res.status(400).json({ error: "Razón social, CUIT y condición IVA son requeridos" });
+      }
+      const result = await db.execute(sql`
+        INSERT INTO accounting_suppliers (razon_social, cuit, condicion_iva, domicilio, localidad, provincia, cp, alicuota_iibb, alicuota_ganancias, alicuota_iva, cbu, banco)
+        VALUES (${razonSocial}, ${cuit}, ${condicionIva}, ${domicilio||null}, ${localidad||null}, ${provincia||"Entre Rios"}, ${cp||null}, ${alicuotaIibb||0}, ${alicuotaGanancias||0}, ${alicuotaIva||0}, ${cbu||null}, ${banco||null})
+        RETURNING *
+      `);
+      res.status(201).json(result.rows[0]);
+    } catch (e: any) {
+      if (e.message?.includes("unique")) return res.status(409).json({ error: "CUIT ya registrado" });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/accounting-suppliers/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { razonSocial, cuit, condicionIva, domicilio, localidad, provincia, cp,
+        alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco, activo } = req.body;
+      const result = await db.execute(sql`
+        UPDATE accounting_suppliers SET
+          razon_social = COALESCE(${razonSocial||null}, razon_social),
+          cuit = COALESCE(${cuit||null}, cuit),
+          condicion_iva = COALESCE(${condicionIva||null}, condicion_iva),
+          domicilio = COALESCE(${domicilio !== undefined ? domicilio : null}, domicilio),
+          localidad = COALESCE(${localidad !== undefined ? localidad : null}, localidad),
+          provincia = COALESCE(${provincia||null}, provincia),
+          cp = COALESCE(${cp !== undefined ? cp : null}, cp),
+          alicuota_iibb = COALESCE(${alicuotaIibb !== undefined ? alicuotaIibb : null}, alicuota_iibb),
+          alicuota_ganancias = COALESCE(${alicuotaGanancias !== undefined ? alicuotaGanancias : null}, alicuota_ganancias),
+          alicuota_iva = COALESCE(${alicuotaIva !== undefined ? alicuotaIva : null}, alicuota_iva),
+          cbu = COALESCE(${cbu !== undefined ? cbu : null}, cbu),
+          banco = COALESCE(${banco !== undefined ? banco : null}, banco),
+          activo = COALESCE(${activo !== undefined ? activo : null}, activo),
+          updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING *
+      `);
+      if (!result.rows.length) return res.status(404).json({ error: "Proveedor no encontrado" });
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/accounting-suppliers/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await db.execute(sql`UPDATE accounting_suppliers SET activo = false WHERE id = ${id}`);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // MÓDULO CONTABLE — Comprobantes de Compra
+  // ═══════════════════════════════════════════════════════════════
+
+  app.get("/api/purchase-invoices", requireAuth, async (req, res) => {
+    try {
+      const { periodo, supplierId, estado } = req.query;
+      const sid = supplierId ? parseInt(supplierId as string) : null;
+
+      // Build flexible query using CASE
+      const result = await db.execute(sql`
+        SELECT pi.*, s.razon_social AS supplier_nombre
+        FROM purchase_invoices pi
+        LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
+        WHERE (${periodo ? sql`pi.periodo = ${periodo as string}` : sql`TRUE`})
+          AND (${sid ? sql`pi.supplier_id = ${sid}` : sql`TRUE`})
+          AND (${estado ? sql`pi.estado = ${estado as string}` : sql`TRUE`})
+        ORDER BY pi.fecha_emision DESC
+      `);
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await db.execute(sql`
+        SELECT pi.*, s.razon_social AS supplier_nombre, s.alicuota_iibb AS supplier_alicuota_iibb
+        FROM purchase_invoices pi
+        LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
+        WHERE pi.id = ${id}
+      `);
+      if (!result.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
+      // Lines del asiento
+      const entry = await db.execute(sql`
+        SELECT ael.*, aa.codigo, aa.nombre
+        FROM accounting_entry_lines ael
+        JOIN accounting_entries ae ON ae.id = ael.entry_id
+        JOIN accounting_accounts aa ON aa.id = ael.account_id
+        WHERE ae.origen_id = ${id} AND ae.origen_tipo = 'purchase_invoice'
+      `);
+      res.json({ ...result.rows[0], asientoLines: entry.rows });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/purchase-invoices", requireAuth, async (req, res) => {
+    try {
+      const body = req.body;
+
+      // Calcular montoTotal
+      const n = (k: string) => parseFloat(body[k] || "0") || 0;
+      const montoTotal =
+        n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
+        n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
+        n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
+        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
+        n("retencionIva") - n("retencionSuss");
+
+      // Estado según condición de pago
+      const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
+
+      // Formatear numero comprobante ext
+      const numeroComprobanteExt = body.puntoVenta && body.numeroComprobante
+        ? `${String(body.puntoVenta).padStart(4, "0")}-${String(body.numeroComprobante).padStart(8, "0")}`
+        : body.numeroComprobante;
+
+      // Insertar comprobante
+      const result = await db.execute(sql`
+        INSERT INTO purchase_invoices (
+          tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
+          punto_venta, numero_comprobante, numero_comprobante_ext,
+          fecha_emision, periodo, condicion_pago,
+          monto_neto, alicuota_iva, monto_iva27, monto_iva21, monto_iva105,
+          monto_iva5, monto_iva25, monto_exento, monto_no_gravado,
+          impuestos_internos, ley_25413, percepcion_iibb, percepcion_iva,
+          percepcion_ganancias, retencion_iibb, retencion_ganancias, retencion_iva,
+          retencion_suss, retencion_municipal, monotributo_comp_bc,
+          monto_total, cuenta_contable_id, centro_costo, estado, observaciones
+        ) VALUES (
+          ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
+          ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
+          ${body.fechaEmision}, ${body.periodo||null}, ${body.condicionPago||"contado"},
+          ${n("montoNeto")}, ${body.alicuotaIva||"21"}, ${n("montoIva27")}, ${n("montoIva21")}, ${n("montoIva105")},
+          ${n("montoIva5")}, ${n("montoIva25")}, ${n("montoExento")}, ${n("montoNoGravado")},
+          ${n("impuestosInternos")}, ${n("ley25413")}, ${n("percepcionIibb")}, ${n("percepcionIva")},
+          ${n("percepcionGanancias")}, ${n("retencionIibb")}, ${n("retencionGanancias")}, ${n("retencionIva")},
+          ${n("retencionSuss")}, ${n("retencionMunicipal")}, ${n("monotributoCompBC")},
+          ${montoTotal}, ${body.cuentaContableId||null}, ${body.centroCosto||null}, ${estado}, ${body.observaciones||null}
+        )
+        RETURNING *
+      `);
+      const invoice = result.rows[0] as any;
+
+      // Generar asiento automático
+      try {
+        const entryId = await generarAsiento(invoice);
+        await db.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${invoice.id}`);
+        invoice.asientoId = entryId;
+      } catch (ae) {
+        console.error("Error generando asiento:", ae);
+      }
+
+      // Si tiene retención IIBB → insertar en iibb_retentions
+      if (n("retencionIibb") > 0 && body.supplierId) {
+        try {
+          const nroRes = await db.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
+          const nroConstancia = (nroRes.rows[0] as any).next;
+          await db.execute(sql`
+            INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, letra_factura, importe_base, alicuota, importe_retenido, invoice_id)
+            VALUES (${nroConstancia}, ${body.supplierId}, ${body.proveedorCuit||""}, ${body.fechaEmision}, ${body.fechaEmision}, ${parseInt(body.numeroComprobante)||0}, ${body.tipoComprobante?.slice(-1)||null}, ${n("montoNeto")}, ${body.alicuotaIibbProveedor||0}, ${n("retencionIibb")}, ${invoice.id})
+          `);
+        } catch (re) {
+          console.error("Error inserting iibb_retention:", re);
+        }
+      }
+
+      res.status(201).json(invoice);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await db.execute(sql`SELECT estado FROM purchase_invoices WHERE id = ${id}`);
+      if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
+      if ((existing.rows[0] as any).estado !== "pendiente") {
+        return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
+      }
+      const body = req.body;
+      const n = (k: string) => parseFloat(body[k] || "0") || 0;
+      const montoTotal =
+        n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
+        n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
+        n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
+        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
+        n("retencionIva") - n("retencionSuss");
+      const result = await db.execute(sql`
+        UPDATE purchase_invoices SET
+          monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},
+          monto_iva105 = ${n("montoIva105")}, monto_iva27 = ${n("montoIva27")},
+          percepcion_iibb = ${n("percepcionIibb")}, percepcion_iva = ${n("percepcionIva")},
+          retencion_iibb = ${n("retencionIibb")}, retencion_ganancias = ${n("retencionGanancias")},
+          retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
+          monto_total = ${montoTotal}, cuenta_contable_id = ${body.cuentaContableId||null},
+          centro_costo = ${body.centroCosto||null}, observaciones = ${body.observaciones||null},
+          updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING *
+      `);
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await db.execute(sql`UPDATE purchase_invoices SET estado = 'anulado' WHERE id = ${id}`);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // MÓDULO CONTABLE — Órdenes de Pago
+  // ═══════════════════════════════════════════════════════════════
+
+  app.get("/api/payment-orders", requireAuth, async (req, res) => {
+    try {
+      const { supplierId } = req.query;
+      let q = sql`
+        SELECT po.*, s.razon_social AS supplier_nombre
+        FROM payment_orders po
+        JOIN accounting_suppliers s ON s.id = po.supplier_id
+        WHERE 1=1
+      `;
+      if (supplierId) {
+        const result = await db.execute(sql`
+          SELECT po.*, s.razon_social AS supplier_nombre
+          FROM payment_orders po JOIN accounting_suppliers s ON s.id = po.supplier_id
+          WHERE po.supplier_id = ${parseInt(supplierId as string)}
+          ORDER BY po.fecha DESC
+        `);
+        return res.json(result.rows);
+      }
+      const result = await db.execute(sql`
+        SELECT po.*, s.razon_social AS supplier_nombre
+        FROM payment_orders po JOIN accounting_suppliers s ON s.id = po.supplier_id
+        ORDER BY po.fecha DESC
+      `);
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/payment-orders", requireAuth, async (req, res) => {
+    try {
+      const { supplierId, fecha, facturaIds, retencionIibb, retencionGanancias,
+        retencionIva, retencionProfLibs, compensacion, formaPago, depBancario,
+        efectivo, cheques, observaciones } = req.body;
+
+      if (!supplierId || !facturaIds?.length) {
+        return res.status(400).json({ error: "Proveedor y facturas son requeridos" });
+      }
+
+      // Verificar facturas
+      const facturasRes = await db.execute(sql`
+        SELECT id, monto_total, estado, supplier_id FROM purchase_invoices
+        WHERE id = ANY(${facturaIds}::int[]) AND supplier_id = ${supplierId} AND estado = 'pendiente'
+      `);
+      if (facturasRes.rows.length !== facturaIds.length) {
+        return res.status(400).json({ error: "Algunas facturas no son válidas o no están pendientes" });
+      }
+
+      // Calcular totales
+      const totalFacturas = facturasRes.rows.reduce((s: number, r: any) => s + parseFloat(r.monto_total), 0);
+      const retIibb = parseFloat(retencionIibb || "0");
+      const retGan = parseFloat(retencionGanancias || "0");
+      const retIva = parseFloat(retencionIva || "0");
+      const retProf = parseFloat(retencionProfLibs || "0");
+      const comp = parseFloat(compensacion || "0");
+      const totalAbonado = totalFacturas - retIibb - retGan - retIva - retProf - comp;
+
+      // Número de OP autoincremental
+      const numRes = await db.execute(sql`
+        SELECT COALESCE(MAX(CAST(SPLIT_PART(numero, '-', 2) AS INTEGER)), 0) + 1 AS next FROM payment_orders
+      `);
+      const nextNum = (numRes.rows[0] as any).next as number;
+      const numero = `000-${String(nextNum).padStart(8, "0")}`;
+
+      // Insertar OP
+      const dep = parseFloat(depBancario || "0");
+      const ef = parseFloat(efectivo || "0");
+      const ch = parseFloat(cheques || "0");
+      const opRes = await db.execute(sql`
+        INSERT INTO payment_orders (numero, supplier_id, fecha, forma_pago, dep_bancario, efectivo, cheques, total_facturas, retencion_iibb, retencion_ganancias, retencion_iva, retencion_prof_libs, compensacion, total_abonado, observaciones)
+        VALUES (${numero}, ${supplierId}, ${fecha || getArgentinaToday()}, ${formaPago||"transferencia"}, ${dep}, ${ef}, ${ch}, ${totalFacturas}, ${retIibb}, ${retGan}, ${retIva}, ${retProf}, ${comp}, ${totalAbonado}, ${observaciones||null})
+        RETURNING *
+      `);
+      const op = opRes.rows[0] as any;
+
+      // Marcar facturas como pagadas e insertar ítems
+      for (const fid of facturaIds) {
+        const factura = facturasRes.rows.find((r: any) => r.id === fid) as any;
+        await db.execute(sql`UPDATE purchase_invoices SET estado = 'pagado' WHERE id = ${fid}`);
+        await db.execute(sql`
+          INSERT INTO payment_order_items (payment_order_id, invoice_id, importe_cancelado)
+          VALUES (${op.id}, ${fid}, ${parseFloat(factura.monto_total)})
+        `);
+      }
+
+      // Generar asiento contable
+      try {
+        const supplier = await db.execute(sql`SELECT razon_social FROM accounting_suppliers WHERE id = ${supplierId}`);
+        const entryId = await generarAsientoOP({ ...op, supplier: supplier.rows[0] as any });
+        await db.execute(sql`UPDATE payment_orders SET asiento_id = ${entryId} WHERE id = ${op.id}`);
+      } catch (ae) { console.error("Error generando asiento OP:", ae); }
+
+      // Insertar retención IIBB si corresponde
+      if (retIibb > 0) {
+        try {
+          const nroRes = await db.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
+          const nroConstancia = (nroRes.rows[0] as any).next;
+          const sup = await db.execute(sql`SELECT cuit FROM accounting_suppliers WHERE id = ${supplierId}`);
+          const cuit = (sup.rows[0] as any)?.cuit || "";
+          await db.execute(sql`
+            INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, importe_base, alicuota, importe_retenido)
+            VALUES (${nroConstancia}, ${supplierId}, ${cuit}, ${fecha||getArgentinaToday()}, ${fecha||getArgentinaToday()}, ${nextNum}, ${totalFacturas}, 0, ${retIibb})
+          `);
+        } catch (re) { console.error("Error inserting iibb_retention for OP:", re); }
+      }
+
+      // Retornar OP completa con facturas
+      res.status(201).json({ ...op, facturas: facturasRes.rows, numero });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Accounting accounts (plan de cuentas)
+  app.get("/api/accounting-accounts", requireAuth, async (req, res) => {
+    try {
+      const result = await db.execute(sql`SELECT * FROM accounting_accounts WHERE activo = true ORDER BY codigo`);
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 

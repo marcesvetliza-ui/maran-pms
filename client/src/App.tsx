@@ -41,6 +41,8 @@ import CashRegisterPage from "@/pages/cash-register";
 import SourceCodePage from "@/pages/source-code";
 import AdminPage from "@/pages/admin";
 import SpaClientsPage from "@/pages/spa-clients";
+import AccountingSuppliersPage from "@/pages/accounting-suppliers";
+import PurchaseInvoicesPage from "@/pages/purchase-invoices";
 import LoginPage from "@/pages/login";
 import HelpChat from "@/components/help-chat";
 import { LogOut, User } from "lucide-react";
@@ -100,6 +102,8 @@ function Router() {
       <Route path="/cash-register" component={CashRegisterPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/source-code" component={SourceCodePage} />
+      <Route path="/accounting-suppliers" component={AccountingSuppliersPage} />
+      <Route path="/purchase-invoices" component={PurchaseInvoicesPage} />
       <Route component={NotFound} />
     </Switch>
   );
