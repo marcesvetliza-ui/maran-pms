@@ -419,12 +419,12 @@ function InvoiceDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <Label>Cuenta Contable de Gasto</Label>
-                  <Select value={form.cuentaContableId} onValueChange={(v) => f("cuentaContableId", v)}>
+                  <Select value={form.cuentaContableId || "__none__"} onValueChange={(v) => f("cuentaContableId", v === "__none__" ? "" : v)}>
                     <SelectTrigger data-testid="select-cuenta-contable">
                       <SelectValue placeholder="Seleccionar cuenta..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">— Sin clasificar —</SelectItem>
+                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
                       {accounts
                         .filter((a) => a.tipo === "egreso")
                         .map((a) => (
@@ -437,12 +437,12 @@ function InvoiceDialog({
                 </div>
                 <div className="col-span-2">
                   <Label>Centro de Costo</Label>
-                  <Select value={form.centroCosto} onValueChange={(v) => f("centroCosto", v)}>
+                  <Select value={form.centroCosto || "__none__"} onValueChange={(v) => f("centroCosto", v === "__none__" ? "" : v)}>
                     <SelectTrigger data-testid="select-centro-costo">
                       <SelectValue placeholder="Seleccionar área..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">— Sin clasificar —</SelectItem>
+                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
                       {CENTROS_COSTO.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                     </SelectContent>
                   </Select>
