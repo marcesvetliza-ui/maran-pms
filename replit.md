@@ -54,6 +54,7 @@ Preferred communication style: Simple, everyday language.
 - **Travel Agencies Module**: CRUD for agencies, commission tracking, per-agency stats, global commission report, agency selection in reservation forms.
 - **Administration Module**: Hub for financial sub-modules (Facturación, CC Empresas, CC Agencias, Comprobantes, Reportes, Caja).
 - **Cuenta Corriente Module**: Tracks `account_movements` (cargo/pago/nota_credito/ajuste) per company/agency, auto-triggers on checkout, provides real-time debt totals.
+- **Módulo Contable (Prompt A — DB)**: 8 tablas creadas: `accounting_suppliers` (proveedores con CUIT/alícuotas, separado de `suppliers` del inventario), `accounting_accounts` (plan de cuentas real del hotel, 51 cuentas), `purchase_invoices` (facturas FACT-A/B/C, NC, resúmenes bancarios, liquidaciones tarjeta), `payment_orders` + `payment_order_items` (OP con retenciones), `accounting_entries` + `accounting_entry_lines` (mayor de cuentas), `iibb_retentions` (SIRCAR). Todos usan `serial` IDs. `asientoId` en `purchase_invoices` es integer simple sin FK.
 
 ### Authentication & Authorization
 - **Strategy**: Passport.js with local strategy.

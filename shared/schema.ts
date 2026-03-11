@@ -1617,3 +1617,186 @@ export const accountMovements = pgTable("account_movements", {
 export const insertAccountMovementSchema = createInsertSchema(accountMovements).omit({ id: true, createdAt: true });
 export type InsertAccountMovement = z.infer<typeof insertAccountMovementSchema>;
 export type AccountMovement = typeof accountMovements.$inferSelect;
+
+// ============================================================
+// MÓDULO CONTABLE / ADMINISTRATIVO
+// ============================================================
+
+// Proveedores contables (separado de suppliers del inventario)
+export const accountingSuppliers = pgTable("accounting_suppliers", {
+  id: serial("id").primaryKey(),
+  razonSocial: text("razon_social").notNull(),
+  cuit: text("cuit").notNull().unique(),
+  domicilio: text("domicilio"),
+  localidad: text("localidad"),
+  provincia: text("provincia").default("Entre Rios"),
+  cp: text("cp"),
+  condicionIva: text("condicion_iva").notNull(),
+  alicuotaIibb: numeric("alicuota_iibb", { precision: 6, scale: 4 }).default("0"),
+  alicuotaGanancias: numeric("alicuota_ganancias", { precision: 6, scale: 4 }).default("0"),
+  alicuotaIva: numeric("alicuota_iva", { precision: 6, scale: 4 }).default("0"),
+  cbu: text("cbu"),
+  banco: text("banco"),
+  activo: boolean("activo").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertAccountingSupplierSchema = createInsertSchema(accountingSuppliers).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertAccountingSupplier = z.infer<typeof insertAccountingSupplierSchema>;
+export type AccountingSupplier = typeof accountingSuppliers.$inferSelect;
+
+// Plan de Cuentas Contables
+export const accountingAccounts = pgTable("accounting_accounts", {
+  id: serial("id").primaryKey(),
+  codigo: text("codigo").notNull().unique(),
+  nombre: text("nombre").notNull(),
+  tipo: text("tipo").notNull(),
+  nivel: integer("nivel").default(1),
+  activo: boolean("activo").default(true),
+});
+
+export const insertAccountingAccountSchema = createInsertSchema(accountingAccounts).omit({ id: true });
+export type InsertAccountingAccount = z.infer<typeof insertAccountingAccountSchema>;
+export type AccountingAccount = typeof accountingAccounts.$inferSelect;
+
+// Comprobantes de Compra (Facturas, NC, Resúmenes, Liquidaciones)
+export const purchaseInvoices = pgTable("purchase_invoices", {
+  id: serial("id").primaryKey(),
+  tipoComprobante: text("tipo_comprobante").notNull(),
+  supplierId: integer("supplier_id").references(() => accountingSuppliers.id),
+  proveedorNombre: text("proveedor_nombre"),
+  proveedorCuit: text("proveedor_cuit"),
+  puntoVenta: text("punto_venta"),
+  numeroComprobante: text("numero_comprobante").notNull(),
+  numeroComprobanteExt: text("numero_comprobante_ext"),
+  fechaEmision: date("fecha_emision").notNull(),
+  periodo: text("periodo"),
+  condicionPago: text("condicion_pago").notNull().default("contado"),
+  montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }).notNull().default("0"),
+  alicuotaIva: text("alicuota_iva").default("21"),
+  montoIva27: numeric("monto_iva27", { precision: 14, scale: 2 }).default("0"),
+  montoIva21: numeric("monto_iva21", { precision: 14, scale: 2 }).default("0"),
+  montoIva105: numeric("monto_iva105", { precision: 14, scale: 2 }).default("0"),
+  montoIva5: numeric("monto_iva5", { precision: 14, scale: 2 }).default("0"),
+  montoIva25: numeric("monto_iva25", { precision: 14, scale: 2 }).default("0"),
+  montoExento: numeric("monto_exento", { precision: 14, scale: 2 }).default("0"),
+  montoNoGravado: numeric("monto_no_gravado", { precision: 14, scale: 2 }).default("0"),
+  impuestosInternos: numeric("impuestos_internos", { precision: 14, scale: 2 }).default("0"),
+  ley25413: numeric("ley_25413", { precision: 14, scale: 2 }).default("0"),
+  percepcionIibb: numeric("percepcion_iibb", { precision: 14, scale: 2 }).default("0"),
+  percepcionIva: numeric("percepcion_iva", { precision: 14, scale: 2 }).default("0"),
+  percepcionGanancias: numeric("percepcion_ganancias", { precision: 14, scale: 2 }).default("0"),
+  retencionIibb: numeric("retencion_iibb", { precision: 14, scale: 2 }).default("0"),
+  retencionGanancias: numeric("retencion_ganancias", { precision: 14, scale: 2 }).default("0"),
+  retencionIva: numeric("retencion_iva", { precision: 14, scale: 2 }).default("0"),
+  retencionSuss: numeric("retencion_suss", { precision: 14, scale: 2 }).default("0"),
+  retencionMunicipal: numeric("retencion_municipal", { precision: 14, scale: 2 }).default("0"),
+  monotributoCompBC: numeric("monotributo_comp_bc", { precision: 14, scale: 2 }).default("0"),
+  montoTotal: numeric("monto_total", { precision: 14, scale: 2 }).notNull().default("0"),
+  cuentaContableId: integer("cuenta_contable_id").references(() => accountingAccounts.id),
+  centroCosto: text("centro_costo"),
+  estado: text("estado").notNull().default("pendiente"),
+  asientoId: integer("asiento_id"),
+  observaciones: text("observaciones"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertPurchaseInvoiceSchema = createInsertSchema(purchaseInvoices).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertPurchaseInvoice = z.infer<typeof insertPurchaseInvoiceSchema>;
+export type PurchaseInvoice = typeof purchaseInvoices.$inferSelect;
+
+// Órdenes de Pago
+export const paymentOrders = pgTable("payment_orders", {
+  id: serial("id").primaryKey(),
+  numero: text("numero").notNull().unique(),
+  supplierId: integer("supplier_id").notNull().references(() => accountingSuppliers.id),
+  fecha: date("fecha").notNull(),
+  formaPago: text("forma_pago").notNull().default("transferencia"),
+  depBancario: numeric("dep_bancario", { precision: 14, scale: 2 }).default("0"),
+  efectivo: numeric("efectivo", { precision: 14, scale: 2 }).default("0"),
+  cheques: numeric("cheques", { precision: 14, scale: 2 }).default("0"),
+  totalFacturas: numeric("total_facturas", { precision: 14, scale: 2 }).notNull(),
+  retencionIibb: numeric("retencion_iibb", { precision: 14, scale: 2 }).default("0"),
+  retencionGanancias: numeric("retencion_ganancias", { precision: 14, scale: 2 }).default("0"),
+  retencionIva: numeric("retencion_iva", { precision: 14, scale: 2 }).default("0"),
+  retencionProfLibs: numeric("retencion_prof_libs", { precision: 14, scale: 2 }).default("0"),
+  compensacion: numeric("compensacion", { precision: 14, scale: 2 }).default("0"),
+  totalAbonado: numeric("total_abonado", { precision: 14, scale: 2 }).notNull(),
+  asientoId: integer("asiento_id"),
+  observaciones: text("observaciones"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPaymentOrderSchema = createInsertSchema(paymentOrders).omit({ id: true, createdAt: true });
+export type InsertPaymentOrder = z.infer<typeof insertPaymentOrderSchema>;
+export type PaymentOrder = typeof paymentOrders.$inferSelect;
+
+// Ítems de Orden de Pago (facturas que cancela cada OP)
+export const paymentOrderItems = pgTable("payment_order_items", {
+  id: serial("id").primaryKey(),
+  paymentOrderId: integer("payment_order_id").notNull().references(() => paymentOrders.id),
+  invoiceId: integer("invoice_id").notNull().references(() => purchaseInvoices.id),
+  importeCancelado: numeric("importe_cancelado", { precision: 14, scale: 2 }).notNull(),
+});
+
+export const insertPaymentOrderItemSchema = createInsertSchema(paymentOrderItems).omit({ id: true });
+export type InsertPaymentOrderItem = z.infer<typeof insertPaymentOrderItemSchema>;
+export type PaymentOrderItem = typeof paymentOrderItems.$inferSelect;
+
+// Asientos Contables (Mayor de Cuentas)
+export const accountingEntries = pgTable("accounting_entries", {
+  id: serial("id").primaryKey(),
+  numeroMinuta: integer("numero_minuta").notNull(),
+  fecha: date("fecha").notNull(),
+  periodo: text("periodo").notNull(),
+  concepto: text("concepto").notNull(),
+  tipoOrigen: text("tipo_origen").notNull(),
+  origenId: integer("origen_id"),
+  origenTipo: text("origen_tipo"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertAccountingEntrySchema = createInsertSchema(accountingEntries).omit({ id: true, createdAt: true });
+export type InsertAccountingEntry = z.infer<typeof insertAccountingEntrySchema>;
+export type AccountingEntry = typeof accountingEntries.$inferSelect;
+
+// Líneas de Asiento
+export const accountingEntryLines = pgTable("accounting_entry_lines", {
+  id: serial("id").primaryKey(),
+  entryId: integer("entry_id").notNull().references(() => accountingEntries.id),
+  accountId: integer("account_id").notNull().references(() => accountingAccounts.id),
+  comprobanteTipo: text("comprobante_tipo"),
+  comprobanteNumero: text("comprobante_numero"),
+  proveedorNombre: text("proveedor_nombre"),
+  debe: numeric("debe", { precision: 14, scale: 2 }).default("0"),
+  haber: numeric("haber", { precision: 14, scale: 2 }).default("0"),
+});
+
+export const insertAccountingEntryLineSchema = createInsertSchema(accountingEntryLines).omit({ id: true });
+export type InsertAccountingEntryLine = z.infer<typeof insertAccountingEntryLineSchema>;
+export type AccountingEntryLine = typeof accountingEntryLines.$inferSelect;
+
+// Constancias de Retención IIBB (SIRCAR)
+export const iibbRetentions = pgTable("iibb_retentions", {
+  id: serial("id").primaryKey(),
+  nroConstancia: integer("nro_constancia").notNull(),
+  supplierId: integer("supplier_id").references(() => accountingSuppliers.id),
+  cuitProveedor: text("cuit_proveedor").notNull(),
+  fechaRetencion: date("fecha_retencion").notNull(),
+  fechaComprobante: date("fecha_comprobante").notNull(),
+  nroComprobante: integer("nro_comprobante").notNull(),
+  letraFactura: text("letra_factura"),
+  importeBase: numeric("importe_base", { precision: 14, scale: 2 }).notNull(),
+  alicuota: numeric("alicuota", { precision: 6, scale: 4 }).notNull(),
+  importeRetenido: numeric("importe_retenido", { precision: 14, scale: 2 }).notNull(),
+  anulacion: boolean("anulacion").default(false),
+  convMultilateral: boolean("conv_multilateral").default(false),
+  invoiceId: integer("invoice_id").references(() => purchaseInvoices.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertIibbRetentionSchema = createInsertSchema(iibbRetentions).omit({ id: true, createdAt: true });
+export type InsertIibbRetention = z.infer<typeof insertIibbRetentionSchema>;
+export type IibbRetention = typeof iibbRetentions.$inferSelect;

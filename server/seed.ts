@@ -802,6 +802,271 @@ export async function refreshRealData() {
       { id: "cab7", name: "Sauna M", description: "Sauna Mujeres", isActive: "true" },
     ]).onConflictDoNothing();
 
+    // ─── MÓDULO CONTABLE ────────────────────────────────────────
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS accounting_suppliers (
+        id SERIAL PRIMARY KEY,
+        razon_social TEXT NOT NULL,
+        cuit TEXT NOT NULL UNIQUE,
+        domicilio TEXT,
+        localidad TEXT,
+        provincia TEXT DEFAULT 'Entre Rios',
+        cp TEXT,
+        condicion_iva TEXT NOT NULL,
+        alicuota_iibb NUMERIC(6,4) DEFAULT 0,
+        alicuota_ganancias NUMERIC(6,4) DEFAULT 0,
+        alicuota_iva NUMERIC(6,4) DEFAULT 0,
+        cbu TEXT,
+        banco TEXT,
+        activo BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS accounting_accounts (
+        id SERIAL PRIMARY KEY,
+        codigo TEXT NOT NULL UNIQUE,
+        nombre TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        nivel INTEGER DEFAULT 1,
+        activo BOOLEAN DEFAULT true
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS purchase_invoices (
+        id SERIAL PRIMARY KEY,
+        tipo_comprobante TEXT NOT NULL,
+        supplier_id INTEGER REFERENCES accounting_suppliers(id),
+        proveedor_nombre TEXT,
+        proveedor_cuit TEXT,
+        punto_venta TEXT,
+        numero_comprobante TEXT NOT NULL,
+        numero_comprobante_ext TEXT,
+        fecha_emision DATE NOT NULL,
+        periodo TEXT,
+        condicion_pago TEXT NOT NULL DEFAULT 'contado',
+        monto_neto NUMERIC(14,2) NOT NULL DEFAULT 0,
+        alicuota_iva TEXT DEFAULT '21',
+        monto_iva27 NUMERIC(14,2) DEFAULT 0,
+        monto_iva21 NUMERIC(14,2) DEFAULT 0,
+        monto_iva105 NUMERIC(14,2) DEFAULT 0,
+        monto_iva5 NUMERIC(14,2) DEFAULT 0,
+        monto_iva25 NUMERIC(14,2) DEFAULT 0,
+        monto_exento NUMERIC(14,2) DEFAULT 0,
+        monto_no_gravado NUMERIC(14,2) DEFAULT 0,
+        impuestos_internos NUMERIC(14,2) DEFAULT 0,
+        ley_25413 NUMERIC(14,2) DEFAULT 0,
+        percepcion_iibb NUMERIC(14,2) DEFAULT 0,
+        percepcion_iva NUMERIC(14,2) DEFAULT 0,
+        percepcion_ganancias NUMERIC(14,2) DEFAULT 0,
+        retencion_iibb NUMERIC(14,2) DEFAULT 0,
+        retencion_ganancias NUMERIC(14,2) DEFAULT 0,
+        retencion_iva NUMERIC(14,2) DEFAULT 0,
+        retencion_suss NUMERIC(14,2) DEFAULT 0,
+        retencion_municipal NUMERIC(14,2) DEFAULT 0,
+        monotributo_comp_bc NUMERIC(14,2) DEFAULT 0,
+        monto_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+        cuenta_contable_id INTEGER REFERENCES accounting_accounts(id),
+        centro_costo TEXT,
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        asiento_id INTEGER,
+        observaciones TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS payment_orders (
+        id SERIAL PRIMARY KEY,
+        numero TEXT NOT NULL UNIQUE,
+        supplier_id INTEGER NOT NULL REFERENCES accounting_suppliers(id),
+        fecha DATE NOT NULL,
+        forma_pago TEXT NOT NULL DEFAULT 'transferencia',
+        dep_bancario NUMERIC(14,2) DEFAULT 0,
+        efectivo NUMERIC(14,2) DEFAULT 0,
+        cheques NUMERIC(14,2) DEFAULT 0,
+        total_facturas NUMERIC(14,2) NOT NULL,
+        retencion_iibb NUMERIC(14,2) DEFAULT 0,
+        retencion_ganancias NUMERIC(14,2) DEFAULT 0,
+        retencion_iva NUMERIC(14,2) DEFAULT 0,
+        retencion_prof_libs NUMERIC(14,2) DEFAULT 0,
+        compensacion NUMERIC(14,2) DEFAULT 0,
+        total_abonado NUMERIC(14,2) NOT NULL,
+        asiento_id INTEGER,
+        observaciones TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS payment_order_items (
+        id SERIAL PRIMARY KEY,
+        payment_order_id INTEGER NOT NULL REFERENCES payment_orders(id),
+        invoice_id INTEGER NOT NULL REFERENCES purchase_invoices(id),
+        importe_cancelado NUMERIC(14,2) NOT NULL
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS accounting_entries (
+        id SERIAL PRIMARY KEY,
+        numero_minuta INTEGER NOT NULL,
+        fecha DATE NOT NULL,
+        periodo TEXT NOT NULL,
+        concepto TEXT NOT NULL,
+        tipo_origen TEXT NOT NULL,
+        origen_id INTEGER,
+        origen_tipo TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS accounting_entry_lines (
+        id SERIAL PRIMARY KEY,
+        entry_id INTEGER NOT NULL REFERENCES accounting_entries(id),
+        account_id INTEGER NOT NULL REFERENCES accounting_accounts(id),
+        comprobante_tipo TEXT,
+        comprobante_numero TEXT,
+        proveedor_nombre TEXT,
+        debe NUMERIC(14,2) DEFAULT 0,
+        haber NUMERIC(14,2) DEFAULT 0
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS iibb_retentions (
+        id SERIAL PRIMARY KEY,
+        nro_constancia INTEGER NOT NULL,
+        supplier_id INTEGER REFERENCES accounting_suppliers(id),
+        cuit_proveedor TEXT NOT NULL,
+        fecha_retencion DATE NOT NULL,
+        fecha_comprobante DATE NOT NULL,
+        nro_comprobante INTEGER NOT NULL,
+        letra_factura TEXT,
+        importe_base NUMERIC(14,2) NOT NULL,
+        alicuota NUMERIC(6,4) NOT NULL,
+        importe_retenido NUMERIC(14,2) NOT NULL,
+        anulacion BOOLEAN DEFAULT false,
+        conv_multilateral BOOLEAN DEFAULT false,
+        invoice_id INTEGER REFERENCES purchase_invoices(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // Seed Plan de Cuentas (solo si vacío)
+    const existingAccounts = await db.execute(sql`SELECT id FROM accounting_accounts LIMIT 1`);
+    if (existingAccounts.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO accounting_accounts (codigo, nombre, tipo) VALUES
+        ('1.1.4.01.04.01', 'Ret. IVA', 'activo'),
+        ('1.1.4.01.04.02', 'Percep IVA', 'activo'),
+        ('1.1.4.01.05', 'Ret Impuestos a las ganancias', 'activo'),
+        ('1.1.4.01.08.01', 'Ret. Ing Brutos', 'activo'),
+        ('1.1.4.01.08.02', 'Percep Ing Brutos', 'activo'),
+        ('1.1.4.01.10', 'Retenciones SUSS', 'activo'),
+        ('1.1.4.01.15', 'Impuesto Ley 25413', 'activo'),
+        ('1.1.4.07.01', 'IVA 21%', 'activo'),
+        ('1.1.4.07.02', 'IVA 10,5%', 'activo'),
+        ('1.1.4.07.03', 'IVA 27%', 'activo'),
+        ('2.1.3.02.09', 'Impuestos Internos', 'pasivo'),
+        ('4.2.1.08.05.02', 'Gastos Comerciales', 'egreso'),
+        ('4.2.1.08.06.01', 'Librería', 'egreso'),
+        ('4.2.1.08.06.02', 'Imprenta', 'egreso'),
+        ('4.2.1.08.07.02', 'Lavandería Hotel', 'egreso'),
+        ('4.2.1.08.09.01', 'Combustibles', 'egreso'),
+        ('4.2.1.08.09.05', 'Gastos Generales', 'egreso'),
+        ('4.2.1.08.10.06', 'Gastos del Personal', 'egreso'),
+        ('4.2.1.08.11.01', 'Luz', 'egreso'),
+        ('4.2.1.08.11.02', 'Gas', 'egreso'),
+        ('4.2.1.08.11.03', 'Teléfono', 'egreso'),
+        ('4.2.1.08.12', 'Publicidad Maran Towers', 'egreso'),
+        ('4.2.1.08.13.01', 'Honorarios', 'egreso'),
+        ('4.2.1.08.14', 'Fletes y Franqueos Maran Tower', 'egreso'),
+        ('4.2.1.08.15.01', 'Municipalidad', 'egreso'),
+        ('4.2.1.08.16', 'Mantenimiento Bs de Uso Maran', 'egreso'),
+        ('4.2.1.08.17', 'Gastos Computación Maran Tower', 'egreso'),
+        ('4.2.1.08.18', 'Gastos Bancarios Maran Towers', 'egreso'),
+        ('4.2.1.08.22', 'Mantenimiento Edificio Maran T', 'egreso'),
+        ('4.2.1.08.23.01', 'Housekeeping', 'egreso'),
+        ('4.2.1.08.23.02', 'Housekeeping Cocina', 'egreso'),
+        ('4.2.1.08.23.03', 'Housekeeping Áreas Públicas', 'egreso'),
+        ('4.2.1.08.23.04', 'Housekeeping Lavandería', 'egreso'),
+        ('4.2.1.08.24', 'Cablevideo', 'egreso'),
+        ('4.2.1.08.27', 'Costo Insumo y comestibles', 'egreso'),
+        ('4.2.1.08.28.01', 'Aves Restaurant', 'egreso'),
+        ('4.2.1.08.28.03', 'Cerdo Restaurant', 'egreso'),
+        ('4.2.1.08.28.05', 'Pescado Restaurant', 'egreso'),
+        ('4.2.1.08.28.09', 'Vacuno Restaurant', 'egreso'),
+        ('4.2.1.08.29.01', 'Fiambres Restaurant', 'egreso'),
+        ('4.2.1.08.32.01', 'Frut V y H Restaurant', 'egreso'),
+        ('4.2.1.08.33.01', 'Lácteos Restaurant', 'egreso'),
+        ('4.2.1.08.35.01', 'Costo Bebidas Restaurant', 'egreso'),
+        ('4.2.1.08.36', 'Otros Gastos Restaurant', 'egreso'),
+        ('4.2.1.08.39', 'Otros Gastos Spa', 'egreso'),
+        ('1.1.1.01', 'Caja', 'activo'),
+        ('1.1.1.02', 'Banco Macro', 'activo'),
+        ('1.1.1.03', 'Banco Santander', 'activo'),
+        ('1.1.1.04', 'Banco Nuevo Bersa', 'activo'),
+        ('1.1.1.05', 'Banco de la Nación', 'activo'),
+        ('2.1.1.01', 'Proveedores a Pagar', 'pasivo')
+        ON CONFLICT (codigo) DO NOTHING
+      `);
+    }
+
+    // Seed Proveedores Contables (solo si vacío)
+    const existingAccSuppliers = await db.execute(sql`SELECT id FROM accounting_suppliers LIMIT 1`);
+    if (existingAccSuppliers.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO accounting_suppliers (razon_social, cuit, condicion_iva, alicuota_iibb, alicuota_ganancias, alicuota_iva) VALUES
+        ('AGUA NUESTRA SA', '30-70786951-4', 'R.Inscrp.', 3.5000, 0, 0),
+        ('BODEGAS CHANDON S.A.', '30-55371841-0', 'R.Inscrp.', 3.5000, 0, 0),
+        ('CAPUCHINO SRL', '33-71252875-9', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Congelados Veracruz SRL', '30-71490852-5', 'R.Inscrp.', 3.5000, 0, 0),
+        ('DISTRIBUIDORA ANTARTIDA SA', '30-70848176-5', 'R.Inscrp.', 3.5000, 0, 0),
+        ('FRUTAS RAULITO SAS', '33-71846981-9', 'R.Inscrp.', 3.5000, 0, 0),
+        ('HUGO O ISAAC DISTRIB SRL', '30-70993544-1', 'R.Inscrp.', 3.5000, 0, 0),
+        ('L & L FUTURA SRL', '30-69338113-0', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Lobo Gustavo Hernan', '20-27833483-0', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Logistica San Miguel SRL', '30-70826260-5', 'R.Inscrp.', 3.5000, 0, 0),
+        ('MARTIN GABRIEL CIPRIANI', '20-22342199-8', 'R.Inscrp.', 3.5000, 0, 0),
+        ('NESTLE ARGENTINA S.A', '30-54676404-0', 'R.Inscrp.', 3.5000, 0, 0),
+        ('PALADINI SA', '30-50334872-8', 'R.Inscrp.', 3.5000, 0, 0),
+        ('PANIFICADORA RIO PARANA SA', '30-71573529-2', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Parana Beef SRL', '30-71553991-4', 'R.Inscrp.', 3.5000, 0, 0),
+        ('SCHONFELD MAURICIO RUBEN', '20-25307793-0', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Santana Javier Salvador', '20-21912741-4', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Total Litoral SA', '30-71703401-1', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Vazquez Maria Andrea', '27-22342883-0', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Virtu SRL', '30-71701621-8', 'R.Inscrp.', 3.5000, 0, 0),
+        ('FONTANA ROLANDO RAUL', '20-12756016-2', 'R.Inscrp.', 3.5000, 0, 0),
+        ('MATZKIN DARIO JAVIER', '20-16958502-5', 'R.Inscrp.', 3.5000, 0, 0),
+        ('PAPELERIA EL CUYANO SRL', '30-67118492-7', 'R.Inscrp.', 3.5000, 0, 0),
+        ('MARCELO A. FERNANDEZ CUETO', '20-14310306-5', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Troceadero de Cerdos Don', '30-65553842-5', 'R.Inscrp.', 3.5000, 0, 0),
+        ('VYG SRL', '30-71738382-2', 'R.Inscrp.', 3.5000, 0, 0),
+        ('KORE SA', '30-71160470-3', 'R.Inscrp.', 3.5000, 0, 0),
+        ('ELECTRICIDAD PARANA S.A', '30-71440399-7', 'R.Inscrp.', 3.5000, 0, 0),
+        ('SELPLAST SA', '30-69050738-9', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Gervasoni Pablo Cesar', '20-30786763-0', 'Monotributo', 0, 0, 0),
+        ('ANGEL H.BELLONI SRL', '30-64620565-0', 'R.Inscrp.', 3.5000, 0, 0),
+        ('FADEFIL SA', '30-71295020-6', 'R.Inscrp.', 3.5000, 0, 0),
+        ('ERTIC SRL', '30-71104918-1', 'R.Inscrp.', 3.5000, 0, 0),
+        ('LA ALBORADA DEL SUD SA', '30-70828075-1', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Zurdo Nancy Viviana', '27-16996676-7', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Cancio Eduardo', '20-16608544-7', 'R.Inscrp.', 3.5000, 0, 0),
+        ('LA RURAL VIÑEDOS Y BODEGAS', '30-52719611-2', 'R.Inscrp.', 3.5000, 0, 0),
+        ('NOSTER SRL', '30-71151601-4', 'R.Inscrp.', 3.5000, 0, 0),
+        ('ALDO M.FERNANDEZ OSUNA', '20-24592976-6', 'R.Inscrp.', 3.5000, 0, 0),
+        ('Ramirez Alberto Adrian', '20-22342219-6', 'R.Inscrp.', 3.5000, 0, 0)
+        ON CONFLICT (cuit) DO NOTHING
+      `);
+    }
+
     console.log("Real hotel data refreshed successfully!");
   } catch (error) {
     console.error("Error refreshing real data:", error);
