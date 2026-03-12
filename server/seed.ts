@@ -554,6 +554,13 @@ export async function refreshRealData() {
 
     await db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS is_editable TEXT DEFAULT 'false'`);
     await db.execute(sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#6366f1'`);
+    await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS attendees_adults integer NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS attendees_youth integer NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS attendees_children integer NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_armado text`);
+    await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_cocina text`);
+    await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_mantenimiento text`);
+    await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_housekeeping text`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS maintenance_staff (

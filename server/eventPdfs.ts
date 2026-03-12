@@ -14,10 +14,29 @@ function eventTypeLabel(type: string): string {
   return labels[type] || type;
 }
 
+const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
 const fmtDate = (d: string) => {
   const [y, m, day] = d.split("-");
-  return `${day}/${m}/${y}`;
+  const fecha = new Date(parseInt(y), parseInt(m) - 1, parseInt(day));
+  const diaSemana = DIAS[fecha.getDay()];
+  return `${diaSemana} ${day}/${m}/${y}`;
 };
+
+function desglosarAsistentes(event: EventWithDetails): string {
+  const total = event.attendees || 0;
+  const adults = (event as any).attendeesAdults || 0;
+  const youth = (event as any).attendeesYouth || 0;
+  const children = (event as any).attendeesChildren || 0;
+  if (adults || youth || children) {
+    const partes: string[] = [];
+    if (adults) partes.push(`${adults} ad.`);
+    if (youth) partes.push(`${youth} jóv.`);
+    if (children) partes.push(`${children} niños`);
+    return `${total} (${partes.join(" / ")})`;
+  }
+  return String(total);
+}
 
 const fmtMoney = (v: string | number) =>
   parseFloat(String(v)).toLocaleString("es-AR", { minimumFractionDigits: 2 });
@@ -64,7 +83,7 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
         ? fmtDate(event.startDate)
         : `${fmtDate(event.startDate)} al ${fmtDate(event.endDate)}`,
       "Asistentes:",
-      String(event.attendees)
+      desglosarAsistentes(event)
     );
     if (event.startTime) {
       row("Horario:", `${event.startTime}${event.endTime ? ` - ${event.endTime}` : ""}`, "", "");
@@ -116,6 +135,27 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
       doc.fontSize(11).font("Helvetica-Bold").text("Notas / Instrucciones operativas");
       doc.moveDown(0.3);
       doc.fontSize(9).font("Helvetica").text(event.notes, 50, doc.y, { width: 495 });
+    }
+
+    // ── COORDINACIÓN POR ÁREA ───────────────────────────────────────────────
+    const areas = [
+      { label: "ARMADO",          value: (event as any).notasArmado },
+      { label: "COCINA",          value: (event as any).notasCocina },
+      { label: "MANTENIMIENTO",   value: (event as any).notasMantenimiento },
+      { label: "HOUSEKEEPING",    value: (event as any).notasHousekeeping },
+    ].filter((a) => a.value);
+
+    if (areas.length > 0) {
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#cccccc").stroke();
+      doc.moveDown(0.5);
+      doc.fontSize(11).font("Helvetica-Bold").text("Coordinación por Área");
+      doc.moveDown(0.4);
+      for (const area of areas) {
+        doc.fontSize(10).font("Helvetica-Bold").text(area.label + ":", 50);
+        doc.fontSize(9).font("Helvetica").text(area.value!, 50, doc.y, { indent: 10, width: 485 });
+        doc.moveDown(0.5);
+      }
     }
 
     // ── PIE DE PÁGINA ───────────────────────────────────────────────────────
@@ -171,7 +211,7 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
     if (event.startTime) {
       row("Horario:", `${event.startTime}${event.endTime ? ` - ${event.endTime}` : ""}`);
     }
-    row("Cantidad de personas:", String(event.attendees));
+    row("Cantidad de personas:", desglosarAsistentes(event));
     row("Tipo de evento:", eventTypeLabel(event.eventType));
     row("Contacto:", event.contactName);
     if (event.contactPhone) row("Teléfono:", event.contactPhone);

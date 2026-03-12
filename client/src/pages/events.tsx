@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -235,8 +235,15 @@ const eventFormSchema = z.object({
   endDate: z.string().min(1, "La fecha de fin es requerida"),
   startTime: z.string().optional(),
   endTime: z.string().optional(),
-  attendees: z.number().min(1, "Debe tener al menos 1 asistente"),
+  attendees: z.number().min(1, "Debe haber al menos 1 asistente en total"),
+  attendeesAdults: z.number().min(0).default(0),
+  attendeesYouth: z.number().min(0).default(0),
+  attendeesChildren: z.number().min(0).default(0),
   notes: z.string().optional(),
+  notasArmado: z.string().optional(),
+  notasCocina: z.string().optional(),
+  notasMantenimiento: z.string().optional(),
+  notasHousekeeping: z.string().optional(),
 });
 
 type EventFormValues = z.infer<typeof eventFormSchema>;
@@ -354,7 +361,14 @@ export default function EventsPage() {
       startTime: "",
       endTime: "",
       attendees: 10,
+      attendeesAdults: 0,
+      attendeesYouth: 0,
+      attendeesChildren: 0,
       notes: "",
+      notasArmado: "",
+      notasCocina: "",
+      notasMantenimiento: "",
+      notasHousekeeping: "",
     },
   });
 
@@ -372,9 +386,32 @@ export default function EventsPage() {
       startTime: "",
       endTime: "",
       attendees: 10,
+      attendeesAdults: 0,
+      attendeesYouth: 0,
+      attendeesChildren: 0,
       notes: "",
+      notasArmado: "",
+      notasCocina: "",
+      notasMantenimiento: "",
+      notasHousekeeping: "",
     },
   });
+
+  // Auto-calcular total asistentes en form nuevo
+  const newAdults = eventForm.watch("attendeesAdults") || 0;
+  const newYouth = eventForm.watch("attendeesYouth") || 0;
+  const newChildren = eventForm.watch("attendeesChildren") || 0;
+  useEffect(() => {
+    eventForm.setValue("attendees", newAdults + newYouth + newChildren || 1);
+  }, [newAdults, newYouth, newChildren]);
+
+  // Auto-calcular total asistentes en form edición
+  const editAdults = editForm.watch("attendeesAdults") || 0;
+  const editYouth = editForm.watch("attendeesYouth") || 0;
+  const editChildren = editForm.watch("attendeesChildren") || 0;
+  useEffect(() => {
+    editForm.setValue("attendees", editAdults + editYouth + editChildren || 1);
+  }, [editAdults, editYouth, editChildren]);
 
   const chargeForm = useForm<ChargeFormValues>({
     resolver: zodResolver(chargeFormSchema),
@@ -668,7 +705,14 @@ export default function EventsPage() {
       startTime: selectedEvent.startTime || "",
       endTime: selectedEvent.endTime || "",
       attendees: selectedEvent.attendees,
+      attendeesAdults: (selectedEvent as any).attendeesAdults || 0,
+      attendeesYouth: (selectedEvent as any).attendeesYouth || 0,
+      attendeesChildren: (selectedEvent as any).attendeesChildren || 0,
       notes: selectedEvent.notes || "",
+      notasArmado: (selectedEvent as any).notasArmado || "",
+      notasCocina: (selectedEvent as any).notasCocina || "",
+      notasMantenimiento: (selectedEvent as any).notasMantenimiento || "",
+      notasHousekeeping: (selectedEvent as any).notasHousekeeping || "",
     });
     setIsEditDialogOpen(true);
   };
@@ -1048,25 +1092,42 @@ export default function EventsPage() {
                   )}
                 />
 
-                <FormField
-                  control={eventForm.control}
-                  name="attendees"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Asistentes</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={1}
-                          {...field}
-                          onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
-                          data-testid="input-attendees"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="col-span-2 space-y-2">
+                  <FormLabel>Asistentes</FormLabel>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField control={eventForm.control} name="attendeesAdults" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Adultos</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseInt(e.target.value) || 0)} data-testid="input-attendees-adults" />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={eventForm.control} name="attendeesYouth" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Jóvenes</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseInt(e.target.value) || 0)} data-testid="input-attendees-youth" />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={eventForm.control} name="attendeesChildren" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Niños</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseInt(e.target.value) || 0)} data-testid="input-attendees-children" />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Total (automático)</p>
+                      <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm font-medium">
+                        {newAdults + newYouth + newChildren || 1}
+                        <span className="ml-1 text-xs text-muted-foreground font-normal">personas</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 <FormField
                   control={eventForm.control}
@@ -1137,6 +1198,34 @@ export default function EventsPage() {
                     </FormItem>
                   )}
                 />
+
+                <div className="col-span-2">
+                  <p className="text-sm font-medium text-muted-foreground border-t pt-3 mt-1">Coordinación por área (opcional)</p>
+                </div>
+                <FormField control={eventForm.control} name="notasArmado" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Armado</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para el equipo de armado..." rows={2} {...field} data-testid="input-notas-armado" /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={eventForm.control} name="notasCocina" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Cocina</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para cocina..." rows={2} {...field} data-testid="input-notas-cocina" /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={eventForm.control} name="notasMantenimiento" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mantenimiento</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para mantenimiento..." rows={2} {...field} data-testid="input-notas-mantenimiento" /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={eventForm.control} name="notasHousekeeping" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Housekeeping</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para housekeeping..." rows={2} {...field} data-testid="input-notas-housekeeping" /></FormControl>
+                  </FormItem>
+                )} />
               </div>
 
               <DialogFooter>
@@ -1273,25 +1362,42 @@ export default function EventsPage() {
                   )}
                 />
 
-                <FormField
-                  control={editForm.control}
-                  name="attendees"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Asistentes</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={1}
-                          {...field}
-                          onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
-                          data-testid="input-edit-attendees"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="col-span-2 space-y-2">
+                  <FormLabel>Asistentes</FormLabel>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField control={editForm.control} name="attendeesAdults" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Adultos</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseInt(e.target.value) || 0)} data-testid="input-edit-attendees-adults" />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={editForm.control} name="attendeesYouth" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Jóvenes</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseInt(e.target.value) || 0)} data-testid="input-edit-attendees-youth" />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={editForm.control} name="attendeesChildren" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Niños</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseInt(e.target.value) || 0)} data-testid="input-edit-attendees-children" />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Total (automático)</p>
+                      <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm font-medium">
+                        {editAdults + editYouth + editChildren || 1}
+                        <span className="ml-1 text-xs text-muted-foreground font-normal">personas</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 <FormField
                   control={editForm.control}
@@ -1362,6 +1468,34 @@ export default function EventsPage() {
                     </FormItem>
                   )}
                 />
+
+                <div className="col-span-2">
+                  <p className="text-sm font-medium text-muted-foreground border-t pt-3 mt-1">Coordinación por área (opcional)</p>
+                </div>
+                <FormField control={editForm.control} name="notasArmado" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Armado</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para el equipo de armado..." rows={2} {...field} data-testid="input-edit-notas-armado" /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={editForm.control} name="notasCocina" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Cocina</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para cocina..." rows={2} {...field} data-testid="input-edit-notas-cocina" /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={editForm.control} name="notasMantenimiento" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mantenimiento</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para mantenimiento..." rows={2} {...field} data-testid="input-edit-notas-mantenimiento" /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={editForm.control} name="notasHousekeeping" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Housekeeping</FormLabel>
+                    <FormControl><Textarea placeholder="Instrucciones para housekeeping..." rows={2} {...field} data-testid="input-edit-notas-housekeeping" /></FormControl>
+                  </FormItem>
+                )} />
               </div>
 
               <DialogFooter>
@@ -1444,7 +1578,14 @@ export default function EventsPage() {
                     <div className="flex items-center gap-2 text-sm">
                       <Users className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Asistentes:</span>
-                      <span>{selectedEvent.attendees}</span>
+                      <span>
+                        {selectedEvent.attendees} total
+                        {((selectedEvent as any).attendeesAdults || (selectedEvent as any).attendeesYouth || (selectedEvent as any).attendeesChildren) ? (
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({(selectedEvent as any).attendeesAdults} ad. / {(selectedEvent as any).attendeesYouth} jóv. / {(selectedEvent as any).attendeesChildren} niños)
+                          </span>
+                        ) : null}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <span className="font-medium">Tipo:</span>
@@ -1476,6 +1617,26 @@ export default function EventsPage() {
                 {selectedEvent.notes && (
                   <div className="p-3 rounded-md bg-muted">
                     <p className="text-sm whitespace-pre-wrap">{selectedEvent.notes}</p>
+                  </div>
+                )}
+
+                {((selectedEvent as any).notasArmado || (selectedEvent as any).notasCocina ||
+                  (selectedEvent as any).notasMantenimiento || (selectedEvent as any).notasHousekeeping) && (
+                  <div className="space-y-2 pt-2 border-t">
+                    <p className="text-sm font-semibold">Coordinación por área</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: "Armado",          value: (selectedEvent as any).notasArmado },
+                        { label: "Cocina",          value: (selectedEvent as any).notasCocina },
+                        { label: "Mantenimiento",   value: (selectedEvent as any).notasMantenimiento },
+                        { label: "Housekeeping",    value: (selectedEvent as any).notasHousekeeping },
+                      ].filter((a) => a.value).map((area) => (
+                        <div key={area.label} className="rounded-md bg-muted p-2">
+                          <p className="text-xs font-semibold text-muted-foreground mb-1">{area.label}</p>
+                          <p className="text-sm whitespace-pre-wrap">{area.value}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
