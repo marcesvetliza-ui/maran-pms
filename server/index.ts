@@ -84,6 +84,20 @@ app.use((req, res, next) => {
     console.error("Init cash shifts error:", err);
   }
 
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      INSERT INTO accounting_accounts (codigo, nombre, tipo) VALUES
+        ('1.1.1.01', 'Caja', 'activo'),
+        ('1.1.1.02', 'Banco Macro', 'activo'),
+        ('2.1.1.01', 'Proveedores a Pagar', 'pasivo')
+      ON CONFLICT (codigo) DO NOTHING
+    `);
+  } catch (err) {
+    console.error("Critical accounts insert error (non-blocking):", err);
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

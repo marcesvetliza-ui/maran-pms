@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -571,7 +571,7 @@ function PaymentOrderDialog({
       return;
     }
     createMut.mutate({
-      supplierId: supplier?.id,
+      supplierId: Number(supplier?.id),
       fecha: form.fecha,
       facturaIds: selectedInvoices,
       formaPago: form.formaPago,
@@ -685,10 +685,73 @@ function PaymentOrderDialog({
   );
 }
 
+// ─── Pagos a Proveedores Tab ──────────────────────────────────────────────────
+
+function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => void }) {
+  const { data: proveedores = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/accounting-suppliers/cuenta-corriente"],
+  });
+
+  if (isLoading) return <div className="py-8 text-center text-muted-foreground text-sm">Cargando proveedores...</div>;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Proveedores con facturas pendientes</CardTitle>
+        <CardDescription>Seleccioná un proveedor para emitir la orden de pago</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {proveedores.length === 0 ? (
+          <div className="text-center py-10 text-muted-foreground">
+            <CheckCircle2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">No hay facturas pendientes de pago</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {proveedores.map((prov: any) => (
+              <div
+                key={prov.id}
+                className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/40 transition-colors"
+                data-testid={`row-proveedor-pago-${prov.id}`}
+              >
+                <div>
+                  <div className="font-medium">{prov.razon_social}</div>
+                  <div className="text-sm text-muted-foreground">
+                    {prov.facturas_pendientes} factura(s) pendiente(s)
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <div className="font-semibold text-destructive">
+                      ${parseFloat(prov.total_saldo || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-muted-foreground">saldo pendiente</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => onEmitirOP({ id: prov.id, razonSocial: prov.razon_social, cuit: prov.cuit, condicionIva: prov.condicion_iva, saldoPendiente: parseFloat(prov.total_saldo || 0), facturasPendientes: parseInt(prov.facturas_pendientes || 0) })}
+                    data-testid={`btn-emitir-op-${prov.id}`}
+                  >
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Emitir OP
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function PurchaseInvoices() {
-  const [tab, setTab] = useState("comprobantes");
+  const [tab, setTab] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("tab") || "comprobantes";
+  });
   const [newOpen, setNewOpen] = useState(false);
   const [opSupplier, setOpSupplier] = useState<CCItem | null>(null);
   const [anularId, setAnularId] = useState<number | null>(null);
@@ -820,6 +883,7 @@ export default function PurchaseInvoices() {
           <TabsList>
             <TabsTrigger value="comprobantes" data-testid="tab-comprobantes">Comprobantes</TabsTrigger>
             <TabsTrigger value="cc" data-testid="tab-cc">Cuenta Corriente</TabsTrigger>
+            <TabsTrigger value="pagos" data-testid="tab-pagos">Pagos a Proveedores</TabsTrigger>
           </TabsList>
 
           {/* Tab: Comprobantes */}
@@ -967,6 +1031,11 @@ export default function PurchaseInvoices() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Tab: Pagos a Proveedores */}
+          <TabsContent value="pagos" className="mt-4">
+            <PagosProveedoresTab onEmitirOP={(prov) => setOpSupplier(prov)} />
           </TabsContent>
         </Tabs>
       </div>

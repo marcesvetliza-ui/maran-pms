@@ -152,6 +152,16 @@ export default function AdminPage() {
       bg: "bg-sky-50 dark:bg-sky-950/30",
       extra: null,
     },
+    {
+      title: "Pago de Proveedores",
+      description: "Emitir órdenes de pago y gestionar cuenta corriente de proveedores con saldo pendiente.",
+      icon: CreditCard,
+      href: "/purchase-invoices?tab=pagos",
+      status: "available" as const,
+      color: "text-green-600",
+      bg: "bg-green-50 dark:bg-green-950/30",
+      extra: null,
+    },
   ];
 
   return (

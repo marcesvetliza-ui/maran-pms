@@ -6579,7 +6579,17 @@ Only respond with the JSON object.`;
         WHERE id = ANY(${facturaIds}::int[]) AND supplier_id = ${supplierId} AND estado = 'pendiente'
       `);
       if (facturasRes.rows.length !== facturaIds.length) {
-        return res.status(400).json({ error: "Algunas facturas no son válidas o no están pendientes" });
+        const idsEncontrados = facturasRes.rows.map((r: any) => Number(r.id));
+        const todosRes = await db.execute(sql`SELECT id, estado FROM purchase_invoices WHERE id = ANY(${facturaIds}::int[])`);
+        const noEncontradas = facturaIds.filter((id: number) => !todosRes.rows.find((r: any) => Number(r.id) === Number(id)));
+        const noPendientes = todosRes.rows
+          .filter((r: any) => r.estado !== "pendiente" && !idsEncontrados.includes(Number(r.id)))
+          .map((r: any) => `#${r.id} (${r.estado})`);
+        let errorMsg = "No se pudo generar la OP: ";
+        if (noEncontradas.length > 0) errorMsg += `Facturas no encontradas: ${noEncontradas.join(", ")}. `;
+        if (noPendientes.length > 0) errorMsg += `Facturas no pendientes: ${noPendientes.join(", ")}. `;
+        if (noEncontradas.length === 0 && noPendientes.length === 0) errorMsg += `Proveedor no coincide con las facturas seleccionadas (supplierId: ${supplierId}).`;
+        return res.status(400).json({ error: errorMsg });
       }
 
       // Calcular totales
