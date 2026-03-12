@@ -341,7 +341,7 @@ export async function seedDatabase() {
   await db.insert(eventRooms).values([
     { id: "er1", name: "Salón Mitre", capacity: 100, status: "available", description: "Salón principal para eventos grandes", amenities: ["projector", "audio", "wifi"], isActive: "true" },
     { id: "er2", name: "Salón Rivadavia", capacity: 60, status: "available", description: "Salón intermedio para eventos medianos", amenities: ["projector", "wifi", "whiteboard"], isActive: "true" },
-    { id: "er3", name: "Salón Mirador", capacity: 40, status: "available", description: "Salón con vista panorámica", amenities: ["projector", "audio", "wifi", "videoconference"], isActive: "true" },
+    { id: "er3", name: "Salón Solárium", capacity: 40, status: "available", description: "Salón con vista panorámica", amenities: ["projector", "audio", "wifi", "videoconference"], isActive: "true" },
     { id: "er4", name: "Salón Rosedal", capacity: 30, status: "available", description: "Salón íntimo para reuniones", amenities: ["projector", "wifi"], isActive: "true" },
   ]);
 
@@ -526,6 +526,9 @@ export async function refreshRealData() {
   console.log("Refreshing real hotel data...");
 
   try {
+    // Rename legacy salon name in DB if it still exists
+    await db.execute(sql`UPDATE event_rooms SET name = 'Salón Solárium' WHERE name = 'Salón Mirador'`);
+
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS account_movements (
         id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -770,7 +773,7 @@ export async function refreshRealData() {
     const realEventRooms = [
       { id: "er1", name: "Salón Mitre", capacity: 100, status: "available" as const, description: "Salón principal para eventos grandes", isActive: "true" as const },
       { id: "er2", name: "Salón Rivadavia", capacity: 60, status: "available" as const, description: "Salón intermedio para eventos medianos", isActive: "true" as const },
-      { id: "er3", name: "Salón Mirador", capacity: 40, status: "available" as const, description: "Salón con vista panorámica", isActive: "true" as const },
+      { id: "er3", name: "Salón Solárium", capacity: 40, status: "available" as const, description: "Salón con vista panorámica", isActive: "true" as const },
       { id: "er4", name: "Salón Rosedal", capacity: 30, status: "available" as const, description: "Salón íntimo para reuniones", isActive: "true" as const },
     ];
 

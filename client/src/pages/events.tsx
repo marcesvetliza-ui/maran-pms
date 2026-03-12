@@ -39,6 +39,8 @@ import {
   DollarSign,
   Info,
   UtensilsCrossed,
+  FileText,
+  Send,
 } from "lucide-react";
 
 type EventRoom = {
@@ -1552,6 +1554,28 @@ export default function EventsPage() {
                       Cancelar Evento
                     </Button>
                   )}
+                  {["pending", "tentative", "confirmed", "in_progress", "completed", "invoiced"].includes(selectedEvent.status) && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(`/api/events/${selectedEvent.id}/pdf/hoja-funcion`, "_blank")}
+                        data-testid="button-pdf-hoja-funcion"
+                      >
+                        <FileText className="h-4 w-4 mr-2" />
+                        Hoja de Función
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(`/api/events/${selectedEvent.id}/pdf/confirmacion`, "_blank")}
+                        data-testid="button-pdf-confirmacion"
+                      >
+                        <Send className="h-4 w-4 mr-2" />
+                        Confirmación Cliente
+                      </Button>
+                    </>
+                  )}
                 </div>
               </TabsContent>
 
@@ -1579,7 +1603,7 @@ export default function EventsPage() {
                     <TableRow>
                       <TableHead>Descripcion</TableHead>
                       <TableHead className="text-right">Cantidad</TableHead>
-                      <TableHead className="text-right">Precio Unit.</TableHead>
+                      <TableHead className="text-right">Precio Unit. (c/IVA)</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
@@ -1620,6 +1644,7 @@ export default function EventsPage() {
                     Total: ${calculateEventTotal(selectedEvent).toFixed(2)}
                   </div>
                 </div>
+                <p className="text-xs text-muted-foreground">* Todos los precios incluyen IVA (21%).</p>
               </TabsContent>
 
               {/* Mesas Tab - only for table_event */}
@@ -2051,7 +2076,7 @@ export default function EventsPage() {
                     name="unitPrice"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Precio Unitario</FormLabel>
+                        <FormLabel>Precio Unit. <span className="text-xs font-normal text-muted-foreground">(con IVA incluido)</span></FormLabel>
                         <FormControl>
                           <Input placeholder="0.00" {...field} disabled={!isChargeEditable} data-testid="input-charge-price" />
                         </FormControl>

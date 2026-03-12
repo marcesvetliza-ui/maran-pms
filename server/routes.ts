@@ -16,6 +16,7 @@ import { registerExportRoutes } from "./exports";
 import { registerAdminCashRoutes } from "./adminCash";
 import { registerBillingRoutes } from "./billing/routes";
 import { registerReportsRoutes } from "./reports/routes";
+import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPdfs";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -6662,6 +6663,33 @@ Only respond with the JSON object.`;
     try {
       const result = await db.execute(sql`SELECT * FROM accounting_accounts WHERE activo = true ORDER BY codigo`);
       res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Event PDF endpoints ────────────────────────────────────────────────────
+  app.get("/api/events/:id/pdf/hoja-funcion", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ error: "Evento no encontrado" });
+      const pdfBuffer = await generateHojaFuncionPdf(event);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="HojaFuncion_${event.eventCode}.pdf"`);
+      res.end(pdfBuffer);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/events/:id/pdf/confirmacion", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ error: "Evento no encontrado" });
+      const pdfBuffer = await generateConfirmacionEventoPdf(event);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="Confirmacion_${event.eventCode}.pdf"`);
+      res.end(pdfBuffer);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
