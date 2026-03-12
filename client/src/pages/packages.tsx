@@ -251,7 +251,7 @@ function PackageFormDialog({
             </div>
 
             <div>
-              <Label>Precio Base *</Label>
+              <Label>Precio <span className="text-xs font-normal text-muted-foreground">(con IVA incluido)</span></Label>
               <Input
                 type="number"
                 step="0.01"

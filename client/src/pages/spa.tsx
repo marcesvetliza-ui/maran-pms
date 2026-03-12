@@ -2011,7 +2011,7 @@ export default function SpaPage() {
                 <Input type="number" {...treatmentForm.register("durationMinutes", { valueAsNumber: true })} data-testid="input-treatment-duration" />
               </div>
               <div>
-                <label className="text-sm font-medium">Precio *</label>
+                <label className="text-sm font-medium">Precio <span className="text-xs font-normal text-muted-foreground">(con IVA incluido)</span></label>
                 <Input type="number" step="0.01" {...treatmentForm.register("price", { required: true })} placeholder="0.00" data-testid="input-treatment-price" />
               </div>
             </div>

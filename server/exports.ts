@@ -5,6 +5,7 @@ import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { requireAuth } from "./auth";
+import { calcNeto, calcIva21 } from "./lib/pricing";
 
 // ─── Hotel Constants ──────────────────────────────────────────────────────────
 const H = {
@@ -472,9 +473,8 @@ export function registerExportRoutes(app: Express) {
       const [d1, d2] = [desde.replace(/-/g, ""), hasta.replace(/-/g, "")];
       const ts = `${d1}-${d2}`;
 
-      // Calculate IVA 21% from total (total includes 21% IVA)
-      const calcNeto = (total: number) => parseFloat((total / 1.21).toFixed(2));
-      const calcIVA = (total: number) => parseFloat((total - calcNeto(total)).toFixed(2));
+      // Calculate IVA 21% from total (total includes 21% IVA) — from shared pricing module
+      const calcIVA = (total: number) => calcIva21(calcNeto(total));
 
       if (tipo === "excel") {
         const wb = new ExcelJS.Workbook();

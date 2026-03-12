@@ -300,14 +300,29 @@ function EmitirFacturaDialog({ open, onClose, config }: { open: boolean; onClose
     setItems(prev => {
       const updated = [...prev];
       const item = { ...updated[idx], [field]: value };
-      // recalculate subtotals
       const base = item.cantidad * item.precioUnitario;
-      if (item.alicuotaIva === "21" || item.alicuotaIva === "10.5") {
-        item.subtotalNeto = base;
-        item.subtotal = base * (1 + (item.alicuotaIva === "21" ? 0.21 : 0.105));
+      const fa = tipo === "FA";
+      if (!fa) {
+        // FB/FC: precioUnitario es el precio CON IVA incluido — neto se calcula solo
+        if (item.alicuotaIva === "21") {
+          item.subtotalNeto = parseFloat((base / 1.21).toFixed(2));
+          item.subtotal = base;
+        } else if (item.alicuotaIva === "10.5") {
+          item.subtotalNeto = parseFloat((base / 1.105).toFixed(2));
+          item.subtotal = base;
+        } else {
+          item.subtotalNeto = base;
+          item.subtotal = base;
+        }
       } else {
-        item.subtotalNeto = base;
-        item.subtotal = base;
+        // FA: precioUnitario es el neto (sin IVA) — el IVA se agrega encima
+        if (item.alicuotaIva === "21" || item.alicuotaIva === "10.5") {
+          item.subtotalNeto = base;
+          item.subtotal = base * (1 + (item.alicuotaIva === "21" ? 0.21 : 0.105));
+        } else {
+          item.subtotalNeto = base;
+          item.subtotal = base;
+        }
       }
       updated[idx] = item;
       return updated;
@@ -318,14 +333,13 @@ function EmitirFacturaDialog({ open, onClose, config }: { open: boolean; onClose
     setItems(prev => prev.filter((_, i) => i !== idx));
   }
 
-  // Totals preview
+  // Totals preview — uses subtotalNeto (always neto regardless of FA/FB/FC)
   const preview = items.reduce((acc, it) => {
-    const base = it.cantidad * it.precioUnitario;
-    acc.neto += base;
-    if (it.alicuotaIva === "21") acc.iva21 += base * 0.21;
-    if (it.alicuotaIva === "10.5") acc.iva105 += base * 0.105;
-    if (it.alicuotaIva === "exento") acc.exento += base;
-    if (it.alicuotaIva === "no_gravado") acc.ng += base;
+    acc.neto += it.subtotalNeto;
+    if (it.alicuotaIva === "21") acc.iva21 += it.subtotalNeto * 0.21;
+    if (it.alicuotaIva === "10.5") acc.iva105 += it.subtotalNeto * 0.105;
+    if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
+    if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
     return acc;
   }, { neto: 0, iva21: 0, iva105: 0, exento: 0, ng: 0 });
   const totalPreview = preview.neto + preview.iva21 + preview.iva105 + preview.exento + preview.ng;
@@ -471,7 +485,10 @@ function EmitirFacturaDialog({ open, onClose, config }: { open: boolean; onClose
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
-                    Subtotal: ${fPeso(item.cantidad * item.precioUnitario)} {item.alicuotaIva === "21" ? `+ IVA $${fPeso(item.cantidad * item.precioUnitario * 0.21)}` : item.alicuotaIva === "10.5" ? `+ IVA $${fPeso(item.cantidad * item.precioUnitario * 0.105)}` : ""}
+                    {isFA
+                      ? `Neto: $${fPeso(item.subtotalNeto)} + IVA ${item.alicuotaIva === "21" ? "21%" : item.alicuotaIva === "10.5" ? "10.5%" : ""} = Total: $${fPeso(item.subtotal)}`
+                      : `Total con IVA: $${fPeso(item.subtotal)} (neto: $${fPeso(item.subtotalNeto)})`
+                    }
                   </span>
                   {items.length > 1 && (
                     <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>

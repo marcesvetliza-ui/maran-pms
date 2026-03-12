@@ -720,7 +720,7 @@ export function ReservationFormDialog({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="baseRate">Tarifa Base/Noche</Label>
+                <Label htmlFor="baseRate">Tarifa Base/Noche <span className="ml-1 text-xs font-normal text-muted-foreground">(con IVA incluido)</span></Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
                   <Input
@@ -1276,6 +1276,7 @@ function ReservationDetailDialog({
                   <span>Subtotal Alojamiento</span>
                   <span data-testid="text-subtotal-room">${subtotalRoom.toFixed(2)}</span>
                 </div>
+                <p className="text-xs text-muted-foreground mt-2">* Precio incluye IVA (21%). El desglose se realiza al facturar.</p>
               </div>
             </div>
 
@@ -1332,7 +1333,7 @@ function ReservationDetailDialog({
                       />
                     </div>
                     <div>
-                      <Label className="text-xs text-muted-foreground mb-1 block">Precio unit.</Label>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Precio unit. <span className="text-xs">(con IVA)</span></Label>
                       <Input
                         type="number"
                         placeholder="0.00"

@@ -158,7 +158,7 @@ function RatePlanFormDialog({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="baseRate">Tarifa Base</Label>
+                <Label htmlFor="baseRate">Tarifa Base <span className="ml-1 text-xs font-normal text-muted-foreground">(con IVA incluido)</span></Label>
                 <Input
                   id="baseRate"
                   type="number"
@@ -190,7 +190,7 @@ function RatePlanFormDialog({
             </div>
             {formData.roomTypeId && (
               <div className="grid gap-2">
-                <Label>Tarifas por Pasajero (PAX)</Label>
+                <Label>Tarifas por Pasajero — con IVA (PAX)</Label>
                 <p className="text-xs text-muted-foreground">Dejá en blanco para usar la tarifa base. Ocupación máx: {maxOcc} PAX</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="grid gap-1">
@@ -556,6 +556,7 @@ export default function RatePlansPage() {
               ))}
             </TableBody>
           </Table>
+          <p className="text-xs text-muted-foreground px-4 py-2">* Todas las tarifas incluyen IVA (21%). El desglose neto se realiza al emitir la factura.</p>
         </Card>
       ) : (
         <Card>

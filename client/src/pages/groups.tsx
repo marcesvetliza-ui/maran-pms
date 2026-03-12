@@ -561,7 +561,7 @@ function GroupFormDialog({
                       </div>
 
                       <div>
-                        <Label className="text-xs">Tarifa Acordada</Label>
+                        <Label className="text-xs">Tarifa Acordada <span className="text-xs font-normal text-muted-foreground">(con IVA)</span></Label>
                         <Input
                           type="number"
                           step="0.01"

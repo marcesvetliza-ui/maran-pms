@@ -2123,7 +2123,7 @@ export default function RestaurantPage() {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Precio *</Label>
+                    <Label className="text-xs">Precio <span className="font-normal text-muted-foreground">(con IVA incluido)</span></Label>
                     <Input
                       type="number"
                       step="0.01"
@@ -3098,7 +3098,7 @@ export default function RestaurantPage() {
                   name="price"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Precio *</FormLabel>
+                      <FormLabel>Precio <span className="text-xs font-normal text-muted-foreground">(con IVA incluido)</span></FormLabel>
                       <FormControl>
                         <Input {...field} type="number" step="0.01" min={0} data-testid="input-menu-item-price" />
                       </FormControl>
