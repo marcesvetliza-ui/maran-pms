@@ -6586,15 +6586,20 @@ Only respond with the JSON object.`;
         return res.status(400).json({ error: "Proveedor y facturas son requeridos" });
       }
 
-      // Verificar facturas
+      // Verificar facturas — usar IN con valores sanitizados para evitar "malformed array literal"
+      const idsInt = facturaIds.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id));
+      if (idsInt.length === 0) {
+        return res.status(400).json({ error: "IDs de facturas inválidos" });
+      }
+      const idsSQL = sql.raw(idsInt.join(","));
       const facturasRes = await db.execute(sql`
         SELECT id, monto_total, estado, supplier_id FROM purchase_invoices
-        WHERE id = ANY(${facturaIds}::int[]) AND supplier_id = ${supplierId} AND estado = 'pendiente'
+        WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado = 'pendiente'
       `);
-      if (facturasRes.rows.length !== facturaIds.length) {
+      if (facturasRes.rows.length !== idsInt.length) {
         const idsEncontrados = facturasRes.rows.map((r: any) => Number(r.id));
-        const todosRes = await db.execute(sql`SELECT id, estado FROM purchase_invoices WHERE id = ANY(${facturaIds}::int[])`);
-        const noEncontradas = facturaIds.filter((id: number) => !todosRes.rows.find((r: any) => Number(r.id) === Number(id)));
+        const todosRes = await db.execute(sql`SELECT id, estado FROM purchase_invoices WHERE id IN (${idsSQL})`);
+        const noEncontradas = idsInt.filter((id: number) => !todosRes.rows.find((r: any) => Number(r.id) === id));
         const noPendientes = todosRes.rows
           .filter((r: any) => r.estado !== "pendiente" && !idsEncontrados.includes(Number(r.id)))
           .map((r: any) => `#${r.id} (${r.estado})`);
@@ -6633,8 +6638,8 @@ Only respond with the JSON object.`;
       const op = opRes.rows[0] as any;
 
       // Marcar facturas como pagadas e insertar ítems
-      for (const fid of facturaIds) {
-        const factura = facturasRes.rows.find((r: any) => r.id === fid) as any;
+      for (const fid of idsInt) {
+        const factura = facturasRes.rows.find((r: any) => Number(r.id) === fid) as any;
         await db.execute(sql`UPDATE purchase_invoices SET estado = 'pagado' WHERE id = ${fid}`);
         await db.execute(sql`
           INSERT INTO payment_order_items (payment_order_id, invoice_id, importe_cancelado)
