@@ -115,7 +115,7 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
       doc.moveDown(0.5);
       doc.fontSize(11).font("Helvetica-Bold").text("Notas / Instrucciones operativas");
       doc.moveDown(0.3);
-      doc.fontSize(9).font("Helvetica").text(event.notes, { width: 495 });
+      doc.fontSize(9).font("Helvetica").text(event.notes, 50, doc.y, { width: 495 });
     }
 
     // ── PIE DE PÁGINA ───────────────────────────────────────────────────────
@@ -225,16 +225,6 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
       doc.fontSize(8).font("Helvetica").fillColor("#666666")
         .text("* IVA a aplicar según condición impositiva del cliente al momento de facturar.", 50, doc.y, { width: 495 });
       doc.fillColor("#000000");
-    }
-
-    // ── NOTAS ───────────────────────────────────────────────────────────────
-    if (event.notes) {
-      doc.moveDown(0.7);
-      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#cccccc").stroke();
-      doc.moveDown(0.5);
-      doc.fontSize(11).font("Helvetica-Bold").text("Observaciones");
-      doc.moveDown(0.3);
-      doc.fontSize(9).font("Helvetica").text(event.notes, { width: 495 });
     }
 
     // ── FIRMA Y CONDICIONES ──────────────────────────────────────────────────
