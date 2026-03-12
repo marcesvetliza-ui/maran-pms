@@ -591,6 +591,29 @@ function PaymentOrderDialog({
         <DialogHeader>
           <DialogTitle>Emitir Orden de Pago — {supplier?.razonSocial}</DialogTitle>
         </DialogHeader>
+        {createdOpId ? (
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-3 p-4 rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800">
+              <CheckCircle2 className="h-6 w-6 text-green-600 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-green-700 dark:text-green-400">Orden de Pago emitida correctamente</p>
+                <p className="text-sm text-green-600 dark:text-green-500">Los documentos también están disponibles en el historial de OPs.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="outline" className="h-16 flex-col gap-1" onClick={handleDownloadOpPdf} data-testid="btn-op-pdf">
+                <FileDown className="h-5 w-5" />
+                <span className="text-sm font-medium">Orden de Pago</span>
+                <span className="text-xs text-muted-foreground">Para el proveedor</span>
+              </Button>
+              <Button variant="outline" className="h-16 flex-col gap-1" onClick={handleDownloadCertPdf} data-testid="btn-cert-retencion-pdf">
+                <FileDown className="h-5 w-5" />
+                <span className="text-sm font-medium">Cert. Retención IIBB</span>
+                <span className="text-xs text-muted-foreground">Constancia fiscal</span>
+              </Button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-4">
           {/* Facturas pendientes */}
           <div>
@@ -659,18 +682,11 @@ function PaymentOrderDialog({
             </CardContent>
           </Card>
         </div>
+        )} {/* fin bloque form */}
 
-        <DialogFooter className="flex flex-wrap gap-2">
+        <DialogFooter>
           {createdOpId ? (
-            <>
-              <Button variant="outline" size="sm" onClick={handleDownloadOpPdf} className="gap-2" data-testid="btn-op-pdf">
-                <FileDown className="h-4 w-4" /> OP PDF
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleDownloadCertPdf} className="gap-2" data-testid="btn-cert-retencion-pdf">
-                <FileDown className="h-4 w-4" /> Cert. Retención
-              </Button>
-              <Button onClick={onClose} data-testid="btn-close-op-dialog">Cerrar</Button>
-            </>
+            <Button onClick={onClose} data-testid="btn-close-op-dialog">Cerrar</Button>
           ) : (
             <>
               <Button variant="ghost" onClick={onClose}>Cancelar</Button>
@@ -742,6 +758,133 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Órdenes de Pago Tab ─────────────────────────────────────────────────────
+
+function OrdenesDePagoTab() {
+  const [search, setSearch] = useState("");
+  const [filterPeriodo, setFilterPeriodo] = useState("");
+
+  const { data: ops = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/payment-orders"],
+  });
+
+  const filtered = ops.filter((op) => {
+    const matchSearch =
+      !search ||
+      op.supplier_nombre?.toLowerCase().includes(search.toLowerCase()) ||
+      op.numero?.includes(search);
+    const matchPeriodo = !filterPeriodo || op.fecha?.startsWith(filterPeriodo);
+    return matchSearch && matchPeriodo;
+  });
+
+  const fmtDate = (d: string) => {
+    if (!d) return "-";
+    const [y, m, day] = d.split("-");
+    return `${day}/${m}/${y}`;
+  };
+  const fmtMoney = (v: any) =>
+    parseFloat(v || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por proveedor o número..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+            data-testid="input-op-search"
+          />
+        </div>
+        <Input
+          type="month"
+          value={filterPeriodo}
+          onChange={(e) => setFilterPeriodo(e.target.value)}
+          className="w-44"
+          placeholder="Filtrar período"
+          data-testid="input-op-periodo"
+        />
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-8 text-muted-foreground">Cargando...</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">No hay órdenes de pago registradas</div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Número</TableHead>
+              <TableHead>Fecha</TableHead>
+              <TableHead>Proveedor</TableHead>
+              <TableHead>Forma de Pago</TableHead>
+              <TableHead className="text-right">Total Facturas</TableHead>
+              <TableHead className="text-right">Total Abonado</TableHead>
+              <TableHead className="w-[120px]">Documentos</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.map((op) => (
+              <TableRow key={op.id} data-testid={`row-op-${op.id}`}>
+                <TableCell className="font-mono text-sm">{op.numero}</TableCell>
+                <TableCell>{fmtDate(op.fecha)}</TableCell>
+                <TableCell className="font-medium">{op.supplier_nombre}</TableCell>
+                <TableCell className="capitalize">{op.forma_pago?.replace("_", " ") || "-"}</TableCell>
+                <TableCell className="text-right">${fmtMoney(op.total_facturas)}</TableCell>
+                <TableCell className="text-right font-semibold">${fmtMoney(op.total_abonado)}</TableCell>
+                <TableCell>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2"
+                      title="Descargar Orden de Pago"
+                      onClick={() => window.open(`/api/payment-orders/${op.id}/pdf`, "_blank")}
+                      data-testid={`btn-op-pdf-${op.id}`}
+                    >
+                      <FileDown className="h-3.5 w-3.5 mr-1" />
+                      OP
+                    </Button>
+                    {parseFloat(op.retencion_iibb || "0") > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-2"
+                        title="Certificado Retención IIBB"
+                        onClick={() => window.open(`/api/exports/cert-retencion/${op.id}`, "_blank")}
+                        data-testid={`btn-cert-iibb-${op.id}`}
+                      >
+                        <FileDown className="h-3.5 w-3.5 mr-1" />
+                        IIBB
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      {filtered.length > 0 && (
+        <div className="flex justify-end gap-6 text-sm border-t pt-3">
+          <span className="text-muted-foreground">
+            {filtered.length} OP{filtered.length !== 1 ? "s" : ""}
+          </span>
+          <span>
+            Total abonado:{" "}
+            <span className="font-semibold">
+              ${fmtMoney(filtered.reduce((s, op) => s + parseFloat(op.total_abonado || "0"), 0))}
+            </span>
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -884,6 +1027,7 @@ export default function PurchaseInvoices() {
             <TabsTrigger value="comprobantes" data-testid="tab-comprobantes">Comprobantes</TabsTrigger>
             <TabsTrigger value="cc" data-testid="tab-cc">Cuenta Corriente</TabsTrigger>
             <TabsTrigger value="pagos" data-testid="tab-pagos">Pagos a Proveedores</TabsTrigger>
+            <TabsTrigger value="ordenes-pago" data-testid="tab-ordenes-pago">Historial de OPs</TabsTrigger>
           </TabsList>
 
           {/* Tab: Comprobantes */}
@@ -1036,6 +1180,9 @@ export default function PurchaseInvoices() {
           {/* Tab: Pagos a Proveedores */}
           <TabsContent value="pagos" className="mt-4">
             <PagosProveedoresTab onEmitirOP={(prov) => setOpSupplier(prov)} />
+          </TabsContent>
+          <TabsContent value="ordenes-pago" className="mt-4">
+            <OrdenesDePagoTab />
           </TabsContent>
         </Tabs>
       </div>
