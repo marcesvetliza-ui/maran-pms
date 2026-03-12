@@ -320,7 +320,7 @@ function AssignBlockDialog({
     firstName: string;
     lastName: string;
   }>>(
-    Array.from({ length: pending }, () => ({ roomId: "", firstName: group.name, lastName: "" }))
+    Array.from({ length: pending }, () => ({ roomId: "", firstName: group.name, lastName: group.name }))
   );
 
   const { data: rooms } = useQuery<RoomWithType[]>({
@@ -474,7 +474,7 @@ function AssignBlockDialog({
                   variant="ghost"
                   size="sm"
                   className="text-xs"
-                  onClick={() => setRows([...rows, { roomId: "", firstName: group.name, lastName: "" }])}
+                  onClick={() => setRows([...rows, { roomId: "", firstName: group.name, lastName: group.name }])}
                   data-testid="button-add-assignment-row"
                 >
                   <Plus className="h-3 w-3 mr-1" />
