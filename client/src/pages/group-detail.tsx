@@ -446,7 +446,7 @@ function AssignBlockDialog({
                   />
 
                   <Input
-                    placeholder="Apellido"
+                    placeholder="Apellido (opcional)"
                     value={row.lastName}
                     onChange={(e) => {
                       const updated = [...rows];

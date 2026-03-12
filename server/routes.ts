@@ -2042,8 +2042,8 @@ export async function registerRoutes(
   app.post("/api/groups/:groupId/assign-room", async (req, res) => {
     try {
       const { roomId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId } = req.body;
-      if (!roomId || !guestFirstName || !guestLastName) {
-        return res.status(400).json({ error: "Room ID, guest first name, and guest last name are required" });
+      if (!roomId || !guestFirstName) {
+        return res.status(400).json({ error: "Room ID and guest first name are required" });
       }
       const reservation = await storage.assignRoomToGroup(
         req.params.groupId,
