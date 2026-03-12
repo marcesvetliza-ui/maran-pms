@@ -2943,6 +2943,18 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.patch("/api/restaurant/orders/:orderId/items/:itemId", requireAuth, async (req, res) => {
+    try {
+      const { course } = req.body;
+      const updated = await storage.updateOrderItem(req.params.itemId, { course: course !== undefined ? course : undefined });
+      if (!updated) return res.status(404).json({ error: "Item no encontrado" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating order item:", error);
+      res.status(500).json({ error: "Error actualizando ítem" });
+    }
+  });
+
   app.delete("/api/restaurant/orders/:orderId/items/:itemId", async (req, res) => {
     try {
       await storage.deleteOrderItem(req.params.itemId);

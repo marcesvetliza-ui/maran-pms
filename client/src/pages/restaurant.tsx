@@ -136,6 +136,7 @@ type RestaurantOrder = {
     notes?: string | null;
     status?: string;
     course?: number | null;
+    sentAt?: string | null;
   }>;
 };
 
@@ -303,6 +304,9 @@ export default function RestaurantPage() {
   const [closeDiscount, setCloseDiscount] = useState("");
   const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("amount");
   const [closeRoomId, setCloseRoomId] = useState("");
+  const [roomSearchFilter, setRoomSearchFilter] = useState("");
+  const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
+  const [editingAreaName, setEditingAreaName] = useState("");
   const [isTimeSlotsDialogOpen, setIsTimeSlotsDialogOpen] = useState(false);
   const [newTimeSlot, setNewTimeSlot] = useState("");
   const [isRecipeDialogOpen, setIsRecipeDialogOpen] = useState(false);
@@ -411,7 +415,7 @@ export default function RestaurantPage() {
 
   const createReservationMutation = useMutation({
     mutationFn: async (data: ReservationFormValues) => {
-      const res = await apiRequest("POST", "/api/restaurant/table-reservations", data);
+      const res = await apiRequest("POST", "/api/restaurant/table-reservations", { ...data, status: "confirmed" });
       return res.json();
     },
     onSuccess: () => {
@@ -470,7 +474,7 @@ export default function RestaurantPage() {
         menuItemId: data.menuItemId,
         quantity: data.quantity,
         notes: data.notes,
-        course: data.course || 1,
+        course: data.course === null ? null : (data.course || 1),
         customPrice: data.customPrice,
         customName: data.customName,
       });
@@ -498,6 +502,33 @@ export default function RestaurantPage() {
       toast({ title: `Curso activado: ${courseLabels[data.activeCourse]}`, description: `${data.activatedItems} items enviados a cocina` });
     },
   });
+
+  const updateItemCourseMutation = useMutation({
+    mutationFn: async (data: { orderId: string; itemId: string; course: number }) => {
+      const res = await apiRequest("PATCH", `/api/restaurant/orders/${data.orderId}/items/${data.itemId}`, { course: data.course });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+    },
+  });
+
+  const updateAreaNameMutation = useMutation({
+    mutationFn: async (data: { id: string; name: string }) => {
+      const res = await apiRequest("PATCH", `/api/restaurant/areas/${data.id}`, { name: data.name });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/areas"] });
+      setEditingAreaId(null);
+      toast({ title: "Área actualizada" });
+    },
+  });
+
+  const handleSaveAreaName = (id: string) => {
+    if (!editingAreaName.trim()) return;
+    updateAreaNameMutation.mutate({ id, name: editingAreaName.trim() });
+  };
 
   const createSplitMutation = useMutation({
     mutationFn: async (data: { orderId: string; parts: number }) => {
@@ -787,7 +818,11 @@ export default function RestaurantPage() {
         menuItemId: pendingItem.id,
         quantity: itemQuantity,
         notes: itemNotes || undefined,
-        course: itemCourse,
+        course: (() => {
+          const cat = menuCategories.find(c => c.id === pendingItem.categoryId);
+          const bevCats = ["bebidas sin alcohol", "cervezas", "vinos", "espumantes", "vinos de ríos", "bebidas"];
+          return cat && bevCats.some(bc => cat.name.toLowerCase().includes(bc)) ? null : itemCourse;
+        })(),
         customPrice: isEditableItem ? customItemPrice : undefined,
         customName: isEditableItem ? customItemName : undefined,
       });
@@ -1098,7 +1133,35 @@ export default function RestaurantPage() {
                     <CardHeader className="pb-3">
                       <div className="flex items-center justify-between gap-4 flex-wrap">
                         <CardTitle className="text-lg flex items-center gap-2">
-                          {area.name}
+                          {isEditMode && editingAreaId === area.id ? (
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={editingAreaName}
+                                onChange={(e) => setEditingAreaName(e.target.value)}
+                                className="h-8 text-base font-semibold w-40"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveAreaName(area.id);
+                                  if (e.key === "Escape") setEditingAreaId(null);
+                                }}
+                                autoFocus
+                              />
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleSaveAreaName(area.id)}>
+                                <Check className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingAreaId(null)}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              {area.name}
+                              {isEditMode && (
+                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setEditingAreaId(area.id); setEditingAreaName(area.name); }} data-testid={`button-edit-area-${area.id}`}>
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          )}
                         </CardTitle>
                         <span className="text-sm text-muted-foreground">
                           {areaTables.length} mesas | Capacidad: {area.capacity}
@@ -1119,6 +1182,11 @@ export default function RestaurantPage() {
                           const table = areaTables.find(t => t.positionX === x && t.positionY === y);
 
                           if (table) {
+                            const today = new Date().toISOString().split("T")[0];
+                            const hasReservationToday = reservations.some(
+                              (r) => r.tableId === table.id && r.reservationDate === today && (r.status === "confirmed" || r.status === "pending")
+                            );
+                            const effectiveStatus = table.status === "available" && hasReservationToday ? "reserved" : table.status;
                             return (
                               <button
                                 key={table.id}
@@ -1128,7 +1196,7 @@ export default function RestaurantPage() {
                                 onDrop={() => handleDrop(x, y, area.id)}
                                 onClick={() => handleTableClick(table)}
                                 className={`p-2 border-2 transition-all flex flex-col items-center justify-center gap-0.5 relative ${
-                                  tableStatusColors[table.status]
+                                  tableStatusColors[effectiveStatus]
                                 } ${table.shape === "round" ? "rounded-full" : "rounded-md"} ${
                                   isEditMode ? "cursor-grab active:cursor-grabbing ring-2 ring-primary/30" : "hover-elevate"
                                 } ${draggedTable?.id === table.id ? "opacity-50" : ""}`}
@@ -1795,8 +1863,8 @@ export default function RestaurantPage() {
                     disabled={advanceCourseMutation.isPending}
                     data-testid="button-advance-course"
                   >
-                    {advanceCourseMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUpDown className="h-4 w-4 mr-1" />}
-                    Sig. Curso
+                    {advanceCourseMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChefHat className="h-4 w-4 mr-1" />}
+                    Sale — Despachar Principal
                   </Button>
                 )}
                 <Button
@@ -1931,6 +1999,22 @@ export default function RestaurantPage() {
                               )}
                             </div>
                             <div className="flex items-center gap-2">
+                              {item.status === "waiting_course" && currentOrder && (
+                                <div className="flex items-center gap-0.5">
+                                  {[1, 2, 3].filter(c => c !== item.course).map(c => (
+                                    <Button
+                                      key={c}
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-5 px-1 text-[10px]"
+                                      onClick={() => updateItemCourseMutation.mutate({ orderId: currentOrder.id, itemId: item.id, course: c })}
+                                      data-testid={`button-course-${item.id}-${c}`}
+                                    >
+                                      {c === 1 ? "1°" : c === 2 ? "2°" : "3°"}
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
                               <span className="text-sm font-semibold">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                               <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => { if (currentOrder) deleteItemMutation.mutate({ orderId: currentOrder.id, itemId: item.id }); }} data-testid={`button-comanda-void-${item.id}`}>
                                 <X className="h-3 w-3" />
@@ -2197,7 +2281,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) setIsSplitMode(false); }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setRoomSearchFilter(""); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -2338,12 +2422,25 @@ export default function RestaurantPage() {
                 {closePaymentMethod === "cuenta_habitacion" && (
                   <div className="space-y-2">
                     <Label>Habitación</Label>
+                    <Input
+                      placeholder="Buscar por número o nombre..."
+                      value={roomSearchFilter}
+                      onChange={(e) => setRoomSearchFilter(e.target.value)}
+                      className="mb-1"
+                      data-testid="input-room-search"
+                    />
                     <Select value={closeRoomId} onValueChange={setCloseRoomId}>
                       <SelectTrigger data-testid="select-room-charge"><SelectValue placeholder="Seleccionar habitación" /></SelectTrigger>
                       <SelectContent>
-                        {inHouseRooms.map(r => (
-                          <SelectItem key={r.roomId} value={r.reservationId}>{r.roomNumber} — {r.guestName}</SelectItem>
-                        ))}
+                        {inHouseRooms
+                          .filter((r) =>
+                            roomSearchFilter === "" ||
+                            r.roomNumber.includes(roomSearchFilter) ||
+                            r.guestName.toLowerCase().includes(roomSearchFilter.toLowerCase())
+                          )
+                          .map(r => (
+                            <SelectItem key={r.roomId} value={r.reservationId}>{r.roomNumber} — {r.guestName}</SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                     {inHouseRooms.length === 0 && (
@@ -2566,7 +2663,7 @@ export default function RestaurantPage() {
                 name="guestName"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Nombre del huesped *</FormLabel>
+                    <FormLabel>Nombre del huésped / cliente *</FormLabel>
                     <FormControl>
                       <Input {...field} placeholder="Nombre completo" data-testid="input-guest-name" />
                     </FormControl>

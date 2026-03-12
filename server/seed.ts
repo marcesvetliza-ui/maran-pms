@@ -528,6 +528,11 @@ export async function refreshRealData() {
   try {
     // Rename legacy salon name in DB if it still exists
     await db.execute(sql`UPDATE event_rooms SET name = 'Salón Solárium' WHERE name = 'Salón Mirador'`);
+    // Ensure display_order column exists in restaurant_areas
+    await db.execute(sql`ALTER TABLE restaurant_areas ADD COLUMN IF NOT EXISTS display_order integer DEFAULT 0`);
+    // Set display order for known areas
+    await db.execute(sql`UPDATE restaurant_areas SET display_order = 0 WHERE id = 'area1'`);
+    await db.execute(sql`UPDATE restaurant_areas SET display_order = 1 WHERE id = 'area2'`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS account_movements (
