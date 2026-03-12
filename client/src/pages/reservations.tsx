@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
-import { getLocalToday, formatDateAR } from "@/lib/utils";
+import { getLocalToday, formatDateAR, toArgentinaDateStr } from "@/lib/utils";
 import {
   CalendarCheck,
   CalendarRange,
@@ -69,7 +69,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
-import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType } from "@shared/schema";
+import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, Package } from "@shared/schema";
 
 function parseReservationError(error: any): string {
   try {
@@ -140,7 +140,8 @@ export function ReservationFormDialog({
   );
 
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || "");
-  
+  const [selectedPackageId, setSelectedPackageId] = useState<string>("");
+
   const [formData, setFormData] = useState<Partial<InsertReservation>>({
     reservationCode: reservation?.reservationCode || "",
     guestId: reservation?.guestId || "",
@@ -299,6 +300,10 @@ export function ReservationFormDialog({
 
   const { data: bedTypes } = useQuery<BedType[]>({
     queryKey: ["/api/bed-types"],
+  });
+
+  const { data: activePackages } = useQuery<Package[]>({
+    queryKey: ["/api/packages/active"],
   });
 
   const { data: generatedCode } = useQuery<{ code: string }>({
@@ -611,6 +616,53 @@ export function ReservationFormDialog({
                 </SelectContent>
               </Select>
             </div>
+
+            {activePackages && activePackages.length > 0 && (
+              <div className="grid gap-2">
+                <Label>Paquete (opcional)</Label>
+                <Select
+                  value={selectedPackageId}
+                  onValueChange={(val) => {
+                    if (val === "__none__") {
+                      setSelectedPackageId("");
+                      return;
+                    }
+                    setSelectedPackageId(val);
+                    const pkg = activePackages.find(p => p.id === val);
+                    if (pkg && pkg.nights) {
+                      const checkIn = formData.checkInDate || today;
+                      const d = new Date(checkIn + "T12:00:00");
+                      d.setDate(d.getDate() + pkg.nights);
+                      const newCheckOut = toArgentinaDateStr(d);
+                      const ratePerNight = (parseFloat(pkg.basePrice) / pkg.nights).toFixed(2);
+                      const nights = pkg.nights;
+                      const total = (parseFloat(ratePerNight) * nights).toFixed(2);
+                      setFormData(prev => ({
+                        ...prev,
+                        checkOutDate: newCheckOut,
+                        nights,
+                        baseRatePerNight: ratePerNight,
+                        finalRatePerNight: ratePerNight,
+                        totalRoomAmount: total,
+                        notes: [`[Paquete: ${pkg.name}]`, prev.notes].filter(Boolean).join(" "),
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger data-testid="select-package">
+                    <SelectValue placeholder="Sin paquete" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin paquete</SelectItem>
+                    {activePackages.map(pkg => (
+                      <SelectItem key={pkg.id} value={pkg.id}>
+                        {pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
