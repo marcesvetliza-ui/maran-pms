@@ -845,23 +845,23 @@ export function registerExportRoutes(app: Express) {
     }
   });
 
-  // ── Certificado de Retención Ganancias ────────────────────────────────────
+  // ── Certificado de Retención Ingresos Brutos (IIBB) ──────────────────────
 
   app.get("/api/exports/cert-retencion/:opId", requireAuth, async (req, res) => {
     try {
       const opId = parseInt(req.params.opId);
       const opRes = await db.execute(sql`
-        SELECT po.*, s.razon_social, s.cuit AS supplier_cuit, s.condicion_iva, s.domicilio, s.localidad
+        SELECT po.*, s.razon_social, s.cuit AS supplier_cuit, s.condicion_iva, s.domicilio, s.localidad, s.alicuota_iibb
         FROM payment_orders po
         JOIN accounting_suppliers s ON s.id = po.supplier_id
-        WHERE po.id = ${opId} AND po.retencion_ganancias > 0
+        WHERE po.id = ${opId} AND po.retencion_iibb > 0
       `);
-      if (!opRes.rows.length) return res.status(404).json({ error: "OP no encontrada o sin retención de Ganancias" });
+      if (!opRes.rows.length) return res.status(404).json({ error: "OP no encontrada o sin retención de Ingresos Brutos" });
       const op = opRes.rows[0] as any;
 
-      const retGan = $n(op.retencion_ganancias);
+      const retIibb = $n(op.retencion_iibb);
       const base = $n(op.total_facturas);
-      const alicuota = base > 0 ? ((retGan / base) * 100).toFixed(2) : "0.00";
+      const alicuota = op.alicuota_iibb ? parseFloat(op.alicuota_iibb).toFixed(2) : (base > 0 ? ((retIibb / base) * 100).toFixed(2) : "0.00");
 
       const pdfBuf = await genPDF((doc) => {
         const x0 = 40;
@@ -872,9 +872,9 @@ export function registerExportRoutes(app: Express) {
         doc.font("Helvetica-Bold").fontSize(14)
           .text("CERTIFICADO DE RETENCION", x0, y + 8, { align: "center", width: 515 });
         doc.font("Helvetica-Bold").fontSize(10)
-          .text("Regimen: IMPUESTO A LAS GANANCIAS - SI.CO.RE.", x0, y + 30, { align: "center", width: 515 });
+          .text("Regimen: INGRESOS BRUTOS - SIRCAR", x0, y + 30, { align: "center", width: 515 });
         doc.font("Helvetica").fontSize(8)
-          .text("RG AFIP 830/00 y modificatorias", x0, y + 44, { align: "center", width: 515 });
+          .text("Provincia de Entre Ríos", x0, y + 44, { align: "center", width: 515 });
         y += 70;
 
         // Agent info
@@ -909,7 +909,7 @@ export function registerExportRoutes(app: Express) {
           ["N° de OP", op.numero],
           ["Importe Base de Calculo", `$ ${fPeso(base)}`],
           ["Alicuota Aplicada", `${alicuota}%`],
-          ["Importe de Retencion", `$ ${fPeso(retGan)}`],
+          ["Importe de Retencion", `$ ${fPeso(retIibb)}`],
         ];
 
         for (const [label, value] of tbl) {
@@ -926,7 +926,7 @@ export function registerExportRoutes(app: Express) {
       });
 
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="cert_retencion_ganancias_OP${opId}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="cert_retencion_iibb_OP${opId}.pdf"`);
       res.send(pdfBuf);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
