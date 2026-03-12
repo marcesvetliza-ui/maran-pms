@@ -191,12 +191,17 @@ export default function NewReservationPage() {
       });
       setLocation("/reservations");
     },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "No se pudo crear la reserva. Intente nuevamente.",
-        variant: "destructive",
-      });
+    onError: (error: any) => {
+      const raw = error?.message || "";
+      let description = "No se pudo crear la reserva. Intente nuevamente.";
+      try {
+        const jsonStart = raw.indexOf("{");
+        if (jsonStart >= 0) {
+          const parsed = JSON.parse(raw.substring(jsonStart));
+          description = parsed.error || parsed.message || description;
+        }
+      } catch {}
+      toast({ title: "No se pudo crear la reserva", description, variant: "destructive" });
     },
   });
 

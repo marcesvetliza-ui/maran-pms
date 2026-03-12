@@ -40,6 +40,7 @@ import {
   Eye,
   CircleDot,
   XCircle,
+  ClipboardList,
 } from "lucide-react";
 
 type CashConfig = {
@@ -260,6 +261,15 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       return res.json();
     },
     enabled: !!currentShift?.id,
+  });
+
+  const { data: changelogHoy = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations/changelog/hoy"],
+    queryFn: async () => {
+      const res = await fetch("/api/reservations/changelog/hoy", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
   });
 
   const efectivoSistema = movements.filter(m => m.paymentMethod === "cash").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
@@ -744,8 +754,33 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
             <DialogTitle>Resumen de Cierre</DialogTitle>
           </DialogHeader>
           {closingSummaryData && (
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
               <SummaryTable movements={closingSummaryData.movements} />
+
+              {changelogHoy.length > 0 && (
+                <div className="border-t pt-4">
+                  <h4 className="font-semibold mb-3 flex items-center gap-2 text-sm">
+                    <ClipboardList className="h-4 w-4" />
+                    Modificaciones de reservas del día
+                  </h4>
+                  <div className="space-y-1 text-xs">
+                    {changelogHoy.map((entry: any) => {
+                      const d = new Date(entry.fecha);
+                      const hora = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+                      return (
+                        <div key={entry.id} className="flex items-start gap-2 py-1 border-b border-dashed border-muted-foreground/20" data-testid={`changelog-hoy-${entry.id}`}>
+                          <span className="text-muted-foreground w-10 shrink-0">{hora}</span>
+                          <span className="text-muted-foreground w-24 shrink-0 truncate">{entry.guestFirstName} {entry.guestLastName}</span>
+                          <span className="text-muted-foreground w-20 shrink-0">[{entry.reservationCode}]</span>
+                          <span className="flex-1">{entry.descripcion}</span>
+                          <span className="text-muted-foreground shrink-0 ml-auto">{entry.operador}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <DialogFooter>
                 <Button
                   onClick={() => printClosingSummary(closingSummaryData.shift, closingSummaryData.movements)}

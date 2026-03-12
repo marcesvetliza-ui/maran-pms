@@ -1913,3 +1913,16 @@ export const invoiceCounters = pgTable("invoice_counters", {
   puntoVenta: integer("punto_venta").notNull(),
   ultimoNumero: integer("ultimo_numero").default(0),
 });
+
+export const reservationChangelog = pgTable("reservation_changelog", {
+  id: serial("id").primaryKey(),
+  reservationId: varchar("reservation_id").notNull().references(() => reservations.id),
+  fecha: timestamp("fecha").defaultNow().notNull(),
+  operador: text("operador"),
+  tipo: text("tipo").notNull(),
+  descripcion: text("descripcion").notNull(),
+});
+
+export const insertReservationChangelogSchema = createInsertSchema(reservationChangelog).omit({ id: true, fecha: true });
+export type InsertReservationChangelog = z.infer<typeof insertReservationChangelogSchema>;
+export type ReservationChangelog = typeof reservationChangelog.$inferSelect;

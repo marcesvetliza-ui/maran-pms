@@ -71,6 +71,18 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType } from "@shared/schema";
 
+function parseReservationError(error: any): string {
+  try {
+    const raw = error?.message || "";
+    const jsonStart = raw.indexOf("{");
+    if (jsonStart >= 0) {
+      const parsed = JSON.parse(raw.substring(jsonStart));
+      return parsed.error || parsed.message || "Error desconocido";
+    }
+  } catch {}
+  return "No se pudo completar la operación. Intente nuevamente.";
+}
+
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
     tentative: { label: "Tentativa", variant: "outline" },
@@ -982,6 +994,14 @@ function ReservationDetailDialog({
     },
   });
 
+  const { data: changelog = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations", reservation.id, "changelog"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservation.id}/changelog`, { credentials: "include" });
+      return res.json();
+    },
+  });
+
   const addChargeMutation = useMutation({
     mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string }) => {
       return apiRequest("POST", "/api/charges", chargeData);
@@ -1142,9 +1162,14 @@ function ReservationDetailDialog({
         )}
 
         <Tabs defaultValue="datos" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
             <TabsTrigger value="folio" data-testid="tab-folio">Folio</TabsTrigger>
+            <TabsTrigger value="historial" data-testid="tab-historial" className="flex items-center gap-1">
+              <History className="h-3 w-3" />
+              Historial
+              {changelog.length > 0 && <span className="text-xs bg-primary/10 text-primary rounded-full px-1.5">{changelog.length}</span>}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="datos" className="space-y-4 mt-4">
@@ -1646,6 +1671,38 @@ function ReservationDetailDialog({
                 )}
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="historial" className="mt-4">
+            {changelog.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground gap-2">
+                <History className="h-8 w-8 opacity-30" />
+                <p className="text-sm">Sin cambios registrados aún.</p>
+                <p className="text-xs">Los cambios de fechas, habitación, tarifa y estado se registran automáticamente.</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {changelog.map((entry: any) => {
+                  const date = new Date(entry.fecha);
+                  const dateStr = `${String(date.getDate()).padStart(2,"0")}/${String(date.getMonth()+1).padStart(2,"0")}/${date.getFullYear()} ${String(date.getHours()).padStart(2,"0")}:${String(date.getMinutes()).padStart(2,"0")}`;
+                  const tipoColors: Record<string,string> = {
+                    fecha: "bg-blue-50 dark:bg-blue-900/20 border-blue-200",
+                    habitacion: "bg-purple-50 dark:bg-purple-900/20 border-purple-200",
+                    estado: "bg-green-50 dark:bg-green-900/20 border-green-200",
+                    tarifa: "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200",
+                    huesped: "bg-orange-50 dark:bg-orange-900/20 border-orange-200",
+                    notas: "bg-gray-50 dark:bg-gray-900/20 border-gray-200",
+                  };
+                  return (
+                    <div key={entry.id} className={`flex items-start gap-3 text-sm p-2 rounded border ${tipoColors[entry.tipo] || "bg-muted border-border"}`} data-testid={`changelog-entry-${entry.id}`}>
+                      <span className="text-muted-foreground shrink-0 w-32 text-xs pt-0.5">{dateStr}</span>
+                      <span className="text-muted-foreground shrink-0 w-20 text-xs pt-0.5 truncate">{entry.operador || "Sistema"}</span>
+                      <span className="text-foreground text-xs">{entry.descripcion}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 

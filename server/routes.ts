@@ -5,11 +5,11 @@ import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
-import { insertGuestReviewSchema } from "@shared/schema";
+import { insertGuestReviewSchema, reservationChangelog, reservations, guests } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
-import { eq, sql, desc } from "drizzle-orm";
+import { eq, sql, desc, asc, gte, lte, and } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
 import { registerExportRoutes } from "./exports";
@@ -993,9 +993,57 @@ export async function registerRoutes(
         }
       }
 
+      // Detectar cambios para el changelog
+      const fmtDate = (d: string) => {
+        if (!d) return d;
+        const parts = d.split("T")[0].split("-");
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      };
+      const statusLabels: Record<string, string> = {
+        tentative: "Tentativa", pending: "Pendiente", confirmed: "Confirmada",
+        checked_in: "Check-in realizado", checked_out: "Check-out realizado", cancelled: "Cancelada",
+      };
+      const cambios: { tipo: string; descripcion: string }[] = [];
+      if (req.body.checkInDate && req.body.checkInDate !== existing.checkInDate) {
+        cambios.push({ tipo: "fecha", descripcion: `Check-in modificado: ${fmtDate(existing.checkInDate)} → ${fmtDate(req.body.checkInDate)}` });
+      }
+      if (req.body.checkOutDate && req.body.checkOutDate !== existing.checkOutDate) {
+        cambios.push({ tipo: "fecha", descripcion: `Check-out modificado: ${fmtDate(existing.checkOutDate)} → ${fmtDate(req.body.checkOutDate)}` });
+      }
+      if (req.body.roomId && req.body.roomId !== existing.roomId) {
+        const oldRoom = await storage.getRoom(existing.roomId);
+        const newRoom = await storage.getRoom(req.body.roomId);
+        cambios.push({ tipo: "habitacion", descripcion: `Habitación cambiada: ${oldRoom?.roomNumber || existing.roomId} → ${newRoom?.roomNumber || req.body.roomId}` });
+      }
+      if (req.body.status && req.body.status !== existing.status) {
+        cambios.push({ tipo: "estado", descripcion: `Estado: ${statusLabels[existing.status] || existing.status} → ${statusLabels[req.body.status] || req.body.status}` });
+      }
+      if (req.body.baseRatePerNight && String(req.body.baseRatePerNight) !== String(existing.baseRatePerNight)) {
+        cambios.push({ tipo: "tarifa", descripcion: `Tarifa modificada: $${existing.baseRatePerNight} → $${req.body.baseRatePerNight}` });
+      }
+      if (req.body.guestId && req.body.guestId !== existing.guestId) {
+        cambios.push({ tipo: "huesped", descripcion: `Huésped titular cambiado` });
+      }
+      if (req.body.notes !== undefined && req.body.notes !== existing.notes) {
+        cambios.push({ tipo: "notas", descripcion: `Notas actualizadas` });
+      }
+
       const reservation = await storage.updateReservation(req.params.id, req.body);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
+      }
+
+      // Guardar changelog
+      if (cambios.length > 0) {
+        const operador = (req as any).user?.fullName || (req as any).user?.username || "Sistema";
+        for (const cambio of cambios) {
+          await db.insert(reservationChangelog).values({
+            reservationId: req.params.id,
+            operador,
+            tipo: cambio.tipo,
+            descripcion: cambio.descripcion,
+          });
+        }
       }
 
       const today = new Date().toISOString().split("T")[0];
@@ -1263,6 +1311,60 @@ export async function registerRoutes(
       });
     } catch (error) {
       res.status(500).json({ error: "Error fetching folio" });
+    }
+  });
+
+  // Changelog por reserva
+  app.get("/api/reservations/:id/changelog", requireAuth, async (req, res) => {
+    try {
+      const logs = await db
+        .select()
+        .from(reservationChangelog)
+        .where(eq(reservationChangelog.reservationId, req.params.id))
+        .orderBy(asc(reservationChangelog.fecha));
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching changelog" });
+    }
+  });
+
+  // Changelog del día (para cierre de caja)
+  app.get("/api/reservations/changelog/hoy", requireAuth, async (req, res) => {
+    try {
+      const argentinaOffset = -3 * 60;
+      const now = new Date();
+      const argNow = new Date(now.getTime() + (argentinaOffset - now.getTimezoneOffset()) * 60000);
+      const inicioDia = new Date(argNow);
+      inicioDia.setHours(0, 0, 0, 0);
+      const finDia = new Date(argNow);
+      finDia.setHours(23, 59, 59, 999);
+      // Convert back to UTC for DB comparison
+      const utcOffset = (argentinaOffset - now.getTimezoneOffset()) * 60000;
+      const inicioDiaUTC = new Date(inicioDia.getTime() - utcOffset);
+      const finDiaUTC = new Date(finDia.getTime() - utcOffset);
+
+      const logs = await db
+        .select({
+          id: reservationChangelog.id,
+          fecha: reservationChangelog.fecha,
+          operador: reservationChangelog.operador,
+          tipo: reservationChangelog.tipo,
+          descripcion: reservationChangelog.descripcion,
+          reservationCode: reservations.reservationCode,
+          guestFirstName: guests.firstName,
+          guestLastName: guests.lastName,
+        })
+        .from(reservationChangelog)
+        .innerJoin(reservations, eq(reservationChangelog.reservationId, reservations.id))
+        .innerJoin(guests, eq(reservations.guestId, guests.id))
+        .where(and(
+          gte(reservationChangelog.fecha, inicioDiaUTC),
+          lte(reservationChangelog.fecha, finDiaUTC)
+        ))
+        .orderBy(asc(reservationChangelog.fecha));
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching today changelog" });
     }
   });
 
