@@ -98,8 +98,10 @@ function GroupFormDialog({
   const { toast } = useToast();
   const isEditing = !!group;
 
-  const today = new Date().toISOString().split("T")[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<Partial<InsertGroup>>({
@@ -108,6 +110,8 @@ function GroupFormDialog({
     contactPhone: group?.contactPhone || "",
     contactEmail: group?.contactEmail || "",
     eventDate: group?.eventDate || "",
+    eventSalon: (group as any)?.eventSalon || "",
+    eventTime: (group as any)?.eventTime || "",
     checkInDate: group?.checkInDate || today,
     checkOutDate: group?.checkOutDate || tomorrow,
     status: group?.status || "blocked",
@@ -132,6 +136,8 @@ function GroupFormDialog({
         contactPhone: group?.contactPhone || "",
         contactEmail: group?.contactEmail || "",
         eventDate: group?.eventDate || "",
+        eventSalon: (group as any)?.eventSalon || "",
+        eventTime: (group as any)?.eventTime || "",
         checkInDate: group?.checkInDate || today,
         checkOutDate: group?.checkOutDate || tomorrow,
         status: group?.status || "blocked",
@@ -423,6 +429,30 @@ function GroupFormDialog({
                   value={formData.eventDate || ""}
                   onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })}
                   data-testid="input-group-event-date"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="eventSalon">Salón del Evento</Label>
+                <Input
+                  id="eventSalon"
+                  type="text"
+                  placeholder="Ej: Salón Solárium"
+                  value={(formData as any).eventSalon || ""}
+                  onChange={(e) => setFormData({ ...formData, eventSalon: e.target.value } as any)}
+                  data-testid="input-group-event-salon"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="eventTime">Horario del Evento</Label>
+                <Input
+                  id="eventTime"
+                  type="text"
+                  placeholder="Ej: 20:00 hs"
+                  value={(formData as any).eventTime || ""}
+                  onChange={(e) => setFormData({ ...formData, eventTime: e.target.value } as any)}
+                  data-testid="input-group-event-time"
                 />
               </div>
 

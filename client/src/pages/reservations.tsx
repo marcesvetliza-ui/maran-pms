@@ -465,6 +465,8 @@ export function ReservationFormDialog({
     e.preventDefault();
     mutation.mutate({
       ...formData,
+      roomId: formData.roomId || reservation?.roomId,
+      roomTypeId: formData.roomTypeId || reservation?.roomTypeId,
       bedTypeId: formData.bedTypeId || null,
       nights: Number(formData.nights),
       numberOfGuests: Number(formData.numberOfGuests),

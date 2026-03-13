@@ -17,6 +17,7 @@ import {
   FileText,
   Printer,
   AlertCircle,
+  AlertTriangle,
   CheckCircle,
   CheckCircle2,
   CreditCard,
@@ -820,6 +821,16 @@ export default function GroupDetailPage() {
       <p>Habitaciones: <strong>${group.reservations.length}</strong></p>
     </div>
   </div>
+  ${group.eventDate ? `
+  <div style="background:#f9f7ff;border:1px solid #d4c8f0;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;">
+    <p class="info-label" style="margin:0 0 6px 0;">Evento</p>
+    <div style="display:flex;gap:32px;">
+      <div><strong>Fecha:</strong> ${new Date(group.eventDate).toLocaleDateString("es-AR")}</div>
+      ${(group as any).eventSalon ? `<div><strong>Salón:</strong> ${(group as any).eventSalon}</div>` : ""}
+      ${(group as any).eventTime ? `<div><strong>Horario:</strong> ${(group as any).eventTime}</div>` : ""}
+    </div>
+  </div>
+  ` : ""}
   <table>
     <thead>
       <tr>
@@ -966,7 +977,12 @@ export default function GroupDetailPage() {
             <p className="text-sm">Check-in: <span className="font-medium">{formatDate(group.checkInDate)}</span></p>
             <p className="text-sm">Check-out: <span className="font-medium">{formatDate(group.checkOutDate)}</span></p>
             {group.eventDate && (
-              <p className="text-sm text-muted-foreground mt-1">Evento: {formatDate(group.eventDate)}</p>
+              <div className="mt-2 pt-2 border-t">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Evento</p>
+                <p className="text-sm">Fecha: <span className="font-medium">{formatDate(group.eventDate)}</span></p>
+                {(group as any).eventSalon && <p className="text-sm">Salón: <span className="font-medium">{(group as any).eventSalon}</span></p>}
+                {(group as any).eventTime && <p className="text-sm">Horario: <span className="font-medium">{(group as any).eventTime}</span></p>}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1013,6 +1029,12 @@ export default function GroupDetailPage() {
               <span className="text-3xl font-bold">{group.assignedRooms}</span>
               <span className="text-muted-foreground">/ {group.totalRooms} asignadas</span>
             </div>
+            {group.totalRooms > group.assignedRooms && (
+              <div className="mt-1 flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>{group.totalRooms - group.assignedRooms} habitación(es) sin asignar</span>
+              </div>
+            )}
             <div className="mt-2 h-2 w-full rounded-full bg-muted overflow-hidden">
               <div
                 className="h-full bg-primary transition-all"

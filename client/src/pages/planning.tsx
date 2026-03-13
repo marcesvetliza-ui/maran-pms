@@ -1511,6 +1511,7 @@ export default function PlanningPage() {
 
   const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string } | null>(null);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [blocksExpanded, setBlocksExpanded] = useState(false);
 
   type PlanningFilter = {
     showEmpty: boolean;
@@ -1934,17 +1935,24 @@ export default function PlanningPage() {
                 <CardContent className="p-3">
                   <div className="flex items-start gap-2">
                     <Users className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                    <div className="text-sm">
-                      <span className="font-medium text-orange-800 dark:text-orange-300">
-                        Bloques de grupo sin asignar:
-                      </span>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {data.unassignedGroupBlocks.map((block, idx) => (
-                          <Badge key={idx} variant="outline" className="text-xs border-orange-400 text-orange-700 dark:text-orange-300" data-testid={`badge-unassigned-block-${idx}`}>
-                            {block.groupName}: {block.quantity - block.assigned} hab. {block.roomTypeName} ({block.checkIn} → {block.checkOut})
-                          </Badge>
-                        ))}
-                      </div>
+                    <div className="text-sm flex-1">
+                      <button
+                        onClick={() => setBlocksExpanded(prev => !prev)}
+                        className="flex items-center gap-1 w-full text-left font-medium text-orange-800 dark:text-orange-300 hover:underline focus:outline-none"
+                        data-testid="button-toggle-unassigned-blocks"
+                      >
+                        <span>Bloques sin asignar ({data.unassignedGroupBlocks.length})</span>
+                        {blocksExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      </button>
+                      {blocksExpanded && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {data.unassignedGroupBlocks.map((block, idx) => (
+                            <Badge key={idx} variant="outline" className="text-xs border-orange-400 text-orange-700 dark:text-orange-300" data-testid={`badge-unassigned-block-${idx}`}>
+                              {block.groupName}: {block.quantity - block.assigned} hab. {block.roomTypeName} ({block.checkIn} → {block.checkOut})
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CardContent>

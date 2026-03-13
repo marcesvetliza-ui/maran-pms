@@ -1119,6 +1119,12 @@ export class DatabaseStorage implements IStorage {
     const checkOut = new Date(checkOutDate);
     const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
 
+    // Verify no overbooking conflict before creating reservation
+    const hasConflict = await this.checkOverbooking(roomId, checkInDate, checkOutDate, undefined);
+    if (hasConflict) {
+      throw new Error(`La habitación ${room.roomNumber} ya tiene una reserva en esas fechas`);
+    }
+
     const reservation = await this.createReservation({
       reservationCode: `G${group.groupCode}-${room.roomNumber}`,
       guestId: guest.id,

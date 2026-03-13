@@ -1998,7 +1998,7 @@ export async function registerRoutes(
 
   app.post("/api/groups", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
       
       if (!name || !checkInDate || !checkOutDate) {
         return res.status(400).json({ error: "Name, checkInDate, and checkOutDate are required" });
@@ -2012,6 +2012,8 @@ export async function registerRoutes(
         contactPhone: contactPhone || null,
         contactEmail: contactEmail || null,
         eventDate: eventDate || null,
+        eventSalon: eventSalon || null,
+        eventTime: eventTime || null,
         checkInDate,
         checkOutDate,
         status: status || "tentative",
@@ -2029,7 +2031,7 @@ export async function registerRoutes(
 
   app.patch("/api/groups/:id", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
       const updateData: Record<string, unknown> = {};
       
       if (name !== undefined) updateData.name = name;
@@ -2037,6 +2039,8 @@ export async function registerRoutes(
       if (contactPhone !== undefined) updateData.contactPhone = contactPhone;
       if (contactEmail !== undefined) updateData.contactEmail = contactEmail;
       if (eventDate !== undefined) updateData.eventDate = eventDate;
+      if (eventSalon !== undefined) updateData.eventSalon = eventSalon;
+      if (eventTime !== undefined) updateData.eventTime = eventTime;
       if (checkInDate !== undefined) updateData.checkInDate = checkInDate;
       if (checkOutDate !== undefined) updateData.checkOutDate = checkOutDate;
       if (status !== undefined) updateData.status = status;
@@ -2266,17 +2270,17 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Amount must be positive" });
       }
 
-      const checkedInReservations = group.reservations.filter(
-        r => r.status === "checked_in"
+      const activeReservations = group.reservations.filter(
+        r => r.status === "confirmed" || r.status === "checked_in"
       );
 
-      if (checkedInReservations.length === 0) {
-        return res.status(400).json({ error: "No hay reservas en casa para registrar pagos" });
+      if (activeReservations.length === 0) {
+        return res.status(400).json({ error: "No hay reservas activas (confirmadas o en casa) para registrar pagos" });
       }
 
       if (distribution === "equal") {
-        const perRoom = totalAmount / checkedInReservations.length;
-        for (const reservation of checkedInReservations) {
+        const perRoom = totalAmount / activeReservations.length;
+        for (const reservation of activeReservations) {
           await storage.createPayment({
             reservationId: reservation.id,
             amount: perRoom.toFixed(2),
@@ -2288,7 +2292,7 @@ export async function registerRoutes(
       } else if (distribution === "proportional") {
         let totalCost = 0;
         const costs: { id: string; cost: number }[] = [];
-        for (const reservation of checkedInReservations) {
+        for (const reservation of activeReservations) {
           const charges = await storage.getCharges(reservation.id);
           const chargesTotal = charges.reduce((sum: number, c) => sum + parseFloat(c.amount), 0);
           const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
@@ -2308,8 +2312,8 @@ export async function registerRoutes(
           });
         }
       } else {
-        const perRoom = totalAmount / checkedInReservations.length;
-        for (const reservation of checkedInReservations) {
+        const perRoom = totalAmount / activeReservations.length;
+        for (const reservation of activeReservations) {
           await storage.createPayment({
             reservationId: reservation.id,
             amount: perRoom.toFixed(2),
@@ -2320,7 +2324,7 @@ export async function registerRoutes(
         }
       }
 
-      res.json({ success: true, distributed: checkedInReservations.length });
+      res.json({ success: true, distributed: activeReservations.length });
     } catch (error) {
       res.status(500).json({ error: "Error processing group payment" });
     }

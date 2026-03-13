@@ -440,6 +440,8 @@ export const groups = pgTable("groups", {
   contactPhone: text("contact_phone"),
   contactEmail: text("contact_email"),
   eventDate: date("event_date"),
+  eventSalon: text("event_salon"),
+  eventTime: text("event_time"),
   checkInDate: date("check_in_date").notNull(),
   checkOutDate: date("check_out_date").notNull(),
   status: text("status").$type<GroupStatus>().notNull().default("tentative"),
