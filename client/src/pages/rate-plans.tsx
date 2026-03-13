@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { subDays } from "date-fns";
+import { formatDateAR } from "@/lib/utils";
 import {
   DollarSign,
   Plus,
@@ -79,17 +81,24 @@ function RatePlanFormDialog({
     currency: ratePlan?.currency || "ARS",
     refundable: ratePlan?.refundable || "true",
     cancellationPolicy: ratePlan?.cancellationPolicy || "",
+    validFrom: ratePlan?.validFrom || "",
+    validTo: ratePlan?.validTo || "",
   });
+  const [versionMode, setVersionMode] = useState<"direct" | "new_version">("direct");
+  const [effectiveFrom, setEffectiveFrom] = useState<string>("");
 
   const selectedRoomType = roomTypes.find(rt => rt.id === formData.roomTypeId);
   const maxOcc = selectedRoomType?.maxOccupancy || 4;
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertRatePlan>) => {
+      const payload = Object.fromEntries(
+        Object.entries(data).filter(([_, v]) => v !== "" && v !== undefined)
+      );
       if (isEditing) {
-        return apiRequest("PATCH", `/api/rate-plans/${ratePlan.id}`, data);
+        return apiRequest("PATCH", `/api/rate-plans/${ratePlan.id}`, payload);
       }
-      return apiRequest("POST", "/api/rate-plans", data);
+      return apiRequest("POST", "/api/rate-plans", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/rate-plans"] });
@@ -109,9 +118,34 @@ function RatePlanFormDialog({
     },
   });
 
+  const createVersionMutation = useMutation({
+    mutationFn: async () => {
+      if (!effectiveFrom) throw new Error("Fecha requerida");
+      const closeDate = subDays(new Date(effectiveFrom + "T12:00:00"), 1).toISOString().split("T")[0];
+      await apiRequest("PATCH", `/api/rate-plans/${ratePlan!.id}`, { validTo: closeDate });
+      const payload = Object.fromEntries(
+        Object.entries(formData).filter(([_, v]) => v !== "" && v !== undefined)
+      );
+      return apiRequest("POST", "/api/rate-plans", { ...payload, validFrom: effectiveFrom, validTo: null });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/rate-plans"] });
+      toast({ title: "Nueva versión de tarifa creada", description: `El plan anterior fue cerrado y se creó la nueva versión desde ${effectiveFrom}.` });
+      onSuccess();
+      onOpenChange(false);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo crear la nueva versión.", variant: "destructive" });
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    mutation.mutate(formData);
+    if (isEditing && versionMode === "new_version") {
+      createVersionMutation.mutate();
+    } else {
+      mutation.mutate(formData);
+    }
   };
 
   return (
@@ -262,13 +296,82 @@ function RatePlanFormDialog({
                 data-testid="input-cancellation-policy"
               />
             </div>
+
+            <div className="grid grid-cols-2 gap-4 pt-2 border-t">
+              <div className="grid gap-2">
+                <Label>Válido desde <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                <Input
+                  type="date"
+                  value={formData.validFrom || ""}
+                  onChange={(e) => setFormData({ ...formData, validFrom: e.target.value || "" })}
+                  data-testid="input-valid-from"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Válido hasta <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                <Input
+                  type="date"
+                  value={formData.validTo || ""}
+                  onChange={(e) => setFormData({ ...formData, validTo: e.target.value || "" })}
+                  data-testid="input-valid-to"
+                />
+              </div>
+            </div>
+
+            {isEditing && (
+              <div className="rounded-md border bg-muted/50 p-3 space-y-3">
+                <Label className="text-sm font-medium">Modo de edición</Label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={versionMode === "direct" ? "default" : "outline"}
+                    onClick={() => setVersionMode("direct")}
+                    data-testid="button-mode-direct"
+                  >
+                    Actualizar directo
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={versionMode === "new_version" ? "default" : "outline"}
+                    onClick={() => setVersionMode("new_version")}
+                    data-testid="button-mode-new-version"
+                  >
+                    Crear nueva versión
+                  </Button>
+                </div>
+                {versionMode === "direct" && (
+                  <p className="text-xs text-muted-foreground">Corrección de datos sin cambio de precio. Sobreescribe el plan actual.</p>
+                )}
+                {versionMode === "new_version" && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Cierra el plan actual y crea una nueva versión desde la fecha indicada.</p>
+                    <div className="grid gap-1">
+                      <Label className="text-xs">¿Desde cuándo aplica el nuevo precio?</Label>
+                      <Input
+                        type="date"
+                        value={effectiveFrom}
+                        onChange={(e) => setEffectiveFrom(e.target.value)}
+                        data-testid="input-effective-from"
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={mutation.isPending} data-testid="button-submit-rate-plan">
-              {mutation.isPending ? "Guardando..." : isEditing ? "Guardar Cambios" : "Crear Plan"}
+            <Button
+              type="submit"
+              disabled={mutation.isPending || createVersionMutation.isPending || (isEditing && versionMode === "new_version" && !effectiveFrom)}
+              data-testid="button-submit-rate-plan"
+            >
+              {(mutation.isPending || createVersionMutation.isPending) ? "Guardando..." : isEditing && versionMode === "new_version" ? "Crear nueva versión" : isEditing ? "Guardar Cambios" : "Crear Plan"}
             </Button>
           </DialogFooter>
         </form>
@@ -423,7 +526,18 @@ export default function RatePlansPage() {
                     <TableBody>
                       {plans.map((plan) => (
                         <TableRow key={plan.id} data-testid={`rate-plan-row-${plan.id}`}>
-                          <TableCell className="font-medium">{plan.name}</TableCell>
+                          <TableCell className="font-medium">
+                            {plan.name}
+                            {(plan.validFrom || plan.validTo) && (
+                              <div className="text-xs text-muted-foreground mt-0.5">
+                                {plan.validFrom && plan.validTo
+                                  ? `${formatDateAR(plan.validFrom)} → ${formatDateAR(plan.validTo)}`
+                                  : plan.validFrom
+                                  ? `Desde ${formatDateAR(plan.validFrom)}`
+                                  : `Hasta ${formatDateAR(plan.validTo!)}`}
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <div>
                               <span className="font-semibold text-primary">

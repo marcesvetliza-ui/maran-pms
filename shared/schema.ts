@@ -30,6 +30,8 @@ export const ratePlans = pgTable("rate_plans", {
   currency: text("currency").notNull().default("ARS"),
   refundable: text("refundable").notNull().default("true"),
   cancellationPolicy: text("cancellation_policy"),
+  validFrom: date("valid_from"),
+  validTo: date("valid_to"),
 });
 
 export const insertRatePlanSchema = createInsertSchema(ratePlans).omit({ id: true });

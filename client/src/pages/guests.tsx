@@ -53,7 +53,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference } from "@shared/schema";
+import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference, Company } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 
 function GuestFormDialog({
@@ -70,6 +70,8 @@ function GuestFormDialog({
   const { toast } = useToast();
   const isEditing = !!guest;
 
+  const { data: companies } = useQuery<Company[]>({ queryKey: ["/api/companies"] });
+
   const [formData, setFormData] = useState<Partial<InsertGuest>>({
     firstName: guest?.firstName || "",
     lastName: guest?.lastName || "",
@@ -78,7 +80,15 @@ function GuestFormDialog({
     documentType: guest?.documentType || "dni",
     documentNumber: guest?.documentNumber || "",
     nationality: guest?.nationality || "",
+    direccion: guest?.direccion || "",
     localidad: guest?.localidad || "",
+    codigoPostal: guest?.codigoPostal || "",
+    fechaNacimiento: guest?.fechaNacimiento || "",
+    sexo: guest?.sexo || "no_especifica",
+    segment: guest?.segment || "LEISURE",
+    cuilCuit: guest?.cuilCuit || "",
+    companyId: guest?.companyId || null,
+    agencyId: guest?.agencyId || null,
     vehiculoPatente: guest?.vehiculoPatente || "",
     vehiculoMarca: guest?.vehiculoMarca || "",
     vehiculoModelo: guest?.vehiculoModelo || "",
@@ -87,10 +97,13 @@ function GuestFormDialog({
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertGuest>) => {
+      const payload = Object.fromEntries(
+        Object.entries(data).filter(([_, v]) => v !== "" && v !== undefined)
+      );
       if (isEditing) {
-        return apiRequest("PATCH", `/api/guests/${guest.id}`, data);
+        return apiRequest("PATCH", `/api/guests/${guest.id}`, payload);
       }
-      return apiRequest("POST", "/api/guests", data);
+      return apiRequest("POST", "/api/guests", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
@@ -222,6 +235,24 @@ function GuestFormDialog({
                 placeholder="Buenos Aires"
                 data-testid="input-localidad"
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Empresa asociada</Label>
+              <Select
+                value={formData.companyId || ""}
+                onValueChange={(v) => setFormData({ ...formData, companyId: v || null })}
+              >
+                <SelectTrigger data-testid="select-company">
+                  <SelectValue placeholder="Sin empresa" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin empresa</SelectItem>
+                  {companies?.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.razonSocial}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="pt-2 border-t">

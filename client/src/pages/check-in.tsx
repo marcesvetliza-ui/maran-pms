@@ -71,6 +71,9 @@ export default function CheckInPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [retroactivoDialog, setRetroactivoDialog] = useState(false);
+  const [retroactivoMotivo, setRetroactivoMotivo] = useState("");
+  const [pendingCheckInId, setPendingCheckInId] = useState<string | null>(null);
 
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -177,8 +180,8 @@ export default function CheckInPage() {
   const totalAmount = selectedRatePlan ? (parseFloat(selectedRatePlan.baseRate) * nights).toFixed(2) : "0.00";
 
   const checkInMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest("POST", `/api/reservations/${id}/check-in`, undefined);
+    mutationFn: async ({ id, motivo }: { id: string; motivo?: string }) => {
+      return apiRequest("POST", `/api/reservations/${id}/check-in`, motivo ? { motivo } : {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -195,10 +198,24 @@ export default function CheckInPage() {
         description: `El huesped ${selectedReservation?.guest?.firstName} ${selectedReservation?.guest?.lastName} ha sido registrado exitosamente.`,
       });
       setConfirmDialogOpen(false);
+      setRetroactivoDialog(false);
+      setRetroactivoMotivo("");
+      setPendingCheckInId(null);
       setSelectedReservation(null);
     },
-    onError: (error: any) => {
-      const message = error?.data?.error || error?.message || "No se pudo realizar el check-in. Intente nuevamente.";
+    onError: async (error: any) => {
+      let errorData: any = {};
+      try {
+        const raw = error?.message || "";
+        const jsonStart = raw.indexOf("{");
+        if (jsonStart >= 0) errorData = JSON.parse(raw.substring(jsonStart));
+      } catch {}
+      if (errorData?.error === "CHECK_IN_RETROACTIVO") {
+        setPendingCheckInId(selectedReservation?.id || null);
+        setRetroactivoDialog(true);
+        return;
+      }
+      const message = errorData?.error || error?.message || "No se pudo realizar el check-in. Intente nuevamente.";
       toast({
         title: "Check-in no permitido",
         description: message,
@@ -345,7 +362,7 @@ export default function CheckInPage() {
       });
     }
     
-    checkInMutation.mutate(selectedReservation.id);
+    checkInMutation.mutate({ id: selectedReservation.id });
   };
 
   const canSubmitWalkIn = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0;
@@ -1143,6 +1160,49 @@ export default function CheckInPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={retroactivoDialog} onOpenChange={(open) => { setRetroactivoDialog(open); if (!open) { setRetroactivoMotivo(""); setPendingCheckInId(null); } }}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-400">
+              <AlertTriangle className="h-5 w-5" />
+              Check-in retroactivo
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              La fecha de check-in es anterior a hoy. Ingrese el motivo por el cual se registra con fecha pasada.
+            </p>
+            <div className="grid gap-2">
+              <Label htmlFor="motivo-retroactivo">Motivo (obligatorio)</Label>
+              <Textarea
+                id="motivo-retroactivo"
+                placeholder="Ej: Huésped llegó tarde, sistema caído, error operativo..."
+                value={retroactivoMotivo}
+                onChange={(e) => setRetroactivoMotivo(e.target.value)}
+                rows={3}
+                data-testid="input-motivo-retroactivo"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => { setRetroactivoDialog(false); setRetroactivoMotivo(""); setPendingCheckInId(null); }}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={!retroactivoMotivo.trim() || checkInMutation.isPending}
+              onClick={() => {
+                if (pendingCheckInId && retroactivoMotivo.trim()) {
+                  checkInMutation.mutate({ id: pendingCheckInId, motivo: retroactivoMotivo });
+                }
+              }}
+              data-testid="button-confirm-retroactivo"
+            >
+              {checkInMutation.isPending ? "Procesando..." : "Confirmar igual"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

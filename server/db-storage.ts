@@ -303,9 +303,10 @@ export class DatabaseStorage implements IStorage {
         ilike(guests.firstName, `%${query}%`),
         ilike(guests.lastName, `%${query}%`),
         ilike(guests.email, `%${query}%`),
-        ilike(guests.documentNumber, `%${query}%`)
+        ilike(guests.documentNumber, `%${query}%`),
+        ilike(guests.phone, `%${query}%`)
       )
-    );
+    ).limit(20);
   }
 
   async createGuest(guest: InsertGuest): Promise<Guest> {

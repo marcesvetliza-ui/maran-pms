@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import {
   CalendarPlus,
   User,
@@ -28,13 +28,21 @@ import type { Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, Ins
 export default function NewReservationPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const search = useSearch();
+
+  const searchParams = new URLSearchParams(search);
+  const prefilledRoomId = searchParams.get("roomId") || "";
+  const prefilledRoomTypeId = searchParams.get("roomTypeId") || "";
+  const prefilledDate = searchParams.get("date") || "";
+  const isFromPlanning = !!prefilledRoomId;
 
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>("");
-  const [selectedRoomId, setSelectedRoomId] = useState<string>("");
+  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(prefilledRoomTypeId);
+  const [selectedRoomId, setSelectedRoomId] = useState<string>(prefilledRoomId);
   const [selectedRatePlanId, setSelectedRatePlanId] = useState<string>("");
   const [checkInDate, setCheckInDate] = useState<string>(() => {
+    if (prefilledDate) return prefilledDate;
     const today = new Date();
     return today.toISOString().split("T")[0];
   });
@@ -47,7 +55,7 @@ export default function NewReservationPage() {
   const [notes, setNotes] = useState<string>("");
   const [discountType, setDiscountType] = useState<string>("none");
   const [discountValue, setDiscountValue] = useState<string>("0");
-  const [bedTypeId, setBedTypeId] = useState<number | null>(null);
+  const [bedTypeId, setBedTypeId] = useState<string>("");
   const [bedTypeNotes, setBedTypeNotes] = useState<string>("");
   const [earlyCheckIn, setEarlyCheckIn] = useState(false);
   const [earlyCheckInTime, setEarlyCheckInTime] = useState("");
@@ -72,6 +80,18 @@ export default function NewReservationPage() {
     queryKey: ["/api/bed-types"],
   });
 
+  const { data: companies } = useQuery<Company[]>({
+    queryKey: ["/api/companies"],
+  });
+
+  const handleGuestSelect = (guest: Guest) => {
+    setSelectedGuest(guest);
+    if (guest.companyId && companies) {
+      const company = companies.find(c => c.id === guest.companyId);
+      if (company) setSelectedCompany(company);
+    }
+  };
+
   const nights = useMemo(() => {
     if (!checkInDate || !checkOutDate) return 0;
     const start = new Date(checkInDate);
@@ -85,9 +105,12 @@ export default function NewReservationPage() {
     (selectedRoomTypeId ? room.roomTypeId === selectedRoomTypeId : true)
   );
 
-  const applicableRatePlans = ratePlans?.filter((rp) => 
-    rp.roomTypeId === selectedRoomTypeId
-  );
+  const applicableRatePlans = ratePlans?.filter((rp) => {
+    if (rp.roomTypeId !== selectedRoomTypeId) return false;
+    if (rp.validFrom && checkInDate < rp.validFrom) return false;
+    if (rp.validTo && checkInDate > rp.validTo) return false;
+    return true;
+  });
 
   const selectedRatePlan = ratePlans?.find((rp) => rp.id === selectedRatePlanId);
   
@@ -234,7 +257,7 @@ export default function NewReservationPage() {
         <div className="space-y-6">
           <GuestSelector
             selectedGuest={selectedGuest}
-            onSelect={setSelectedGuest}
+            onSelect={handleGuestSelect}
             onCreateNew={(guest) => createGuestMutation.mutate(guest)}
             onClear={() => setSelectedGuest(null)}
           />
@@ -295,47 +318,69 @@ export default function NewReservationPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Tipo de Habitacion</Label>
-                <Select
-                  value={selectedRoomTypeId}
-                  onValueChange={(v) => {
-                    setSelectedRoomTypeId(v);
-                    setSelectedRoomId("");
-                    setSelectedRatePlanId("");
-                  }}
-                >
-                  <SelectTrigger data-testid="select-room-type">
-                    <SelectValue placeholder="Seleccionar tipo..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roomTypes?.map((rt) => (
-                      <SelectItem key={rt.id} value={rt.id}>
-                        {rt.name} - {rt.maxOccupancy} pax
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {isFromPlanning ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 rounded-md border bg-muted px-3 py-2 text-sm" data-testid="text-room-type-prefilled">
+                      {roomTypes?.find(rt => rt.id === selectedRoomTypeId)?.name || selectedRoomTypeId}
+                    </div>
+                    <Badge variant="secondary" className="text-xs">Desde planning</Badge>
+                  </div>
+                ) : (
+                  <Select
+                    value={selectedRoomTypeId}
+                    onValueChange={(v) => {
+                      setSelectedRoomTypeId(v);
+                      setSelectedRoomId("");
+                      setSelectedRatePlanId("");
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-room-type">
+                      <SelectValue placeholder="Seleccionar tipo..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {roomTypes?.map((rt) => (
+                        <SelectItem key={rt.id} value={rt.id}>
+                          {rt.name} - {rt.maxOccupancy} pax
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
               <div className="space-y-2">
                 <Label>Habitacion Disponible</Label>
-                <Select
-                  value={selectedRoomId}
-                  onValueChange={setSelectedRoomId}
-                  disabled={!selectedRoomTypeId}
-                >
-                  <SelectTrigger data-testid="select-room">
-                    <SelectValue placeholder={selectedRoomTypeId ? "Seleccionar habitacion..." : "Primero seleccione tipo"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableRooms?.map((room) => (
-                      <SelectItem key={room.id} value={room.id}>
-                        Hab. {room.roomNumber} - Piso {room.floor}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedRoomTypeId && availableRooms?.length === 0 && (
-                  <p className="text-sm text-destructive">No hay habitaciones disponibles de este tipo</p>
+                {isFromPlanning ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 rounded-md border bg-muted px-3 py-2 text-sm" data-testid="text-room-prefilled">
+                      {rooms?.find(r => r.id === selectedRoomId)
+                        ? `Hab. ${rooms.find(r => r.id === selectedRoomId)!.roomNumber} - Piso ${rooms.find(r => r.id === selectedRoomId)!.floor}`
+                        : selectedRoomId}
+                    </div>
+                    <Badge variant="secondary" className="text-xs">Desde planning</Badge>
+                  </div>
+                ) : (
+                  <>
+                    <Select
+                      value={selectedRoomId}
+                      onValueChange={setSelectedRoomId}
+                      disabled={!selectedRoomTypeId}
+                    >
+                      <SelectTrigger data-testid="select-room">
+                        <SelectValue placeholder={selectedRoomTypeId ? "Seleccionar habitacion..." : "Primero seleccione tipo"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableRooms?.map((room) => (
+                          <SelectItem key={room.id} value={room.id}>
+                            Hab. {room.roomNumber} - Piso {room.floor}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedRoomTypeId && availableRooms?.length === 0 && (
+                      <p className="text-sm text-destructive">No hay habitaciones disponibles de este tipo</p>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -353,15 +398,15 @@ export default function NewReservationPage() {
               <div className="space-y-2">
                 <Label>Tipo de camaje</Label>
                 <Select
-                  value={bedTypeId ? String(bedTypeId) : ""}
-                  onValueChange={(v) => setBedTypeId(parseInt(v))}
+                  value={bedTypeId}
+                  onValueChange={setBedTypeId}
                 >
                   <SelectTrigger data-testid="select-bed-type">
                     <SelectValue placeholder="Seleccionar tipo de camaje..." />
                   </SelectTrigger>
                   <SelectContent>
                     {bedTypes?.filter(bt => bt.isActive).map((bt) => (
-                      <SelectItem key={bt.id} value={String(bt.id)}>
+                      <SelectItem key={bt.id} value={bt.id}>
                         {bt.name}
                       </SelectItem>
                     ))}

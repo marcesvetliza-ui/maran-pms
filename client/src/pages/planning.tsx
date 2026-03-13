@@ -1752,12 +1752,7 @@ export default function PlanningPage() {
       return;
     }
     if (status === "available") {
-      setNewReservationDefaults({
-        roomId: room.id,
-        roomTypeId: room.roomTypeId,
-        checkInDate: day,
-      });
-      setNewReservationOpen(true);
+      navigate(`/new-reservation?roomId=${room.id}&roomTypeId=${room.roomTypeId}&date=${day}`);
     } else {
       const resolvedId = reservationId || findReservationForRoomAndDay(room.id, day);
       if (resolvedId) {
