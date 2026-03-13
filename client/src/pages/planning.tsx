@@ -724,7 +724,8 @@ function ReservationDetailModal({
 
   const addPaymentMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
-      return apiRequest("POST", `/api/payments`, { ...data, reservationId });
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      return apiRequest("POST", `/api/payments`, { ...data, reservationId, date: data.date || today });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId] });

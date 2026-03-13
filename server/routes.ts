@@ -1738,6 +1738,10 @@ export async function registerRoutes(
       if (req.body.billingTarget && !["guest", "company"].includes(req.body.billingTarget)) {
         req.body.billingTarget = "guest";
       }
+      if (!req.body.date) {
+        const now = new Date();
+        req.body.date = now.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      }
       const payment = await storage.createPayment(req.body);
 
       try {
