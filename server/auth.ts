@@ -43,7 +43,15 @@ export function setupAuth(app: Express) {
         tableName: "sessions",
         createTableIfMissing: true,
       }),
-      secret: process.env.SESSION_SECRET || "maran-suite-secret-key",
+      secret: (() => {
+        if (!process.env.SESSION_SECRET) {
+          if (process.env.NODE_ENV === "production") {
+            throw new Error("SESSION_SECRET es obligatorio en producción");
+          }
+          console.warn("⚠️  SESSION_SECRET no definido — usando clave de desarrollo. NO usar en producción.");
+        }
+        return process.env.SESSION_SECRET || "dev-only-maran-secret-do-not-use-in-prod";
+      })(),
       resave: false,
       saveUninitialized: false,
       cookie: {

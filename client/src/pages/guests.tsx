@@ -532,6 +532,9 @@ export default function GuestsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       toast({ title: "Huésped eliminado", description: "El huésped ha sido eliminado del sistema." });
     },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo eliminar el huésped", variant: "destructive" });
+    },
   });
 
   const filteredGuests = guests?.filter((guest) => {

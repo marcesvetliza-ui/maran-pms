@@ -5,8 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileCode, FolderOpen, Search, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function SourceCodePage() {
+  const { user } = useAuth();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [copied, setCopied] = useState(false);
@@ -49,6 +51,14 @@ export default function SourceCodePage() {
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  if (user?.role !== "admin") {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-muted-foreground">Acceso restringido a administradores.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">

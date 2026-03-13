@@ -40,6 +40,7 @@ import {
   Smartphone,
   Bot,
 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Sidebar,
   SidebarContent,
@@ -130,9 +131,9 @@ const menuSections = [
   {
     titulo: "Configuración",
     items: [
-      { label: "Configuración",          icon: Settings, href: "/settings"        },
+      { label: "Configuración",          icon: Settings, href: "/administration"  },
       { label: "Administración sistema", icon: Shield,   href: "/administration"  },
-      { label: "Código fuente",          icon: Code2,    href: "/source-code"     },
+      { label: "Código fuente",          icon: Code2,    href: "/source-code",     adminOnly: true },
     ],
   },
 ];
@@ -332,6 +333,7 @@ function TurnoAlert() {
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { user } = useAuth();
 
   return (
     <Sidebar>
@@ -357,7 +359,7 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {section.items.map((item) => {
+                {section.items.filter(item => !(item as any).adminOnly || user?.role === "admin").map((item) => {
                   const isActive =
                     item.href === "/"
                       ? location === "/"

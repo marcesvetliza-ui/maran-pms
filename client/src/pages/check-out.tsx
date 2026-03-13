@@ -125,6 +125,9 @@ export default function CheckOutPage() {
       setNewChargeAmount("");
       toast({ title: "Cargo agregado" });
     },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo agregar el cargo", variant: "destructive" });
+    },
   });
 
   const addPaymentMutation = useMutation({

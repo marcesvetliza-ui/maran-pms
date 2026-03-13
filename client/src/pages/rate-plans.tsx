@@ -303,6 +303,9 @@ export default function RatePlansPage() {
         description: "El plan tarifario ha sido eliminado del sistema." 
       });
     },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo eliminar el plan tarifario", variant: "destructive" });
+    },
   });
 
   const filteredRatePlans = ratePlans?.filter((plan) => {

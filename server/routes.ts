@@ -67,6 +67,9 @@ export async function registerRoutes(
   });
 
   app.post("/api/auth/setup", async (req, res) => {
+    if (process.env.NODE_ENV === "production") {
+      return res.status(404).json({ message: "Not found" });
+    }
     try {
       const allUsers = await db.select().from(systemUsers);
       const anyUserWithPassword = allUsers.some(u => u.password !== null);
@@ -1704,7 +1707,9 @@ export async function registerRoutes(
           cashMethod, String(req.body.amount), "income",
           undefined, req.body.receiptType
         );
-      } catch (e) {}
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
 
       res.status(201).json(payment);
     } catch (error) {
@@ -2847,7 +2852,9 @@ Only respond with the JSON object.`;
           String(finalTotal.toFixed(2)), "income",
           undefined, receiptType
         );
-      } catch (e) {}
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
 
       res.json(updatedOrder);
     } catch (error) {
@@ -2899,14 +2906,15 @@ Only respond with the JSON object.`;
         status: itemStatus,
       });
       
-      // Update order totals
+      // Update order totals — precio del menú ya incluye IVA, se desglosa
       const orderItems = await storage.getOrderItems(req.params.orderId);
-      const newSubtotal = orderItems.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
-      const tax = newSubtotal * 0.21; // 21% IVA
+      const total = orderItems.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
+      const neto = parseFloat((total / 1.21).toFixed(2));
+      const tax = parseFloat((total - neto).toFixed(2));
       await storage.updateRestaurantOrder(req.params.orderId, {
-        subtotal: newSubtotal.toFixed(2),
+        subtotal: neto.toFixed(2),
         tax: tax.toFixed(2),
-        total: (newSubtotal + tax).toFixed(2),
+        total: total.toFixed(2),
         status: "in_progress",
       });
       
@@ -2959,14 +2967,15 @@ Only respond with the JSON object.`;
     try {
       await storage.deleteOrderItem(req.params.itemId);
       
-      // Recalculate order totals
+      // Recalculate order totals — precio del menú ya incluye IVA, se desglosa
       const orderItems = await storage.getOrderItems(req.params.orderId);
-      const newSubtotal = orderItems.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
-      const tax = newSubtotal * 0.21;
+      const total = orderItems.reduce((sum, i) => sum + parseFloat(i.subtotal), 0);
+      const neto = parseFloat((total / 1.21).toFixed(2));
+      const tax = parseFloat((total - neto).toFixed(2));
       await storage.updateRestaurantOrder(req.params.orderId, {
-        subtotal: newSubtotal.toFixed(2),
+        subtotal: neto.toFixed(2),
         tax: tax.toFixed(2),
-        total: (newSubtotal + tax).toFixed(2),
+        total: total.toFixed(2),
       });
       
       res.status(204).send();
@@ -3925,7 +3934,9 @@ Only respond with the JSON object.`;
           "spa", "spa_account", req.params.id, label,
           method, String(amount), "income"
         );
-      } catch (e) {}
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
 
       res.status(201).json(payment);
     } catch (error) {
@@ -4382,7 +4393,9 @@ Only respond with the JSON object.`;
           "events", "event", req.params.eventId, label,
           method, String(amount), "income"
         );
-      } catch (e) {}
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
 
       res.status(201).json(payment);
     } catch (error) {
@@ -4599,7 +4612,9 @@ Only respond with the JSON object.`;
           "events", "event", req.params.eventId, label,
           method, String(amount), "income"
         );
-      } catch (e) {}
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
 
       res.status(201).json(payment);
     } catch (error) {

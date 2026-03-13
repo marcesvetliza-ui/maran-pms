@@ -141,6 +141,9 @@ export default function InventoryPage() {
       setIsNewItemDialogOpen(false);
       toast({ title: "Articulo creado" });
     },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo crear el artículo", variant: "destructive" });
+    },
   });
 
   const createMovementMutation = useMutation({
