@@ -58,6 +58,7 @@ Preferred communication style: Simple, everyday language.
 - **Event Module Enhancements**: Renamed "Salón Mirador" to "Salón Solárium". Price labels include "(con IVA incluido)". New PDF exports for internal "Hoja de Función" and client "Confirmación" with pricing and signature space.
 - **Planning UX Improvements**: Collapsible header, natural page scroll, consistent color definitions for statuses, improved room status icons (dirty/cleaning/inspected/maintenance), blocked clicks on maintenance cells, correct date handling, and advanced filtering options.
 - **Contable Exportaciones**: Consolidated accounting exports including SIRCAR (ZIP), IIBB Retentions (PDF), IVA Purchase/Sales Books (Excel/TXT), Account Ledger (PDF), Payment Order (PDF), Withholding Tax Certificate (PDF), and Supplier Current Account (PDF). Frontend includes a dedicated section for these queries and exports.
+- **Folio Grupal**: New "Folio Grupal" tab in the group detail view. Includes two new DB tables: `group_charges` and `group_payments`. Backend provides GET folio, POST/DELETE charges, GET/POST payments (v2 with distribution), and transfer-charge endpoints. Frontend shows financial summary (accommodation, extras, group charges, received payments, balance), group charges table with add/delete, per-room breakdown, registered group payments list, and dialogs for adding charges and registering payments with 4 distribution modes (equal, proportional_nights, proportional_rate, manual).
 
 ## External Dependencies
 

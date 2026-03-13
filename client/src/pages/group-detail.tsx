@@ -75,6 +75,8 @@ import type {
   RatePlan,
   RoomWithType,
   ReservationWithDetails,
+  GroupFolioData,
+  GroupCharge,
 } from "@shared/schema";
 
 function GroupStatusBadge({ status }: { status: GroupStatus }) {
@@ -528,8 +530,32 @@ export default function GroupDetailPage() {
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
 
+  // Folio Grupal state
+  const [showAddGroupChargeDialog, setShowAddGroupChargeDialog] = useState(false);
+  const [showFolioPaymentDialog, setShowFolioPaymentDialog] = useState(false);
+  const [folioChargeDescription, setFolioChargeDescription] = useState("");
+  const [folioChargeAmount, setFolioChargeAmount] = useState("");
+  const [folioChargeDate, setFolioChargeDate] = useState(new Date().toISOString().split("T")[0]);
+  const [folioChargeCategory, setFolioChargeCategory] = useState("otros");
+  const [folioPaymentAmount, setFolioPaymentAmount] = useState("");
+  const [folioPaymentMethod, setFolioPaymentMethod] = useState("");
+  const [folioPaymentDistribution, setFolioPaymentDistribution] = useState("equal");
+  const [folioPaymentReference, setFolioPaymentReference] = useState("");
+  const [folioPaymentNotes, setFolioPaymentNotes] = useState("");
+  const [manualDistribution, setManualDistribution] = useState<Record<string, number>>({});
+  const [transferChargeTarget, setTransferChargeTarget] = useState<GroupCharge | null>(null);
+
   const { data: group, isLoading } = useQuery<GroupWithDetails>({
     queryKey: ["/api/groups", groupId],
+  });
+
+  const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
+    queryKey: ["/api/groups", groupId, "folio"],
+    queryFn: async () => {
+      const res = await fetch(`/api/groups/${groupId}/folio`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error loading folio");
+      return res.json();
+    },
   });
 
   const deleteBlockMutation = useMutation({
@@ -633,6 +659,70 @@ export default function GroupDetailPage() {
     onError: () => {
       toast({ title: "Error al registrar pago grupal", variant: "destructive" });
     },
+  });
+
+  // Folio mutations
+  const addGroupChargeMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/groups/${groupId}/charges`, {
+      description: folioChargeDescription,
+      amount: folioChargeAmount,
+      date: folioChargeDate,
+      category: folioChargeCategory,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      toast({ title: "Cargo agregado al folio grupal" });
+      setShowAddGroupChargeDialog(false);
+      setFolioChargeDescription("");
+      setFolioChargeAmount("");
+      setFolioChargeDate(new Date().toISOString().split("T")[0]);
+      setFolioChargeCategory("otros");
+    },
+    onError: () => toast({ title: "Error al agregar cargo", variant: "destructive" }),
+  });
+
+  const deleteGroupChargeMutation = useMutation({
+    mutationFn: (chargeId: string) => apiRequest("DELETE", `/api/groups/${groupId}/charges/${chargeId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      toast({ title: "Cargo eliminado" });
+    },
+    onError: () => toast({ title: "Error al eliminar cargo", variant: "destructive" }),
+  });
+
+  const folioPaymentMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/groups/${groupId}/payment/v2`, {
+      amount: folioPaymentAmount,
+      method: folioPaymentMethod,
+      reference: folioPaymentReference,
+      distribution: folioPaymentDistribution,
+      distributionDetail: folioPaymentDistribution === "manual" ? manualDistribution : undefined,
+      notes: folioPaymentNotes,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      toast({ title: "Pago grupal registrado" });
+      setShowFolioPaymentDialog(false);
+      setFolioPaymentAmount("");
+      setFolioPaymentMethod("");
+      setFolioPaymentReference("");
+      setFolioPaymentNotes("");
+      setFolioPaymentDistribution("equal");
+      setManualDistribution({});
+    },
+    onError: () => toast({ title: "Error al registrar pago", variant: "destructive" }),
+  });
+
+  const transferChargeMutation = useMutation({
+    mutationFn: ({ chargeId }: { chargeId: string }) =>
+      apiRequest("POST", `/api/groups/${groupId}/transfer-charge`, { chargeId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      toast({ title: "Cargo transferido al folio grupal" });
+      setTransferChargeTarget(null);
+    },
+    onError: () => toast({ title: "Error al transferir cargo", variant: "destructive" }),
   });
 
   const loadInvoice = async () => {
@@ -951,6 +1041,10 @@ export default function GroupDetailPage() {
             <Users2 className="mr-2 h-4 w-4" />
             Reservas ({group.reservations.length})
           </TabsTrigger>
+          <TabsTrigger value="folio" data-testid="tab-folio">
+            <DollarSign className="mr-2 h-4 w-4" />
+            Folio Grupal
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="blocks" className="mt-4">
@@ -1089,6 +1183,227 @@ export default function GroupDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ─── FOLIO GRUPAL ─── */}
+        <TabsContent value="folio" className="mt-4">
+          {folioLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : folio ? (
+            <div className="space-y-4">
+
+              {/* Resumen financiero */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Resumen Financiero del Grupo</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Alojamiento</p>
+                      <p className="font-semibold text-lg" data-testid="folio-accommodation">
+                        ${folio.totals.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Cargos extras</p>
+                      <p className="font-semibold text-lg" data-testid="folio-extras">
+                        ${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Cargos grupales</p>
+                      <p className="font-semibold text-lg" data-testid="folio-group-charges">
+                        ${folio.totals.groupCharges.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Pagos recibidos</p>
+                      <p className="font-semibold text-lg text-green-600" data-testid="folio-payments">
+                        ${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Saldo</p>
+                      <p className={`font-semibold text-lg ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`} data-testid="folio-balance">
+                        ${folio.totals.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Cargos del grupo */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-base">Cargos del Grupo</CardTitle>
+                  <Button size="sm" onClick={() => setShowAddGroupChargeDialog(true)} data-testid="button-add-group-charge">
+                    <Plus className="h-4 w-4 mr-1" /> Agregar cargo
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {folio.groupCharges.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Descripción</TableHead>
+                          <TableHead>Categoría</TableHead>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead className="text-right">Monto</TableHead>
+                          <TableHead className="w-[50px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {folio.groupCharges.map((gc) => (
+                          <TableRow key={gc.id} data-testid={`row-group-charge-${gc.id}`}>
+                            <TableCell className="font-medium">{gc.description}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{gc.category}</Badge>
+                            </TableCell>
+                            <TableCell className="text-sm">{new Date(gc.date).toLocaleDateString("es-AR")}</TableCell>
+                            <TableCell className="text-right font-medium">${parseFloat(gc.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => deleteGroupChargeMutation.mutate(gc.id)}
+                                disabled={deleteGroupChargeMutation.isPending}
+                                data-testid={`button-delete-group-charge-${gc.id}`}
+                              >
+                                <Trash2 className="h-3 w-3 text-destructive" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="bg-muted/30">
+                          <TableCell colSpan={3} className="font-semibold text-right">Total cargos grupales</TableCell>
+                          <TableCell className="text-right font-bold">${folio.groupChargesTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell />
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="text-center py-6 text-muted-foreground text-sm">
+                      No hay cargos directos al grupo. Use "Agregar cargo" para registrar servicios generales.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Desglose por habitación */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Desglose por Habitación</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {folio.reservations.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Hab.</TableHead>
+                          <TableHead>Huésped</TableHead>
+                          <TableHead className="text-right">Noches</TableHead>
+                          <TableHead className="text-right">Alojamiento</TableHead>
+                          <TableHead className="text-right">Extras</TableHead>
+                          <TableHead className="text-right">Pagos</TableHead>
+                          <TableHead className="text-right">Saldo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {folio.reservations.map((r) => (
+                          <TableRow key={r.reservationId} data-testid={`row-folio-res-${r.reservationId}`}>
+                            <TableCell className="font-bold">{r.roomNumber}</TableCell>
+                            <TableCell>{r.guestName || "-"}</TableCell>
+                            <TableCell className="text-right">{r.nights}</TableCell>
+                            <TableCell className="text-right">${r.accommodationTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell className="text-right">${r.extrasTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell className="text-right text-green-600">${r.paymentsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell className={`text-right font-semibold ${r.balance > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                              ${r.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="bg-muted/30 font-semibold">
+                          <TableCell colSpan={3} className="text-right">Totales</TableCell>
+                          <TableCell className="text-right">${folio.totals.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell className="text-right">${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell className="text-right text-green-600">${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell className={`text-right ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                            ${folio.totals.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="text-center py-6 text-muted-foreground text-sm">
+                      No hay reservas asignadas a este grupo.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Pagos grupales */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-base">Pagos Registrados</CardTitle>
+                  <Button size="sm" onClick={() => setShowFolioPaymentDialog(true)} data-testid="button-folio-payment">
+                    <CreditCard className="h-4 w-4 mr-1" /> Registrar pago
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {folio.groupPayments.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead>Método</TableHead>
+                          <TableHead>Distribución</TableHead>
+                          <TableHead>Referencia</TableHead>
+                          <TableHead className="text-right">Monto</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {folio.groupPayments.map((gp) => (
+                          <TableRow key={gp.id} data-testid={`row-group-payment-${gp.id}`}>
+                            <TableCell className="text-sm">{new Date(gp.date).toLocaleDateString("es-AR")}</TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">{gp.method}</Badge>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {gp.distribution === "equal" ? "Partes iguales" :
+                               gp.distribution === "proportional_nights" ? "Prop. noches" :
+                               gp.distribution === "proportional_rate" ? "Prop. tarifa" :
+                               "Manual"}
+                            </TableCell>
+                            <TableCell className="text-sm">{gp.reference || "-"}</TableCell>
+                            <TableCell className="text-right font-semibold text-green-600">
+                              ${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="bg-muted/30">
+                          <TableCell colSpan={4} className="font-semibold text-right">Total pagos grupales</TableCell>
+                          <TableCell className="text-right font-bold text-green-600">
+                            ${folio.groupPaymentsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="text-center py-6 text-muted-foreground text-sm">
+                      No hay pagos grupales registrados.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">Error cargando folio grupal.</div>
+          )}
+        </TabsContent>
+
       </Tabs>
 
       {group && (
@@ -1568,6 +1883,222 @@ export default function GroupDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ─── Dialog: Agregar cargo al folio grupal ─── */}
+      <Dialog open={showAddGroupChargeDialog} onOpenChange={setShowAddGroupChargeDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Agregar Cargo al Folio Grupal</DialogTitle>
+            <DialogDescription>
+              Este cargo se aplicará directamente al grupo, no a una reserva individual.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Descripción *</Label>
+              <Input
+                value={folioChargeDescription}
+                onChange={(e) => setFolioChargeDescription(e.target.value)}
+                placeholder="Ej: Salón de eventos, Decoración..."
+                data-testid="input-folio-charge-description"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Monto *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={folioChargeAmount}
+                  onChange={(e) => setFolioChargeAmount(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="input-folio-charge-amount"
+                />
+              </div>
+              <div>
+                <Label>Fecha *</Label>
+                <Input
+                  type="date"
+                  value={folioChargeDate}
+                  onChange={(e) => setFolioChargeDate(e.target.value)}
+                  data-testid="input-folio-charge-date"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Categoría</Label>
+              <Select value={folioChargeCategory} onValueChange={setFolioChargeCategory}>
+                <SelectTrigger data-testid="select-folio-charge-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="otros">Otros</SelectItem>
+                  <SelectItem value="alimentos">Alimentos</SelectItem>
+                  <SelectItem value="bebidas">Bebidas</SelectItem>
+                  <SelectItem value="eventos">Eventos</SelectItem>
+                  <SelectItem value="transporte">Transporte</SelectItem>
+                  <SelectItem value="spa">SPA</SelectItem>
+                  <SelectItem value="lavanderia">Lavandería</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddGroupChargeDialog(false)}>Cancelar</Button>
+            <Button
+              onClick={() => addGroupChargeMutation.mutate()}
+              disabled={!folioChargeDescription || !folioChargeAmount || addGroupChargeMutation.isPending}
+              data-testid="button-confirm-group-charge"
+            >
+              {addGroupChargeMutation.isPending ? "Guardando..." : "Agregar Cargo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Dialog: Pago desde Folio Grupal ─── */}
+      <Dialog open={showFolioPaymentDialog} onOpenChange={setShowFolioPaymentDialog}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Registrar Pago Grupal
+            </DialogTitle>
+            <DialogDescription>
+              El pago se distribuirá entre las reservas activas y quedará registrado en el folio.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Monto Total *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={folioPaymentAmount}
+                  onChange={(e) => setFolioPaymentAmount(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="input-folio-payment-amount"
+                />
+              </div>
+              <div>
+                <Label>Método *</Label>
+                <Select value={folioPaymentMethod} onValueChange={setFolioPaymentMethod}>
+                  <SelectTrigger data-testid="select-folio-payment-method">
+                    <SelectValue placeholder="Seleccionar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="efectivo">Efectivo</SelectItem>
+                    <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                    <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                    <SelectItem value="transferencia">Transferencia</SelectItem>
+                    <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div>
+              <Label>Distribución</Label>
+              <Select value={folioPaymentDistribution} onValueChange={setFolioPaymentDistribution}>
+                <SelectTrigger data-testid="select-folio-payment-distribution">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="equal">Partes iguales</SelectItem>
+                  <SelectItem value="proportional_nights">Proporcional por noches</SelectItem>
+                  <SelectItem value="proportional_rate">Proporcional por tarifa</SelectItem>
+                  <SelectItem value="manual">Manual (asignar por habitación)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {folioPaymentDistribution === "manual" && folio && (
+              <div className="space-y-2 rounded-md border p-3 bg-muted/30">
+                <Label>Asignación manual</Label>
+                {folio.reservations.map((res) => (
+                  <div key={res.reservationId} className="flex items-center gap-2">
+                    <span className="text-sm w-28 shrink-0">Hab. {res.roomNumber}</span>
+                    <span className="text-xs text-muted-foreground w-24 truncate">{res.guestName}</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={manualDistribution[res.reservationId] || ""}
+                      onChange={(e) => setManualDistribution({
+                        ...manualDistribution,
+                        [res.reservationId]: parseFloat(e.target.value) || 0,
+                      })}
+                      className="w-28"
+                      placeholder="0.00"
+                    />
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Asignado: ${Object.values(manualDistribution).reduce((a, b) => a + b, 0).toFixed(2)}
+                  {" / "}Total: ${folioPaymentAmount || "0"}
+                </p>
+              </div>
+            )}
+
+            <div>
+              <Label>Referencia</Label>
+              <Input
+                value={folioPaymentReference}
+                onChange={(e) => setFolioPaymentReference(e.target.value)}
+                placeholder="N° de comprobante..."
+                data-testid="input-folio-payment-reference"
+              />
+            </div>
+            <div>
+              <Label>Notas</Label>
+              <Input
+                value={folioPaymentNotes}
+                onChange={(e) => setFolioPaymentNotes(e.target.value)}
+                placeholder="Observaciones opcionales..."
+                data-testid="input-folio-payment-notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowFolioPaymentDialog(false)}>Cancelar</Button>
+            <Button
+              onClick={() => folioPaymentMutation.mutate()}
+              disabled={!folioPaymentAmount || !folioPaymentMethod || folioPaymentMutation.isPending}
+              data-testid="button-confirm-folio-payment"
+            >
+              <CreditCard className="mr-2 h-4 w-4" />
+              {folioPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Confirm: Transferir cargo al folio grupal ─── */}
+      <AlertDialog open={!!transferChargeTarget} onOpenChange={(open) => !open && setTransferChargeTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Transferir cargo al folio grupal</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Mover el cargo "{transferChargeTarget?.description}" (${parseFloat(transferChargeTarget?.amount || "0").toFixed(2)}) al folio del grupo?
+              Se creará una copia en el folio grupal.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => transferChargeTarget && transferChargeMutation.mutate({ chargeId: transferChargeTarget.id })}
+              disabled={transferChargeMutation.isPending}
+              data-testid="button-confirm-transfer-charge"
+            >
+              {transferChargeMutation.isPending ? "Transfiriendo..." : "Transferir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }

@@ -28,6 +28,9 @@ import {
   type GroupRoomBlock, type InsertGroupRoomBlock,
   type GroupReservationLink, type InsertGroupReservationLink,
   type GroupWithDetails, type GroupRoomBlockWithDetails,
+  type GroupCharge, type InsertGroupCharge,
+  type GroupPayment, type InsertGroupPayment,
+  type GroupFolioData,
   type GuestReview, type InsertGuestReview, type GuestReviewWithDetails, type SentimentType,
   type HousekeepingTask, type InsertHousekeepingTask, type HousekeepingTaskWithRoom,
   type RestaurantArea, type InsertRestaurantArea,
@@ -84,7 +87,7 @@ import {
   users, rooms, roomTypes, ratePlans, companies, agencies, guests, bedTypes,
   reservations, charges, payments, cancelledReservationLogs,
   otaChannels, otaReservationLogs,
-  groups, groupRoomBlocks, groupReservationLinks,
+  groups, groupRoomBlocks, groupReservationLinks, groupCharges, groupPayments,
   guestReviews, housekeepingTasks,
   restaurantAreas, restaurantTables, menuCategories, menuItems,
   restaurantOrders, orderItems, tableReservations, restaurantTimeSlots,
@@ -1146,6 +1149,137 @@ export class DatabaseStorage implements IStorage {
     });
 
     return reservation;
+  }
+
+  // ─── Group Folio (Cargos y Pagos Grupales) ───────────────────────────────
+
+  async createGroupCharge(charge: InsertGroupCharge): Promise<GroupCharge> {
+    const [created] = await db.insert(groupCharges).values(charge as any).returning();
+    return created;
+  }
+
+  async getGroupCharges(groupId: string): Promise<GroupCharge[]> {
+    return db.select().from(groupCharges).where(eq(groupCharges.groupId, groupId)).orderBy(desc(groupCharges.createdAt));
+  }
+
+  async deleteGroupCharge(id: string): Promise<boolean> {
+    const result = await db.delete(groupCharges).where(eq(groupCharges.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async createGroupPayment(payment: InsertGroupPayment): Promise<GroupPayment> {
+    const [created] = await db.insert(groupPayments).values(payment as any).returning();
+    return created;
+  }
+
+  async getGroupPayments(groupId: string): Promise<GroupPayment[]> {
+    return db.select().from(groupPayments).where(eq(groupPayments.groupId, groupId)).orderBy(desc(groupPayments.createdAt));
+  }
+
+  async transferChargeToGroup(chargeId: string, groupId: string): Promise<GroupCharge> {
+    const [srcCharge] = await db.select().from(charges).where(eq(charges.id, chargeId));
+    if (!srcCharge) throw new Error("Cargo no encontrado");
+    const [created] = await db.insert(groupCharges).values({
+      groupId,
+      description: `[Transferido] ${srcCharge.description}`,
+      amount: srcCharge.amount,
+      date: srcCharge.date,
+      category: srcCharge.category,
+      billingTarget: "group",
+      reservationId: srcCharge.reservationId,
+      createdBy: srcCharge.createdBy,
+    } as any).returning();
+    return created;
+  }
+
+  async getGroupFolio(groupId: string): Promise<GroupFolioData> {
+    const group = await this.getGroup(groupId);
+    if (!group) throw new Error("Grupo no encontrado");
+
+    const gCharges = await this.getGroupCharges(groupId);
+    const gPayments = await this.getGroupPayments(groupId);
+
+    const groupChargesTotal = gCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
+    const groupPaymentsTotal = gPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+
+    let accommodationTotal = 0;
+    let extrasTotal = 0;
+    let indivPaymentsTotal = 0;
+
+    const resRows = await Promise.all(group.reservations.map(async (res) => {
+      const resCharges = await this.getCharges(res.id);
+      const resPayments = await this.getPayments(res.id);
+      const accTotal = parseFloat(res.totalRoomAmount || "0");
+      const extTotal = resCharges.filter(c => c.status !== "anulado").reduce((s, c) => s + parseFloat(c.amount), 0);
+      const payTotal = resPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+      const nights = res.nights || 0;
+
+      accommodationTotal += accTotal;
+      extrasTotal += extTotal;
+      indivPaymentsTotal += payTotal;
+
+      return {
+        reservationId: res.id,
+        guestName: `${res.guest?.firstName || ""} ${res.guest?.lastName || ""}`.trim(),
+        roomNumber: res.room?.roomNumber || "-",
+        nights,
+        accommodationTotal: accTotal,
+        extrasTotal: extTotal,
+        paymentsTotal: payTotal,
+        balance: accTotal + extTotal - payTotal,
+      };
+    }));
+
+    const totalPayments = indivPaymentsTotal + groupPaymentsTotal;
+    const balance = accommodationTotal + extrasTotal + groupChargesTotal - totalPayments;
+
+    return {
+      group,
+      groupCharges: gCharges,
+      groupChargesTotal,
+      reservations: resRows,
+      groupPayments: gPayments,
+      groupPaymentsTotal,
+      totals: {
+        accommodation: accommodationTotal,
+        groupCharges: groupChargesTotal,
+        extras: extrasTotal,
+        payments: totalPayments,
+        balance,
+      },
+    };
+  }
+
+  async distributeGroupPayment(
+    groupId: string,
+    totalAmount: number,
+    distribution: string,
+    manualDetail?: Record<string, number>
+  ): Promise<Record<string, number>> {
+    const group = await this.getGroup(groupId);
+    if (!group) return {};
+    const activeRes = group.reservations.filter(r =>
+      r.status === "confirmed" || r.status === "checked_in"
+    );
+    if (activeRes.length === 0) return {};
+
+    if (distribution === "equal") {
+      const perRoom = totalAmount / activeRes.length;
+      return Object.fromEntries(activeRes.map(r => [r.id, perRoom]));
+    }
+    if (distribution === "proportional_nights") {
+      const totalNights = activeRes.reduce((s, r) => s + (r.nights || 1), 0);
+      return Object.fromEntries(activeRes.map(r => [r.id, totalAmount * ((r.nights || 1) / totalNights)]));
+    }
+    if (distribution === "proportional_rate") {
+      const totalCost = activeRes.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
+      return Object.fromEntries(activeRes.map(r => [r.id, totalAmount * (parseFloat(r.totalRoomAmount || "0") / (totalCost || 1))]));
+    }
+    if (distribution === "manual" && manualDetail) {
+      return manualDetail;
+    }
+    const perRoom = totalAmount / activeRes.length;
+    return Object.fromEntries(activeRes.map(r => [r.id, perRoom]));
   }
 
   async getGuestReviews(): Promise<GuestReviewWithDetails[]> {

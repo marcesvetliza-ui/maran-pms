@@ -45,6 +45,11 @@ import {
   type InsertGroupReservationLink,
   type GroupWithDetails,
   type GroupRoomBlockWithDetails,
+  type GroupCharge,
+  type InsertGroupCharge,
+  type GroupPayment,
+  type InsertGroupPayment,
+  type GroupFolioData,
   type GuestReview,
   type InsertGuestReview,
   type GuestReviewWithDetails,
@@ -346,6 +351,16 @@ export interface IStorage {
       ratePlanId?: string | null;
     }
   ): Promise<Reservation | undefined>;
+
+  // Group Folio
+  createGroupCharge(charge: InsertGroupCharge): Promise<GroupCharge>;
+  getGroupCharges(groupId: string): Promise<GroupCharge[]>;
+  deleteGroupCharge(id: string): Promise<boolean>;
+  createGroupPayment(payment: InsertGroupPayment): Promise<GroupPayment>;
+  getGroupPayments(groupId: string): Promise<GroupPayment[]>;
+  transferChargeToGroup(chargeId: string, groupId: string): Promise<GroupCharge>;
+  getGroupFolio(groupId: string): Promise<GroupFolioData>;
+  distributeGroupPayment(groupId: string, totalAmount: number, distribution: string, manualDetail?: Record<string, number>): Promise<Record<string, number>>;
 
   // Guest Reviews
   getGuestReviews(): Promise<GuestReviewWithDetails[]>;
@@ -2605,6 +2620,16 @@ export class MemStorage implements IStorage {
 
     return reservation;
   }
+
+  // Group Folio stubs (MemStorage — production uses DatabaseStorage)
+  async createGroupCharge(_charge: InsertGroupCharge): Promise<GroupCharge> { throw new Error("Not implemented in MemStorage"); }
+  async getGroupCharges(_groupId: string): Promise<GroupCharge[]> { return []; }
+  async deleteGroupCharge(_id: string): Promise<boolean> { return false; }
+  async createGroupPayment(_payment: InsertGroupPayment): Promise<GroupPayment> { throw new Error("Not implemented in MemStorage"); }
+  async getGroupPayments(_groupId: string): Promise<GroupPayment[]> { return []; }
+  async transferChargeToGroup(_chargeId: string, _groupId: string): Promise<GroupCharge> { throw new Error("Not implemented in MemStorage"); }
+  async getGroupFolio(_groupId: string): Promise<GroupFolioData> { throw new Error("Not implemented in MemStorage"); }
+  async distributeGroupPayment(_groupId: string, totalAmount: number, distribution: string, _manualDetail?: Record<string, number>): Promise<Record<string, number>> { return {}; }
 
   // Guest Reviews
   private enrichReview(review: GuestReview): GuestReviewWithDetails {

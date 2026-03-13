@@ -2326,6 +2326,123 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Group Folio endpoints ──────────────────────────────────────────────
+
+  app.get("/api/groups/:groupId/folio", requireAuth, async (req, res) => {
+    try {
+      const folio = await storage.getGroupFolio(req.params.groupId);
+      res.json(folio);
+    } catch (error: any) {
+      if (error.message === "Grupo no encontrado") return res.status(404).json({ error: error.message });
+      res.status(500).json({ error: "Error al obtener folio grupal" });
+    }
+  });
+
+  app.post("/api/groups/:groupId/charges", requireAuth, async (req, res) => {
+    try {
+      const { description, amount, date, category } = req.body;
+      if (!description || !amount || !date) {
+        return res.status(400).json({ error: "description, amount y date son requeridos" });
+      }
+      const charge = await storage.createGroupCharge({
+        groupId: req.params.groupId,
+        description,
+        amount: parseFloat(amount).toFixed(2),
+        date,
+        category: category || "otros",
+        billingTarget: "group",
+        reservationId: null,
+        createdBy: (req.user as any)?.username || null,
+      });
+      res.json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error al crear cargo grupal" });
+    }
+  });
+
+  app.delete("/api/groups/:groupId/charges/:chargeId", requireAuth, async (req, res) => {
+    try {
+      const ok = await storage.deleteGroupCharge(req.params.chargeId);
+      if (!ok) return res.status(404).json({ error: "Cargo no encontrado" });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error al eliminar cargo grupal" });
+    }
+  });
+
+  app.get("/api/groups/:groupId/payments", requireAuth, async (req, res) => {
+    try {
+      const payments = await storage.getGroupPayments(req.params.groupId);
+      res.json(payments);
+    } catch (error) {
+      res.status(500).json({ error: "Error al obtener pagos grupales" });
+    }
+  });
+
+  app.post("/api/groups/:groupId/payment/v2", requireAuth, async (req, res) => {
+    try {
+      const { amount, method, date, reference, distribution, distributionDetail, notes } = req.body;
+      if (!amount || !method) {
+        return res.status(400).json({ error: "amount y method son requeridos" });
+      }
+      const totalAmount = parseFloat(amount);
+      if (totalAmount <= 0) return res.status(400).json({ error: "El monto debe ser positivo" });
+
+      const paymentDate = date || new Date().toISOString().split("T")[0];
+      const distrib = distribution || "equal";
+
+      // Calculate distribution
+      const detail = await storage.distributeGroupPayment(
+        req.params.groupId,
+        totalAmount,
+        distrib,
+        distributionDetail
+      );
+
+      // Save group payment record (audit)
+      const groupPayment = await storage.createGroupPayment({
+        groupId: req.params.groupId,
+        amount: totalAmount.toFixed(2),
+        method,
+        date: paymentDate,
+        reference: reference || null,
+        distribution: distrib,
+        distributionDetail: detail,
+        receivedBy: (req.user as any)?.username || null,
+        notes: notes || null,
+      });
+
+      // Apply payments to individual reservations to maintain compatibility
+      for (const [reservationId, amt] of Object.entries(detail)) {
+        if (amt > 0) {
+          await storage.createPayment({
+            reservationId,
+            amount: (amt as number).toFixed(2),
+            method,
+            reference: reference || `Pago grupal`,
+            date: paymentDate,
+          });
+        }
+      }
+
+      res.json({ success: true, groupPayment, distributed: Object.keys(detail).length });
+    } catch (error) {
+      res.status(500).json({ error: "Error al registrar pago grupal" });
+    }
+  });
+
+  app.post("/api/groups/:groupId/transfer-charge", requireAuth, async (req, res) => {
+    try {
+      const { chargeId } = req.body;
+      if (!chargeId) return res.status(400).json({ error: "chargeId es requerido" });
+      const transferred = await storage.transferChargeToGroup(chargeId, req.params.groupId);
+      res.json(transferred);
+    } catch (error: any) {
+      if (error.message === "Cargo no encontrado") return res.status(404).json({ error: error.message });
+      res.status(500).json({ error: "Error al transferir cargo" });
+    }
+  });
+
   // Guest Reviews
   app.get("/api/reviews", async (req, res) => {
     try {

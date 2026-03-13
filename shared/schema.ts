@@ -495,6 +495,69 @@ export type GroupWithDetails = Group & {
   assignedRooms: number;
 };
 
+// Group Charges (Cargos del folio grupal)
+export const groupCharges = pgTable("group_charges", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupId: varchar("group_id").notNull(),
+  description: text("description").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  date: date("date").notNull(),
+  category: text("category").notNull().default("otros"),
+  billingTarget: text("billing_target").notNull().default("group"),
+  reservationId: varchar("reservation_id"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertGroupChargeSchema = createInsertSchema(groupCharges).omit({ id: true, createdAt: true });
+export type InsertGroupCharge = z.infer<typeof insertGroupChargeSchema>;
+export type GroupCharge = typeof groupCharges.$inferSelect;
+
+// Group Payments (Pagos del folio grupal)
+export const groupPayments = pgTable("group_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupId: varchar("group_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  method: text("method").notNull(),
+  date: date("date").notNull(),
+  reference: text("reference"),
+  distribution: text("distribution").notNull().default("equal"),
+  distributionDetail: jsonb("distribution_detail"),
+  receivedBy: varchar("received_by"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertGroupPaymentSchema = createInsertSchema(groupPayments).omit({ id: true, createdAt: true });
+export type InsertGroupPayment = z.infer<typeof insertGroupPaymentSchema>;
+export type GroupPayment = typeof groupPayments.$inferSelect;
+
+// Group Folio consolidated data type
+export type GroupFolioData = {
+  group: GroupWithDetails;
+  groupCharges: GroupCharge[];
+  groupChargesTotal: number;
+  reservations: Array<{
+    reservationId: string;
+    guestName: string;
+    roomNumber: string;
+    nights: number;
+    accommodationTotal: number;
+    extrasTotal: number;
+    paymentsTotal: number;
+    balance: number;
+  }>;
+  groupPayments: GroupPayment[];
+  groupPaymentsTotal: number;
+  totals: {
+    accommodation: number;
+    groupCharges: number;
+    extras: number;
+    payments: number;
+    balance: number;
+  };
+};
+
 // Guest Reviews with Sentiment Analysis
 export type SentimentType = "positive" | "neutral" | "negative";
 export type ReviewCategory = "service" | "cleanliness" | "location" | "amenities" | "value" | "food" | "staff" | "general";
