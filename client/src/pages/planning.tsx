@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -67,62 +67,29 @@ function formatDateReadable(dateStr: string) {
   return date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
 }
 
+export const PLANNING_COLORS: Record<PlanningCellStatus, { bg: string; text: string; label: string; border: string }> = {
+  available:      { bg: "bg-white dark:bg-zinc-900",              text: "text-zinc-400",                          label: "Disponible",       border: "border-zinc-200 dark:border-zinc-700" },
+  booked:         { bg: "bg-blue-100 dark:bg-blue-900/40",        text: "text-blue-800 dark:text-blue-200",       label: "Reservado",        border: "border-blue-200 dark:border-blue-700" },
+  checkin_today:  { bg: "bg-emerald-400 dark:bg-emerald-600",     text: "text-white",                             label: "Check-in hoy",     border: "border-emerald-500" },
+  checked_in:     { bg: "bg-emerald-200 dark:bg-emerald-800",     text: "text-emerald-900 dark:text-emerald-100", label: "Ocupado",          border: "border-emerald-300 dark:border-emerald-600" },
+  checkout_today: { bg: "bg-amber-300 dark:bg-amber-600",         text: "text-amber-900",                         label: "Check-out hoy",    border: "border-amber-400 dark:border-amber-500" },
+  maintenance:    { bg: "bg-red-200 dark:bg-red-900/50",          text: "text-red-800 dark:text-red-200",         label: "Mantenimiento",    border: "border-red-300 dark:border-red-700" },
+  cleaning:       { bg: "bg-yellow-100 dark:bg-yellow-900/40",    text: "text-yellow-800",                        label: "Limpieza",         border: "border-yellow-200 dark:border-yellow-700" },
+  dirty:          { bg: "bg-orange-100 dark:bg-orange-900/40",    text: "text-orange-800",                        label: "Sucia",            border: "border-orange-200 dark:border-orange-700" },
+  group_blocked:  { bg: "bg-violet-200 dark:bg-violet-800/50",    text: "text-violet-900 dark:text-violet-100",   label: "Grupo",            border: "border-violet-300 dark:border-violet-600" },
+  early_blocked:  { bg: "bg-sky-100 dark:bg-sky-900/30",          text: "text-sky-800",                           label: "Early check-in",   border: "border-sky-200 dark:border-sky-700 border-dashed" },
+  late_blocked:   { bg: "bg-pink-100 dark:bg-pink-900/30",        text: "text-pink-800",                          label: "Late check-out",   border: "border-pink-200 dark:border-pink-700 border-dashed" },
+  inspected:      { bg: "bg-green-50 dark:bg-green-900/20",       text: "text-green-700",                         label: "Inspeccionada",    border: "border-green-200 dark:border-green-700" },
+};
+
 function getStatusColor(status: PlanningCellStatus): string {
-  switch (status) {
-    case "available":
-      return "bg-green-100 dark:bg-green-900/30 border-green-200 dark:border-green-800";
-    case "booked":
-      return "bg-blue-100 dark:bg-blue-900/40 border-blue-200 dark:border-blue-800";
-    case "checked_in":
-      return "bg-amber-100 dark:bg-amber-900/40 border-amber-200 dark:border-amber-800";
-    case "checkout_today":
-      return "bg-orange-100 dark:bg-orange-900/40 border-orange-200 dark:border-orange-800";
-    case "maintenance":
-      return "bg-red-100 dark:bg-red-900/40 border-red-200 dark:border-red-800";
-    case "dirty":
-      return "bg-orange-200 dark:bg-orange-900/50 border-orange-400 dark:border-orange-700";
-    case "cleaning":
-      return "bg-yellow-100 dark:bg-yellow-900/40 border-yellow-200 dark:border-yellow-800";
-    case "group_blocked":
-      return "bg-indigo-100 dark:bg-indigo-900/40 border-indigo-200 dark:border-indigo-800";
-    case "checkin_today":
-      return "bg-teal-100 dark:bg-teal-900/40 border-teal-300 dark:border-teal-700";
-    case "early_blocked":
-      return "bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 border-dashed";
-    case "late_blocked":
-      return "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 border-dashed";
-    default:
-      return "bg-muted";
-  }
+  const c = PLANNING_COLORS[status];
+  if (!c) return "bg-muted border-border";
+  return `${c.bg} ${c.border}`;
 }
 
 function getStatusLabel(status: PlanningCellStatus): string {
-  switch (status) {
-    case "available":
-      return "Disponible";
-    case "booked":
-      return "Reservado";
-    case "checked_in":
-      return "Ocupado";
-    case "checkout_today":
-      return "Check-out hoy";
-    case "maintenance":
-      return "Mantenimiento";
-    case "dirty":
-      return "Sucia";
-    case "cleaning":
-      return "Limpieza";
-    case "group_blocked":
-      return "Grupo";
-    case "checkin_today":
-      return "Check-in hoy";
-    case "early_blocked":
-      return "Bloqueado (Early check-in)";
-    case "late_blocked":
-      return "Bloqueado (Late check-out)";
-    default:
-      return status;
-  }
+  return PLANNING_COLORS[status]?.label ?? status;
 }
 
 function getSourceColor(source: ReservationSource): string {
@@ -183,17 +150,11 @@ const bedConfigLabels: Record<string, string> = {
   MAT_CC_EXTRA: "Matrimonial + CC + Extra",
 };
 
-function Legend() {
-  const statusItems: { status: PlanningCellStatus; label: string }[] = [
-    { status: "available", label: "Disponible" },
-    { status: "checkin_today", label: "Check-in hoy" },
-    { status: "dirty", label: "Sucia" },
-    { status: "cleaning", label: "Limpieza" },
-    { status: "maintenance", label: "Mantenimiento" },
-    { status: "group_blocked", label: "Grupo bloq." },
-    { status: "early_blocked", label: "Early check-in" },
-    { status: "late_blocked", label: "Late check-out" },
-  ];
+function Legend({ activeStatuses }: { activeStatuses?: Set<PlanningCellStatus> }) {
+  const allStatuses = Object.entries(PLANNING_COLORS) as [PlanningCellStatus, typeof PLANNING_COLORS[PlanningCellStatus]][];
+  const visibleStatuses = allStatuses.filter(([status]) =>
+    !activeStatuses || activeStatuses.has(status) || status === "available"
+  );
 
   const sourceItems: { source: ReservationSource; label: string }[] = [
     { source: "directo", label: "Directo (tel / web / presencial)" },
@@ -205,10 +166,10 @@ function Legend() {
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs font-medium text-muted-foreground">Estado:</span>
-        {statusItems.map(({ status, label }) => (
+        {visibleStatuses.map(([status, c]) => (
           <div key={status} className="flex items-center gap-1.5">
-            <div className={`w-4 h-4 rounded border ${getStatusColor(status)}`} />
-            <span className="text-xs text-muted-foreground">{label}</span>
+            <div className={`w-4 h-4 rounded border ${c.bg} ${c.border}`} />
+            <span className="text-xs text-muted-foreground">{c.label}</span>
           </div>
         ))}
       </div>
@@ -1549,6 +1510,22 @@ export default function PlanningPage() {
   const [newReservationDefaults, setNewReservationDefaults] = useState<{ roomId?: string; roomTypeId?: string; checkInDate?: string } | null>(null);
 
   const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string } | null>(null);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+
+  type PlanningFilter = {
+    showEmpty: boolean;
+    showOccupied: boolean;
+    roomTypeIds: string[];
+    floorFilter: string;
+    statusFilter: PlanningCellStatus | "";
+  };
+  const [filters, setFilters] = useState<PlanningFilter>({
+    showEmpty: true,
+    showOccupied: true,
+    roomTypeIds: [],
+    floorFilter: "",
+    statusFilter: "",
+  });
 
   const updateBedConfigMutation = useMutation({
     mutationFn: async ({ roomId, bedConfig }: { roomId: string; bedConfig: string }) => {
@@ -1738,10 +1715,12 @@ export default function PlanningPage() {
 
   const goToDate = (date: Date | undefined) => {
     if (!date) return;
-    const start = new Date(date);
-    start.setDate(start.getDate() - 1);
-    const end = new Date(date);
-    end.setDate(end.getDate() + 14);
+    // Use local date values to avoid timezone offset issues
+    const y = date.getFullYear();
+    const m = date.getMonth();
+    const d = date.getDate();
+    const start = new Date(y, m, d - 1);
+    const end = new Date(y, m, d + 14);
     setDateRange({
       start: toArgentinaDateStr(start),
       end: toArgentinaDateStr(end),
@@ -1768,6 +1747,10 @@ export default function PlanningPage() {
 
   const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
     if (status === "early_blocked" || status === "late_blocked") return;
+    if (status === "maintenance") {
+      toast({ title: "Habitación en mantenimiento", description: "No se pueden crear reservas en esta habitación mientras está en mantenimiento.", variant: "destructive" });
+      return;
+    }
     if (status === "available") {
       setNewReservationDefaults({
         roomId: room.id,
@@ -1784,12 +1767,40 @@ export default function PlanningPage() {
     }
   };
 
-  const groupedRooms = data?.rooms.reduce((acc, room) => {
+  // Compute active statuses present in current view for Legend filtering
+  const activeStatuses = new Set<PlanningCellStatus>();
+  if (data) {
+    for (const roomOcc of Object.values(data.occupancy)) {
+      for (const s of roomOcc) activeStatuses.add(s);
+    }
+  }
+
+  // Available room types and floors for filter UI
+  const availableRoomTypes = data?.rooms
+    ? Array.from(new Map(data.rooms.map(r => [r.roomTypeId, r.roomType])).entries()).map(([id, rt]) => ({ id, name: rt?.name ?? id }))
+    : [];
+  const availableFloors = data?.rooms
+    ? Array.from(new Set(data.rooms.map(r => String(r.floor)))).sort((a, b) => Number(a) - Number(b))
+    : [];
+
+  // Apply filters to rooms
+  const filteredRooms = (data?.rooms ?? []).filter(room => {
+    if (filters.roomTypeIds.length > 0 && !filters.roomTypeIds.includes(room.roomTypeId)) return false;
+    if (filters.floorFilter && String(room.floor) !== filters.floorFilter) return false;
+    const roomOcc = data?.occupancy[room.id] ?? [];
+    const hasReservation = roomOcc.some(s => s !== "available" && s !== "dirty" && s !== "cleaning" && s !== "inspected");
+    if (!filters.showEmpty && !hasReservation) return false;
+    if (!filters.showOccupied && hasReservation) return false;
+    if (filters.statusFilter && !roomOcc.includes(filters.statusFilter as PlanningCellStatus)) return false;
+    return true;
+  });
+
+  const groupedRooms = filteredRooms.reduce((acc, room) => {
     const floor = room.floor;
     if (!acc[floor]) acc[floor] = [];
     acc[floor].push(room);
     return acc;
-  }, {} as Record<number, typeof data.rooms>) || {};
+  }, {} as Record<number, typeof filteredRooms>);
 
   const floors = Object.keys(groupedRooms).map(Number).sort((a, b) => a - b);
 
@@ -1803,105 +1814,162 @@ export default function PlanningPage() {
   });
 
   return (
-    <div ref={planningRef} className={`flex flex-col gap-4 p-6 h-full ${isFullscreen ? "bg-background overflow-auto" : ""}`}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight" data-testid="text-planning-title">
-            Planning de Ocupación
-          </h1>
-          <p className="text-muted-foreground">Vista de disponibilidad por habitación y fecha (15 días)</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => navigateDays("prev")}
-            data-testid="button-prev-week"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            onClick={goToToday}
-            data-testid="button-today"
-          >
-            Hoy
-          </Button>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" data-testid="button-date-picker">
-                <CalendarSearch className="h-4 w-4 mr-2" />
-                Ir a fecha
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
-              <CalendarPicker
-                mode="single"
-                selected={new Date(dateRange.start)}
-                onSelect={goToDate}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => navigateDays("next")}
-            data-testid="button-next-week"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={toggleFullscreen}
-            title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
-            data-testid="button-fullscreen-planning"
-          >
-            {isFullscreen ? (
-              <Minimize2 className="h-4 w-4" />
-            ) : (
-              <Maximize2 className="h-4 w-4" />
+    <div ref={planningRef} className={`flex flex-col gap-4 p-6 ${isFullscreen ? "bg-background overflow-auto" : ""}`}>
+      {/* ── HEADER ─────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3">
+        {/* Top bar: title + navigation + collapse button — always visible */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight" data-testid="text-planning-title">
+              Planning de Ocupación
+            </h1>
+            {!headerCollapsed && (
+              <p className="text-muted-foreground">Vista de disponibilidad por habitación y fecha (15 días)</p>
             )}
-          </Button>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="icon" onClick={() => navigateDays("prev")} data-testid="button-prev-week">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" onClick={goToToday} data-testid="button-today">Hoy</Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" data-testid="button-date-picker">
+                  <CalendarSearch className="h-4 w-4 mr-2" />
+                  Ir a fecha
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <CalendarPicker mode="single" selected={new Date(dateRange.start + "T12:00:00")} onSelect={goToDate} initialFocus />
+              </PopoverContent>
+            </Popover>
+            <Button variant="outline" size="icon" onClick={() => navigateDays("next")} data-testid="button-next-week">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+              data-testid="button-fullscreen-planning"
+            >
+              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setHeaderCollapsed(v => !v)}
+              title={headerCollapsed ? "Expandir panel" : "Minimizar panel"}
+              data-testid="button-toggle-header"
+            >
+              {headerCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
+
+        {/* Collapsable section */}
+        {!headerCollapsed && (
+          <>
+            <Legend activeStatuses={activeStatuses} />
+
+            {/* Filtros */}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <div className="flex items-center gap-1.5">
+                <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs font-medium text-muted-foreground">Filtros:</span>
+              </div>
+              <button
+                onClick={() => setFilters(f => ({ ...f, showOccupied: !f.showOccupied }))}
+                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${filters.showOccupied ? "bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-800 dark:text-blue-200" : "bg-muted border-border text-muted-foreground"}`}
+                data-testid="filter-show-occupied"
+              >
+                Con reservas
+              </button>
+              <button
+                onClick={() => setFilters(f => ({ ...f, showEmpty: !f.showEmpty }))}
+                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${filters.showEmpty ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-300 text-zinc-700 dark:text-zinc-300" : "bg-muted border-border text-muted-foreground"}`}
+                data-testid="filter-show-empty"
+              >
+                Sin reservas
+              </button>
+              <Select value={filters.floorFilter || "__all__"} onValueChange={v => setFilters(f => ({ ...f, floorFilter: v === "__all__" ? "" : v }))}>
+                <SelectTrigger className="h-7 text-xs w-28" data-testid="filter-floor">
+                  <SelectValue placeholder="Piso" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todos los pisos</SelectItem>
+                  {availableFloors.map(fl => <SelectItem key={fl} value={fl}>Piso {fl}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {availableRoomTypes.length > 1 && (
+                <Select value={filters.roomTypeIds[0] || "__all__"} onValueChange={v => setFilters(f => ({ ...f, roomTypeIds: v === "__all__" ? [] : [v] }))}>
+                  <SelectTrigger className="h-7 text-xs w-36" data-testid="filter-roomtype">
+                    <SelectValue placeholder="Categoría" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todas las categorías</SelectItem>
+                    {availableRoomTypes.map(rt => <SelectItem key={rt.id} value={rt.id}>{rt.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select value={filters.statusFilter || "__all__"} onValueChange={v => setFilters(f => ({ ...f, statusFilter: v === "__all__" ? "" : v as PlanningCellStatus }))}>
+                <SelectTrigger className="h-7 text-xs w-36" data-testid="filter-status">
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todos los estados</SelectItem>
+                  {(Object.keys(PLANNING_COLORS) as PlanningCellStatus[]).map(s => (
+                    <SelectItem key={s} value={s}>{PLANNING_COLORS[s].label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(filters.floorFilter || filters.roomTypeIds.length > 0 || filters.statusFilter || !filters.showEmpty || !filters.showOccupied) && (
+                <button
+                  onClick={() => setFilters({ showEmpty: true, showOccupied: true, roomTypeIds: [], floorFilter: "", statusFilter: "" })}
+                  className="text-xs text-muted-foreground underline"
+                  data-testid="filter-reset"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+
+            {data?.unassignedGroupBlocks && data.unassignedGroupBlocks.length > 0 && (
+              <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-700">
+                <CardContent className="p-3">
+                  <div className="flex items-start gap-2">
+                    <Users className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm">
+                      <span className="font-medium text-orange-800 dark:text-orange-300">
+                        Bloques de grupo sin asignar:
+                      </span>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {data.unassignedGroupBlocks.map((block, idx) => (
+                          <Badge key={idx} variant="outline" className="text-xs border-orange-400 text-orange-700 dark:text-orange-300" data-testid={`badge-unassigned-block-${idx}`}>
+                            {block.groupName}: {block.quantity - block.assigned} hab. {block.roomTypeName} ({block.checkIn} → {block.checkOut})
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        )}
       </div>
 
-      <Legend />
-
-      {data?.unassignedGroupBlocks && data.unassignedGroupBlocks.length > 0 && (
-        <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-700">
-          <CardContent className="p-3">
-            <div className="flex items-start gap-2">
-              <Users className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm">
-                <span className="font-medium text-orange-800 dark:text-orange-300">
-                  Bloques de grupo sin asignar:
-                </span>
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {data.unassignedGroupBlocks.map((block, idx) => (
-                    <Badge key={idx} variant="outline" className="text-xs border-orange-400 text-orange-700 dark:text-orange-300" data-testid={`badge-unassigned-block-${idx}`}>
-                      {block.groupName}: {block.quantity - block.assigned} hab. {block.roomTypeName} ({block.checkIn} → {block.checkOut})
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="flex-1 min-h-0">
+      <Card>
         <CardHeader className="py-3 px-4 border-b">
           <CardTitle className="text-base font-medium flex items-center gap-2">
             <Info className="h-4 w-4 text-muted-foreground" />
             <span>
-              {data ? `${data.rooms.length} habitaciones` : "Cargando..."} | {" "}
+              {data ? `${filteredRooms.length} habitaciones${filteredRooms.length !== data.rooms.length ? ` (de ${data.rooms.length})` : ""}` : "Cargando..."} | {" "}
               {dateRange.start} — {dateRange.end}
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0 h-[calc(100%-60px)] overflow-auto">
+        <CardContent className="p-0 overflow-auto">
           {isLoading ? (
             <div className="p-4 space-y-2">
               {[...Array(10)].map((_, i) => (
@@ -1956,7 +2024,21 @@ export default function PlanningPage() {
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <div className="flex flex-col cursor-default" data-testid={`room-header-${room.id}`}>
-                                    <span className="font-medium text-sm">{room.roomNumber}</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-medium text-sm">{room.roomNumber}</span>
+                                      {room.status === "dirty" && (
+                                        <span title="Sucia"><AlertCircle className="h-3 w-3 text-orange-500" /></span>
+                                      )}
+                                      {room.status === "cleaning" && (
+                                        <span title="En limpieza"><RefreshCw className="h-3 w-3 text-yellow-500" /></span>
+                                      )}
+                                      {room.status === "inspected" && (
+                                        <span title="Inspeccionada"><CheckCircle2 className="h-3 w-3 text-green-500" /></span>
+                                      )}
+                                      {room.status === "maintenance" && (
+                                        <span title="Mantenimiento"><Wrench className="h-3 w-3 text-red-500" /></span>
+                                      )}
+                                    </div>
                                     <span className="text-xs text-muted-foreground">{room.roomType?.name ?? ""}</span>
                                     {room.bedConfig && (
                                       <span

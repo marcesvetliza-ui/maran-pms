@@ -37,7 +37,7 @@ export type InsertRatePlan = z.infer<typeof insertRatePlanSchema>;
 export type RatePlan = typeof ratePlans.$inferSelect;
 
 // Rooms
-export type RoomStatus = "available" | "occupied" | "dirty" | "cleaning" | "maintenance" | "oos";
+export type RoomStatus = "available" | "occupied" | "dirty" | "cleaning" | "maintenance" | "oos" | "inspected";
 export type RoomFeature = "accessible" | "balcony" | "separable_bed" | "sofa_bed" | "shower_only" | "extra_bed" | "twin_config" | "living_room";
 export type BedConfig = "MAT" | "TWIN" | "MAT_CC" | "TWIN_CC" | "MAT_EXTRA" | "MAT_CC_EXTRA";
 
@@ -330,13 +330,13 @@ export type RoomWithType = Room & {
 };
 
 // Planning types
-export type PlanningCellStatus = "available" | "booked" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked";
+export type PlanningCellStatus = "available" | "booked" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked" | "inspected";
 
 export type PlanningData = {
   rooms: RoomWithType[];
   days: string[];
   occupancy: Record<string, PlanningCellStatus[]>;
-  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null }>;
+  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null }>;
   cellReservations: Record<string, Record<string, string>>; // roomId -> date -> reservationId
   groupBlocks: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }>;
   cellGroupBlocks: Record<string, Record<string, string>>; // roomId -> date -> groupBlockId

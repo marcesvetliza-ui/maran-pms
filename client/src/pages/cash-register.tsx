@@ -840,6 +840,50 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Anular Movimiento Dialog */}
+      <Dialog open={anularMovTarget !== null} onOpenChange={(open) => {
+        if (!open) { setAnularMovTarget(null); setAnularMovMotivo(""); }
+      }}>
+        <DialogContent className="w-[95vw] max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Anular Movimiento
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción anula el movimiento. Seguirá visible en la lista con estado ANULADO y no afectará los totales de cierre.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="motivo-anular-mov">Motivo de anulación (opcional)</Label>
+            <Textarea
+              id="motivo-anular-mov"
+              placeholder="Ej: Error de carga, duplicado..."
+              value={anularMovMotivo}
+              onChange={(e) => setAnularMovMotivo(e.target.value)}
+              rows={3}
+              data-testid="input-motivo-anular-mov"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAnularMovTarget(null); setAnularMovMotivo(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (anularMovTarget === null) return;
+                anularMovementMutation.mutate({ id: anularMovTarget, motivo: anularMovMotivo });
+              }}
+              disabled={anularMovementMutation.isPending}
+              data-testid="button-confirm-anular-mov"
+            >
+              {anularMovementMutation.isPending ? "Anulando..." : "Confirmar Anulación"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1109,50 +1153,6 @@ export default function CashRegister() {
           <HistorialTab />
         </TabsContent>
       </Tabs>
-
-      {/* Anular Movimiento Dialog */}
-      <Dialog open={anularMovTarget !== null} onOpenChange={(open) => {
-        if (!open) { setAnularMovTarget(null); setAnularMovMotivo(""); }
-      }}>
-        <DialogContent className="w-[95vw] max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              Anular Movimiento
-            </DialogTitle>
-            <DialogDescription>
-              Esta acción anula el movimiento. Seguirá visible en la lista con estado ANULADO y no afectará los totales de cierre.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <Label htmlFor="motivo-anular-mov">Motivo de anulación (opcional)</Label>
-            <Textarea
-              id="motivo-anular-mov"
-              placeholder="Ej: Error de carga, duplicado..."
-              value={anularMovMotivo}
-              onChange={(e) => setAnularMovMotivo(e.target.value)}
-              rows={3}
-              data-testid="input-motivo-anular-mov"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setAnularMovTarget(null); setAnularMovMotivo(""); }}>
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (anularMovTarget === null) return;
-                anularMovementMutation.mutate({ id: anularMovTarget, motivo: anularMovMotivo });
-              }}
-              disabled={anularMovementMutation.isPending}
-              data-testid="button-confirm-anular-mov"
-            >
-              {anularMovementMutation.isPending ? "Anulando..." : "Confirmar Anulación"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

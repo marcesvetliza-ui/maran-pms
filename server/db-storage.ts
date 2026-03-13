@@ -733,14 +733,7 @@ export class DatabaseStorage implements IStorage {
           occupancy[room.id].push("maintenance");
           continue;
         }
-        if (room.status === "dirty" && day === todayStr) {
-          occupancy[room.id].push("dirty");
-          continue;
-        }
-        if (room.status === "cleaning" && day === todayStr) {
-          occupancy[room.id].push("cleaning");
-          continue;
-        }
+        // dirty, cleaning, inspected: show status badge in room column but DON'T block cells
 
         const reservation = allReservations.find(r => {
           if (r.roomId !== room.id) return false;
