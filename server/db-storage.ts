@@ -508,6 +508,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCharges(reservationId: string): Promise<Charge[]> {
+    return db.select().from(charges).where(
+      and(eq(charges.reservationId, reservationId), or(isNull(charges.status), eq(charges.status, "active")))
+    );
+  }
+
+  async getAllChargesIncludingAnulados(reservationId: string): Promise<Charge[]> {
     return db.select().from(charges).where(eq(charges.reservationId, reservationId));
   }
 
@@ -532,11 +538,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getChargesTotal(reservationId: string): Promise<number> {
-    const result = await db.select({ total: sql<string>`COALESCE(SUM(${charges.amount}::numeric), 0)` }).from(charges).where(eq(charges.reservationId, reservationId));
+    const result = await db.select({ total: sql<string>`COALESCE(SUM(${charges.amount}::numeric), 0)` }).from(charges).where(
+      and(eq(charges.reservationId, reservationId), or(isNull(charges.status), eq(charges.status, "active")))
+    );
     return parseFloat(result[0]?.total || "0");
   }
 
   async getPayments(reservationId: string): Promise<Payment[]> {
+    return db.select().from(payments).where(
+      and(eq(payments.reservationId, reservationId), or(isNull(payments.status), eq(payments.status, "active")))
+    );
+  }
+
+  async getAllPaymentsIncludingAnulados(reservationId: string): Promise<Payment[]> {
     return db.select().from(payments).where(eq(payments.reservationId, reservationId));
   }
 
@@ -556,7 +570,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPaymentsTotal(reservationId: string): Promise<number> {
-    const result = await db.select({ total: sql<string>`COALESCE(SUM(${payments.amount}::numeric), 0)` }).from(payments).where(eq(payments.reservationId, reservationId));
+    const result = await db.select({ total: sql<string>`COALESCE(SUM(${payments.amount}::numeric), 0)` }).from(payments).where(
+      and(eq(payments.reservationId, reservationId), or(isNull(payments.status), eq(payments.status, "active")))
+    );
     return parseFloat(result[0]?.total || "0");
   }
 
@@ -3284,7 +3300,9 @@ export class DatabaseStorage implements IStorage {
     if (!shift) throw new Error("Turno no encontrado");
     if (shift.status !== "open") throw new Error("El turno ya está cerrado");
 
-    const movements = await db.select().from(cashMovements).where(eq(cashMovements.shiftId, shiftId));
+    const movements = await db.select().from(cashMovements).where(
+      and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.anulado, false))
+    );
 
     const totals: Record<string, number> = {
       cash: 0, debit_card: 0, credit_card: 0, transfer: 0,

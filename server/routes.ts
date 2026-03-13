@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
 import { insertGuestReviewSchema, reservationChangelog, reservations, guests } from "@shared/schema";
+import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
@@ -1538,8 +1539,11 @@ export async function registerRoutes(
   // Charges
   app.get("/api/reservations/:reservationId/charges", async (req, res) => {
     try {
-      const charges = await storage.getCharges(req.params.reservationId);
-      res.json(charges);
+      const includeAnulados = req.query.includeAnulados === "true";
+      const result = includeAnulados
+        ? await storage.getAllChargesIncludingAnulados(req.params.reservationId)
+        : await storage.getCharges(req.params.reservationId);
+      res.json(result);
     } catch (error) {
       res.status(500).json({ error: "Error fetching charges" });
     }
@@ -1588,7 +1592,33 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/charges/:id/anular", requireAuth, async (req, res) => {
+    try {
+      const { motivoAnulacion, anuladoPor } = req.body;
+      if (!motivoAnulacion?.trim()) {
+        return res.status(400).json({ error: "El motivo de anulación es requerido" });
+      }
+      const existing = await storage.getCharge(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Cargo no encontrado" });
+      if (existing.status === "anulado") return res.status(400).json({ error: "El cargo ya está anulado" });
+      if (existing.reservationId) {
+        const reservation = await storage.getReservation(existing.reservationId);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se puede anular cargos de una reserva cerrada" });
+        }
+      }
+      const [updated] = await db.update(charges)
+        .set({ status: "anulado", anuladoPor: anuladoPor || null, motivoAnulacion, anuladoAt: new Date() })
+        .where(eq(charges.id, req.params.id))
+        .returning();
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.delete("/api/charges/:id", async (req, res) => {
+    console.warn(`[DEPRECADO] DELETE /api/charges/${req.params.id} — usar PATCH /anular`);
     try {
       const existing = await storage.getCharge(req.params.id);
       if (!existing) {
@@ -1659,8 +1689,11 @@ export async function registerRoutes(
   // Payments
   app.get("/api/reservations/:reservationId/payments", async (req, res) => {
     try {
-      const payments = await storage.getPayments(req.params.reservationId);
-      res.json(payments);
+      const includeAnulados = req.query.includeAnulados === "true";
+      const result = includeAnulados
+        ? await storage.getAllPaymentsIncludingAnulados(req.params.reservationId)
+        : await storage.getPayments(req.params.reservationId);
+      res.json(result);
     } catch (error) {
       res.status(500).json({ error: "Error fetching payments" });
     }
@@ -1729,7 +1762,35 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/payments/:id/anular", requireAuth, async (req, res) => {
+    try {
+      const { motivoAnulacion, anuladoPor } = req.body;
+      if (!motivoAnulacion?.trim()) {
+        return res.status(400).json({ error: "El motivo de anulación es requerido" });
+      }
+      const payResult = await db.execute(sql`SELECT * FROM payments WHERE id = ${req.params.id}`);
+      const pay = payResult.rows?.[0] as any;
+      if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
+      if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
+      if (pay.reservation_id) {
+        const reservation = await storage.getReservation(pay.reservation_id);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se puede anular pagos de una reserva cerrada" });
+        }
+      }
+      const updated = await db.execute(sql`
+        UPDATE payments SET status = 'anulado', anulado_por = ${anuladoPor || null},
+        motivo_anulacion = ${motivoAnulacion}, anulado_at = NOW()
+        WHERE id = ${req.params.id} RETURNING *
+      `);
+      res.json(updated.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.delete("/api/payments/:id", async (req, res) => {
+    console.warn(`[DEPRECADO] DELETE /api/payments/${req.params.id} — usar PATCH /anular`);
     try {
       const payResult = await db.execute(sql`SELECT reservation_id FROM payments WHERE id = ${req.params.id}`);
       const payRow = payResult.rows?.[0] as any;
@@ -3944,7 +4005,27 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.patch("/api/spa/payments/:id/anular", requireAuth, async (req, res) => {
+    try {
+      const { motivoAnulacion } = req.body;
+      if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "El motivo de anulación es requerido" });
+      const [pay] = await db.select().from(spaPayments).where(eq(spaPayments.id, req.params.id));
+      if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
+      if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
+      const account = await storage.getSpaAccount(pay.accountId);
+      if (account?.status === "closed") return res.status(403).json({ error: "No se puede anular pagos de una cuenta cerrada" });
+      const [updated] = await db.update(spaPayments)
+        .set({ status: "anulado", motivoAnulacion, anuladoAt: new Date() })
+        .where(eq(spaPayments.id, req.params.id))
+        .returning();
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.delete("/api/spa/payments/:id", async (req, res) => {
+    console.warn(`[DEPRECADO] DELETE /api/spa/payments/${req.params.id} — usar PATCH /anular`);
     try {
       await storage.deleteSpaPayment(req.params.id);
       res.status(204).send();
@@ -4403,7 +4484,34 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.patch("/api/events/:eventId/payments/:payId/anular", requireAuth, async (req, res) => {
+    try {
+      const { motivoAnulacion } = req.body;
+      if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "El motivo de anulación es requerido" });
+      const event = await storage.getEvent(req.params.eventId);
+      if (event?.status === "invoiced") return res.status(403).json({ error: "No se puede anular pagos de un evento facturado" });
+      const [pay] = await db.select().from(eventPayments).where(eq(eventPayments.id, req.params.payId));
+      if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
+      if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
+      const [updated] = await db.update(eventPayments)
+        .set({ status: "anulado", motivoAnulacion, anuladoAt: new Date() })
+        .where(eq(eventPayments.id, req.params.payId))
+        .returning();
+      if (event) {
+        const allPays = await db.select().from(eventPayments).where(
+          and(eq(eventPayments.eventId, req.params.eventId), eq(eventPayments.status, "active"))
+        );
+        const totalPaid = allPays.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+        await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
+      }
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.delete("/api/events/:eventId/payments/:payId", async (req, res) => {
+    console.warn(`[DEPRECADO] DELETE /api/events/${req.params.eventId}/payments/${req.params.payId} — usar PATCH /anular`);
     try {
       const event = await storage.getEvent(req.params.eventId);
       if (event && (event.status === "invoiced")) {
@@ -5858,6 +5966,60 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.get("/api/reports/caja-unificada", requireAuth, async (req, res) => {
+    try {
+      const fecha = (req.query.fecha as string) || getArgentinaToday();
+      const todos: any[] = [];
+
+      const resPayments = await db.execute(sql`
+        SELECT p.id, 'reserva' as modulo, p.method as metodo, p.amount as monto,
+               p.date as fecha_pago, g.first_name || ' ' || g.last_name as descripcion,
+               r.reservation_code as referencia
+        FROM payments p
+        LEFT JOIN reservations r ON p.reservation_id = r.id
+        LEFT JOIN guests g ON r.guest_id = g.id
+        WHERE p.date = ${fecha} AND (p.status IS NULL OR p.status = 'active')
+      `);
+      todos.push(...(resPayments.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
+
+      const spaRows = await db.execute(sql`
+        SELECT sp.id, 'spa' as modulo, sp.method as metodo, sp.amount as monto,
+               sp.created_at::date as fecha_pago,
+               'SPA - Cuenta ' || sp.account_id as descripcion,
+               sp.account_id as referencia
+        FROM spa_payments sp
+        WHERE sp.created_at::date = ${fecha} AND (sp.status IS NULL OR sp.status = 'active')
+      `);
+      todos.push(...(spaRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
+
+      const evtRows = await db.execute(sql`
+        SELECT ep.id, 'eventos' as modulo, ep.method as metodo, ep.amount as monto,
+               ep.paid_at::date as fecha_pago,
+               'Evento - ' || e.name as descripcion,
+               e.name as referencia
+        FROM event_payments ep
+        LEFT JOIN events e ON ep.event_id = e.id
+        WHERE ep.paid_at::date = ${fecha} AND (ep.status IS NULL OR ep.status = 'active')
+      `);
+      todos.push(...(evtRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
+
+      const porMetodo: Record<string, number> = {};
+      for (const p of todos) {
+        const m = (p as any).metodo || "otros";
+        porMetodo[m] = (porMetodo[m] || 0) + parseFloat((p as any).monto || "0");
+      }
+
+      res.json({
+        fecha,
+        movimientos: todos,
+        totalPorMetodo: porMetodo,
+        totalGeneral: todos.reduce((s, p) => s + parseFloat((p as any).monto || "0"), 0),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/reports/top-guests", requireAuth, async (req, res) => {
     try {
       const { from, to, limit } = req.query as { from: string; to: string; limit?: string };
@@ -6062,6 +6224,28 @@ Only respond with the JSON object.`;
       res.status(201).json(movement);
     } catch (error) {
       res.status(500).json({ error: "Error creating movement" });
+    }
+  });
+
+  app.patch("/api/cash/movements/:id/anular", requireAuth, async (req, res) => {
+    try {
+      const { motivoAnulacion, anuladoPor } = req.body;
+      if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "Motivo requerido" });
+      const [mov] = await db.select().from(cashMovements).where(eq(cashMovements.id, req.params.id));
+      if (!mov) return res.status(404).json({ error: "Movimiento no encontrado" });
+      if (mov.anulado) return res.status(400).json({ error: "Ya está anulado" });
+      if (mov.shiftId) {
+        const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, mov.shiftId));
+        if (shift && shift.status === "closed") {
+          return res.status(403).json({ error: "No se puede anular movimientos de un turno cerrado" });
+        }
+      }
+      await db.update(cashMovements)
+        .set({ anulado: true, motivoAnulacion, anuladoPor: anuladoPor || null, anuladoAt: new Date() })
+        .where(eq(cashMovements.id, req.params.id));
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 

@@ -20,10 +20,12 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -41,6 +43,8 @@ import {
   CircleDot,
   XCircle,
   ClipboardList,
+  Ban,
+  AlertTriangle,
 } from "lucide-react";
 
 type CashConfig = {
@@ -76,6 +80,8 @@ type CashMovement = {
   receiptType?: string;
   description?: string;
   createdAt: string;
+  anulado?: boolean;
+  motivoAnulacion?: string;
 };
 
 type ShiftDetail = {
@@ -125,6 +131,7 @@ function formatDate(dateStr: string): string {
 function buildSummaryFromMovements(movements: CashMovement[]) {
   const summary: Record<string, { count: number; total: number }> = {};
   for (const m of movements) {
+    if (m.anulado) continue;
     if (!summary[m.paymentMethod]) {
       summary[m.paymentMethod] = { count: 0, total: 0 };
     }
@@ -272,7 +279,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     },
   });
 
-  const efectivoSistema = movements.filter(m => m.paymentMethod === "cash").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+  const efectivoSistema = movements.filter(m => !m.anulado && m.paymentMethod === "cash").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
   const diferencia = efectivoContado - efectivoSistema;
 
   const openShiftMutation = useMutation({
@@ -321,6 +328,24 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const [anularMovTarget, setAnularMovTarget] = useState<number | null>(null);
+  const [anularMovMotivo, setAnularMovMotivo] = useState("");
+
+  const anularMovementMutation = useMutation({
+    mutationFn: async ({ id, motivo }: { id: number; motivo: string }) =>
+      apiRequest("PATCH", `/api/cash/movements/${id}/anular`, { motivoAnulacion: motivo }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+      setAnularMovTarget(null);
+      setAnularMovMotivo("");
+      toast({ title: "Movimiento anulado", description: "El movimiento fue anulado correctamente" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error al anular", description: err.message, variant: "destructive" });
+      console.error("Anular movement error:", err);
     },
   });
 
@@ -468,27 +493,48 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                       <TableHead>Método de pago</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead className="text-right">Monto</TableHead>
+                      <TableHead className="w-8"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {movements.map((m) => (
-                      <TableRow key={m.id} data-testid={`movement-row-${m.id}`}>
-                        <TableCell>{formatTime(m.createdAt)}</TableCell>
+                      <TableRow key={m.id} data-testid={`movement-row-${m.id}`} className={m.anulado ? "opacity-40" : ""}>
+                        <TableCell className={m.anulado ? "line-through text-muted-foreground" : ""}>{formatTime(m.createdAt)}</TableCell>
                         <TableCell>
-                          <Badge className={AREA_COLORS[m.area] || ""}>
-                            {AREA_LABEL_MAP[m.area] || m.area}
-                          </Badge>
+                          {m.anulado ? (
+                            <Badge variant="destructive" className="text-xs">ANULADO</Badge>
+                          ) : (
+                            <Badge className={AREA_COLORS[m.area] || ""}>
+                              {AREA_LABEL_MAP[m.area] || m.area}
+                            </Badge>
+                          )}
                         </TableCell>
-                        <TableCell>{m.description || m.sourceLabel || "-"}</TableCell>
-                        <TableCell>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
+                        <TableCell className={m.anulado ? "line-through text-muted-foreground" : ""}>{m.description || m.sourceLabel || "-"}</TableCell>
+                        <TableCell className={m.anulado ? "text-muted-foreground" : ""}>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
                         <TableCell>
-                          {m.movementType === "income" ? (
+                          {m.anulado ? (
+                            <span />
+                          ) : m.movementType === "income" ? (
                             <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">Ingreso</Badge>
                           ) : (
                             <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Egreso</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-right font-medium">{formatCurrency(m.amount)}</TableCell>
+                        <TableCell className={`text-right font-medium ${m.anulado ? "line-through text-muted-foreground" : ""}`}>{formatCurrency(m.amount)}</TableCell>
+                        <TableCell className="text-right">
+                          {!m.anulado && m.sourceType === "manual" && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-6 w-6"
+                              onClick={() => { setAnularMovTarget(m.id); setAnularMovMotivo(""); }}
+                              title="Anular movimiento"
+                              data-testid={`button-anular-movement-${m.id}`}
+                            >
+                              <Ban className="h-3 w-3 text-destructive" />
+                            </Button>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1063,6 +1109,50 @@ export default function CashRegister() {
           <HistorialTab />
         </TabsContent>
       </Tabs>
+
+      {/* Anular Movimiento Dialog */}
+      <Dialog open={anularMovTarget !== null} onOpenChange={(open) => {
+        if (!open) { setAnularMovTarget(null); setAnularMovMotivo(""); }
+      }}>
+        <DialogContent className="w-[95vw] max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Anular Movimiento
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción anula el movimiento. Seguirá visible en la lista con estado ANULADO y no afectará los totales de cierre.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="motivo-anular-mov">Motivo de anulación (opcional)</Label>
+            <Textarea
+              id="motivo-anular-mov"
+              placeholder="Ej: Error de carga, duplicado..."
+              value={anularMovMotivo}
+              onChange={(e) => setAnularMovMotivo(e.target.value)}
+              rows={3}
+              data-testid="input-motivo-anular-mov"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAnularMovTarget(null); setAnularMovMotivo(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (anularMovTarget === null) return;
+                anularMovementMutation.mutate({ id: anularMovTarget, motivo: anularMovMotivo });
+              }}
+              disabled={anularMovementMutation.isPending}
+              data-testid="button-confirm-anular-mov"
+            >
+              {anularMovementMutation.isPending ? "Anulando..." : "Confirmar Anulación"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

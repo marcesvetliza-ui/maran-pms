@@ -262,6 +262,7 @@ export interface IStorage {
 
   // Charges
   getCharges(reservationId: string): Promise<Charge[]>;
+  getAllChargesIncludingAnulados(reservationId: string): Promise<Charge[]>;
   getCharge(id: string): Promise<Charge | undefined>;
   createCharge(charge: InsertCharge): Promise<Charge>;
   updateCharge(id: string, charge: Partial<InsertCharge>): Promise<Charge | undefined>;
@@ -270,6 +271,7 @@ export interface IStorage {
 
   // Payments
   getPayments(reservationId: string): Promise<Payment[]>;
+  getAllPaymentsIncludingAnulados(reservationId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment): Promise<Payment>;
   updatePayment(id: string, payment: Partial<InsertPayment>): Promise<Payment | undefined>;
   deletePayment(id: string): Promise<boolean>;
@@ -1853,6 +1855,10 @@ export class MemStorage implements IStorage {
 
   // Charges
   async getCharges(reservationId: string): Promise<Charge[]> {
+    return Array.from(this.charges.values()).filter((c) => c.reservationId === reservationId && (c as any).status !== "anulado");
+  }
+
+  async getAllChargesIncludingAnulados(reservationId: string): Promise<Charge[]> {
     return Array.from(this.charges.values()).filter((c) => c.reservationId === reservationId);
   }
 
@@ -1898,6 +1904,12 @@ export class MemStorage implements IStorage {
 
   // Payments
   async getPayments(reservationId: string): Promise<Payment[]> {
+    return Array.from(this.payments.values())
+      .filter((p) => p.reservationId === reservationId && (p as any).status !== "anulado")
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+
+  async getAllPaymentsIncludingAnulados(reservationId: string): Promise<Payment[]> {
     return Array.from(this.payments.values())
       .filter((p) => p.reservationId === reservationId)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());

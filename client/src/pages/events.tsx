@@ -41,6 +41,8 @@ import {
   UtensilsCrossed,
   FileText,
   Send,
+  Ban,
+  AlertTriangle,
 } from "lucide-react";
 
 type EventRoom = {
@@ -278,6 +280,8 @@ type EventPlanningResponse = {
 export default function EventsPage() {
   const [weekStart, setWeekStart] = useState(startOfDay(new Date()));
   const [selectedEvent, setSelectedEvent] = useState<HotelEvent | null>(null);
+  const [anularEventPayTarget, setAnularEventPayTarget] = useState<{ eventId: string; payId: string } | null>(null);
+  const [anularEventPayMotivo, setAnularEventPayMotivo] = useState("");
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
   const [isChargeDialogOpen, setIsChargeDialogOpen] = useState(false);
   const [isChargeEditable, setIsChargeEditable] = useState(false);
@@ -527,14 +531,31 @@ export default function EventsPage() {
   });
 
   const deletePaymentMutation = useMutation({
-    mutationFn: ({ eventId, payId }: { eventId: string; payId: string }) =>
-      apiRequest("DELETE", `/api/events/${eventId}/payments/${payId}`),
+    mutationFn: ({ eventId, payId }: { eventId: string; payId: string }) => {
+      console.warn("DEPRECATED: use anularEventPaymentMutation instead");
+      return apiRequest("DELETE", `/api/events/${eventId}/payments/${payId}`);
+    },
     onSuccess: async () => {
       await refreshSelectedEvent();
       toast({ title: "Pago eliminado" });
     },
     onError: (error: any) => {
       toast({ title: error?.message || "Error al eliminar el pago", variant: "destructive" });
+    },
+  });
+
+  const anularEventPaymentMutation = useMutation({
+    mutationFn: ({ eventId, payId, motivo }: { eventId: string; payId: string; motivo: string }) =>
+      apiRequest("PATCH", `/api/events/${eventId}/payments/${payId}/anular`, { motivoAnulacion: motivo }),
+    onSuccess: async () => {
+      await refreshSelectedEvent();
+      setAnularEventPayTarget(null);
+      setAnularEventPayMotivo("");
+      toast({ title: "Pago anulado" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Error al anular el pago", variant: "destructive" });
+      console.error("Anular event payment error:", error);
     },
   });
 
@@ -763,7 +784,7 @@ export default function EventsPage() {
 
   const calculateEventPaid = (event: HotelEvent): number => {
     if (!event.payments) return 0;
-    return event.payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    return event.payments.filter((p: any) => p.status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0);
   };
 
   const handleAddPayment = () => {
@@ -1974,28 +1995,35 @@ export default function EventsPage() {
                         Pagos
                       </h4>
                       <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                        {selectedEvent.payments?.map((payment) => (
-                          <div key={payment.id} className="flex items-center justify-between p-2 rounded border text-sm">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">${payment.amount}</span>
+                        {selectedEvent.payments?.map((payment: any) => {
+                          const isAnulado = payment.status === "anulado";
+                          return (
+                          <div key={payment.id} className={`flex items-center justify-between p-2 rounded border text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""}`}>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`font-medium ${isAnulado ? "line-through text-muted-foreground" : ""}`}>${payment.amount}</span>
                               <span className="text-muted-foreground">
                                 {paymentMethodLabels[payment.method] || payment.method}
                               </span>
-                              {payment.isAdvance === "true" && (
+                              {isAnulado && <Badge variant="destructive" className="text-xs">ANULADO</Badge>}
+                              {payment.isAdvance === "true" && !isAnulado && (
                                 <Badge variant="outline" className="text-xs border-amber-500 text-amber-600">SEÑA</Badge>
                               )}
                             </div>
+                            {!isAnulado && (
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6"
-                              onClick={() => deletePaymentMutation.mutate({ eventId: selectedEvent.id, payId: payment.id })}
-                              data-testid={`button-delete-payment-${payment.id}`}
+                              onClick={() => { setAnularEventPayTarget({ eventId: selectedEvent.id, payId: payment.id }); setAnularEventPayMotivo(""); }}
+                              title="Anular pago"
+                              data-testid={`button-anular-payment-${payment.id}`}
                             >
-                              <Trash2 className="h-3 w-3" />
+                              <Ban className="h-3 w-3 text-destructive" />
                             </Button>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
                         {(!selectedEvent.payments || selectedEvent.payments.length === 0) && (
                           <p className="text-sm text-muted-foreground text-center py-4">Sin pagos</p>
                         )}
@@ -2600,6 +2628,50 @@ export default function EventsPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Anular Pago Evento Dialog */}
+      <Dialog open={anularEventPayTarget !== null} onOpenChange={(open) => {
+        if (!open) { setAnularEventPayTarget(null); setAnularEventPayMotivo(""); }
+      }}>
+        <DialogContent className="w-[95vw] max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Anular Pago
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción anula el pago. Seguirá visible en el historial con estado ANULADO y no afectará los totales.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="motivo-anular-evento">Motivo de anulación (opcional)</Label>
+            <Textarea
+              id="motivo-anular-evento"
+              placeholder="Ej: Error de carga, duplicado..."
+              value={anularEventPayMotivo}
+              onChange={(e) => setAnularEventPayMotivo(e.target.value)}
+              rows={3}
+              data-testid="input-motivo-anular-evento"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAnularEventPayTarget(null); setAnularEventPayMotivo(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!anularEventPayTarget) return;
+                anularEventPaymentMutation.mutate({ ...anularEventPayTarget, motivo: anularEventPayMotivo });
+              }}
+              disabled={anularEventPaymentMutation.isPending}
+              data-testid="button-confirm-anular-evento"
+            >
+              {anularEventPaymentMutation.isPending ? "Anulando..." : "Confirmar Anulación"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

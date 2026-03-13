@@ -26,6 +26,8 @@ import {
   DollarSign,
   History,
   Lock,
+  Ban,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -985,6 +987,8 @@ function ReservationDetailDialog({
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
   const [targetReservationId, setTargetReservationId] = useState<string>("");
+  const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
+  const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [newCharge, setNewCharge] = useState({
     description: "",
     amount: "",
@@ -1031,17 +1035,17 @@ function ReservationDetailDialog({
   });
 
   const { data: charges, refetch: refetchCharges } = useQuery<Charge[]>({
-    queryKey: ["/api/reservations", reservation.id, "charges"],
+    queryKey: ["/api/reservations", reservation.id, "charges", "all"],
     queryFn: async () => {
-      const res = await fetch(`/api/reservations/${reservation.id}/charges`);
+      const res = await fetch(`/api/reservations/${reservation.id}/charges?includeAnulados=true`);
       return res.json();
     },
   });
 
   const { data: payments, refetch: refetchPayments } = useQuery<Payment[]>({
-    queryKey: ["/api/reservations", reservation.id, "payments"],
+    queryKey: ["/api/reservations", reservation.id, "payments", "all"],
     queryFn: async () => {
-      const res = await fetch(`/api/reservations/${reservation.id}/payments`);
+      const res = await fetch(`/api/reservations/${reservation.id}/payments?includeAnulados=true`);
       return res.json();
     },
   });
@@ -1068,11 +1072,28 @@ function ReservationDetailDialog({
 
   const deleteChargeMutation = useMutation({
     mutationFn: async (chargeId: string) => {
+      console.warn("DEPRECATED: use anularChargeMutation instead");
       return apiRequest("DELETE", `/api/charges/${chargeId}`, undefined);
     },
     onSuccess: () => {
       refetchCharges();
       toast({ title: "Cargo eliminado", description: "El cargo ha sido eliminado del folio." });
+    },
+  });
+
+  const anularChargeMutation = useMutation({
+    mutationFn: async ({ id, motivo }: { id: string; motivo: string }) => {
+      return apiRequest("PATCH", `/api/charges/${id}/anular`, { motivoAnulacion: motivo });
+    },
+    onSuccess: () => {
+      refetchCharges();
+      setAnularTarget(null);
+      setMotivoAnulacion("");
+      toast({ title: "Cargo anulado", description: "El cargo ha sido anulado del folio." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo anular el cargo", variant: "destructive" });
+      console.error("Anular charge error:", error);
     },
   });
 
@@ -1099,11 +1120,28 @@ function ReservationDetailDialog({
 
   const deletePaymentMutation = useMutation({
     mutationFn: async (paymentId: string) => {
+      console.warn("DEPRECATED: use anularPaymentMutation instead");
       return apiRequest("DELETE", `/api/payments/${paymentId}`, undefined);
     },
     onSuccess: () => {
       refetchPayments();
       toast({ title: "Pago eliminado", description: "El pago ha sido eliminado del registro." });
+    },
+  });
+
+  const anularPaymentMutation = useMutation({
+    mutationFn: async ({ id, motivo }: { id: string; motivo: string }) => {
+      return apiRequest("PATCH", `/api/payments/${id}/anular`, { motivoAnulacion: motivo });
+    },
+    onSuccess: () => {
+      refetchPayments();
+      setAnularTarget(null);
+      setMotivoAnulacion("");
+      toast({ title: "Pago anulado", description: "El pago ha sido anulado del registro." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo anular el pago", variant: "destructive" });
+      console.error("Anular payment error:", error);
     },
   });
 
@@ -1189,8 +1227,9 @@ function ReservationDetailDialog({
   };
 
   const consumptionCharges = charges?.filter((c) => c.category !== "payment") || [];
-  const totalConsumptions = consumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
-  const totalPayments = payments?.reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
+  const activeConsumptionCharges = consumptionCharges.filter((c) => (c as any).status !== "anulado");
+  const totalConsumptions = activeConsumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+  const totalPayments = payments?.filter((p) => (p as any).status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
   const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0");
   const totalToPay = subtotalRoom + totalConsumptions;
   const balance = totalToPay - totalPayments;
@@ -1467,18 +1506,21 @@ function ReservationDetailDialog({
               )}
 
               <div className="divide-y max-h-[150px] overflow-y-auto">
-                {consumptionCharges.map((charge) => (
-                  <div key={charge.id} className="flex items-center justify-between p-3 text-sm" data-testid={`charge-row-${charge.id}`}>
+                {consumptionCharges.map((charge) => {
+                  const isAnulado = (charge as any).status === "anulado";
+                  return (
+                  <div key={charge.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`charge-row-${charge.id}`}>
                     <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
                       <Badge variant="outline" className="text-xs shrink-0">{categoryLabels[charge.category]}</Badge>
-                      <span className="truncate">{charge.description}</span>
+                      {isAnulado && <Badge variant="destructive" className="text-xs shrink-0">ANULADO</Badge>}
+                      <span className={`truncate ${isAnulado ? "line-through text-muted-foreground" : ""}`}>{charge.description}</span>
                       <span className="text-muted-foreground text-xs shrink-0">({formatDateAR(charge.date)})</span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
-                      <span className="font-medium tabular-nums" data-testid={`text-charge-amount-${charge.id}`}>
+                      <span className={`font-medium tabular-nums ${isAnulado ? "line-through text-muted-foreground" : ""}`} data-testid={`text-charge-amount-${charge.id}`}>
                         ${parseFloat(charge.amount).toFixed(2)}
                       </span>
-                      {!isLocked && (
+                      {!isLocked && !isAnulado && (
                         <>
                         <Button 
                           size="icon" 
@@ -1494,16 +1536,18 @@ function ReservationDetailDialog({
                           size="icon" 
                           variant="ghost" 
                           className="h-6 w-6"
-                          onClick={() => deleteChargeMutation.mutate(charge.id)}
-                          data-testid={`button-delete-charge-${charge.id}`}
+                          onClick={() => { setAnularTarget({ type: "cargo", id: charge.id }); setMotivoAnulacion(""); }}
+                          title="Anular cargo"
+                          data-testid={`button-anular-charge-${charge.id}`}
                         >
-                          <Trash2 className="h-3 w-3 text-destructive" />
+                          <Ban className="h-3 w-3 text-destructive" />
                         </Button>
                         </>
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {consumptionCharges.length === 0 && (
                   <div className="p-3 text-sm text-muted-foreground text-center">
                     Sin consumos adicionales
@@ -1649,32 +1693,37 @@ function ReservationDetailDialog({
               )}
 
               <div className="divide-y max-h-[120px] overflow-y-auto">
-                {payments?.map((payment) => (
-                  <div key={payment.id} className="flex items-center justify-between p-3 text-sm" data-testid={`payment-row-${payment.id}`}>
+                {payments?.map((payment) => {
+                  const isAnulado = (payment as any).status === "anulado";
+                  return (
+                  <div key={payment.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`payment-row-${payment.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline" className="text-xs">{paymentMethodLabels[payment.method]}</Badge>
+                      {isAnulado && <Badge variant="destructive" className="text-xs">ANULADO</Badge>}
                       {(payment as any).billingTarget === "company" && (
                         <Badge variant="secondary" className="text-xs">Empresa</Badge>
                       )}
-                      {payment.reference && <span className="text-muted-foreground">{payment.reference}</span>}
+                      {payment.reference && <span className={`text-muted-foreground ${isAnulado ? "line-through" : ""}`}>{payment.reference}</span>}
                       <span className="text-muted-foreground text-xs">({formatDateAR(payment.date)})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-green-600">${parseFloat(payment.amount).toFixed(2)}</span>
-                      {!isLocked && (
+                      <span className={`font-medium ${isAnulado ? "line-through text-muted-foreground" : "text-green-600"}`}>${parseFloat(payment.amount).toFixed(2)}</span>
+                      {!isLocked && !isAnulado && (
                       <Button 
                         size="icon" 
                         variant="ghost" 
                         className="h-6 w-6"
-                        onClick={() => deletePaymentMutation.mutate(payment.id)}
-                        data-testid={`button-delete-payment-${payment.id}`}
+                        onClick={() => { setAnularTarget({ type: "pago", id: payment.id }); setMotivoAnulacion(""); }}
+                        title="Anular pago"
+                        data-testid={`button-anular-payment-${payment.id}`}
                       >
-                        <Trash2 className="h-3 w-3 text-destructive" />
+                        <Ban className="h-3 w-3 text-destructive" />
                       </Button>
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {(!payments || payments.length === 0) && (
                   <div className="p-3 text-sm text-muted-foreground text-center">
                     Sin pagos registrados
@@ -1868,6 +1917,54 @@ function ReservationDetailDialog({
               data-testid="button-confirm-transfer"
             >
               {transferChargeMutation.isPending ? "Transfiriendo..." : "Transferir Cargo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Anular Cargo / Pago Dialog */}
+      <Dialog open={anularTarget !== null} onOpenChange={(open) => {
+        if (!open) { setAnularTarget(null); setMotivoAnulacion(""); }
+      }}>
+        <DialogContent className="w-[95vw] max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Anular {anularTarget?.type === "cargo" ? "Cargo" : "Pago"}
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción anula el registro. Seguirá visible en el folio con estado ANULADO y no afectará los totales.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="motivo-anulacion">Motivo de anulación (opcional)</Label>
+            <Textarea
+              id="motivo-anulacion"
+              placeholder="Ej: Error de carga, duplicado..."
+              value={motivoAnulacion}
+              onChange={(e) => setMotivoAnulacion(e.target.value)}
+              rows={3}
+              data-testid="input-motivo-anulacion"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAnularTarget(null); setMotivoAnulacion(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!anularTarget) return;
+                if (anularTarget.type === "cargo") {
+                  anularChargeMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
+                } else {
+                  anularPaymentMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
+                }
+              }}
+              disabled={anularChargeMutation.isPending || anularPaymentMutation.isPending}
+              data-testid="button-confirm-anular"
+            >
+              {(anularChargeMutation.isPending || anularPaymentMutation.isPending) ? "Anulando..." : "Confirmar Anulación"}
             </Button>
           </DialogFooter>
         </DialogContent>

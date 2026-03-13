@@ -561,6 +561,24 @@ export async function refreshRealData() {
     await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_cocina text`);
     await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_mantenimiento text`);
     await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_housekeeping text`);
+    await db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'`);
+    await db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS anulado_por text`);
+    await db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS motivo_anulacion text`);
+    await db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS anulado_at timestamp`);
+    await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'`);
+    await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS anulado_por text`);
+    await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS motivo_anulacion text`);
+    await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS anulado_at timestamp`);
+    await db.execute(sql`ALTER TABLE event_payments ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'`);
+    await db.execute(sql`ALTER TABLE event_payments ADD COLUMN IF NOT EXISTS motivo_anulacion text`);
+    await db.execute(sql`ALTER TABLE event_payments ADD COLUMN IF NOT EXISTS anulado_at timestamp`);
+    await db.execute(sql`ALTER TABLE spa_payments ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'`);
+    await db.execute(sql`ALTER TABLE spa_payments ADD COLUMN IF NOT EXISTS motivo_anulacion text`);
+    await db.execute(sql`ALTER TABLE spa_payments ADD COLUMN IF NOT EXISTS anulado_at timestamp`);
+    await db.execute(sql`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS anulado boolean NOT NULL DEFAULT false`);
+    await db.execute(sql`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS motivo_anulacion text`);
+    await db.execute(sql`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS anulado_por text`);
+    await db.execute(sql`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS anulado_at timestamp`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS maintenance_staff (

@@ -224,6 +224,10 @@ export const charges = pgTable("charges", {
   date: date("date").notNull(),
   category: text("category").$type<ChargeCategory>().notNull().default("otros"),
   createdBy: varchar("created_by"),
+  status: text("status").notNull().default("active"),
+  anuladoPor: text("anulado_por"),
+  motivoAnulacion: text("motivo_anulacion"),
+  anuladoAt: timestamp("anulado_at"),
 });
 
 export const insertChargeSchema = createInsertSchema(charges).omit({ id: true });
@@ -246,6 +250,10 @@ export const payments = pgTable("payments", {
   receivedBy: varchar("received_by"),
   notes: text("notes"),
   billingTarget: text("billing_target").$type<BillingTarget>().default("guest"),
+  status: text("status").notNull().default("active"),
+  anuladoPor: text("anulado_por"),
+  motivoAnulacion: text("motivo_anulacion"),
+  anuladoAt: timestamp("anulado_at"),
 });
 
 export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true });
@@ -626,6 +634,9 @@ export const eventPayments = pgTable("event_payments", {
   notes: text("notes"),
   paidAt: timestamp("paid_at"),
   createdAt: timestamp("created_at"),
+  status: text("status").notNull().default("active"),
+  motivoAnulacion: text("motivo_anulacion"),
+  anuladoAt: timestamp("anulado_at"),
 });
 
 export const insertEventPaymentSchema = createInsertSchema(eventPayments).omit({ id: true });
@@ -1241,6 +1252,9 @@ export const spaPayments = pgTable("spa_payments", {
   reservationId: varchar("reservation_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
+  status: text("status").notNull().default("active"),
+  motivoAnulacion: text("motivo_anulacion"),
+  anuladoAt: timestamp("anulado_at"),
 });
 
 export const insertSpaPaymentSchema = createInsertSchema(spaPayments).omit({ id: true });
@@ -1576,6 +1590,10 @@ export const cashMovements = pgTable("cash_movements", {
   receiptType: text("receipt_type"),
   registeredBy: text("registered_by"),
   createdAt: timestamp("created_at").defaultNow(),
+  anulado: boolean("anulado").notNull().default(false),
+  motivoAnulacion: text("motivo_anulacion"),
+  anuladoPor: text("anulado_por"),
+  anuladoAt: timestamp("anulado_at"),
 });
 
 export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({ id: true, createdAt: true });
