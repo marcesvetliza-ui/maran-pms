@@ -795,8 +795,9 @@ function ReservationDetailModal({
       toast({ title: "Check-in realizado", description: "El huesped ha sido registrado." });
       onOpenChange(false);
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo realizar el check-in.", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.data?.error || error?.message || "No se pudo realizar el check-in.";
+      toast({ title: "Error en Check-in", description: message, variant: "destructive" });
     },
   });
 
