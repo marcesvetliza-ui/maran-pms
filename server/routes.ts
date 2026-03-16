@@ -2036,20 +2036,21 @@ export async function registerRoutes(
   app.patch("/api/groups/:id", async (req, res) => {
     try {
       const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
+      const nullIfEmpty = (v: any) => (v === "" || v === null || v === undefined) ? null : v;
       const updateData: Record<string, unknown> = {};
       
       if (name !== undefined) updateData.name = name;
-      if (contactName !== undefined) updateData.contactName = contactName;
-      if (contactPhone !== undefined) updateData.contactPhone = contactPhone;
-      if (contactEmail !== undefined) updateData.contactEmail = contactEmail;
-      if (eventDate !== undefined) updateData.eventDate = eventDate;
-      if (eventSalon !== undefined) updateData.eventSalon = eventSalon;
-      if (eventTime !== undefined) updateData.eventTime = eventTime;
+      if (contactName !== undefined) updateData.contactName = nullIfEmpty(contactName);
+      if (contactPhone !== undefined) updateData.contactPhone = nullIfEmpty(contactPhone);
+      if (contactEmail !== undefined) updateData.contactEmail = nullIfEmpty(contactEmail);
+      if (eventDate !== undefined) updateData.eventDate = nullIfEmpty(eventDate);
+      if (eventSalon !== undefined) updateData.eventSalon = nullIfEmpty(eventSalon);
+      if (eventTime !== undefined) updateData.eventTime = nullIfEmpty(eventTime);
       if (checkInDate !== undefined) updateData.checkInDate = checkInDate;
       if (checkOutDate !== undefined) updateData.checkOutDate = checkOutDate;
       if (status !== undefined) updateData.status = status;
-      if (releaseDate !== undefined) updateData.releaseDate = releaseDate;
-      if (notes !== undefined) updateData.notes = notes;
+      if (releaseDate !== undefined) updateData.releaseDate = nullIfEmpty(releaseDate);
+      if (notes !== undefined) updateData.notes = nullIfEmpty(notes);
       if (color !== undefined) updateData.color = color;
 
       const group = await storage.updateGroup(req.params.id, updateData);
@@ -2057,8 +2058,9 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Group not found" });
       }
       res.json(group);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating group" });
+    } catch (error: any) {
+      console.error("Error updating group:", error?.message || error);
+      res.status(500).json({ error: "Error updating group", detail: error?.message });
     }
   });
 
