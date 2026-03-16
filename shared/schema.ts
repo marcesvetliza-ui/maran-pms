@@ -861,6 +861,10 @@ export const tableReservations = pgTable("table_reservations", {
   reservationTime: text("reservation_time").notNull(),
   status: text("status").$type<TableReservationStatus>().notNull().default("pending"),
   notes: text("notes"),
+  advanceAmount: decimal("advance_amount", { precision: 10, scale: 2 }).default("0"),
+  advanceMethod: text("advance_method"),
+  advanceDate: date("advance_date"),
+  advanceNotes: text("advance_notes"),
   createdAt: timestamp("created_at").notNull(),
 });
 

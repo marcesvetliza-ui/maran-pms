@@ -228,13 +228,15 @@ const tableStatusLabels: Record<string, string> = {
   blocked: "Bloqueada",
 };
 
+const SHOW_FACTURA_C = false;
+
 const receiptTypeLabels: Record<string, string> = {
   ticket: "Ticket",
   factura_a: "Factura A",
   factura_b: "Factura B",
-  factura_c: "Factura C",
-  nota_credito: "Nota de Credito",
   voucher: "Voucher (No Fiscal)",
+  nota_credito: "Nota de Credito",
+  ...(SHOW_FACTURA_C ? { factura_c: "Factura C" } : {}),
 };
 
 const paymentMethodLabels: Record<string, string> = {
@@ -335,8 +337,27 @@ export default function RestaurantPage() {
   const [splitPayMethod, setSplitPayMethod] = useState("efectivo");
   const [splitPayMethods, setSplitPayMethods] = useState<Record<string, string>>({});
   const [splitReceiptTypes, setSplitReceiptTypes] = useState<Record<string, string>>({});
+  const [menuSearch, setMenuSearch] = useState("");
+  const menuSearchRef = useRef<HTMLInputElement>(null);
+  const [showItemNotes, setShowItemNotes] = useState(false);
+  const [reservationViewMode, setReservationViewMode] = useState<"day" | "all">("day");
+  const [reservationDateFilter, setReservationDateFilter] = useState(
+    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+  );
+  const [reservationSearchText, setReservationSearchText] = useState("");
+  const [closeBillingName, setCloseBillingName] = useState("");
+  const [closeBillingCuit, setCloseBillingCuit] = useState("");
 
   const courseLabels: Record<number, string> = { 1: "Entradas", 2: "Platos Principales", 3: "Postres" };
+
+  function inferCourseFromCategory(categoryName: string): number | null {
+    const name = categoryName.toLowerCase();
+    if (name.includes("entrada") || name.includes("aperitivo")) return 1;
+    if (name.includes("principal") || name.includes("segundo") || name.includes("plato")) return 2;
+    if (name.includes("postre") || name.includes("dulce")) return 3;
+    if (name.includes("bebida") || name.includes("cerveza") || name.includes("vino") || name.includes("espumante") || name.includes("jugo") || name.includes("gaseosa")) return null;
+    return null;
+  }
 
   const reservationForm = useForm<ReservationFormValues>({
     resolver: zodResolver(reservationFormSchema),
@@ -406,8 +427,9 @@ export default function RestaurantPage() {
     queryKey: ["/api/restaurant/recipes"],
   });
 
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const todayReservations = reservations.filter(r =>
-    r.reservationDate === new Date().toISOString().split("T")[0] &&
+    r.reservationDate === todayStr &&
     r.status !== "cancelled" && r.status !== "completed"
   );
 
@@ -577,16 +599,20 @@ export default function RestaurantPage() {
   const deleteItemMutation = useMutation({
     mutationFn: async (data: { orderId: string; itemId: string }) => {
       const res = await apiRequest("DELETE", `/api/restaurant/orders/${data.orderId}/items/${data.itemId}`);
+      if (res.status === 204 || res.status === 200) return { success: true };
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       toast({ title: "Item eliminado" });
     },
+    onError: () => {
+      toast({ title: "Error al eliminar item", variant: "destructive" });
+    },
   });
 
   const closeOrderMutation = useMutation({
-    mutationFn: async (data: { orderId: string; receiptType: string; paymentMethod: string; discount?: number; discountType?: string; roomReservationId?: string }) => {
+    mutationFn: async (data: { orderId: string; receiptType: string; paymentMethod: string; discount?: number; discountType?: string; roomReservationId?: string; billingName?: string; billingCuit?: string }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
         receiptType: data.receiptType,
@@ -594,6 +620,8 @@ export default function RestaurantPage() {
         discount: data.discount,
         discountType: data.discountType,
         roomReservationId: data.roomReservationId,
+        billingName: data.billingName,
+        billingCuit: data.billingCuit,
       });
       return res.json();
     },
@@ -605,6 +633,8 @@ export default function RestaurantPage() {
       setCloseDiscount("");
       setCloseDiscountType("amount");
       setCloseRoomId("");
+      setCloseBillingName("");
+      setCloseBillingCuit("");
       toast({ title: "Pedido cerrado" });
     },
   });
@@ -827,6 +857,9 @@ export default function RestaurantPage() {
         customName: isEditableItem ? customItemName : undefined,
       });
     }
+    setMenuSearch("");
+    setShowItemNotes(false);
+    setItemNotes("");
   };
 
   const handleCancelItem = () => {
@@ -836,6 +869,8 @@ export default function RestaurantPage() {
     setIsEditableItem(false);
     setCustomItemName("");
     setCustomItemPrice("");
+    setMenuSearch("");
+    setShowItemNotes(false);
   };
 
   const getUpdatedOrder = () => {
@@ -1714,10 +1749,11 @@ export default function RestaurantPage() {
       {/* ==================== DIALOGS ==================== */}
 
       {/* New Order Dialog (table-based) */}
-      <Dialog open={isNewOrderDialogOpen} onOpenChange={setIsNewOrderDialogOpen}>
-        <DialogContent>
+      <Dialog open={isNewOrderDialogOpen} onOpenChange={(open) => { if (open) setIsNewOrderDialogOpen(true); }}>
+        <DialogContent onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>Nuevo Pedido - Mesa {selectedTable?.tableNumber}</DialogTitle>
+            <DialogTitle>Nuevo Pedido — Mesa {selectedTable?.tableNumber}</DialogTitle>
+            <DialogDescription>Al crear el pedido se abre la mesa y se habilita la carga de comandas.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -1766,10 +1802,11 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Direct Order Dialog (tableless areas) */}
-      <Dialog open={isDirectOrderDialogOpen} onOpenChange={setIsDirectOrderDialogOpen}>
-        <DialogContent>
+      <Dialog open={isDirectOrderDialogOpen} onOpenChange={(open) => { if (open) setIsDirectOrderDialogOpen(true); }}>
+        <DialogContent onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>Nueva Orden - {areas.find(a => a.id === directOrderAreaId)?.name}</DialogTitle>
+            <DialogTitle>Nueva Orden — {areas.find(a => a.id === directOrderAreaId)?.name}</DialogTitle>
+            <DialogDescription>Al crear la orden se habilita la carga de comandas.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -2085,13 +2122,37 @@ export default function RestaurantPage() {
 
           {orderView === "menu" && !pendingItem && (
             <div className="flex-1 overflow-y-auto space-y-4">
+              {/* Buscador */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  ref={menuSearchRef}
+                  value={menuSearch}
+                  onChange={(e) => {
+                    setMenuSearch(e.target.value);
+                    if (e.target.value) setSelectedCategory(null);
+                  }}
+                  placeholder="Buscar plato o código..."
+                  className="pl-9"
+                  data-testid="input-menu-search"
+                />
+                {menuSearch && (
+                  <button
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setMenuSearch("")}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 {sortedCategories.map((cat) => (
                   <Button
                     key={cat.id}
                     variant={selectedCategory === cat.id ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setSelectedCategory(selectedCategory === cat.id ? null : cat.id)}
+                    onClick={() => { setSelectedCategory(selectedCategory === cat.id ? null : cat.id); setMenuSearch(""); }}
                     data-testid={`button-category-${cat.id}`}
                   >
                     {cat.name}
@@ -2109,40 +2170,78 @@ export default function RestaurantPage() {
                 </Button>
               </div>
 
-              {selectedCategory ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {menuItems
-                    .filter((item) => item.categoryId === selectedCategory && item.isAvailable !== "false")
-                    .map((item) => (
-                      <button
-                        key={item.id}
-                        className="p-3 border rounded-md text-left hover-elevate flex items-center justify-between"
-                        onClick={() => {
-                          setPendingItem(item);
-                          if ((item as any).isEditable === "true") {
-                            setIsEditableItem(true);
-                            setCustomItemName(item.name);
-                            setCustomItemPrice("");
-                          } else {
-                            setIsEditableItem(false);
-                            setCustomItemName("");
-                            setCustomItemPrice("");
-                          }
-                        }}
-                        data-testid={`select-item-${item.id}`}
-                      >
-                        <span className="font-medium">{item.name}</span>
-                        <span className="text-muted-foreground">
-                          ${parseFloat(item.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                        </span>
-                      </button>
-                    ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  Selecciona una categoria para ver los platos
-                </div>
-              )}
+              {(() => {
+                const selectItem = (item: MenuItem) => {
+                  const cat = menuCategories.find(c => c.id === item.categoryId);
+                  const inferred = inferCourseFromCategory(cat?.name || "");
+                  setItemCourse(inferred ?? 1);
+                  setPendingItem(item);
+                  setMenuSearch("");
+                  if ((item as any).isEditable === "true") {
+                    setIsEditableItem(true);
+                    setCustomItemName(item.name);
+                    setCustomItemPrice("");
+                  } else {
+                    setIsEditableItem(false);
+                    setCustomItemName("");
+                    setCustomItemPrice("");
+                  }
+                };
+
+                if (menuSearch.trim()) {
+                  const visibleItems = menuItems.filter(item =>
+                    item.isAvailable !== "false" && (
+                      item.name.toLowerCase().includes(menuSearch.toLowerCase()) ||
+                      (item.description || "").toLowerCase().includes(menuSearch.toLowerCase())
+                    )
+                  );
+                  if (visibleItems.length === 0) {
+                    return <p className="text-center text-muted-foreground py-4 text-sm">Sin resultados para "{menuSearch}"</p>;
+                  }
+                  return (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {visibleItems.map(item => {
+                        const cat = menuCategories.find(c => c.id === item.categoryId);
+                        return (
+                          <button key={item.id} className="p-3 border rounded-md text-left hover-elevate" onClick={() => selectItem(item)} data-testid={`select-item-${item.id}`}>
+                            <div className="font-medium">{item.name}</div>
+                            <div className="text-xs text-muted-foreground">{cat?.name}</div>
+                            <div className="text-muted-foreground text-sm">${parseFloat(item.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                }
+
+                if (selectedCategory) {
+                  return (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {menuItems
+                        .filter((item) => item.categoryId === selectedCategory && item.isAvailable !== "false")
+                        .map((item) => (
+                          <button
+                            key={item.id}
+                            className="p-3 border rounded-md text-left hover-elevate flex items-center justify-between"
+                            onClick={() => selectItem(item)}
+                            data-testid={`select-item-${item.id}`}
+                          >
+                            <span className="font-medium">{item.name}</span>
+                            <span className="text-muted-foreground">
+                              ${parseFloat(item.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                          </button>
+                        ))}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Selecciona una categoría o buscá un plato
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -2172,28 +2271,32 @@ export default function RestaurantPage() {
                   )}
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>Curso</Label>
-                <div className="flex gap-2">
-                  {(() => {
-                    const cat = menuCategories.find(c => c.id === pendingItem.categoryId);
-                    const beverageCategories = ["bebidas sin alcohol", "cervezas", "vinos", "espumantes", "vinos de ríos", "bebidas"];
-                    const isBeverage = cat && beverageCategories.some(bc => cat.name.toLowerCase().includes(bc));
-                    if (isBeverage) return <span className="text-sm text-muted-foreground">Bebida — sin curso</span>;
-                    return [1, 2, 3].map(c => (
-                      <Button
-                        key={c}
-                        variant={itemCourse === c ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setItemCourse(c)}
-                        data-testid={`button-course-${c}`}
-                      >
-                        {courseLabels[c]}
-                      </Button>
-                    ));
-                  })()}
-                </div>
-              </div>
+              {(() => {
+                const cat = menuCategories.find(c => c.id === pendingItem.categoryId);
+                const inferred = inferCourseFromCategory(cat?.name || "");
+                if (inferred !== null) return null;
+                const beverageCategories = ["bebidas sin alcohol", "cervezas", "vinos", "espumantes", "vinos de ríos", "bebidas"];
+                const isBeverage = cat && beverageCategories.some(bc => cat.name.toLowerCase().includes(bc));
+                if (isBeverage) return null;
+                return (
+                  <div className="space-y-2">
+                    <Label>Curso</Label>
+                    <div className="flex gap-2">
+                      {[1, 2, 3].map(c => (
+                        <Button
+                          key={c}
+                          variant={itemCourse === c ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setItemCourse(c)}
+                          data-testid={`button-course-${c}`}
+                        >
+                          {courseLabels[c]}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               {isEditableItem && (
                 <div className="space-y-2 mt-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md">
                   <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">Fuera de menú — completar descripción y precio</p>
@@ -2219,16 +2322,25 @@ export default function RestaurantPage() {
                   </div>
                 </div>
               )}
-              <div className="space-y-2">
-                <Label htmlFor="item-notes">Observaciones (opcional)</Label>
-                <Textarea
-                  id="item-notes"
-                  value={itemNotes}
-                  onChange={(e) => setItemNotes(e.target.value)}
-                  placeholder="Ej: sin sal, termino medio, etc."
-                  rows={2}
-                  data-testid="input-item-notes"
-                />
+              <div>
+                <button
+                  type="button"
+                  className="text-sm text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={() => setShowItemNotes(!showItemNotes)}
+                >
+                  {showItemNotes ? "Ocultar observaciones" : "+ Agregar observación"}
+                </button>
+                {showItemNotes && (
+                  <Textarea
+                    value={itemNotes}
+                    onChange={(e) => setItemNotes(e.target.value)}
+                    placeholder="Ej: sin sal, término medio, sin gluten..."
+                    rows={2}
+                    autoFocus
+                    className="mt-2"
+                    data-testid="input-item-notes"
+                  />
+                )}
               </div>
               <p className="font-medium">Agregar este item?</p>
               <div className="flex gap-2">
@@ -2418,6 +2530,30 @@ export default function RestaurantPage() {
                     </div>
                   );
                 })()}
+
+                {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && closePaymentMethod !== "cuenta_habitacion" && (
+                  <div className="space-y-3 p-3 border rounded-md bg-muted/30">
+                    <p className="text-sm font-medium">Datos de facturación</p>
+                    <div>
+                      <Label className="text-xs">Razón social / Nombre</Label>
+                      <Input
+                        value={closeBillingName}
+                        onChange={(e) => setCloseBillingName(e.target.value)}
+                        placeholder="Ej: Juan García / Empresa SA"
+                        data-testid="input-billing-name"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">CUIT / DNI</Label>
+                      <Input
+                        value={closeBillingCuit}
+                        onChange={(e) => setCloseBillingCuit(e.target.value)}
+                        placeholder="20-12345678-9"
+                        data-testid="input-billing-cuit"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {closePaymentMethod === "cuenta_habitacion" && (
                   <div className="space-y-2">
@@ -2625,6 +2761,8 @@ export default function RestaurantPage() {
                         discount: disc > 0 ? disc : undefined,
                         discountType: disc > 0 ? closeDiscountType : undefined,
                         roomReservationId: closePaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
+                        billingName: closeBillingName || undefined,
+                        billingCuit: closeBillingCuit || undefined,
                       });
                     }
                   }}
@@ -2869,6 +3007,53 @@ export default function RestaurantPage() {
                 <Label>Notas</Label>
                 <Textarea value={editingReservation.notes || ""} onChange={(e) => setEditingReservation({...editingReservation, notes: e.target.value})} data-testid="input-edit-notes" />
               </div>
+              <div className="border-t pt-4 space-y-3">
+                <Label className="text-sm font-medium">Anticipo / Seña</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Monto</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={(editingReservation as any).advanceAmount || ""}
+                      onChange={(e) => setEditingReservation({ ...editingReservation, advanceAmount: e.target.value } as any)}
+                      placeholder="0.00"
+                      data-testid="input-advance-amount"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Método</Label>
+                    <Select
+                      value={(editingReservation as any).advanceMethod || ""}
+                      onValueChange={(v) => setEditingReservation({ ...editingReservation, advanceMethod: v } as any)}
+                    >
+                      <SelectTrigger data-testid="select-advance-method"><SelectValue placeholder="Forma de pago" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="efectivo">Efectivo</SelectItem>
+                        <SelectItem value="transferencia">Transferencia</SelectItem>
+                        <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                        <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                        <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Notas del anticipo</Label>
+                  <Input
+                    value={(editingReservation as any).advanceNotes || ""}
+                    onChange={(e) => setEditingReservation({ ...editingReservation, advanceNotes: e.target.value } as any)}
+                    placeholder="Referencia, comprobante, observación..."
+                    data-testid="input-advance-notes"
+                  />
+                </div>
+                {parseFloat((editingReservation as any).advanceAmount || "0") > 0 && (
+                  <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
+                    Anticipo registrado: ${parseFloat((editingReservation as any).advanceAmount).toLocaleString("es-AR")}
+                    {(editingReservation as any).advanceMethod && ` — ${(editingReservation as any).advanceMethod}`}
+                  </div>
+                )}
+              </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsEditReservationOpen(false)}>Cancelar</Button>
                 <Button onClick={() => {
@@ -2879,6 +3064,9 @@ export default function RestaurantPage() {
                     tableId: editingReservation.tableId,
                     partySize: editingReservation.partySize,
                     notes: editingReservation.notes,
+                    advanceAmount: (editingReservation as any).advanceAmount || null,
+                    advanceMethod: (editingReservation as any).advanceMethod || null,
+                    advanceNotes: (editingReservation as any).advanceNotes || null,
                   }});
                   setIsEditReservationOpen(false);
                 }} disabled={updateReservationMutation.isPending} data-testid="button-save-edit-reservation">
@@ -2895,19 +3083,62 @@ export default function RestaurantPage() {
       <Dialog open={isDailyReservationsOpen} onOpenChange={setIsDailyReservationsOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Reservas del Dia - {new Date().toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}</DialogTitle>
+            <DialogTitle>Reservas de Restaurant</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            {todayReservations.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <CalendarDays className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No hay reservas para hoy</p>
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {todayReservations
-                  .sort((a, b) => a.reservationTime.localeCompare(b.reservationTime))
-                  .map((reservation) => {
+          <div className="space-y-3">
+            {/* Mode selector + date filter */}
+            <div className="flex gap-2 items-center flex-wrap">
+              <Button size="sm" variant={reservationViewMode === "day" ? "default" : "outline"} onClick={() => setReservationViewMode("day")}>
+                Por día
+              </Button>
+              <Button size="sm" variant={reservationViewMode === "all" ? "default" : "outline"} onClick={() => setReservationViewMode("all")}>
+                Todas
+              </Button>
+              {reservationViewMode === "day" && (
+                <Input
+                  type="date"
+                  value={reservationDateFilter}
+                  onChange={(e) => setReservationDateFilter(e.target.value)}
+                  className="h-8 w-40"
+                />
+              )}
+            </div>
+            <Input
+              placeholder="Buscar por nombre, teléfono o email..."
+              value={reservationSearchText}
+              onChange={(e) => setReservationSearchText(e.target.value)}
+            />
+            {(() => {
+              const filteredRes = reservations.filter(r => {
+                if (r.status === "cancelled") return false;
+                if (reservationViewMode === "day" && r.reservationDate !== reservationDateFilter) return false;
+                if (reservationSearchText) {
+                  const q = reservationSearchText.toLowerCase();
+                  return (
+                    r.guestName.toLowerCase().includes(q) ||
+                    (r.guestPhone || "").includes(q) ||
+                    (r.guestEmail || "").toLowerCase().includes(q) ||
+                    r.reservationDate.includes(q)
+                  );
+                }
+                return true;
+              }).sort((a, b) => {
+                if (reservationViewMode === "all") return a.reservationDate.localeCompare(b.reservationDate) || a.reservationTime.localeCompare(b.reservationTime);
+                return a.reservationTime.localeCompare(b.reservationTime);
+              });
+
+              if (filteredRes.length === 0) {
+                return (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CalendarDays className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No hay reservas para este filtro</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {filteredRes.map((reservation) => {
                     const table = tables.find(t => t.id === reservation.tableId);
                     return (
                       <div
@@ -2916,11 +3147,23 @@ export default function RestaurantPage() {
                         data-testid={`daily-reservation-${reservation.id}`}
                       >
                         <div className="flex items-center gap-4">
-                          <div className="text-lg font-bold">{reservation.reservationTime}</div>
+                          <div className="text-center">
+                            <div className="text-lg font-bold">{reservation.reservationTime}</div>
+                            {reservationViewMode === "all" && (
+                              <div className="text-xs text-muted-foreground">{new Date(reservation.reservationDate + "T12:00:00").toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })}</div>
+                            )}
+                          </div>
                           <div>
-                            <div className="font-medium">{reservation.guestName}</div>
+                            <div className="font-medium flex items-center gap-2">
+                              {reservation.guestName}
+                              {parseFloat((reservation as any).advanceAmount || "0") > 0 && (
+                                <Badge variant="outline" className="text-xs text-green-700 border-green-400">
+                                  Seña ${parseFloat((reservation as any).advanceAmount).toLocaleString("es-AR")}
+                                </Badge>
+                              )}
+                            </div>
                             <div className="text-sm text-muted-foreground">
-                              Mesa {table?.tableNumber || "?"} - {reservation.partySize} personas
+                              Mesa {table?.tableNumber || "?"} — {reservation.partySize} personas
                               {table?.hasWindow === "true" && " (Ventana)"}
                             </div>
                           </div>
@@ -2930,10 +3173,7 @@ export default function RestaurantPage() {
                             {reservationStatusLabels[reservation.status]}
                           </Badge>
                           {reservation.status === "pending" && (
-                            <Button
-                              size="sm"
-                              onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}
-                            >
+                            <Button size="sm" onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}>
                               <Check className="h-4 w-4" />
                             </Button>
                           )}
@@ -2941,13 +3181,12 @@ export default function RestaurantPage() {
                       </div>
                     );
                   })}
-              </div>
-            )}
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter>
-            <Button onClick={() => setIsDailyReservationsOpen(false)}>
-              Cerrar
-            </Button>
+            <Button onClick={() => setIsDailyReservationsOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
