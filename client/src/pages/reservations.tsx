@@ -2560,6 +2560,7 @@ export default function ReservationsPage() {
 
       {/* Reservation Form Dialog */}
       <ReservationFormDialog
+        key={selectedReservation?.id ?? "new"}
         reservation={selectedReservation}
         guests={guests || []}
         rooms={rooms || []}
