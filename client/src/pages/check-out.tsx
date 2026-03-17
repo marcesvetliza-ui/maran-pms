@@ -231,6 +231,7 @@ export default function CheckOutPage() {
   });
 
   const balance = folio?.balance || 0;
+  const isHistorical = selectedReservation ? selectedReservation.checkOutDate < today : false;
 
   if (wizardStep > 0 && selectedReservation) {
     return (
@@ -246,6 +247,20 @@ export default function CheckOutPage() {
             <p className="text-muted-foreground">Hab. {selectedReservation.room?.roomNumber}</p>
           </div>
         </div>
+
+        {isHistorical && (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3" data-testid="banner-historical-checkout">
+            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold text-amber-800 dark:text-amber-300">Cerrando habitación histórica</p>
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                La fecha de salida original era {formatDateAR(selectedReservation.checkOutDate)}.
+                El sistema cerrará la habitación tal como está, sin permitir modificaciones.
+                El cierre quedará registrado con fecha de hoy.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 mb-2">
           {[1, 2, 3].map((step) => (
@@ -276,14 +291,16 @@ export default function CheckOutPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Cargos</CardTitle>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setAddChargeOpen(true)}
-                    data-testid="button-add-charge"
-                  >
-                    <Plus className="h-4 w-4 mr-1" /> Agregar cargo
-                  </Button>
+                  {!isHistorical && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAddChargeOpen(true)}
+                      data-testid="button-add-charge"
+                    >
+                      <Plus className="h-4 w-4 mr-1" /> Agregar cargo
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
@@ -369,7 +386,7 @@ export default function CheckOutPage() {
 
             <div className="flex justify-end">
               <Button onClick={() => setWizardStep(2)} data-testid="button-continue-to-payment">
-                Continuar al pago <ChevronRight className="h-4 w-4 ml-1" />
+                {isHistorical ? "Continuar al cierre" : "Continuar al pago"} <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
 
@@ -419,7 +436,22 @@ export default function CheckOutPage() {
 
         {wizardStep === 2 && (
           <div className="grid gap-4">
-            {balance <= 0.01 ? (
+            {isHistorical ? (
+              <Card className="border-amber-300 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800">
+                <CardContent className="flex flex-col items-center py-8 gap-3">
+                  <AlertCircle className="h-12 w-12 text-amber-500" />
+                  <h3 className="text-lg font-semibold text-amber-700 dark:text-amber-400">Cierre histórico</h3>
+                  <p className="text-sm text-muted-foreground text-center">
+                    La habitación se cerrará tal como está registrada.
+                    {balance > 0.01 && (
+                      <span className="block mt-1 font-medium text-amber-700 dark:text-amber-400">
+                        Saldo pendiente sin saldar: ${balance.toFixed(2)}
+                      </span>
+                    )}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : balance <= 0.01 ? (
               <Card className="border-green-300 bg-green-50 dark:bg-green-900/10 dark:border-green-800">
                 <CardContent className="flex flex-col items-center py-8 gap-3">
                   <CircleCheck className="h-12 w-12 text-green-500" />
@@ -557,10 +589,15 @@ export default function CheckOutPage() {
               </Button>
               <Button
                 onClick={() => selectedReservation && checkOutMutation.mutate(selectedReservation.id)}
-                disabled={balance > 0.01 || checkOutMutation.isPending}
+                disabled={(!isHistorical && balance > 0.01) || checkOutMutation.isPending}
+                variant={isHistorical ? "destructive" : "default"}
                 data-testid="button-confirm-checkout"
               >
-                {checkOutMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
+                {checkOutMutation.isPending
+                  ? "Procesando..."
+                  : isHistorical
+                  ? "Cerrar Habitación Histórica"
+                  : "Confirmar Check-out"}
               </Button>
             </div>
           </div>

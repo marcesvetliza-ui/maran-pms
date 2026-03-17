@@ -1414,12 +1414,15 @@ export async function registerRoutes(
       const todayMs = new Date(today + "T12:00:00").getTime();
       const coMs = new Date(checkOutDate + "T12:00:00").getTime();
       const diffDays = Math.round((coMs - todayMs) / (1000 * 60 * 60 * 24));
-      if (diffDays > 1 || diffDays < -1) {
+      const isHistorical = diffDays < -1;
+
+      // Only block FUTURE check-outs (more than 1 day ahead)
+      if (diffDays > 1) {
         return res.status(400).json({ error: `No se puede hacer check-out: la fecha de salida es ${checkOutDate} y hoy es ${today}` });
       }
 
-      // Get balance - if forceCheckout is true, skip balance check
-      const forceCheckout = req.body.forceCheckout === true;
+      // Historical check-outs always use forceCheckout (close as-is)
+      const forceCheckout = req.body.forceCheckout === true || isHistorical;
       if (!forceCheckout) {
         const chargesTotal = await storage.getChargesTotal(req.params.id);
         const paymentsTotal = await storage.getPaymentsTotal(req.params.id);
