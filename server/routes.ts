@@ -5,7 +5,7 @@ import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
-import { insertGuestReviewSchema, reservationChangelog, reservations, guests } from "@shared/schema";
+import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks } from "@shared/schema";
 import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
@@ -963,6 +963,11 @@ export async function registerRoutes(
 
       delete req.body.createdAt;
       delete req.body.id;
+
+      // Fix 3: Protección — ignorar campos críticos vacíos para no sobreescribir en DB
+      if (!req.body.roomId || req.body.roomId === "") delete req.body.roomId;
+      if (!req.body.roomTypeId || req.body.roomTypeId === "") delete req.body.roomTypeId;
+      if (!req.body.guestId || req.body.guestId === "") delete req.body.guestId;
 
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
       for (const field of numericFields) {
@@ -2266,7 +2271,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Group not found" });
       }
 
-      const { amount, method, reference, receiptType, distribution } = req.body;
+      const { amount, method, reference, receiptType, distribution, closeAllRooms } = req.body;
       if (!amount || !method) {
         return res.status(400).json({ error: "amount and method are required" });
       }
@@ -2284,54 +2289,119 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No hay reservas activas (confirmadas o en casa) para registrar pagos" });
       }
 
-      if (distribution === "equal") {
-        const perRoom = totalAmount / activeReservations.length;
+      const today = getArgentinaToday();
+      const refText = reference || `Pago grupal${closeAllRooms ? " (cierre total)" : ""} - ${group.name}`;
+
+      // Calcular la diferencia de saldo cuando se cierra el grupo
+      let balanceDiff = 0;
+      if (closeAllRooms) {
+        let totalGroupDebt = 0;
         for (const reservation of activeReservations) {
-          await storage.createPayment({
-            reservationId: reservation.id,
-            amount: perRoom.toFixed(2),
-            method,
-            reference: reference || `Pago grupal - ${group.name}`,
-            date: new Date().toISOString().split("T")[0],
-          });
-        }
-      } else if (distribution === "proportional") {
-        let totalCost = 0;
-        const costs: { id: string; cost: number }[] = [];
-        for (const reservation of activeReservations) {
-          const charges = await storage.getCharges(reservation.id);
-          const chargesTotal = charges.reduce((sum: number, c) => sum + parseFloat(c.amount), 0);
+          const chargesTotal = await storage.getChargesTotal(reservation.id);
+          const paymentsTotal = await storage.getPaymentsTotal(reservation.id);
           const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+          totalGroupDebt += roomTotal + chargesTotal - paymentsTotal;
+        }
+        balanceDiff = totalAmount - totalGroupDebt;
+      }
+
+      if (distribution === "proportional") {
+        let totalCost = 0;
+        const costs: { id: string; cost: number; balance: number }[] = [];
+        for (const reservation of activeReservations) {
+          const chargesTotal = await storage.getChargesTotal(reservation.id);
+          const paymentsTotal = await storage.getPaymentsTotal(reservation.id);
+          const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+          const balance = roomTotal + chargesTotal - paymentsTotal;
           const cost = roomTotal + chargesTotal;
-          costs.push({ id: reservation.id, cost });
+          costs.push({ id: reservation.id, cost, balance });
           totalCost += cost;
         }
         for (const item of costs) {
-          const proportion = totalCost > 0 ? item.cost / totalCost : 1 / costs.length;
-          const paymentAmount = (totalAmount * proportion).toFixed(2);
-          await storage.createPayment({
-            reservationId: item.id,
-            amount: paymentAmount,
-            method,
-            reference: reference || `Pago grupal - ${group.name}`,
-            date: new Date().toISOString().split("T")[0],
-          });
+          let paymentAmt: number;
+          if (closeAllRooms) {
+            // Pagar exactamente el saldo pendiente de cada habitación
+            paymentAmt = Math.max(0, item.balance);
+          } else {
+            const proportion = totalCost > 0 ? item.cost / totalCost : 1 / costs.length;
+            paymentAmt = totalAmount * proportion;
+          }
+          if (paymentAmt > 0.001) {
+            await storage.createPayment({
+              reservationId: item.id,
+              amount: paymentAmt.toFixed(2),
+              method,
+              reference: refText,
+              date: today,
+            });
+          }
         }
       } else {
+        // equal (o cualquier otro): dividir en partes iguales
         const perRoom = totalAmount / activeReservations.length;
         for (const reservation of activeReservations) {
           await storage.createPayment({
             reservationId: reservation.id,
             amount: perRoom.toFixed(2),
             method,
-            reference: reference || `Pago grupal - ${group.name}`,
-            date: new Date().toISOString().split("T")[0],
+            reference: refText,
+            date: today,
           });
         }
       }
 
-      res.json({ success: true, distributed: activeReservations.length });
+      // Si closeAllRooms: hacer check-out de todas las reservas checked_in
+      let checkoutCount = 0;
+      if (closeAllRooms) {
+        for (const reservation of activeReservations) {
+          if (reservation.status !== "checked_in") continue;
+
+          await db.insert(reservationChangelog).values({
+            reservationId: reservation.id,
+            fecha: new Date(),
+            operador: (req as any).user?.username || "sistema",
+            tipo: "checkout_grupal",
+            descripcion: `Check-out grupal con pago centralizado. Grupo: ${group.name}. Monto total: $${totalAmount.toFixed(2)}.`,
+          });
+
+          await storage.updateReservation(reservation.id, { status: "checked_out" });
+          await storage.updateRoom(reservation.roomId, { status: "dirty" });
+
+          try {
+            await db.insert(housekeepingTasks).values({
+              id: randomUUID(),
+              roomId: reservation.roomId,
+              type: "checkout_clean",
+              priority: "high",
+              status: "pending",
+              notes: `Check-out grupal (pago centralizado) — ${group.name}`,
+              createdAt: new Date(),
+            } as any);
+          } catch {}
+
+          checkoutCount++;
+        }
+
+        // Si todas las reservas están cerradas, marcar el grupo como finished
+        const updatedGroup = await storage.getGroup(req.params.groupId);
+        if (updatedGroup) {
+          const allDone = updatedGroup.reservations.every(
+            r => r.status === "checked_out" || r.status === "cancelled"
+          );
+          if (allDone) {
+            await storage.updateGroup(req.params.groupId, { status: "finished" as any });
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        distributed: activeReservations.length,
+        checkoutCount,
+        balanceDiff: closeAllRooms ? balanceDiff : undefined,
+      });
     } catch (error) {
+      console.error("Error processing group payment:", error);
       res.status(500).json({ error: "Error processing group payment" });
     }
   });

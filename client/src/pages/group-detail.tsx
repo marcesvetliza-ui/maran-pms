@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -530,6 +531,7 @@ export default function GroupDetailPage() {
   const [groupPaymentReference, setGroupPaymentReference] = useState("");
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
+  const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
 
   // Folio Grupal state
   const [showAddGroupChargeDialog, setShowAddGroupChargeDialog] = useState(false);
@@ -642,17 +644,39 @@ export default function GroupDetailPage() {
         reference: groupPaymentReference,
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
+        closeAllRooms: groupPaymentCloseAll,
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (res) => {
+      const data = await res.json().catch(() => ({}));
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
-      toast({ title: "Pago grupal registrado exitosamente" });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ predicate: (q) =>
+        Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning"
+      });
+      if (groupPaymentCloseAll) {
+        if (data.balanceDiff && Math.abs(data.balanceDiff) > 0.01) {
+          toast({
+            title: "Pago registrado con diferencia",
+            description: `Diferencia de $${Math.abs(data.balanceDiff).toFixed(2)} ${data.balanceDiff > 0 ? "(pagó de más)" : "(saldo pendiente)"}`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Pago grupal registrado — grupo cerrado",
+            description: `${data.checkoutCount ?? 0} habitación(es) cerrada(s) exitosamente.`,
+          });
+        }
+      } else {
+        toast({ title: "Pago grupal registrado exitosamente" });
+      }
       setShowGroupPaymentDialog(false);
       setGroupPaymentAmount("");
       setGroupPaymentMethod("");
       setGroupPaymentReference("");
       setGroupPaymentReceiptType("");
       setGroupPaymentDistribution("equal");
+      setGroupPaymentCloseAll(false);
       if (showInvoiceDialog) {
         loadInvoice();
       }
@@ -1888,6 +1912,25 @@ export default function GroupDetailPage() {
                 data-testid="input-group-payment-reference"
               />
             </div>
+
+            <div className="border-t pt-3">
+              <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+                <Checkbox
+                  id="close-all-rooms"
+                  checked={groupPaymentCloseAll}
+                  onCheckedChange={(v) => setGroupPaymentCloseAll(!!v)}
+                  data-testid="checkbox-close-all-rooms"
+                />
+                <div className="space-y-1">
+                  <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
+                    Con este pago se cierran todas las habitaciones del grupo
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    El sistema distribuirá el pago para saldar cada reserva y realizará el check-out de todas las habitaciones activas.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
@@ -1900,7 +1943,7 @@ export default function GroupDetailPage() {
               data-testid="button-confirm-group-payment"
             >
               <CreditCard className="mr-2 h-4 w-4" />
-              {groupPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
+              {groupPaymentMutation.isPending ? "Procesando..." : groupPaymentCloseAll ? "Pagar y Cerrar Grupo" : "Registrar Pago"}
             </Button>
           </DialogFooter>
         </DialogContent>

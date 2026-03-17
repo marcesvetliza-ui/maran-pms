@@ -465,8 +465,9 @@ export function ReservationFormDialog({
     e.preventDefault();
     mutation.mutate({
       ...formData,
-      roomId: formData.roomId || reservation?.roomId,
-      roomTypeId: formData.roomTypeId || reservation?.roomTypeId,
+      roomId: formData.roomId || reservation?.roomId || "",
+      roomTypeId: formData.roomTypeId || reservation?.roomTypeId || "",
+      guestId: formData.guestId || reservation?.guestId || "",
       bedTypeId: formData.bedTypeId || null,
       nights: Number(formData.nights),
       numberOfGuests: Number(formData.numberOfGuests),
@@ -477,10 +478,11 @@ export function ReservationFormDialog({
     });
   };
 
-  const availableRooms = rooms.filter((r) => 
-    (r.status === "available" || r.id === reservation?.roomId) && 
-    r.roomTypeId === selectedRoomTypeId
-  );
+  const availableRooms = rooms.filter((r) => {
+    const sameRoom = r.id === reservation?.roomId;
+    const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
+    return (isUsable || sameRoom) && r.roomTypeId === selectedRoomTypeId;
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
