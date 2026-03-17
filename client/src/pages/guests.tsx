@@ -15,6 +15,11 @@ import {
   Car,
   Heart,
   Calendar,
+  ChevronDown,
+  ChevronUp,
+  CreditCard,
+  DollarSign,
+  Hotel,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -334,6 +339,111 @@ function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }
 
+function ReservationExpandedDetail({ r }: { r: ReservationWithDetails }) {
+  const sourceLabel: Record<string, string> = {
+    directo: "Directo", empresa: "Empresa", agencia: "Agencia",
+    ota: "OTA", walkin: "Walk-in",
+  };
+  const paymentMethodLabel: Record<string, string> = {
+    efectivo: "Efectivo", tarjeta_credito: "Tarj. Crédito", tarjeta_debito: "Tarj. Débito",
+    transferencia: "Transferencia", cheque: "Cheque", cuenta_corriente: "Cta. Corriente",
+  };
+  const activeCharges = r.charges?.filter(c => c.status === "active") || [];
+  const activePayments = r.payments?.filter(p => p.status === "active") || [];
+  const totalCharges = activeCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+  const totalPayments = activePayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+  const balance = parseFloat(r.totalRoomAmount || "0") + totalCharges - totalPayments;
+
+  return (
+    <div className="bg-muted/30 border-t px-4 py-3 space-y-3 text-sm">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-xs text-muted-foreground">Código</p>
+          <p className="font-mono font-medium text-xs">{r.reservationCode}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Tipo de Habitación</p>
+          <p className="font-medium">{(r.room as any)?.roomType?.name || "-"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Tarifa por noche</p>
+          <p className="font-medium">${parseFloat(r.finalRatePerNight || "0").toLocaleString("es-AR")}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Total habitación</p>
+          <p className="font-medium">${parseFloat(r.totalRoomAmount || "0").toLocaleString("es-AR")}</p>
+        </div>
+        {r.discountType && r.discountType !== "none" && (
+          <div>
+            <p className="text-xs text-muted-foreground">Descuento</p>
+            <p className="font-medium text-green-600">
+              {r.discountType === "percent" ? `${r.discountValue}%` : `$${r.discountValue}`}
+            </p>
+          </div>
+        )}
+        <div>
+          <p className="text-xs text-muted-foreground">Fuente</p>
+          <p className="font-medium">{sourceLabel[r.source || ""] || r.source || "-"}</p>
+        </div>
+        {r.company && (
+          <div className="col-span-2">
+            <p className="text-xs text-muted-foreground">Empresa</p>
+            <p className="font-medium">{r.company.nombreFantasia || r.company.razonSocial}</p>
+          </div>
+        )}
+        {r.agency && (
+          <div className="col-span-2">
+            <p className="text-xs text-muted-foreground">Agencia</p>
+            <p className="font-medium">{r.agency.nombreFantasia || r.agency.razonSocial}</p>
+          </div>
+        )}
+      </div>
+
+      {r.notes && (
+        <div className="border-t pt-2">
+          <p className="text-xs text-muted-foreground">Notas</p>
+          <p className="text-xs mt-0.5">{r.notes}</p>
+        </div>
+      )}
+
+      {activeCharges.length > 0 && (
+        <div className="border-t pt-2">
+          <p className="text-xs font-semibold text-muted-foreground mb-1">Cargos ({activeCharges.length})</p>
+          <div className="space-y-1">
+            {activeCharges.map(c => (
+              <div key={c.id} className="flex justify-between text-xs">
+                <span>{c.description}</span>
+                <span className="font-medium">${parseFloat(c.amount).toLocaleString("es-AR")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activePayments.length > 0 && (
+        <div className="border-t pt-2">
+          <p className="text-xs font-semibold text-muted-foreground mb-1">Pagos ({activePayments.length})</p>
+          <div className="space-y-1">
+            {activePayments.map(p => (
+              <div key={p.id} className="flex justify-between text-xs">
+                <span>{paymentMethodLabel[p.method || ""] || p.method} · {p.date}</span>
+                <span className="font-medium text-green-700 dark:text-green-400">${parseFloat(p.amount).toLocaleString("es-AR")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t pt-2 flex justify-between text-xs font-semibold">
+        <span>Saldo pendiente</span>
+        <span className={balance > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}>
+          ${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function GuestDetailDialog({
   guest,
   open,
@@ -343,6 +453,8 @@ function GuestDetailDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
+
   const { data: allReservations } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations"],
   });
@@ -503,28 +615,51 @@ function GuestDetailDialog({
           )}
 
           <div className="border rounded-lg">
-            <div className="p-3 border-b bg-muted/50">
-              <h4 className="font-semibold">Historial de Reservaciones</h4>
+            <div className="p-3 border-b bg-muted/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Hotel className="h-4 w-4 text-muted-foreground" />
+                <h4 className="font-semibold">Historial de Reservaciones</h4>
+                {guestReservations.length > 0 && (
+                  <Badge variant="outline" className="text-xs">{guestReservations.length}</Badge>
+                )}
+              </div>
             </div>
-            <div className="divide-y max-h-[200px] overflow-y-auto">
+            <div className="divide-y max-h-[320px] overflow-y-auto">
               {guestReservations.length > 0 ? (
-                guestReservations.map((reservation) => (
-                  <div key={reservation.id} className="flex items-center justify-between p-3 text-sm" data-testid={`guest-reservation-${reservation.id}`}>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">Hab. {reservation.room?.roomNumber}</p>
-                        <p className="text-muted-foreground text-xs">
-                          {reservation.checkInDate} - {reservation.checkOutDate}
-                        </p>
-                      </div>
+                guestReservations.map((reservation) => {
+                  const isExpanded = expandedReservationId === reservation.id;
+                  return (
+                    <div key={reservation.id} data-testid={`guest-reservation-${reservation.id}`}>
+                      <button
+                        className="w-full flex items-center justify-between p-3 text-sm hover:bg-muted/40 transition-colors text-left"
+                        onClick={() => setExpandedReservationId(isExpanded ? null : reservation.id)}
+                        data-testid={`btn-expand-reservation-${reservation.id}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <div>
+                            <p className="font-medium">
+                              Hab. {reservation.room?.roomNumber}
+                              {(reservation.room as any)?.roomType?.name && (
+                                <span className="text-muted-foreground font-normal"> · {(reservation.room as any).roomType.name}</span>
+                              )}
+                            </p>
+                            <p className="text-muted-foreground text-xs font-mono">{reservation.reservationCode}</p>
+                            <p className="text-muted-foreground text-xs">
+                              {reservation.checkInDate} → {reservation.checkOutDate} ({reservation.nights} noche{reservation.nights !== 1 ? "s" : ""})
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-medium">${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR")}</span>
+                          <ReservationStatusBadge status={reservation.status} />
+                          {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                        </div>
+                      </button>
+                      {isExpanded && <ReservationExpandedDetail r={reservation} />}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">${reservation.totalRoomAmount || 0}</span>
-                      <ReservationStatusBadge status={reservation.status} />
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="p-4 text-center text-muted-foreground text-sm">
                   No hay reservaciones registradas

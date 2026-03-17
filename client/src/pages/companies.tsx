@@ -15,8 +15,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt } from "lucide-react";
-import { insertCompanySchema, type Company, type AccountMovement } from "@shared/schema";
+import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { insertCompanySchema, type Company, type AccountMovement, type Guest, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 
 const companyFormSchema = insertCompanySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -25,12 +26,108 @@ const companyFormSchema = insertCompanySchema.extend({
 
 type CompanyFormData = z.infer<typeof companyFormSchema>;
 
+const statusLabels: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  tentative: { label: "Tentativa", variant: "outline" },
+  pending: { label: "Pendiente", variant: "secondary" },
+  confirmed: { label: "Confirmada", variant: "default" },
+  checked_in: { label: "Check-in", variant: "default" },
+  checked_out: { label: "Finalizada", variant: "outline" },
+  cancelled: { label: "Cancelada", variant: "destructive" },
+};
+
+function ReservationStatusBadge({ status }: { status: string }) {
+  const cfg = statusLabels[status as ReservationStatus] || { label: "Sin estado", variant: "outline" as const };
+  return <Badge variant={cfg.variant} className="text-xs">{cfg.label}</Badge>;
+}
+
+const sourceLabel: Record<string, string> = {
+  directo: "Directo", empresa: "Empresa", agencia: "Agencia", ota: "OTA", walkin: "Walk-in",
+};
+const payMethodLabel: Record<string, string> = {
+  efectivo: "Efectivo", tarjeta_credito: "Tarj. Crédito", tarjeta_debito: "Tarj. Débito",
+  transferencia: "Transferencia", cheque: "Cheque", cuenta_corriente: "Cta. Corriente",
+};
+
+function ReservationDetailRow({ r }: { r: ReservationWithDetails }) {
+  const [expanded, setExpanded] = useState(false);
+  const activeCharges = r.charges?.filter(c => c.status === "active") || [];
+  const activePayments = r.payments?.filter(p => p.status === "active") || [];
+  const totalCharges = activeCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+  const totalPayments = activePayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+  const balance = parseFloat(r.totalRoomAmount || "0") + totalCharges - totalPayments;
+
+  return (
+    <div className="border-b last:border-b-0">
+      <button
+        className="w-full flex items-center justify-between p-3 text-sm hover:bg-muted/40 transition-colors text-left"
+        onClick={() => setExpanded(!expanded)}
+        data-testid={`btn-expand-res-${r.id}`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-xs font-mono truncate">{r.reservationCode}</p>
+              <ReservationStatusBadge status={r.status} />
+            </div>
+            <p className="text-muted-foreground text-xs">
+              {r.guest?.firstName} {r.guest?.lastName} · Hab. {r.room?.roomNumber}
+              {(r.room as any)?.roomType?.name && ` · ${(r.room as any).roomType.name}`}
+            </p>
+            <p className="text-muted-foreground text-xs">{r.checkInDate} → {r.checkOutDate} ({r.nights}n)</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          <span className="font-medium text-sm">${parseFloat(r.totalRoomAmount || "0").toLocaleString("es-AR")}</span>
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </button>
+      {expanded && (
+        <div className="bg-muted/30 px-4 py-3 space-y-2 text-sm">
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div><p className="text-muted-foreground">Tarifa/noche</p><p className="font-medium">${parseFloat(r.finalRatePerNight || "0").toLocaleString("es-AR")}</p></div>
+            <div><p className="text-muted-foreground">Fuente</p><p className="font-medium">{sourceLabel[r.source || ""] || r.source || "-"}</p></div>
+            {r.discountType && r.discountType !== "none" && (
+              <div><p className="text-muted-foreground">Descuento</p><p className="font-medium text-green-600">{r.discountType === "percent" ? `${r.discountValue}%` : `$${r.discountValue}`}</p></div>
+            )}
+          </div>
+          {r.notes && <p className="text-xs text-muted-foreground border-t pt-2">{r.notes}</p>}
+          {activeCharges.length > 0 && (
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold text-muted-foreground mb-1">Cargos</p>
+              {activeCharges.map(c => (
+                <div key={c.id} className="flex justify-between text-xs"><span>{c.description}</span><span>${parseFloat(c.amount).toLocaleString("es-AR")}</span></div>
+              ))}
+            </div>
+          )}
+          {activePayments.length > 0 && (
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold text-muted-foreground mb-1">Pagos</p>
+              {activePayments.map(p => (
+                <div key={p.id} className="flex justify-between text-xs">
+                  <span>{payMethodLabel[p.method || ""] || p.method} · {p.date}</span>
+                  <span className="text-green-700 dark:text-green-400">${parseFloat(p.amount).toLocaleString("es-AR")}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="border-t pt-2 flex justify-between text-xs font-semibold">
+            <span>Saldo pendiente</span>
+            <span className={balance > 0 ? "text-red-600" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CompaniesPage() {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [viewingAccountCompany, setViewingAccountCompany] = useState<Company | null>(null);
+  const [viewingCompanyDetail, setViewingCompanyDetail] = useState<Company | null>(null);
   const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
@@ -52,6 +149,27 @@ export default function CompaniesPage() {
     },
     enabled: !!viewingAccountCompany,
   });
+
+  const { data: allGuests = [] } = useQuery<Guest[]>({
+    queryKey: ["/api/guests"],
+    enabled: !!viewingCompanyDetail,
+  });
+
+  const { data: allReservations = [] } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/reservations", "all"],
+    queryFn: async () => {
+      const res = await fetch("/api/reservations?dateMode=all");
+      return res.json();
+    },
+    enabled: !!viewingCompanyDetail,
+  });
+
+  const companyGuests = viewingCompanyDetail
+    ? allGuests.filter(g => g.companyId === viewingCompanyDetail.id)
+    : [];
+  const companyReservations = viewingCompanyDetail
+    ? allReservations.filter(r => r.companyId === viewingCompanyDetail.id)
+    : [];
 
   const form = useForm<CompanyFormData>({
     resolver: zodResolver(companyFormSchema),
@@ -289,6 +407,15 @@ export default function CompaniesPage() {
                     <TableCell>{company.telefono || "-"}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setViewingCompanyDetail(company)}
+                          title="Ver huéspedes y reservas"
+                          data-testid={`button-detail-company-${company.id}`}
+                        >
+                          <Eye className="h-4 w-4 text-green-600" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -629,6 +756,73 @@ export default function CompaniesPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={!!viewingCompanyDetail} onOpenChange={(open) => { if (!open) setViewingCompanyDetail(null); }}>
+        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              {viewingCompanyDetail?.nombreFantasia || viewingCompanyDetail?.razonSocial}
+            </SheetTitle>
+            <SheetDescription>
+              {viewingCompanyDetail?.cuilCuit && `CUIT: ${viewingCompanyDetail.cuilCuit}`}
+              {viewingCompanyDetail?.condicionIva && ` · ${viewingCompanyDetail.condicionIva === "responsable_inscripto" ? "Resp. Inscripto" : viewingCompanyDetail.condicionIva}`}
+            </SheetDescription>
+          </SheetHeader>
+
+          <Tabs defaultValue="reservations">
+            <TabsList className="w-full mb-4">
+              <TabsTrigger value="reservations" className="flex-1">
+                <Hotel className="h-4 w-4 mr-1" />
+                Reservas ({companyReservations.length})
+              </TabsTrigger>
+              <TabsTrigger value="guests" className="flex-1">
+                <Users className="h-4 w-4 mr-1" />
+                Huéspedes ({companyGuests.length})
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="reservations">
+              {companyReservations.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Hotel className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">Sin reservas registradas para esta empresa</p>
+                </div>
+              ) : (
+                <div className="border rounded-lg divide-y">
+                  {companyReservations
+                    .sort((a, b) => b.checkInDate.localeCompare(a.checkInDate))
+                    .map(r => <ReservationDetailRow key={r.id} r={r} />)}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="guests">
+              {companyGuests.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">Sin huéspedes asociados a esta empresa</p>
+                </div>
+              ) : (
+                <div className="border rounded-lg divide-y">
+                  {companyGuests.map(g => (
+                    <div key={g.id} className="p-3 flex items-center gap-3" data-testid={`company-guest-${g.id}`}>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm shrink-0">
+                        {g.firstName?.[0]}{g.lastName?.[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{g.firstName} {g.lastName}</p>
+                        <p className="text-xs text-muted-foreground">{g.documentType?.toUpperCase()}: {g.documentNumber || "-"} · {g.email || g.phone || "Sin contacto"}</p>
+                      </div>
+                      <Badge variant="outline" className="text-xs shrink-0">{g.segment || "LEISURE"}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </SheetContent>
       </Sheet>
     </div>

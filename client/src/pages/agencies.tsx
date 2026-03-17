@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp, Receipt } from "lucide-react";
-import { insertAgencySchema, type Agency, type AccountMovement } from "@shared/schema";
+import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel } from "lucide-react";
+import { insertAgencySchema, type Agency, type AccountMovement, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 
 const agencyFormSchema = insertAgencySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -44,6 +44,101 @@ interface AgencyStats {
   activeReservations: number;
 }
 
+const agStatusLabels: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  tentative: { label: "Tentativa", variant: "outline" },
+  pending: { label: "Pendiente", variant: "secondary" },
+  confirmed: { label: "Confirmada", variant: "default" },
+  checked_in: { label: "Check-in", variant: "default" },
+  checked_out: { label: "Finalizada", variant: "outline" },
+  cancelled: { label: "Cancelada", variant: "destructive" },
+};
+
+function AgReservationStatusBadge({ status }: { status: string }) {
+  const cfg = agStatusLabels[status as ReservationStatus] || { label: "Sin estado", variant: "outline" as const };
+  return <Badge variant={cfg.variant} className="text-xs">{cfg.label}</Badge>;
+}
+
+const agSourceLabel: Record<string, string> = {
+  directo: "Directo", empresa: "Empresa", agencia: "Agencia", ota: "OTA", walkin: "Walk-in",
+};
+const agPayMethodLabel: Record<string, string> = {
+  efectivo: "Efectivo", tarjeta_credito: "Tarj. Crédito", tarjeta_debito: "Tarj. Débito",
+  transferencia: "Transferencia", cheque: "Cheque", cuenta_corriente: "Cta. Corriente",
+};
+
+function AgencyReservationDetailRow({ r }: { r: ReservationWithDetails }) {
+  const [expanded, setExpanded] = useState(false);
+  const activeCharges = r.charges?.filter(c => c.status === "active") || [];
+  const activePayments = r.payments?.filter(p => p.status === "active") || [];
+  const totalCharges = activeCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+  const totalPayments = activePayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+  const balance = parseFloat(r.totalRoomAmount || "0") + totalCharges - totalPayments;
+
+  return (
+    <div className="border-b last:border-b-0">
+      <button
+        className="w-full flex items-center justify-between p-3 text-sm hover:bg-muted/40 transition-colors text-left"
+        onClick={() => setExpanded(!expanded)}
+        data-testid={`btn-expand-agency-res-${r.id}`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-xs font-mono truncate">{r.reservationCode}</p>
+              <AgReservationStatusBadge status={r.status} />
+            </div>
+            <p className="text-muted-foreground text-xs">
+              {r.guest?.firstName} {r.guest?.lastName} · Hab. {r.room?.roomNumber}
+              {(r.room as any)?.roomType?.name && ` · ${(r.room as any).roomType.name}`}
+            </p>
+            <p className="text-muted-foreground text-xs">{r.checkInDate} → {r.checkOutDate} ({r.nights}n)</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          <span className="font-medium text-sm">${parseFloat(r.totalRoomAmount || "0").toLocaleString("es-AR")}</span>
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </button>
+      {expanded && (
+        <div className="bg-muted/30 px-4 py-3 space-y-2 text-sm">
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div><p className="text-muted-foreground">Tarifa/noche</p><p className="font-medium">${parseFloat(r.finalRatePerNight || "0").toLocaleString("es-AR")}</p></div>
+            <div><p className="text-muted-foreground">Fuente</p><p className="font-medium">{agSourceLabel[r.source || ""] || r.source || "-"}</p></div>
+            {r.discountType && r.discountType !== "none" && (
+              <div><p className="text-muted-foreground">Descuento</p><p className="font-medium text-green-600">{r.discountType === "percent" ? `${r.discountValue}%` : `$${r.discountValue}`}</p></div>
+            )}
+          </div>
+          {r.notes && <p className="text-xs text-muted-foreground border-t pt-2">{r.notes}</p>}
+          {activeCharges.length > 0 && (
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold text-muted-foreground mb-1">Cargos</p>
+              {activeCharges.map(c => (
+                <div key={c.id} className="flex justify-between text-xs"><span>{c.description}</span><span>${parseFloat(c.amount).toLocaleString("es-AR")}</span></div>
+              ))}
+            </div>
+          )}
+          {activePayments.length > 0 && (
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold text-muted-foreground mb-1">Pagos</p>
+              {activePayments.map(p => (
+                <div key={p.id} className="flex justify-between text-xs">
+                  <span>{agPayMethodLabel[p.method || ""] || p.method} · {p.date}</span>
+                  <span className="text-green-700 dark:text-green-400">${parseFloat(p.amount).toLocaleString("es-AR")}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="border-t pt-2 flex justify-between text-xs font-semibold">
+            <span>Saldo pendiente</span>
+            <span className={balance > 0 ? "text-red-600" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AgenciesPage() {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
@@ -53,6 +148,7 @@ export default function AgenciesPage() {
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
   const [viewingAccountAgency, setViewingAccountAgency] = useState<Agency | null>(null);
+  const [viewingAgencyDetail, setViewingAgencyDetail] = useState<Agency | null>(null);
   const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
@@ -94,6 +190,19 @@ export default function AgenciesPage() {
     },
     enabled: !!viewingAccountAgency,
   });
+
+  const { data: allAgencyReservations = [] } = useQuery<ReservationWithDetails[]>({
+    queryKey: ["/api/reservations", "all-agency"],
+    queryFn: async () => {
+      const res = await fetch("/api/reservations?dateMode=all");
+      return res.json();
+    },
+    enabled: !!viewingAgencyDetail,
+  });
+
+  const agencyReservationsForDetail = viewingAgencyDetail
+    ? allAgencyReservations.filter(r => r.agencyId === viewingAgencyDetail.id)
+    : [];
 
   const registerPaymentMutation = useMutation({
     mutationFn: async () => {
@@ -353,6 +462,15 @@ export default function AgenciesPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setViewingAgencyDetail(agency)}
+                              title="Ver reservas de la agencia"
+                              data-testid={`button-detail-agency-${agency.id}`}
+                            >
+                              <Eye className="h-4 w-4 text-green-600" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -861,6 +979,39 @@ export default function AgenciesPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={!!viewingAgencyDetail} onOpenChange={(open) => { if (!open) setViewingAgencyDetail(null); }}>
+        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle className="flex items-center gap-2">
+              <Plane className="h-5 w-5" />
+              {viewingAgencyDetail?.nombreFantasia || viewingAgencyDetail?.razonSocial}
+            </SheetTitle>
+            <SheetDescription>
+              {viewingAgencyDetail?.cuilCuit && `CUIT: ${viewingAgencyDetail.cuilCuit}`}
+              {viewingAgencyDetail?.commissionRate && ` · Comisión: ${viewingAgencyDetail.commissionRate}%`}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex items-center gap-2 mb-3">
+            <Hotel className="h-4 w-4 text-muted-foreground" />
+            <h3 className="font-semibold text-sm">Reservas de la agencia ({agencyReservationsForDetail.length})</h3>
+          </div>
+
+          {agencyReservationsForDetail.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <Hotel className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Sin reservas registradas para esta agencia</p>
+            </div>
+          ) : (
+            <div className="border rounded-lg divide-y">
+              {agencyReservationsForDetail
+                .sort((a, b) => b.checkInDate.localeCompare(a.checkInDate))
+                .map(r => <AgencyReservationDetailRow key={r.id} r={r} />)}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
