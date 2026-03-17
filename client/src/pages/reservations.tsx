@@ -85,6 +85,10 @@ function parseReservationError(error: any): string {
   return "No se pudo completar la operación. Intente nuevamente.";
 }
 
+const VALID_STATUSES: ReservationStatus[] = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled"];
+const normalizeStatus = (s: string | null | undefined): ReservationStatus =>
+  VALID_STATUSES.includes(s as ReservationStatus) ? (s as ReservationStatus) : "pending";
+
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
     tentative: { label: "Tentativa", variant: "outline" },
@@ -95,9 +99,13 @@ function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
     cancelled: { label: "Cancelada", variant: "destructive" },
   };
 
-  const config = statusConfig[status] || { label: status || "Desconocido", variant: "outline" as const };
+  const config = statusConfig[status] || { label: "Sin estado", variant: "outline" as const };
 
-  return <Badge variant={config.variant}>{config.label}</Badge>;
+  return (
+    <Badge variant={config.variant} title={!statusConfig[status] ? "Estado inválido — abrir Editar y guardar para corregir" : undefined}>
+      {config.label}
+    </Badge>
+  );
 }
 
 export function ReservationFormDialog({
@@ -156,7 +164,7 @@ export function ReservationFormDialog({
     checkOutDate: reservation?.checkOutDate || tomorrow,
     nights: reservation?.nights || 1,
     numberOfGuests: reservation?.numberOfGuests || 1,
-    status: reservation?.status || "pending",
+    status: normalizeStatus(reservation?.status),
     source: reservation?.source || "directo",
     discountType: reservation?.discountType || "none",
     discountValue: reservation?.discountValue || "0",
@@ -200,7 +208,7 @@ export function ReservationFormDialog({
         })(),
         nights: reservation?.nights || 1,
         numberOfGuests: reservation?.numberOfGuests || 1,
-        status: reservation?.status || "pending",
+        status: normalizeStatus(reservation?.status),
         source: reservation?.source || "directo",
         discountType: reservation?.discountType || "none",
         discountValue: reservation?.discountValue || "0",

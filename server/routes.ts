@@ -968,6 +968,8 @@ export async function registerRoutes(
       if (!req.body.roomId || req.body.roomId === "") delete req.body.roomId;
       if (!req.body.roomTypeId || req.body.roomTypeId === "") delete req.body.roomTypeId;
       if (!req.body.guestId || req.body.guestId === "") delete req.body.guestId;
+      const VALID_STATUSES = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled"];
+      if (req.body.status !== undefined && !VALID_STATUSES.includes(req.body.status)) delete req.body.status;
 
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
       for (const field of numericFields) {
