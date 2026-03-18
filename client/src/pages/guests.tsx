@@ -733,7 +733,7 @@ function GuestDetailDialog({
                     CONGRESS: "bg-amber-100 text-amber-700",
                   };
                   const segLabels: Record<string, string> = {
-                    LEISURE: "Leisure", CORP: "Corporativo", SPORT: "Deportivo", CONGRESS: "Congreso",
+                    LEISURE: "Turismo", CORP: "Corporativo", SPORT: "Deportivo", CONGRESS: "Congreso",
                   };
                   return (
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${segColors[guest.segment] || "bg-gray-100 text-gray-600"}`}>
