@@ -53,7 +53,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound } from "@shared/schema";
+import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest } from "@shared/schema";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "inspected";
 type TaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep";
@@ -310,11 +311,13 @@ const LF_CATEGORY_LABEL: Record<string, string> = {
 
 function LostFoundCard({
   item,
+  guestName,
   onEdit,
   onDeliver,
   onStatusChange,
 }: {
   item: LostFoundItem;
+  guestName?: string;
   onEdit: () => void;
   onDeliver: () => void;
   onStatusChange: (status: string) => void;
@@ -340,6 +343,9 @@ function LostFoundCard({
             {" · "}{new Date(item.foundDate + "T12:00:00").toLocaleDateString("es-AR")}
             {" · "}Encontrado por: {item.foundBy}
           </div>
+          {guestName && (
+            <p className="text-xs text-primary font-medium mt-0.5">👤 Huésped: {guestName}</p>
+          )}
           {item.storageLocation && (
             <p className="text-xs text-muted-foreground">Guardado en: {item.storageLocation}</p>
           )}
@@ -393,21 +399,40 @@ function LostFoundForm({
   const [foundBy, setFoundBy] = useState(item?.foundBy || "");
   const [storageLocation, setStorageLocation] = useState(item?.storageLocation || "");
   const [notes, setNotes] = useState(item?.notes || "");
-  const [lookupRoom, setLookupRoom] = useState("");
-  const [lookupResult, setLookupResult] = useState<{ guest?: { firstName: string; lastName: string }; reservation?: { checkOutDate: string; id: string; guestId: string | null } } | null>(null);
-  const [lookupLoading, setLookupLoading] = useState(false);
   const [guestId, setGuestId] = useState<string | null>(item?.guestId || null);
-  const [reservationId, setReservationId] = useState<string | null>(item?.reservationId || null);
+  const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
+  const [guestSearch, setGuestSearch] = useState("");
+  const [guestPopoverOpen, setGuestPopoverOpen] = useState(false);
+  const [selectedRoomId, setSelectedRoomId] = useState<string>("");
 
-  const handleLookup = async () => {
-    if (!lookupRoom.trim()) return;
-    setLookupLoading(true);
-    try {
-      const res = await fetch(`/api/lost-found/lookup-room/${lookupRoom.trim()}`);
-      if (res.ok) setLookupResult(await res.json());
-      else setLookupResult(null);
-    } catch { setLookupResult(null); }
-    setLookupLoading(false);
+  const { data: guests = [] } = useQuery<Guest[]>({ queryKey: ["/api/guests"] });
+  const { data: rooms = [] } = useQuery<RoomWithType[]>({ queryKey: ["/api/rooms"] });
+
+  // Cuando se edita un item ya existente con guestId, mostramos el huésped cargado
+  const displayedGuest = selectedGuest || (guestId ? guests.find(g => g.id === guestId) || null : null);
+
+  const filteredGuests = guests.filter(g => {
+    const q = guestSearch.toLowerCase();
+    return (
+      g.firstName.toLowerCase().includes(q) ||
+      g.lastName.toLowerCase().includes(q) ||
+      (g.documentNumber || "").toLowerCase().includes(q)
+    );
+  }).slice(0, 20);
+
+  const handleSelectGuest = (g: Guest) => {
+    setSelectedGuest(g);
+    setGuestId(g.id);
+    setGuestSearch("");
+    setGuestPopoverOpen(false);
+  };
+
+  const handleRoomChange = (roomId: string) => {
+    setSelectedRoomId(roomId);
+    const room = rooms.find(r => r.id === roomId);
+    if (room && !location) {
+      setLocation(`Hab. ${room.roomNumber}`);
+    }
   };
 
   const handleSubmit = () => {
@@ -421,13 +446,12 @@ function LostFoundForm({
       storageLocation: storageLocation.trim() || undefined,
       notes: notes.trim() || undefined,
       guestId: guestId || undefined,
-      reservationId: reservationId || undefined,
     });
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{item ? "Editar objeto" : "Registrar objeto perdido"}</DialogTitle>
           <DialogDescription>
@@ -456,53 +480,105 @@ function LostFoundForm({
               <Input type="date" value={foundDate} onChange={e => setFoundDate(e.target.value)} data-testid="input-lf-date" />
             </div>
           </div>
+
+          {/* Huésped asociado */}
           <div>
-            <Label>Lugar donde fue encontrado *</Label>
-            <div className="flex gap-2">
-              <Input
-                value={location}
-                onChange={e => setLocation(e.target.value)}
-                placeholder="Ej: Hab. 305, Lobby, Restaurant..."
-                data-testid="input-lf-location"
-                className="flex-1"
-              />
-              <div className="flex gap-1">
-                <Input
-                  value={lookupRoom}
-                  onChange={e => setLookupRoom(e.target.value)}
-                  placeholder="Hab."
-                  className="w-20"
-                  data-testid="input-lf-lookup-room"
-                  onKeyDown={e => e.key === "Enter" && handleLookup()}
-                />
-                <Button type="button" variant="outline" size="sm" onClick={handleLookup} disabled={lookupLoading} data-testid="button-lf-lookup">
-                  <Search className="h-4 w-4" />
+            <Label>Huésped asociado</Label>
+            {displayedGuest ? (
+              <div className="flex items-center gap-2 mt-1 p-2 border rounded-md bg-muted/40">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{displayedGuest.firstName} {displayedGuest.lastName}</p>
+                  {displayedGuest.documentNumber && (
+                    <p className="text-xs text-muted-foreground">DNI/Pasaporte: {displayedGuest.documentNumber}</p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-destructive shrink-0"
+                  onClick={() => { setSelectedGuest(null); setGuestId(null); }}
+                  data-testid="button-lf-clear-guest"
+                >
+                  <XCircle className="h-4 w-4" />
                 </Button>
               </div>
-            </div>
-            {lookupResult && (
-              <div className="mt-1 p-2 bg-muted rounded text-xs">
-                {lookupResult.guest ? (
-                  <div className="flex items-center justify-between">
-                    <span>Último huésped: <strong>{lookupResult.guest.firstName} {lookupResult.guest.lastName}</strong>{lookupResult.reservation && ` · CO: ${new Date(lookupResult.reservation.checkOutDate + "T12:00:00").toLocaleDateString("es-AR")}`}</span>
-                    <Button
-                      type="button" size="sm" variant="link" className="text-xs h-auto p-0"
-                      onClick={() => {
-                        setGuestId(lookupResult.reservation?.guestId || null);
-                        setReservationId(lookupResult.reservation?.id || null);
-                      }}
-                    >
-                      Asociar
-                    </Button>
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground">Sin reservas en esa habitación</span>
-                )}
-                {(guestId || reservationId) && (
-                  <p className="text-green-600 dark:text-green-400 mt-0.5">✓ Huésped asociado</p>
-                )}
-              </div>
+            ) : (
+              <Popover open={guestPopoverOpen} onOpenChange={setGuestPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-start text-muted-foreground font-normal mt-1"
+                    data-testid="button-lf-guest-selector"
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    Buscar huésped por nombre o DNI...
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0 w-80" align="start">
+                  <Command>
+                    <CommandInput
+                      placeholder="Nombre, apellido o DNI..."
+                      value={guestSearch}
+                      onValueChange={setGuestSearch}
+                      data-testid="input-lf-guest-search"
+                    />
+                    <CommandList>
+                      <CommandEmpty>No se encontraron huéspedes</CommandEmpty>
+                      <CommandGroup>
+                        {filteredGuests.map(g => (
+                          <CommandItem
+                            key={g.id}
+                            onSelect={() => handleSelectGuest(g)}
+                            data-testid={`item-lf-guest-${g.id}`}
+                          >
+                            <div>
+                              <p className="text-sm font-medium">{g.firstName} {g.lastName}</p>
+                              {g.documentNumber && (
+                                <p className="text-xs text-muted-foreground">DNI/Pas: {g.documentNumber}</p>
+                              )}
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             )}
+          </div>
+
+          {/* Habitación donde se hospedaba */}
+          <div>
+            <Label>Habitación donde se hospedaba</Label>
+            <Select value={selectedRoomId} onValueChange={handleRoomChange}>
+              <SelectTrigger data-testid="select-lf-room" className="mt-1">
+                <SelectValue placeholder="Seleccionar habitación..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Sin especificar</SelectItem>
+                {rooms
+                  .slice()
+                  .sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber))
+                  .map(r => (
+                    <SelectItem key={r.id} value={r.id}>
+                      Hab. {r.roomNumber} — Piso {r.floor}
+                      {(r as any).roomType?.name ? ` · ${(r as any).roomType.name}` : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label>Lugar donde fue encontrado *</Label>
+            <Input
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              placeholder="Ej: Hab. 305, Lobby, Restaurant..."
+              data-testid="input-lf-location"
+            />
           </div>
           <div>
             <Label>Encontrado por *</Label>
@@ -621,6 +697,8 @@ function LostFoundTab() {
     },
   });
 
+  const { data: allGuests = [] } = useQuery<Guest[]>({ queryKey: ["/api/guests"] });
+
   const visibleItems = statusFilter === "activos"
     ? items.filter(i => i.status === "en_custodia" || i.status === "contactado")
     : items;
@@ -716,15 +794,19 @@ function LostFoundTab() {
         </div>
       ) : (
         <div className="space-y-2">
-          {visibleItems.map(item => (
-            <LostFoundCard
-              key={item.id}
-              item={item}
-              onEdit={() => { setEditingItem(item); setShowForm(true); }}
-              onDeliver={() => { setDeliveringItem(item); setShowDeliveryDialog(true); }}
-              onStatusChange={status => updateStatusMutation.mutate({ id: item.id, status })}
-            />
-          ))}
+          {visibleItems.map(item => {
+            const guest = item.guestId ? allGuests.find(g => g.id === item.guestId) : undefined;
+            return (
+              <LostFoundCard
+                key={item.id}
+                item={item}
+                guestName={guest ? `${guest.firstName} ${guest.lastName}` : undefined}
+                onEdit={() => { setEditingItem(item); setShowForm(true); }}
+                onDeliver={() => { setDeliveringItem(item); setShowDeliveryDialog(true); }}
+                onStatusChange={status => updateStatusMutation.mutate({ id: item.id, status })}
+              />
+            );
+          })}
         </div>
       )}
 
