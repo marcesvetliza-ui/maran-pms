@@ -1024,8 +1024,10 @@ function ReservationDetailModal({
     const guest = reservation.guest;
     const room = reservation.room;
     const guestName = `${(guest?.lastName || "").toUpperCase()} ${guest?.firstName || ""}`.trim();
-    const formatShort = (dateStr: string) =>
-      new Date(dateStr).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const formatShort = (dateStr: string) => {
+      const [y, m, d] = dateStr.split("-");
+      return `${d}/${m}/${y}`;
+    };
     const checkIn = formatShort(reservation.checkInDate);
     const checkOut = formatShort(reservation.checkOutDate);
     const nights = Math.round(
@@ -2447,8 +2449,14 @@ export default function PlanningPage() {
           open={editReservationOpen}
           onOpenChange={setEditReservationOpen}
           onSuccess={() => {
+            const editedId = editingReservationData?.id;
             setEditingReservationData(null);
             queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+            if (editedId) {
+              queryClient.invalidateQueries({ queryKey: ["/api/reservations", editedId] });
+              setSelectedReservationId(editedId);
+              setReservationDetailOpen(true);
+            }
           }}
         />
       )}
