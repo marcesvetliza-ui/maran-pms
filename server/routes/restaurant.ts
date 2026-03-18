@@ -1,0 +1,684 @@
+import type { Express } from "express";
+import { storage } from "../db-storage";
+import { requireAuth } from "../auth";
+
+export function registerRestaurantRoutes(app: Express) {
+  // Restaurant Areas
+  app.get("/api/restaurant/areas", async (req, res) => {
+    try {
+      const areas = await storage.getRestaurantAreas();
+      res.json(areas);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching areas" });
+    }
+  });
+
+  app.post("/api/restaurant/areas", async (req, res) => {
+    try {
+      const area = await storage.createRestaurantArea(req.body);
+      res.status(201).json(area);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating area" });
+    }
+  });
+
+  app.patch("/api/restaurant/areas/:id", async (req, res) => {
+    try {
+      const area = await storage.updateRestaurantArea(req.params.id, req.body);
+      if (!area) return res.status(404).json({ error: "Area not found" });
+      res.json(area);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating area" });
+    }
+  });
+
+  app.delete("/api/restaurant/areas/:id", async (req, res) => {
+    try {
+      await storage.deleteRestaurantArea(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting area" });
+    }
+  });
+
+  // Restaurant Tables
+  app.get("/api/restaurant/tables", async (req, res) => {
+    try {
+      const tables = await storage.getRestaurantTables();
+      res.json(tables);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching tables" });
+    }
+  });
+
+  app.post("/api/restaurant/tables", async (req, res) => {
+    try {
+      const table = await storage.createRestaurantTable(req.body);
+      res.status(201).json(table);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating table" });
+    }
+  });
+
+  app.patch("/api/restaurant/tables/:id", async (req, res) => {
+    try {
+      const table = await storage.updateRestaurantTable(req.params.id, req.body);
+      if (!table) return res.status(404).json({ error: "Table not found" });
+      res.json(table);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating table" });
+    }
+  });
+
+  app.delete("/api/restaurant/tables/:id", async (req, res) => {
+    try {
+      await storage.deleteRestaurantTable(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting table" });
+    }
+  });
+
+  // Menu Categories
+  app.get("/api/restaurant/menu/categories", async (req, res) => {
+    try {
+      const categories = await storage.getMenuCategories();
+      res.json(categories);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching menu categories" });
+    }
+  });
+
+  app.post("/api/restaurant/menu/categories", async (req, res) => {
+    try {
+      const category = await storage.createMenuCategory(req.body);
+      res.status(201).json(category);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating category" });
+    }
+  });
+
+  app.patch("/api/restaurant/menu/categories/:id", async (req, res) => {
+    try {
+      const category = await storage.updateMenuCategory(req.params.id, req.body);
+      if (!category) return res.status(404).json({ error: "Category not found" });
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating category" });
+    }
+  });
+
+  app.delete("/api/restaurant/menu/categories/:id", async (req, res) => {
+    try {
+      await storage.deleteMenuCategory(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting category" });
+    }
+  });
+
+  // Menu Items
+  app.get("/api/restaurant/menu/items", async (req, res) => {
+    try {
+      const items = await storage.getMenuItems();
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching menu items" });
+    }
+  });
+
+  app.post("/api/restaurant/menu/items", async (req, res) => {
+    try {
+      const item = await storage.createMenuItem(req.body);
+      res.status(201).json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating menu item" });
+    }
+  });
+
+  app.patch("/api/restaurant/menu/items/:id", async (req, res) => {
+    try {
+      const item = await storage.updateMenuItem(req.params.id, req.body);
+      if (!item) return res.status(404).json({ error: "Item not found" });
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating menu item" });
+    }
+  });
+
+  app.delete("/api/restaurant/menu/items/:id", async (req, res) => {
+    try {
+      await storage.deleteMenuItem(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting menu item" });
+    }
+  });
+
+  // Restaurant Orders
+  app.get("/api/restaurant/orders", async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const orders = await storage.getRestaurantOrders(status as any);
+      const ordersWithSplits = await Promise.all(
+        orders.map(async (order: any) => {
+          const splits = await storage.getOrderSplits(order.id);
+          return { ...order, splits };
+        })
+      );
+      res.json(ordersWithSplits);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching orders" });
+    }
+  });
+
+  app.get("/api/restaurant/orders/:id", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching order" });
+    }
+  });
+
+  app.post("/api/restaurant/orders", async (req, res) => {
+    try {
+      const { waiterName, tableId, areaId, orderLabel } = req.body;
+      if (!waiterName || !waiterName.trim()) {
+        return res.status(400).json({ error: "Mozo es requerido" });
+      }
+      if (!tableId && !areaId) {
+        return res.status(400).json({ error: "Se requiere mesa o area" });
+      }
+      if (!tableId && (!orderLabel || !orderLabel.trim())) {
+        return res.status(400).json({ error: "Etiqueta de orden es requerida para areas sin mesas" });
+      }
+      const orderNumber = storage.generateOrderNumber();
+      const order = await storage.createRestaurantOrder({
+        ...req.body,
+        orderNumber,
+        openedAt: new Date(),
+      });
+      if (order.tableId) {
+        await storage.updateRestaurantTable(order.tableId, { status: "occupied" });
+      }
+      res.status(201).json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating order" });
+    }
+  });
+
+  app.patch("/api/restaurant/orders/:id", async (req, res) => {
+    try {
+      const order = await storage.updateRestaurantOrder(req.params.id, req.body);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating order" });
+    }
+  });
+
+  // Close order and optionally charge to room
+  app.post("/api/restaurant/orders/:id/close", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType } = req.body;
+      const effectiveReservationId = reservationId || roomReservationId;
+
+      let finalTotal = parseFloat(order.total || "0");
+      let discountAmount = 0;
+      if (discount && discount > 0) {
+        if (discountType === "percent") {
+          discountAmount = finalTotal * discount / 100;
+        } else {
+          discountAmount = discount;
+        }
+        finalTotal = Math.max(0, finalTotal - discountAmount);
+      }
+
+      const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
+        status: "closed",
+        closedAt: new Date(),
+        chargedToRoom: chargeToRoom ? "true" : "false",
+        roomNumber: roomNumber || null,
+        receiptType: receiptType || null,
+        paymentMethod: paymentMethod || null,
+        total: String(finalTotal.toFixed(2)),
+        notes: discountAmount > 0 ? `Descuento: $${discountAmount.toFixed(2)}` : undefined,
+      });
+
+      if (chargeToRoom && effectiveReservationId) {
+        await storage.createCharge({
+          reservationId: effectiveReservationId,
+          description: `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`,
+          amount: String(finalTotal.toFixed(2)),
+          category: "restaurant",
+          date: new Date().toISOString().split("T")[0],
+        });
+      }
+
+      if (order.tableId) {
+        await storage.updateRestaurantTable(order.tableId, { status: "available" });
+      }
+
+      try {
+        const label = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
+        await storage.registerCashMovement(
+          "restaurant", "restaurant_order", req.params.id, label,
+          paymentMethod || (chargeToRoom ? "room_charge" : "cash"),
+          String(finalTotal.toFixed(2)), "income",
+          undefined, receiptType
+        );
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
+
+      res.json(updatedOrder);
+    } catch (error) {
+      res.status(500).json({ error: "Error closing order" });
+    }
+  });
+
+  // Order Items
+  app.post("/api/restaurant/orders/:orderId/items", async (req, res) => {
+    try {
+      const { menuItemId, quantity, notes, course, customPrice, customName } = req.body;
+      const menuItem = await storage.getMenuItem(menuItemId);
+      if (!menuItem) return res.status(404).json({ error: "Menu item not found" });
+
+      const order = await storage.getRestaurantOrder(req.params.orderId);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      let finalCustomPrice = undefined;
+      let finalCustomName = undefined;
+      if (customPrice || customName) {
+        if ((menuItem as any).isEditable !== "true") {
+          return res.status(400).json({ error: "Este ítem no permite precio personalizado" });
+        }
+        if (customPrice) {
+          const parsed = parseFloat(customPrice);
+          if (isNaN(parsed) || parsed <= 0) {
+            return res.status(400).json({ error: "El precio personalizado debe ser un número positivo" });
+          }
+          finalCustomPrice = parsed.toFixed(2);
+        }
+        finalCustomName = customName;
+      }
+
+      const unitPrice = finalCustomPrice || menuItem.price;
+      const subtotal = (parseFloat(unitPrice) * (quantity || 1)).toFixed(2);
+      const itemCourse = course || 1;
+      const activeCourse = order.activeCourse || 1;
+      const itemStatus = itemCourse <= activeCourse ? "pending" : "waiting_course";
+      const itemNotes = customName ? `[${customName}] ${notes || ""}`.trim() : notes;
+
+      const item = await storage.createOrderItem({
+        orderId: req.params.orderId,
+        menuItemId,
+        quantity: quantity || 1,
+        unitPrice,
+        subtotal,
+        notes: itemNotes,
+        course: itemCourse,
+        status: itemStatus,
+      });
+
+      const orderItems = await storage.getOrderItems(req.params.orderId);
+      const total = orderItems.reduce((sum: number, i: any) => sum + parseFloat(i.subtotal), 0);
+      const neto = parseFloat((total / 1.21).toFixed(2));
+      const tax = parseFloat((total - neto).toFixed(2));
+      await storage.updateRestaurantOrder(req.params.orderId, {
+        subtotal: neto.toFixed(2),
+        tax: tax.toFixed(2),
+        total: total.toFixed(2),
+        status: "in_progress",
+      });
+
+      res.status(201).json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error adding item to order" });
+    }
+  });
+
+  // Advance course
+  app.post("/api/restaurant/orders/:id/advance-course", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const currentCourse = order.activeCourse || 1;
+      if (currentCourse >= 3) return res.status(400).json({ error: "Ya se alcanzó el último curso" });
+
+      const newCourse = currentCourse + 1;
+      await storage.updateRestaurantOrder(req.params.id, { activeCourse: newCourse });
+
+      const orderItems = await storage.getOrderItems(req.params.id);
+      let activated = 0;
+      for (const item of orderItems) {
+        if (item.course === newCourse && item.status === "waiting_course") {
+          await storage.updateOrderItem(item.id, { status: "pending" });
+          activated++;
+        }
+      }
+
+      res.json({ activeCourse: newCourse, activatedItems: activated });
+    } catch (error) {
+      res.status(500).json({ error: "Error advancing course" });
+    }
+  });
+
+  app.patch("/api/restaurant/orders/:orderId/items/:itemId", requireAuth, async (req, res) => {
+    try {
+      const { course } = req.body;
+      const updated = await storage.updateOrderItem(req.params.itemId, { course: course !== undefined ? course : undefined });
+      if (!updated) return res.status(404).json({ error: "Item no encontrado" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating order item:", error);
+      res.status(500).json({ error: "Error actualizando ítem" });
+    }
+  });
+
+  app.delete("/api/restaurant/orders/:orderId/items/:itemId", async (req, res) => {
+    try {
+      await storage.deleteOrderItem(req.params.itemId);
+
+      const orderItems = await storage.getOrderItems(req.params.orderId);
+      const total = orderItems.reduce((sum: number, i: any) => sum + parseFloat(i.subtotal), 0);
+      const neto = parseFloat((total / 1.21).toFixed(2));
+      const tax = parseFloat((total - neto).toFixed(2));
+      await storage.updateRestaurantOrder(req.params.orderId, {
+        subtotal: neto.toFixed(2),
+        tax: tax.toFixed(2),
+        total: total.toFixed(2),
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error removing item from order" });
+    }
+  });
+
+  // Table Reservations
+  app.get("/api/restaurant/table-reservations", async (req, res) => {
+    try {
+      const { date } = req.query;
+      if (date && typeof date === "string") {
+        const tableReservations = await storage.getTableReservationsByDate(date);
+        return res.json(tableReservations);
+      }
+      const tableReservations = await storage.getTableReservations();
+      res.json(tableReservations);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching table reservations" });
+    }
+  });
+
+  app.get("/api/restaurant/table-reservations/:id", async (req, res) => {
+    try {
+      const tableReservation = await storage.getTableReservation(req.params.id);
+      if (!tableReservation) return res.status(404).json({ error: "Reservation not found" });
+      res.json(tableReservation);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching table reservation" });
+    }
+  });
+
+  app.post("/api/restaurant/table-reservations", async (req, res) => {
+    try {
+      const tableReservation = await storage.createTableReservation({
+        ...req.body,
+        createdAt: new Date(),
+      });
+      res.status(201).json(tableReservation);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating table reservation" });
+    }
+  });
+
+  app.patch("/api/restaurant/table-reservations/:id", async (req, res) => {
+    try {
+      const tableReservation = await storage.updateTableReservation(req.params.id, req.body);
+      if (!tableReservation) return res.status(404).json({ error: "Reservation not found" });
+      res.json(tableReservation);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating table reservation" });
+    }
+  });
+
+  app.delete("/api/restaurant/table-reservations/:id", async (req, res) => {
+    try {
+      await storage.deleteTableReservation(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting table reservation" });
+    }
+  });
+
+  // Restaurant Time Slots
+  app.get("/api/restaurant/time-slots", async (req, res) => {
+    try {
+      const slots = await storage.getRestaurantTimeSlots();
+      res.json(slots);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching time slots" });
+    }
+  });
+
+  app.post("/api/restaurant/time-slots", async (req, res) => {
+    try {
+      const slot = await storage.createRestaurantTimeSlot(req.body);
+      res.status(201).json(slot);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating time slot" });
+    }
+  });
+
+  app.patch("/api/restaurant/time-slots/:id", async (req, res) => {
+    try {
+      const slot = await storage.updateRestaurantTimeSlot(req.params.id, req.body);
+      if (!slot) return res.status(404).json({ error: "Time slot not found" });
+      res.json(slot);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating time slot" });
+    }
+  });
+
+  app.delete("/api/restaurant/time-slots/:id", async (req, res) => {
+    try {
+      await storage.deleteRestaurantTimeSlot(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting time slot" });
+    }
+  });
+
+  // Order Splits
+  app.post("/api/restaurant/orders/:id/split", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      if (order.status === "closed") return res.status(400).json({ error: "La orden ya está cerrada" });
+
+      const existingSplits = await storage.getOrderSplits(req.params.id);
+      if (existingSplits.length > 0) return res.status(400).json({ error: "La orden ya tiene una división activa" });
+
+      const { parts } = req.body;
+      if (!parts || parts < 2) return res.status(400).json({ error: "Se requieren al menos 2 partes" });
+
+      const total = parseFloat(order.total || "0");
+      const baseAmount = Math.floor(total / parts * 100) / 100;
+      const remainder = total - baseAmount * parts;
+
+      const splits = [];
+      for (let i = 1; i <= parts; i++) {
+        const amount = i === parts ? (baseAmount + remainder).toFixed(2) : baseAmount.toFixed(2);
+        const split = await storage.createOrderSplit({
+          orderId: req.params.id,
+          splitNumber: i,
+          amount,
+          createdAt: new Date(),
+        });
+        splits.push(split);
+      }
+
+      res.status(201).json(splits);
+    } catch (error) {
+      res.status(500).json({ error: "Error splitting order" });
+    }
+  });
+
+  app.get("/api/restaurant/orders/:id/split", async (req, res) => {
+    try {
+      const splits = await storage.getOrderSplits(req.params.id);
+      res.json(splits);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching splits" });
+    }
+  });
+
+  app.patch("/api/restaurant/orders/:id/split/:splitId", async (req, res) => {
+    try {
+      const { method, receiptType } = req.body;
+      if (!method) return res.status(400).json({ error: "Método de pago requerido" });
+
+      const split = await storage.updateOrderSplit(req.params.splitId, {
+        method,
+        receiptType: receiptType || null,
+        isPaid: "true",
+        paidAt: new Date(),
+      });
+      if (!split) return res.status(404).json({ error: "Split not found" });
+
+      const allSplits = await storage.getOrderSplits(req.params.id);
+      const allPaid = allSplits.every((s: any) => s.isPaid === "true");
+
+      if (allPaid) {
+        const order = await storage.getRestaurantOrder(req.params.id);
+        await storage.updateRestaurantOrder(req.params.id, {
+          status: "closed",
+          closedAt: new Date(),
+          paymentMethod: method,
+          receiptType: receiptType || null,
+        });
+        if (order?.tableId) {
+          await storage.updateRestaurantTable(order.tableId, { status: "available" });
+        }
+      }
+
+      res.json({ split, allPaid });
+    } catch (error) {
+      res.status(500).json({ error: "Error paying split" });
+    }
+  });
+
+  app.delete("/api/restaurant/orders/:id/split", async (req, res) => {
+    try {
+      await storage.deleteOrderSplitsByOrder(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error cancelling split" });
+    }
+  });
+
+  // Recipes
+  app.get("/api/restaurant/recipes", async (req, res) => {
+    try {
+      const recipes = await storage.getRecipes();
+      res.json(recipes);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching recipes" });
+    }
+  });
+
+  app.get("/api/restaurant/recipes/:id", async (req, res) => {
+    try {
+      const recipe = await storage.getRecipe(req.params.id);
+      if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+      res.json(recipe);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching recipe" });
+    }
+  });
+
+  app.get("/api/restaurant/recipes/by-menu-item/:menuItemId", async (req, res) => {
+    try {
+      const recipe = await storage.getRecipeByMenuItem(req.params.menuItemId);
+      res.json(recipe || null);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching recipe" });
+    }
+  });
+
+  app.post("/api/restaurant/recipes", async (req, res) => {
+    try {
+      const recipe = await storage.createRecipe(req.body);
+      res.status(201).json(recipe);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating recipe" });
+    }
+  });
+
+  app.patch("/api/restaurant/recipes/:id", async (req, res) => {
+    try {
+      const recipe = await storage.updateRecipe(req.params.id, req.body);
+      if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+      res.json(recipe);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating recipe" });
+    }
+  });
+
+  app.delete("/api/restaurant/recipes/:id", async (req, res) => {
+    try {
+      await storage.deleteRecipe(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting recipe" });
+    }
+  });
+
+  // Recipe Ingredients
+  app.get("/api/restaurant/recipes/:recipeId/ingredients", async (req, res) => {
+    try {
+      const ingredients = await storage.getRecipeIngredients(req.params.recipeId);
+      res.json(ingredients);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching ingredients" });
+    }
+  });
+
+  app.post("/api/restaurant/recipes/:recipeId/ingredients", async (req, res) => {
+    try {
+      const ingredient = await storage.createRecipeIngredient({
+        ...req.body,
+        recipeId: req.params.recipeId,
+      });
+      res.status(201).json(ingredient);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating ingredient" });
+    }
+  });
+
+  app.patch("/api/restaurant/recipe-ingredients/:id", async (req, res) => {
+    try {
+      const ingredient = await storage.updateRecipeIngredient(req.params.id, req.body);
+      if (!ingredient) return res.status(404).json({ error: "Ingredient not found" });
+      res.json(ingredient);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating ingredient" });
+    }
+  });
+
+  app.delete("/api/restaurant/recipe-ingredients/:id", async (req, res) => {
+    try {
+      await storage.deleteRecipeIngredient(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting ingredient" });
+    }
+  });
+}

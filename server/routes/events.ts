@@ -1,0 +1,695 @@
+import type { Express } from "express";
+import { storage } from "../db-storage";
+import { db } from "../db";
+import { eventPayments } from "@shared/schema";
+import { requireAuth } from "../auth";
+import { eq, and } from "drizzle-orm";
+import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "../eventPdfs";
+
+export function registerEventsRoutes(app: Express) {
+  // Event Rooms
+  app.get("/api/events/rooms", async (req, res) => {
+    try {
+      const rooms = await storage.getEventRooms();
+      res.json(rooms);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event rooms" });
+    }
+  });
+
+  app.get("/api/events/rooms/:id", async (req, res) => {
+    try {
+      const room = await storage.getEventRoom(req.params.id);
+      if (!room) return res.status(404).json({ error: "Event room not found" });
+      res.json(room);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event room" });
+    }
+  });
+
+  app.post("/api/events/rooms", async (req, res) => {
+    try {
+      const room = await storage.createEventRoom(req.body);
+      res.status(201).json(room);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event room" });
+    }
+  });
+
+  app.patch("/api/events/rooms/:id", async (req, res) => {
+    try {
+      const room = await storage.updateEventRoom(req.params.id, req.body);
+      if (!room) return res.status(404).json({ error: "Event room not found" });
+      res.json(room);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event room" });
+    }
+  });
+
+  app.delete("/api/events/rooms/:id", async (req, res) => {
+    try {
+      await storage.deleteEventRoom(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event room" });
+    }
+  });
+
+  // Event Planning
+  app.get("/api/events/planning", async (req, res) => {
+    try {
+      const startDate = req.query.start as string;
+      const endDate = req.query.end as string;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "Start and end dates are required" });
+      }
+
+      const planningData = await storage.getEventPlanningData(startDate, endDate);
+      res.json(planningData);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event planning data" });
+    }
+  });
+
+  // Event Charge Types - MUST come before /api/events/:id
+  app.get("/api/events/charge-types", async (req, res) => {
+    try {
+      const chargeTypes = await storage.getEventChargeTypes();
+      res.json(chargeTypes);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event charge types" });
+    }
+  });
+
+  app.post("/api/events/charge-types", async (req, res) => {
+    try {
+      const chargeType = await storage.createEventChargeType(req.body);
+      res.status(201).json(chargeType);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event charge type" });
+    }
+  });
+
+  app.patch("/api/events/charge-types/:id", async (req, res) => {
+    try {
+      const chargeType = await storage.updateEventChargeType(req.params.id, req.body);
+      if (!chargeType) return res.status(404).json({ error: "Event charge type not found" });
+      res.json(chargeType);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event charge type" });
+    }
+  });
+
+  app.delete("/api/events/charge-types/:id", async (req, res) => {
+    try {
+      await storage.deleteEventChargeType(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event charge type" });
+    }
+  });
+
+  // Events CRUD
+  app.get("/api/events", async (req, res) => {
+    try {
+      const events = await storage.getEvents();
+      res.json(events);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching events" });
+    }
+  });
+
+  app.get("/api/events/:id", async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      res.json(event);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event" });
+    }
+  });
+
+  app.post("/api/events", async (req, res) => {
+    try {
+      const { eventRoomId, startDate, endDate } = req.body;
+      if (eventRoomId && startDate && endDate) {
+        const activeStatuses = ["tentative", "confirmed", "in_progress"];
+        const existingEvents = await storage.getEventsByDateRange(startDate, endDate);
+        for (const existing of existingEvents) {
+          if (existing.eventRoomId !== eventRoomId) continue;
+          if (!activeStatuses.includes(existing.status)) continue;
+          if (existing.startDate <= endDate && existing.endDate >= startDate) {
+            const room = await storage.getEventRoom(eventRoomId);
+            return res.status(409).json({
+              error: "Superposición de evento",
+              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}.`,
+            });
+          }
+        }
+      }
+      const eventCode = storage.generateEventCode();
+      const event = await storage.createEvent({
+        ...req.body,
+        eventCode,
+        createdAt: new Date(),
+      });
+      res.status(201).json(event);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event" });
+    }
+  });
+
+  app.patch("/api/events/:id", async (req, res) => {
+    try {
+      const current = await storage.getEvent(req.params.id);
+      if (!current) return res.status(404).json({ error: "Event not found" });
+
+      const eventRoomId = req.body.eventRoomId || current.eventRoomId;
+      const startDate = req.body.startDate || current.startDate;
+      const endDate = req.body.endDate || current.endDate;
+
+      if (req.body.eventRoomId || req.body.startDate || req.body.endDate) {
+        const activeStatuses = ["tentative", "confirmed", "in_progress"];
+        const existingEvents = await storage.getEventsByDateRange(startDate, endDate);
+        for (const existing of existingEvents) {
+          if (existing.id === req.params.id) continue;
+          if (existing.eventRoomId !== eventRoomId) continue;
+          if (!activeStatuses.includes(existing.status)) continue;
+          if (existing.startDate <= endDate && existing.endDate >= startDate) {
+            const room = await storage.getEventRoom(eventRoomId);
+            return res.status(409).json({
+              error: "Superposición de evento",
+              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}.`,
+            });
+          }
+        }
+      }
+
+      const event = await storage.updateEvent(req.params.id, req.body);
+      res.json(event);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event" });
+    }
+  });
+
+  app.delete("/api/events/:id", async (req, res) => {
+    try {
+      await storage.deleteEvent(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event" });
+    }
+  });
+
+  // Event Charges
+  app.get("/api/events/:eventId/charges", async (req, res) => {
+    try {
+      const chargesList = await storage.getEventCharges(req.params.eventId);
+      res.json(chargesList);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event charges" });
+    }
+  });
+
+  app.post("/api/events/:eventId/charges", async (req, res) => {
+    try {
+      const evt = await storage.getEvent(req.params.eventId);
+      if (!evt) return res.status(404).json({ error: "Event not found" });
+      if (evt.status === "invoiced" || evt.status === "cancelled") {
+        return res.status(400).json({ error: "No se pueden agregar cargos a un evento facturado o cancelado" });
+      }
+      const { chargeTypeId, description, quantity, unitPrice, notes } = req.body;
+
+      if (!description || !unitPrice) {
+        return res.status(400).json({ error: "description and unitPrice are required" });
+      }
+
+      const qty = quantity || 1;
+      const total = (parseFloat(unitPrice) * qty).toFixed(2);
+
+      const charge = await storage.createEventCharge({
+        eventId: req.params.eventId,
+        chargeTypeId: chargeTypeId || null,
+        description,
+        quantity: qty,
+        unitPrice,
+        totalAmount: total,
+        date: new Date().toISOString().split("T")[0],
+        notes: notes || null,
+        createdAt: new Date(),
+      });
+      res.status(201).json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event charge" });
+    }
+  });
+
+  app.patch("/api/events/charges/:id", async (req, res) => {
+    try {
+      const charge = await storage.updateEventCharge(req.params.id, req.body);
+      if (!charge) return res.status(404).json({ error: "Event charge not found" });
+      res.json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event charge" });
+    }
+  });
+
+  app.delete("/api/events/charges/:id", async (req, res) => {
+    try {
+      await storage.deleteEventCharge(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event charge" });
+    }
+  });
+
+  // Event Payments
+  app.get("/api/events/:eventId/payments", async (req, res) => {
+    try {
+      const paymentsList = await storage.getEventPayments(req.params.eventId);
+      res.json(paymentsList);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event payments" });
+    }
+  });
+
+  app.post("/api/events/:eventId/payments", async (req, res) => {
+    try {
+      const existingEvent = await storage.getEvent(req.params.eventId);
+      if (!existingEvent) return res.status(404).json({ error: "Event not found" });
+      if (existingEvent.status === "invoiced") {
+        return res.status(400).json({ error: "No se pueden agregar pagos a un evento facturado" });
+      }
+      const { amount, method, isAdvance, reservationId, notes } = req.body;
+      if (!amount || !method) {
+        return res.status(400).json({ error: "amount and method are required" });
+      }
+      if (method === "room_charge" && !reservationId) {
+        return res.status(400).json({ error: "reservationId es requerido para cargo a habitacion" });
+      }
+      const payment = await storage.createEventPayment({
+        eventId: req.params.eventId,
+        amount,
+        method,
+        isAdvance: isAdvance ? "true" : "false",
+        reservationId: reservationId || null,
+        notes: notes || null,
+        paidAt: new Date(),
+        createdAt: new Date(),
+      });
+      const refreshedEvent = await storage.getEvent(req.params.eventId);
+      if (refreshedEvent) {
+        const totalPaid = (refreshedEvent.payments || []).reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+        await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
+      }
+
+      try {
+        const evt = await storage.getEvent(req.params.eventId);
+        const label = `Evento ${evt?.name || req.params.eventId} - Pago ${method}`;
+        await storage.registerCashMovement(
+          "events", "event", req.params.eventId, label,
+          method, String(amount), "income"
+        );
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
+
+      res.status(201).json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event payment" });
+    }
+  });
+
+  app.patch("/api/events/:eventId/payments/:payId/anular", requireAuth, async (req, res) => {
+    try {
+      const { motivoAnulacion } = req.body;
+      if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "El motivo de anulación es requerido" });
+      const event = await storage.getEvent(req.params.eventId);
+      if (event?.status === "invoiced") return res.status(403).json({ error: "No se puede anular pagos de un evento facturado" });
+      const [pay] = await db.select().from(eventPayments).where(eq(eventPayments.id, req.params.payId));
+      if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
+      if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
+      const [updated] = await db.update(eventPayments)
+        .set({ status: "anulado", motivoAnulacion, anuladoAt: new Date() })
+        .where(eq(eventPayments.id, req.params.payId))
+        .returning();
+      if (event) {
+        const allPays = await db.select().from(eventPayments).where(
+          and(eq(eventPayments.eventId, req.params.eventId), eq(eventPayments.status, "active"))
+        );
+        const totalPaid = allPays.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+        await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
+      }
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/events/:eventId/payments/:payId", async (req, res) => {
+    console.warn(`[DEPRECADO] DELETE /api/events/${req.params.eventId}/payments/${req.params.payId} — usar PATCH /anular`);
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (event && event.status === "invoiced") {
+        return res.status(400).json({ error: "No se pueden eliminar pagos de un evento facturado" });
+      }
+      await storage.deleteEventPayment(req.params.payId);
+      if (event) {
+        const remaining = (event.payments || []).filter((p: any) => p.id !== req.params.payId);
+        const totalPaid = remaining.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+        await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event payment" });
+    }
+  });
+
+  app.get("/api/events/:eventId/summary", async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      const chargesList = event.charges || [];
+      const paymentsList = event.payments || [];
+      const totalCharges = chargesList.reduce((sum: number, c: any) => sum + parseFloat(c.totalAmount), 0);
+      const totalPayments = paymentsList.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+      res.json({
+        totalCharges,
+        totalPayments,
+        balance: totalCharges - totalPayments,
+        charges: chargesList,
+        payments: paymentsList,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event summary" });
+    }
+  });
+
+  app.post("/api/events/:eventId/close", async (req, res) => {
+    try {
+      const { receiptType } = req.body;
+      if (!receiptType) {
+        return res.status(400).json({ error: "receiptType es requerido" });
+      }
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+
+      const chargesList = event.charges || [];
+      const paymentsList = event.payments || [];
+      const totalCharges = chargesList.reduce((sum: number, c: any) => sum + parseFloat(c.totalAmount), 0);
+      const totalPayments = paymentsList.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+      const balance = totalCharges - totalPayments;
+
+      if (balance > 0.01) {
+        return res.status(400).json({
+          error: "Saldo pendiente",
+          message: `Hay un saldo pendiente de $${balance.toFixed(2)}. Registre los pagos antes de cerrar.`,
+        });
+      }
+
+      for (const payment of paymentsList) {
+        if (payment.method === "room_charge" && payment.reservationId) {
+          await storage.createCharge({
+            reservationId: payment.reservationId,
+            description: `Eventos - ${event.name}`,
+            amount: payment.amount,
+            date: new Date().toISOString().split("T")[0],
+            category: "events",
+            createdBy: null,
+          });
+        }
+      }
+
+      await storage.updateEvent(req.params.eventId, {
+        status: "invoiced",
+        receiptType,
+        closedAt: new Date(),
+        totalAmount: totalCharges.toFixed(2),
+        totalPaid: totalPayments.toFixed(2),
+      } as any);
+
+      const updated = await storage.getEvent(req.params.eventId);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error closing event" });
+    }
+  });
+
+  // Event Tables (Evento por Mesa)
+  app.get("/api/events/:eventId/tables", async (req, res) => {
+    try {
+      const tables = await storage.getEventTables(req.params.eventId);
+      res.json(tables);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching event tables" });
+    }
+  });
+
+  app.post("/api/events/:eventId/tables", async (req, res) => {
+    try {
+      const { tableNumber, label, seats, reservationId } = req.body;
+      if (!tableNumber) {
+        return res.status(400).json({ error: "tableNumber is required" });
+      }
+      const table = await storage.createEventTable({
+        eventId: req.params.eventId,
+        tableNumber,
+        label: label || null,
+        seats: seats || null,
+        reservationId: reservationId || null,
+        createdAt: new Date(),
+      });
+      res.status(201).json(table);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating event table" });
+    }
+  });
+
+  app.patch("/api/events/:eventId/tables/:tableId", async (req, res) => {
+    try {
+      const table = await storage.updateEventTable(req.params.tableId, req.body);
+      if (!table) return res.status(404).json({ error: "Event table not found" });
+      res.json(table);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating event table" });
+    }
+  });
+
+  app.delete("/api/events/:eventId/tables/:tableId", async (req, res) => {
+    try {
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Event table not found" });
+      if (table.charges.length > 0 || table.payments.length > 0) {
+        return res.status(400).json({ error: "No se puede eliminar una mesa con cargos o pagos" });
+      }
+      await storage.deleteEventTable(req.params.tableId);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting event table" });
+    }
+  });
+
+  app.post("/api/events/:eventId/tables/:tableId/charges", async (req, res) => {
+    try {
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Table not found" });
+      if (table.status !== "open") {
+        return res.status(400).json({ error: "No se pueden agregar cargos a una mesa cerrada" });
+      }
+      const { description, quantity, unitPrice } = req.body;
+      if (!description || !unitPrice) {
+        return res.status(400).json({ error: "description and unitPrice are required" });
+      }
+      const qty = quantity || 1;
+      const total = (parseFloat(unitPrice) * qty).toFixed(2);
+      const charge = await storage.createEventTableCharge({
+        eventTableId: req.params.tableId,
+        description,
+        quantity: qty,
+        unitPrice,
+        total,
+        createdAt: new Date(),
+      });
+      res.status(201).json(charge);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating table charge" });
+    }
+  });
+
+  app.delete("/api/events/:eventId/tables/:tableId/charges/:chargeId", async (req, res) => {
+    try {
+      await storage.deleteEventTableCharge(req.params.chargeId);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting table charge" });
+    }
+  });
+
+  app.post("/api/events/:eventId/tables/:tableId/payments", async (req, res) => {
+    try {
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Table not found" });
+      if (table.status !== "open") {
+        return res.status(400).json({ error: "No se pueden agregar pagos a una mesa cerrada" });
+      }
+      const { amount, method, isAdvance, reservationId } = req.body;
+      if (!amount || !method) {
+        return res.status(400).json({ error: "amount and method are required" });
+      }
+      if (method === "room_charge" && !reservationId) {
+        return res.status(400).json({ error: "reservationId es requerido para cargo a habitacion" });
+      }
+      const payment = await storage.createEventTablePayment({
+        eventTableId: req.params.tableId,
+        amount,
+        method,
+        isAdvance: isAdvance ? "true" : "false",
+        reservationId: reservationId || null,
+        paidAt: new Date(),
+        createdAt: new Date(),
+      });
+
+      try {
+        const evt = await storage.getEvent(req.params.eventId);
+        const label = `Evento ${evt?.name || req.params.eventId} - Mesa ${table.tableName} - Pago ${method}`;
+        await storage.registerCashMovement(
+          "events", "event", req.params.eventId, label,
+          method, String(amount), "income"
+        );
+      } catch (e) {
+        console.error("Error registrando movimiento de caja:", e);
+      }
+
+      res.status(201).json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating table payment" });
+    }
+  });
+
+  app.get("/api/events/:eventId/tables/:tableId/summary", async (req, res) => {
+    try {
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Event table not found" });
+      const totalCharges = table.charges.reduce((sum: number, c: any) => sum + parseFloat(c.total), 0);
+      const totalPayments = table.payments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+      res.json({
+        totalCharges,
+        totalPayments,
+        balance: totalCharges - totalPayments,
+        charges: table.charges,
+        payments: table.payments,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching table summary" });
+    }
+  });
+
+  app.post("/api/events/:eventId/tables/:tableId/close", async (req, res) => {
+    try {
+      const { receiptType } = req.body;
+      if (!receiptType) {
+        return res.status(400).json({ error: "receiptType es requerido" });
+      }
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Event table not found" });
+
+      const totalCharges = table.charges.reduce((sum: number, c: any) => sum + parseFloat(c.total), 0);
+      const totalPayments = table.payments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+      const balance = totalCharges - totalPayments;
+
+      if (balance > 0.01) {
+        return res.status(400).json({
+          error: "Saldo pendiente",
+          message: `Saldo pendiente de $${balance.toFixed(2)}. Registre los pagos antes de cerrar.`,
+        });
+      }
+
+      for (const payment of table.payments) {
+        if (payment.method === "room_charge" && payment.reservationId) {
+          const event = await storage.getEvent(req.params.eventId);
+          await storage.createCharge({
+            reservationId: payment.reservationId,
+            description: `Eventos Mesa ${table.tableNumber} - ${event?.name || ""}`,
+            amount: payment.amount,
+            date: new Date().toISOString().split("T")[0],
+            category: "events",
+            createdBy: null,
+          });
+        }
+      }
+
+      await storage.updateEventTable(req.params.tableId, {
+        status: "invoiced",
+        receiptType,
+        closedAt: new Date(),
+      });
+
+      const updated = await storage.getEventTable(req.params.tableId);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error closing table" });
+    }
+  });
+
+  app.get("/api/events/:eventId/tables-summary", async (req, res) => {
+    try {
+      const tables = await storage.getEventTables(req.params.eventId);
+      const tableSummaries = tables.map((table: any) => {
+        const totalCharges = table.charges.reduce((sum: number, c: any) => sum + parseFloat(c.total), 0);
+        const totalPayments = table.payments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+        return {
+          id: table.id,
+          tableNumber: table.tableNumber,
+          label: table.label,
+          seats: table.seats,
+          status: table.status,
+          totalCharges,
+          totalPayments,
+          balance: totalCharges - totalPayments,
+        };
+      });
+      const totalAll = tableSummaries.reduce((sum: number, t: any) => sum + t.totalCharges, 0);
+      const paidAll = tableSummaries.reduce((sum: number, t: any) => sum + t.totalPayments, 0);
+      const pendingTables = tableSummaries.filter((t: any) => t.status === "open").length;
+      res.json({
+        tables: tableSummaries,
+        totalCharges: totalAll,
+        totalPayments: paidAll,
+        balance: totalAll - paidAll,
+        pendingTables,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching tables summary" });
+    }
+  });
+
+  // PDF exports for events
+  app.get("/api/events/:eventId/hoja-funcion-pdf", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      const pdfBuffer = await generateHojaFuncionPdf(event);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="hoja-funcion-${event.eventCode}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("Error generating hoja funcion PDF:", error);
+      res.status(500).json({ error: "Error generating PDF" });
+    }
+  });
+
+  app.get("/api/events/:eventId/confirmacion-pdf", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      const pdfBuffer = await generateConfirmacionEventoPdf(event);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="confirmacion-${event.eventCode}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("Error generating confirmacion PDF:", error);
+      res.status(500).json({ error: "Error generating PDF" });
+    }
+  });
+}

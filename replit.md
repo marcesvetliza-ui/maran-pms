@@ -26,6 +26,11 @@ Preferred communication style: Simple, everyday language.
 - **ID Strategy**: All tables use `varchar` primary keys with UUID generation.
 - **Key Entities**: Room Types, Rooms, Guests, Reservations, Payments.
 
+### Backend Routes Architecture
+- **Modular structure**: `server/routes.ts` (main, ~1792 lines) delegates to sub-modules in `server/routes/`
+- **Extracted modules**: `hospitality.ts`, `ota.ts`, `planning.ts`, `packages.ts`, `rooms.ts`, `guests.ts`, `reservations.ts`, `groups.ts`, `housekeeping.ts`, `restaurant.ts`, `inventory.ts`, `spa.ts`, `events.ts`, `maintenance.ts`
+- **Remaining in routes.ts**: Auth, dashboard, admin (users/settings/audit), notifications, chatbot, web check-in, cash register, executive stats, reports (basic), accounting suppliers, purchase invoices
+
 ### Authentication & Authorization
 - **Strategy**: Passport.js with local strategy and bcrypt for password hashing.
 - **Session Store**: `connect-pg-simple` storing sessions in PostgreSQL (8-hour duration).
