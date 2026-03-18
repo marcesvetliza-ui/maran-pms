@@ -20,6 +20,7 @@ import { registerAdminCashRoutes } from "./adminCash";
 import { registerBillingRoutes } from "./billing/routes";
 import { registerReportsRoutes } from "./reports/routes";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPdfs";
+import { audit } from "./audit";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -46,14 +47,16 @@ export async function registerRoutes(
       if (!user) {
         return res.status(401).json({ message: info?.message || "Credenciales incorrectas" });
       }
-      req.logIn(user, (err) => {
+      req.logIn(user, async (err) => {
         if (err) return next(err);
+        await audit(req, "login", "auth", `Inicio de sesión: ${user.username}`);
         return res.json(user);
       });
     })(req, res, next);
   });
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", async (req, res) => {
+    await audit(req, "logout", "auth", `Cierre de sesión: ${(req as any).user?.username || "desconocido"}`);
     req.logout((err) => {
       if (err) {
         return res.status(500).json({ message: "Error al cerrar sesión" });
@@ -136,6 +139,9 @@ export async function registerRoutes(
   app.use("/api/system-settings", requireRole(["admin"]));
 
   app.get("/api/source/files", requireAuth, async (_req, res) => {
+    if (process.env.NODE_ENV === "production") {
+      return res.status(404).json({ error: "Not found" });
+    }
     const fs = await import("fs");
     const srcPath = path.resolve(".");
     const allowedDirs = ["client/src", "server", "shared", "script"];
@@ -305,6 +311,7 @@ export async function registerRoutes(
   app.post("/api/rate-plans", async (req, res) => {
     try {
       const ratePlan = await storage.createRatePlan(req.body);
+      await audit(req, "create", "rate-plans", `Nueva tarifa creada: ${req.body.name}`, { entityType: "rate_plan", entityId: ratePlan.id });
       res.status(201).json(ratePlan);
     } catch (error) {
       res.status(500).json({ error: "Error creating rate plan" });
@@ -313,10 +320,15 @@ export async function registerRoutes(
 
   app.patch("/api/rate-plans/:id", async (req, res) => {
     try {
+      const existing = await storage.getRatePlan(req.params.id);
       const ratePlan = await storage.updateRatePlan(req.params.id, req.body);
       if (!ratePlan) {
         return res.status(404).json({ error: "Rate plan not found" });
       }
+      await audit(req, "update", "rate-plans",
+        `Tarifa modificada: ${ratePlan.name} — $${existing?.baseRate ?? "?"} → $${ratePlan.baseRate ?? "?"}`,
+        { entityType: "rate_plan", entityId: req.params.id }
+      );
       res.json(ratePlan);
     } catch (error) {
       res.status(500).json({ error: "Error updating rate plan" });
@@ -1080,6 +1092,10 @@ export async function registerRoutes(
         });
       }
 
+      await audit(req, "update", "reservations",
+        `Reserva ${existing.reservationCode} modificada`,
+        { entityType: "reservation", entityId: req.params.id, details: cambios.length > 0 ? { cambios } : undefined }
+      );
       res.json(reservation);
     } catch (error: any) {
       console.error("Error updating reservation:", error?.message || error);
@@ -1317,6 +1333,11 @@ export async function registerRoutes(
         }
       }
       
+      const roomForAudit = await storage.getRoom(reservation.roomId);
+      await audit(req, "update", "reservations",
+        `Check-in: ${reservation.reservationCode} — Hab. ${roomForAudit?.roomNumber || reservation.roomId}`,
+        { entityType: "reservation", entityId: req.params.id }
+      );
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing check-in" });
@@ -1497,7 +1518,10 @@ export async function registerRoutes(
       await storage.updateRoom(reservation.roomId, { status: "dirty" });
       
       await storage.createCheckoutCleaningTask(reservation.roomId);
-      
+      await audit(req, "update", "reservations",
+        `Check-out: ${reservation.reservationCode} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
+        { entityType: "reservation", entityId: req.params.id }
+      );
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing check-out" });
@@ -1534,7 +1558,10 @@ export async function registerRoutes(
       if (reservation.room?.status === "occupied") {
         await storage.updateRoom(reservation.roomId, { status: "dirty" });
       }
-      
+      await audit(req, "delete", "reservations",
+        `Cancelación: ${reservation.reservationCode}`,
+        { entityType: "reservation", entityId: req.params.id }
+      );
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error cancelling reservation" });
@@ -1792,6 +1819,10 @@ export async function registerRoutes(
         console.error("Error registrando movimiento de caja:", e);
       }
 
+      await audit(req, "create", "payments",
+        `Pago registrado: $${req.body.amount} (${req.body.method}) — Reserva ${req.body.reservationId || "N/A"}`,
+        { entityType: "payment", entityId: payment.id }
+      );
       res.status(201).json(payment);
     } catch (error) {
       res.status(500).json({ error: "Error creating payment" });
@@ -2199,6 +2230,10 @@ export async function registerRoutes(
   app.post("/api/groups/:groupId/check-out-all", requireAuth, async (req, res) => {
     try {
       const result = await storage.bulkCheckOut(req.params.groupId);
+      await audit(req, "update", "groups",
+        `Check-out grupal: ${result.processed} habitaciones procesadas`,
+        { entityType: "group", entityId: req.params.groupId }
+      );
       res.json({ success: result.processed, failed: result.skipped, errors: result.pendingBalance.map(p => `Hab. ${p.room}: saldo pendiente $${p.balance.toFixed(2)}`) });
     } catch (error) {
       res.status(500).json({ error: "Error en check-out grupal" });
@@ -2525,6 +2560,10 @@ export async function registerRoutes(
         }
       }
 
+      await audit(req, "create", "groups",
+        `Pago grupal: $${req.body.amount} (${req.body.method})`,
+        { entityType: "group", entityId: req.params.groupId }
+      );
       res.json({ success: true, groupPayment, distributed: Object.keys(detail).length });
     } catch (error) {
       res.status(500).json({ error: "Error al registrar pago grupal" });
@@ -6544,6 +6583,10 @@ Only respond with the JSON object.`;
   app.post("/api/cash/shifts/open", requireAuth, async (req, res) => {
     try {
       const shift = await storage.openShift(req.body);
+      await audit(req, "create", "cash",
+        `Turno de caja abierto — Área: ${req.body.area || "recepción"}`,
+        { entityType: "cash_shift", entityId: shift.id }
+      );
       res.status(201).json(shift);
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Error opening shift" });
@@ -6555,6 +6598,10 @@ Only respond with the JSON object.`;
       const { closedBy, efectivoContado = 0, operadorSiguiente = null, enviarAAdministracion = false, notes } = req.body;
       if (!closedBy) return res.status(400).json({ error: "closedBy is required" });
       const result = await storage.closeShift(req.params.id, closedBy, parseFloat(efectivoContado) || 0, operadorSiguiente || null, !!enviarAAdministracion, notes);
+      await audit(req, "update", "cash",
+        `Turno de caja cerrado — Área: ${result?.area || "recepción"}`,
+        { entityType: "cash_shift", entityId: req.params.id }
+      );
       res.json(result);
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Error closing shift" });

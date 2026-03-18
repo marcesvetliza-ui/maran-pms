@@ -133,7 +133,7 @@ const menuSections = [
     items: [
       { label: "Configuración",          icon: Settings, href: "/administration"  },
       { label: "Administración sistema", icon: Shield,   href: "/administration"  },
-      { label: "Código fuente",          icon: Code2,    href: "/source-code",     adminOnly: true },
+      { label: "Código fuente",          icon: Code2,    href: "/source-code",     adminOnly: true, devOnly: true },
     ],
   },
 ];
@@ -359,7 +359,7 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {section.items.filter(item => !(item as any).adminOnly || user?.role === "admin").map((item) => {
+                {section.items.filter(item => (!(item as any).adminOnly || user?.role === "admin") && (!(item as any).devOnly || import.meta.env.DEV)).map((item) => {
                   const isActive =
                     item.href === "/"
                       ? location === "/"

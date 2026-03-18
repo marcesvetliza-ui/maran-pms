@@ -3,9 +3,33 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { setupAuth } from "./auth";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 
 const app = express();
 app.set("trust proxy", 1);
+
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Demasiadas solicitudes, intente en unos minutos" },
+  skip: (req) => req.path.startsWith("/api/public/"),
+});
+app.use("/api", apiLimiter);
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: "Demasiados intentos de inicio de sesión" },
+});
+app.use("/api/auth/login", loginLimiter);
 const httpServer = createServer(app);
 
 declare module "http" {

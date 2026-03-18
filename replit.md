@@ -30,6 +30,8 @@ Preferred communication style: Simple, everyday language.
 - **Strategy**: Passport.js with local strategy and bcrypt for password hashing.
 - **Session Store**: `connect-pg-simple` storing sessions in PostgreSQL (8-hour duration).
 - **Access Control**: Role-based access with protected routes for API and admin functionalities.
+- **Security (Production)**: `helmet` HTTP headers, rate limiting (500 req/15min general, 10 req/15min login), `/api/auth/setup` and `/api/source/files` disabled in production.
+- **Audit Logging**: `server/audit.ts` helper records critical events (login, logout, check-in, check-out, cancel, payments, rate plans, groups, cash shifts) to `audit_logs` table via `/api/admin/audit-logs`.
 
 ### Core Feature Specifications
 - **Core PMS**: Enhanced bed type management, advanced search, flexible check-in/out charges, multi-step check-out, mass operations, group payments.
