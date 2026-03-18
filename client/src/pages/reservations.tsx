@@ -861,19 +861,6 @@ export function ReservationFormDialog({
               </div>
             </div>
 
-            <div className="p-4 bg-muted rounded-lg">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-muted-foreground">Tarifa Final/Noche</p>
-                  <p className="text-lg font-semibold">${formData.finalRatePerNight || "0.00"}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-muted-foreground">Total Habitación</p>
-                  <p className="text-2xl font-bold text-primary">${formData.totalRoomAmount || "0.00"}</p>
-                </div>
-              </div>
-            </div>
-
             <div className="grid gap-2">
               <Label htmlFor="bedConfig">Tipo de camaje</Label>
               <Select
@@ -1017,6 +1004,19 @@ export function ReservationFormDialog({
                 )}
               </div>
             )}
+
+            <div className="p-4 bg-muted rounded-lg">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-muted-foreground">Tarifa Final/Noche</p>
+                  <p className="text-lg font-semibold">${formData.finalRatePerNight || "0.00"}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-muted-foreground">Total Habitación</p>
+                  <p className="text-2xl font-bold text-primary">${formData.totalRoomAmount || "0.00"}</p>
+                </div>
+              </div>
+            </div>
 
             <div className="grid gap-3 border rounded-lg p-3">
               <Label className="text-sm font-semibold">Servicios especiales</Label>
