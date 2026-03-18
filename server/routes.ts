@@ -7,11 +7,12 @@ import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
 import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks } from "@shared/schema";
 import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
+import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
 import { lostFoundItems } from "@shared/schema";
-import { eq, sql, desc, asc, gte, lte, and, or, ilike, like } from "drizzle-orm";
+import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
 import { registerExportRoutes } from "./exports";
@@ -1289,6 +1290,19 @@ export async function registerRoutes(
               priority: pref.priority as any,
             });
           }
+          await db.insert(stayNotes).values({
+            id: randomUUID(),
+            reservationId: req.params.id,
+            guestId: reservation.guestId,
+            category: pref.category as any,
+            title: pref.title,
+            description: pref.description || "",
+            priority: pref.priority as any,
+            visibleTo: pref.visibleTo || ["all"],
+            isResolved: false,
+            recordedBy: "sistema (check-in automático)",
+            createdAt: new Date(),
+          });
           if (pref.priority === "critical" || pref.priority === "high") {
             await storage.createNotification({
               type: "hospitality_alert",
@@ -6001,6 +6015,21 @@ Only respond with the JSON object.`;
   // ==================== HOSPITALITY MODULE ====================
 
   // Guest Preferences CRUD
+  app.get("/api/guests/:id/history", async (req, res) => {
+    try {
+      const reservationsList = await storage.getReservationsByGuest(req.params.id);
+      const history = [];
+      for (const r of reservationsList) {
+        const notes = await storage.getStayNotes(r.id);
+        history.push({ reservation: r, notes });
+      }
+      history.sort((a, b) => new Date(b.reservation.checkInDate).getTime() - new Date(a.reservation.checkInDate).getTime());
+      res.json(history);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching guest history" });
+    }
+  });
+
   app.get("/api/guests/:id/preferences", async (req, res) => {
     try {
       const activeOnly = req.query.active === "true";
@@ -6155,58 +6184,90 @@ Only respond with the JSON object.`;
     }
   });
 
+  app.patch("/api/hospitality/alerts/:alertId/complete", requireAuth, async (req, res) => {
+    try {
+      const { completedBy } = req.body;
+      const operador = completedBy || (req as any).user?.username || "Sistema";
+      const [updated] = await db.update(hospitalityAlerts)
+        .set({ status: "completed", isAcknowledged: true, acknowledgedAt: new Date(), acknowledgedBy: operador })
+        .where(eq(hospitalityAlerts.id, req.params.alertId))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Alert not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error completing alert" });
+    }
+  });
+
   // Hospitality Dashboard
   app.get("/api/hospitality/dashboard", async (req, res) => {
     try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const in7days = new Date();
+      in7days.setDate(in7days.getDate() + 7);
+      const limit = in7days.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
       const allReservations = await storage.getReservations();
-      const checkedIn = allReservations.filter((r) => r.status === "checked_in");
-      
+      const relevantReservations = allReservations.filter(r =>
+        r.status === "checked_in" ||
+        (r.status === "confirmed" && r.checkInDate >= today && r.checkInDate <= limit)
+      );
+
+      const relevantGuestIds = relevantReservations.map(r => r.guestId).filter(Boolean) as string[];
+      const allActivePrefs = relevantGuestIds.length > 0
+        ? await db.select().from(guestPreferences).where(
+            and(eq(guestPreferences.isActive, true), inArray(guestPreferences.guestId, relevantGuestIds))
+          )
+        : [];
+      const prefsByGuest = new Map<string, typeof allActivePrefs>();
+      for (const p of allActivePrefs) {
+        if (!prefsByGuest.has(p.guestId)) prefsByGuest.set(p.guestId, []);
+        prefsByGuest.get(p.guestId)!.push(p);
+      }
+
       const guestsWithPrefs = [];
-      for (const r of checkedIn) {
-        if (r.guestId) {
-          const guest = await storage.getGuest(r.guestId);
-          const prefs = await storage.getActiveGuestPreferences(r.guestId);
-          if (guest) {
-            guestsWithPrefs.push({
-              guest,
-              reservation: r,
-              preferences: prefs,
-              hasCritical: prefs.some((p) => p.priority === "critical"),
-              hasHigh: prefs.some((p) => p.priority === "high"),
-            });
-          }
-        }
+      for (const r of relevantReservations) {
+        if (!r.guestId) continue;
+        const prefs = prefsByGuest.get(r.guestId) || [];
+        if (prefs.length === 0) continue;
+        const guest = await storage.getGuest(r.guestId);
+        if (!guest) continue;
+        guestsWithPrefs.push({
+          guest,
+          reservation: r,
+          preferences: prefs,
+          isInHouse: r.status === "checked_in",
+          checkInDate: r.checkInDate,
+          hasCritical: prefs.some(p => p.priority === "critical"),
+          hasHigh: prefs.some(p => p.priority === "high"),
+          hasSpecialDate: prefs.some(p => p.category === "fecha_especial"),
+          hasDiet: prefs.some(p => p.category === "alimentacion"),
+        });
       }
 
+      const relevantReservationIds = new Set(relevantReservations.map(r => r.id));
       const allAlerts = await storage.getHospitalityAlerts();
-      const pendingAlerts = allAlerts.filter((a) => !a.isAcknowledged);
+      const pendingAlerts = allAlerts.filter(a =>
+        a.status !== "completed" && relevantReservationIds.has(a.reservationId)
+      );
 
-      const allGuests = await storage.getGuests();
-      const allPrefs = [];
-      for (const g of allGuests) {
-        const prefs = await storage.getActiveGuestPreferences(g.id);
-        const specialDates = prefs.filter((p) => p.category === "fecha_especial");
-        if (specialDates.length > 0) {
-          allPrefs.push({ guest: g, specialDates });
-        }
-      }
+      const criticalPrefs = guestsWithPrefs
+        .filter(g => g.hasCritical)
+        .map(g => ({ guest: g.guest, reservation: g.reservation, preferences: g.preferences.filter(p => p.priority === "critical") }));
 
-      const criticalPrefs = [];
-      for (const g of allGuests) {
-        const prefs = await storage.getActiveGuestPreferences(g.id);
-        const critical = prefs.filter((p) => p.priority === "critical");
-        if (critical.length > 0) {
-          criticalPrefs.push({ guest: g, preferences: critical });
-        }
-      }
+      const upcomingSpecialDates = guestsWithPrefs
+        .filter(g => g.hasSpecialDate)
+        .map(g => ({ guest: g.guest, reservation: g.reservation, specialDates: g.preferences.filter(p => p.category === "fecha_especial") }));
 
       res.json({
-        inHouseGuests: guestsWithPrefs,
+        inHouseGuests: guestsWithPrefs.filter(g => g.isInHouse),
+        upcomingGuests: guestsWithPrefs.filter(g => !g.isInHouse),
         pendingAlerts,
-        upcomingSpecialDates: allPrefs,
+        upcomingSpecialDates,
         criticalPreferences: criticalPrefs,
         stats: {
-          totalInHouseWithPrefs: guestsWithPrefs.filter((g) => g.preferences.length > 0).length,
+          totalInHouseWithPrefs: guestsWithPrefs.filter(g => g.isInHouse).length,
+          totalUpcomingWithPrefs: guestsWithPrefs.filter(g => !g.isInHouse).length,
           pendingAlertsCount: pendingAlerts.length,
           criticalCount: criticalPrefs.reduce((sum, g) => sum + g.preferences.length, 0),
         },

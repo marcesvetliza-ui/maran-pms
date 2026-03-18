@@ -1606,10 +1606,11 @@ export const hospitalityAlerts = pgTable("hospitality_alerts", {
   isAcknowledged: boolean("is_acknowledged").default(false),
   acknowledgedAt: timestamp("acknowledged_at"),
   acknowledgedBy: text("acknowledged_by"),
+  status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertHospitalityAlertSchema = createInsertSchema(hospitalityAlerts).omit({ id: true, createdAt: true, isAcknowledged: true, acknowledgedAt: true, acknowledgedBy: true });
+export const insertHospitalityAlertSchema = createInsertSchema(hospitalityAlerts).omit({ id: true, createdAt: true, isAcknowledged: true, acknowledgedAt: true, acknowledgedBy: true, status: true });
 export type InsertHospitalityAlert = z.infer<typeof insertHospitalityAlertSchema>;
 export type HospitalityAlert = typeof hospitalityAlerts.$inferSelect;
 

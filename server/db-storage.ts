@@ -695,6 +695,18 @@ export class DatabaseStorage implements IStorage {
     const reservationsMap: Record<string, any> = {};
     const groupBlocksMap: Record<string, any> = {};
 
+    const guestIdsWithRes = allReservations.map(r => r.guestId).filter(Boolean) as string[];
+    const allActivePrefs = guestIdsWithRes.length > 0
+      ? await db.select().from(guestPreferences).where(
+          and(eq(guestPreferences.isActive, true), inArray(guestPreferences.guestId, guestIdsWithRes))
+        )
+      : [];
+    const prefsByGuest = new Map<string, typeof allActivePrefs>();
+    for (const p of allActivePrefs) {
+      if (!prefsByGuest.has(p.guestId)) prefsByGuest.set(p.guestId, []);
+      prefsByGuest.get(p.guestId)!.push(p);
+    }
+
     for (const res of allReservations) {
       const guest = guestsMap.get(res.guestId);
       if (guest) {
@@ -713,6 +725,15 @@ export class DatabaseStorage implements IStorage {
             }
           }
         }
+        const guestPrefs = prefsByGuest.get(res.guestId) || [];
+        const prefSummary = guestPrefs.length > 0 ? {
+          hasCritical: guestPrefs.some(p => p.priority === "critical"),
+          hasHigh: guestPrefs.some(p => p.priority === "high"),
+          hasSpecialDate: guestPrefs.some(p => p.category === "fecha_especial"),
+          hasDiet: guestPrefs.some(p => p.category === "alimentacion"),
+          count: guestPrefs.length,
+        } : null;
+
         reservationsMap[res.id] = {
           id: res.id,
           guestName: `${guest.firstName} ${guest.lastName}`,
@@ -728,6 +749,7 @@ export class DatabaseStorage implements IStorage {
           earlyCheckInTime: res.earlyCheckInTime ?? null,
           lateCheckOut: res.lateCheckOut ?? false,
           lateCheckOutTime: res.lateCheckOutTime ?? null,
+          prefSummary,
         };
       }
     }
@@ -2934,6 +2956,7 @@ export class DatabaseStorage implements IStorage {
       isAcknowledged: true,
       acknowledgedAt: new Date(),
       acknowledgedBy,
+      status: "in_progress",
     }).where(eq(hospitalityAlerts.id, id)).returning();
     return updated;
   }

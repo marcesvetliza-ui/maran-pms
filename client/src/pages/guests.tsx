@@ -484,9 +484,27 @@ function GuestDetailDialog({
               {guest.firstName?.[0]}{guest.lastName?.[0]}
             </div>
             <div className="flex-1">
-              <p className="font-semibold text-xl">
-                {guest.firstName} {guest.lastName}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-semibold text-xl">
+                  {guest.firstName} {guest.lastName}
+                </p>
+                {guest.segment && guest.segment !== "OTHER" && (() => {
+                  const segColors: Record<string, string> = {
+                    LEISURE: "bg-blue-100 text-blue-700",
+                    CORP: "bg-purple-100 text-purple-700",
+                    SPORT: "bg-green-100 text-green-700",
+                    CONGRESS: "bg-amber-100 text-amber-700",
+                  };
+                  const segLabels: Record<string, string> = {
+                    LEISURE: "Leisure", CORP: "Corporativo", SPORT: "Deportivo", CONGRESS: "Congreso",
+                  };
+                  return (
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${segColors[guest.segment] || "bg-gray-100 text-gray-600"}`}>
+                      {segLabels[guest.segment] || guest.segment}
+                    </span>
+                  );
+                })()}
+              </div>
               <p className="text-sm text-muted-foreground">{guest.nationality || "Sin nacionalidad"}</p>
             </div>
           </div>

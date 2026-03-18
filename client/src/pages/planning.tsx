@@ -2358,6 +2358,16 @@ export default function PlanningPage() {
                                                 Late Check-out: {reservation.lateCheckOutTime || "--"} hs
                                               </div>
                                             )}
+                                            {reservation.prefSummary && (
+                                              <div className="flex items-center gap-1 border-t pt-1 mt-1 flex-wrap">
+                                                <span className="text-muted-foreground">Prefs:</span>
+                                                {reservation.prefSummary.hasCritical && <span title="Preferencia crítica" className="text-red-500">🚨</span>}
+                                                {reservation.prefSummary.hasSpecialDate && <span title="Fecha especial" className="text-yellow-500">🎂</span>}
+                                                {reservation.prefSummary.hasDiet && <span title="Restricción alimentaria" className="text-orange-500">🍽️</span>}
+                                                {!reservation.prefSummary.hasCritical && reservation.prefSummary.hasHigh && <span title="Preferencia alta" className="text-amber-500">⚠️</span>}
+                                                <span className="text-muted-foreground">({reservation.prefSummary.count})</span>
+                                              </div>
+                                            )}
                                             <div className="border-t pt-1 mt-1 text-primary">
                                               Clic para ver detalle
                                             </div>

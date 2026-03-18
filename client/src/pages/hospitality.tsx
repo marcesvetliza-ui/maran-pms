@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,9 +36,25 @@ import {
   FileText,
   ToggleLeft,
   ToggleRight,
-  Eye,
+  CalendarClock,
+  CalendarDays,
 } from "lucide-react";
-import type { GuestPreference, Guest, HospitalityAlert } from "@shared/schema";
+import type { GuestPreference, Guest, HospitalityAlert, StayNote } from "@shared/schema";
+
+const segmentConfig: Record<string, { label: string; className: string }> = {
+  LEISURE:  { label: "Leisure",     className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" },
+  CORP:     { label: "Corporativo", className: "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300" },
+  SPORT:    { label: "Deportivo",   className: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" },
+  CONGRESS: { label: "Congreso",    className: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300" },
+  OTHER:    { label: "Otro",        className: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" },
+};
+
+function SegmentBadge({ segment }: { segment?: string | null }) {
+  if (!segment) return null;
+  const cfg = segmentConfig[segment];
+  if (!cfg) return null;
+  return <Badge className={`text-xs ${cfg.className}`}>{cfg.label}</Badge>;
+}
 
 const CATEGORY_OPTIONS = [
   { value: "habitacion", label: "Habitación", icon: DoorOpen },
@@ -94,6 +111,41 @@ function getCategoryLabel(category: string) {
 }
 
 // ========== DASHBOARD TAB ==========
+function GuestCard({ item, testPrefix }: { item: any; testPrefix: string }) {
+  return (
+    <div className="flex items-start justify-between p-3 border rounded-lg" data-testid={`${testPrefix}-${item.guest?.id}`}>
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+          {item.guest?.firstName?.[0]}{item.guest?.lastName?.[0]}
+        </div>
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="font-medium">{item.guest?.firstName} {item.guest?.lastName}</p>
+            <SegmentBadge segment={item.guest?.segment} />
+          </div>
+          <p className="text-xs text-muted-foreground">Hab. {item.reservation?.roomId} · {item.checkInDate}</p>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {item.preferences?.slice(0, 4).map((p: GuestPreference) => (
+              <Badge key={p.id} variant="outline" className="text-xs">
+                {getCategoryIcon(p.category)}
+                <span className="ml-1">{p.title}</span>
+              </Badge>
+            ))}
+            {item.preferences?.length > 4 && (
+              <Badge variant="outline" className="text-xs">+{item.preferences.length - 4} más</Badge>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-col gap-1 items-end">
+        {item.hasCritical && <Badge className="bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 text-xs">Crítico</Badge>}
+        {item.hasHigh && !item.hasCritical && <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 text-xs">Alta</Badge>}
+        {item.hasSpecialDate && <Badge className="bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300 text-xs">🎂 Fecha especial</Badge>}
+      </div>
+    </div>
+  );
+}
+
 function DashboardTab() {
   const { data: dashboard, isLoading } = useQuery<any>({
     queryKey: ["/api/hospitality/dashboard"],
@@ -109,12 +161,14 @@ function DashboardTab() {
 
   const stats = dashboard?.stats || {};
   const inHouseGuests = dashboard?.inHouseGuests || [];
+  const upcomingGuests = dashboard?.upcomingGuests || [];
   const pendingAlerts = dashboard?.pendingAlerts || [];
   const criticalPreferences = dashboard?.criticalPreferences || [];
+  const upcomingSpecialDates = dashboard?.upcomingSpecialDates || [];
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card data-testid="stat-inhouse-prefs">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="p-3 rounded-full bg-blue-100 dark:bg-blue-900">
@@ -122,7 +176,18 @@ function DashboardTab() {
             </div>
             <div>
               <p className="text-2xl font-bold">{stats.totalInHouseWithPrefs || 0}</p>
-              <p className="text-sm text-muted-foreground">Huéspedes con preferencias</p>
+              <p className="text-sm text-muted-foreground">In-house con prefs.</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card data-testid="stat-upcoming-prefs">
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="p-3 rounded-full bg-indigo-100 dark:bg-indigo-900">
+              <CalendarClock className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{stats.totalUpcomingWithPrefs || 0}</p>
+              <p className="text-sm text-muted-foreground">Llegando (7 días)</p>
             </div>
           </CardContent>
         </Card>
@@ -133,7 +198,7 @@ function DashboardTab() {
             </div>
             <div>
               <p className="text-2xl font-bold">{stats.pendingAlertsCount || 0}</p>
-              <p className="text-sm text-muted-foreground">Alertas pendientes</p>
+              <p className="text-sm text-muted-foreground">Alertas activas</p>
             </div>
           </CardContent>
         </Card>
@@ -144,7 +209,7 @@ function DashboardTab() {
             </div>
             <div>
               <p className="text-2xl font-bold">{stats.criticalCount || 0}</p>
-              <p className="text-sm text-muted-foreground">Preferencias críticas</p>
+              <p className="text-sm text-muted-foreground">Prefs. críticas</p>
             </div>
           </CardContent>
         </Card>
@@ -155,7 +220,7 @@ function DashboardTab() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2 text-red-600 dark:text-red-400">
               <ShieldAlert className="h-5 w-5" />
-              Preferencias Críticas (requieren atención inmediata)
+              Preferencias Críticas — Atención Inmediata
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -164,9 +229,42 @@ function DashboardTab() {
                 <div key={idx} className="flex items-start gap-3 p-3 bg-red-50 dark:bg-red-950/30 rounded-lg" data-testid={`critical-pref-${idx}`}>
                   <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="font-medium">{item.guest?.firstName} {item.guest?.lastName}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{item.guest?.firstName} {item.guest?.lastName}</p>
+                      <SegmentBadge segment={item.guest?.segment} />
+                    </div>
                     {item.preferences?.map((p: GuestPreference) => (
                       <p key={p.id} className="text-sm text-red-700 dark:text-red-300">{p.title}: {p.description}</p>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {upcomingSpecialDates.length > 0 && (
+        <Card className="border-yellow-200 dark:border-yellow-800">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+              <Gift className="h-5 w-5" />
+              Fechas Especiales — Esta Semana
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {upcomingSpecialDates.map((item: any, idx: number) => (
+                <div key={idx} className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950/30 rounded-lg" data-testid={`special-date-${idx}`}>
+                  <Gift className="h-4 w-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-sm">{item.guest?.firstName} {item.guest?.lastName}</p>
+                      <SegmentBadge segment={item.guest?.segment} />
+                      <Badge variant="outline" className="text-xs">{item.reservation?.status === "checked_in" ? "In-house" : `Llega ${item.reservation?.checkInDate}`}</Badge>
+                    </div>
+                    {item.specialDates?.map((p: GuestPreference) => (
+                      <p key={p.id} className="text-xs text-yellow-700 dark:text-yellow-300">{p.title}: {p.description}</p>
                     ))}
                   </div>
                 </div>
@@ -181,7 +279,7 @@ function DashboardTab() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-orange-500" />
-              Alertas Pendientes ({pendingAlerts.length})
+              Alertas Activas ({pendingAlerts.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -193,44 +291,40 @@ function DashboardTab() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <User className="h-5 w-5" />
-            Huéspedes In-House con Preferencias
+            <User className="h-5 w-5 text-green-600" />
+            In-House con Preferencias
           </CardTitle>
         </CardHeader>
         <CardContent>
           {inHouseGuests.length === 0 ? (
-            <p className="text-muted-foreground text-sm text-center py-6">No hay huéspedes registrados con preferencias activas</p>
+            <p className="text-muted-foreground text-sm text-center py-6">No hay huéspedes in-house con preferencias activas</p>
           ) : (
             <div className="space-y-3">
               {inHouseGuests.map((item: any, idx: number) => (
-                <div key={idx} className="flex items-start justify-between p-3 border rounded-lg" data-testid={`inhouse-guest-${idx}`}>
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                      {item.guest?.firstName?.[0]}{item.guest?.lastName?.[0]}
-                    </div>
-                    <div>
-                      <p className="font-medium">{item.guest?.firstName} {item.guest?.lastName}</p>
-                      <p className="text-xs text-muted-foreground">Hab. {item.reservation?.roomId}</p>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {item.preferences?.map((p: GuestPreference) => (
-                          <Badge key={p.id} variant="outline" className="text-xs">
-                            {getCategoryIcon(p.category)}
-                            <span className="ml-1">{p.title}</span>
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
-                    {item.hasCritical && <Badge className="bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">Crítico</Badge>}
-                    {item.hasHigh && !item.hasCritical && <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300">Alta</Badge>}
-                  </div>
-                </div>
+                <GuestCard key={idx} item={item} testPrefix="inhouse-guest" />
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+
+      {upcomingGuests.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-indigo-600" />
+              Llegando en los Próximos 7 Días con Preferencias
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {upcomingGuests.map((item: any, idx: number) => (
+                <GuestCard key={idx} item={item} testPrefix="upcoming-guest" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
@@ -238,52 +332,93 @@ function DashboardTab() {
 // ========== ALERTS LIST COMPONENT ==========
 function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const currentUsername = (user as any)?.username || (user as any)?.firstName || "Recepción";
+
   const acknowledgeMutation = useMutation({
-    mutationFn: async (alertId: number) => {
-      await apiRequest("PATCH", `/api/hospitality/alerts/${alertId}/acknowledge`, { acknowledgedBy: "Recepción" });
+    mutationFn: async (alertId: string) => {
+      return apiRequest("PATCH", `/api/hospitality/alerts/${alertId}/acknowledge`, { acknowledgedBy: currentUsername });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/hospitality/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/hospitality/alerts"] });
-      toast({ title: "Alerta confirmada" });
+      toast({ title: "Alerta marcada en proceso" });
+    },
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: async (alertId: string) => {
+      return apiRequest("PATCH", `/api/hospitality/alerts/${alertId}/complete`, { completedBy: currentUsername });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/hospitality/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/hospitality/alerts"] });
+      toast({ title: "Alerta completada" });
     },
   });
 
   if (alerts.length === 0) {
-    return <p className="text-muted-foreground text-sm text-center py-4">Sin alertas pendientes</p>;
+    return <p className="text-muted-foreground text-sm text-center py-4">Sin alertas activas</p>;
   }
 
   return (
     <div className="space-y-2">
       {alerts.map((alert) => (
-        <div key={alert.id} className="flex items-start justify-between gap-3 p-3 border rounded-lg" data-testid={`alert-${alert.id}`}>
-          <div className="flex items-start gap-2">
+        <div
+          key={alert.id}
+          className={`flex items-start justify-between gap-3 p-3 border rounded-lg ${
+            (alert as any).status === "completed" ? "opacity-60 bg-muted/30" : ""
+          }`}
+          data-testid={`alert-${alert.id}`}
+        >
+          <div className="flex items-start gap-2 flex-1 min-w-0">
             {getPriorityBadge(alert.priority)}
-            <div>
+            <div className="min-w-0">
               <p className="text-sm">{alert.alertMessage}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 Área: {AREA_OPTIONS.find((a) => a.value === alert.targetArea)?.label || alert.targetArea}
               </p>
+              {(alert as any).status === "in_progress" && alert.acknowledgedBy && (
+                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                  En proceso — {alert.acknowledgedBy} {alert.acknowledgedAt ? `· ${new Date(alert.acknowledgedAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}
+                </p>
+              )}
             </div>
           </div>
-          {!alert.isAcknowledged && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => acknowledgeMutation.mutate(alert.id)}
-              disabled={acknowledgeMutation.isPending}
-              data-testid={`btn-acknowledge-${alert.id}`}
-            >
-              <Check className="h-4 w-4 mr-1" />
-              Entendido
-            </Button>
-          )}
-          {alert.isAcknowledged && (
-            <Badge variant="outline" className="text-green-600">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Confirmada
-            </Badge>
-          )}
+          <div className="flex-shrink-0">
+            {(alert as any).status === "pending" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => acknowledgeMutation.mutate(alert.id)}
+                disabled={acknowledgeMutation.isPending}
+                data-testid={`btn-acknowledge-${alert.id}`}
+              >
+                <Clock className="h-4 w-4 mr-1" />
+                En proceso
+              </Button>
+            )}
+            {(alert as any).status === "in_progress" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-green-600 border-green-300 hover:bg-green-50"
+                onClick={() => completeMutation.mutate(alert.id)}
+                disabled={completeMutation.isPending}
+                data-testid={`btn-complete-${alert.id}`}
+              >
+                <CheckCircle className="h-4 w-4 mr-1" />
+                Completado
+              </Button>
+            )}
+            {(alert as any).status === "completed" && (
+              <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                <CheckCircle className="h-3 w-3" />
+                Completado
+                {alert.acknowledgedBy && ` por ${alert.acknowledgedBy}`}
+              </span>
+            )}
+          </div>
         </div>
       ))}
     </div>
@@ -539,10 +674,13 @@ function PreferencesTab() {
               : "Selecciona un huésped"}
           </CardTitle>
           {selectedGuest && (
-            <Button size="sm" onClick={() => { setEditPref(null); setShowForm(true); }} data-testid="btn-add-preference">
-              <Plus className="h-4 w-4 mr-1" />
-              Agregar
-            </Button>
+            <div className="flex items-center gap-2">
+              <SegmentBadge segment={selectedGuest.segment} />
+              <Button size="sm" onClick={() => { setEditPref(null); setShowForm(true); }} data-testid="btn-add-preference">
+                <Plus className="h-4 w-4 mr-1" />
+                Agregar
+              </Button>
+            </div>
           )}
         </CardHeader>
         <CardContent>
@@ -893,19 +1031,31 @@ function HistoryTab() {
   const { data: guests = [] } = useQuery<Guest[]>({ queryKey: ["/api/guests"] });
   const [selectedGuestId, setSelectedGuestId] = useState<string | null>(null);
 
+  const selectedGuest = guests.find(g => g.id === selectedGuestId);
+
   const { data: preferences = [] } = useQuery<GuestPreference[]>({
     queryKey: ["/api/guests", selectedGuestId, "preferences"],
     enabled: !!selectedGuestId,
   });
 
-  const { data: alerts = [] } = useQuery<HospitalityAlert[]>({
-    queryKey: ["/api/hospitality/alerts"],
+  const { data: history = [], isLoading: historyLoading } = useQuery<any[]>({
+    queryKey: ["/api/guests", selectedGuestId, "history"],
+    enabled: !!selectedGuestId,
   });
 
   const filteredGuests = guests.filter((g) => {
     const q = search.toLowerCase();
-    return g.firstName.toLowerCase().includes(q) || g.lastName.toLowerCase().includes(q);
+    return g.firstName.toLowerCase().includes(q) || g.lastName.toLowerCase().includes(q) ||
+      (g.documentNumber && g.documentNumber.toLowerCase().includes(q));
   });
+
+  const statusLabels: Record<string, string> = {
+    checked_out: "Check-out",
+    checked_in: "In-house",
+    confirmed: "Confirmada",
+    pending: "Pendiente",
+    cancelled: "Cancelada",
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -917,14 +1067,14 @@ function HistoryTab() {
           <div className="relative mb-3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar..."
+              placeholder="Nombre, apellido o DNI..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
               data-testid="input-search-history"
             />
           </div>
-          <ScrollArea className="h-[400px]">
+          <ScrollArea className="h-[500px]">
             <div className="space-y-1">
               {filteredGuests.map((g) => (
                 <button
@@ -936,6 +1086,7 @@ function HistoryTab() {
                   data-testid={`btn-history-guest-${g.id}`}
                 >
                   <p className="font-medium text-sm">{g.firstName} {g.lastName}</p>
+                  <p className="text-xs text-muted-foreground">{g.documentType?.toUpperCase()} {g.documentNumber}</p>
                 </button>
               ))}
             </div>
@@ -945,82 +1096,118 @@ function HistoryTab() {
 
       <Card className="lg:col-span-2">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            {selectedGuestId ? "Historial de Preferencias y Alertas" : "Selecciona un huésped"}
-          </CardTitle>
+          {selectedGuest ? (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                {selectedGuest.firstName?.[0]}{selectedGuest.lastName?.[0]}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">{selectedGuest.firstName} {selectedGuest.lastName}</CardTitle>
+                  <SegmentBadge segment={selectedGuest.segment} />
+                </div>
+                <p className="text-xs text-muted-foreground">{selectedGuest.documentType?.toUpperCase()} {selectedGuest.documentNumber}</p>
+              </div>
+            </div>
+          ) : (
+            <CardTitle className="text-base">Selecciona un huésped</CardTitle>
+          )}
         </CardHeader>
         <CardContent>
           {!selectedGuestId ? (
             <div className="text-center py-12 text-muted-foreground">
               <Clock className="h-12 w-12 mx-auto mb-3 opacity-30" />
-              <p>Selecciona un huésped para ver su historial</p>
+              <p>Selecciona un huésped para ver su historial completo</p>
             </div>
           ) : (
-            <ScrollArea className="h-[400px]">
-              <div className="space-y-4">
+            <ScrollArea className="h-[500px]">
+              <div className="space-y-5">
                 {preferences.length > 0 && (
                   <div>
-                    <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
+                    <h4 className="font-medium text-sm mb-2 flex items-center gap-2 text-primary">
                       <Heart className="h-4 w-4" />
-                      Preferencias ({preferences.length})
+                      Preferencias Activas ({preferences.filter(p => p.isActive).length})
                     </h4>
-                    <div className="space-y-2 ml-6">
-                      {preferences.map((p) => (
-                        <div key={p.id} className="p-3 border rounded-lg" data-testid={`history-pref-${p.id}`}>
-                          <div className="flex items-center gap-2">
+                    <div className="space-y-2">
+                      {preferences.filter(p => p.isActive).map((p) => (
+                        <div key={p.id} className="p-3 border rounded-lg bg-muted/30" data-testid={`history-pref-${p.id}`}>
+                          <div className="flex items-center gap-2 flex-wrap">
                             {getCategoryIcon(p.category)}
                             <span className="font-medium text-sm">{p.title}</span>
                             {getPriorityBadge(p.priority)}
-                            <Badge variant={p.isActive ? "default" : "outline"} className="text-xs">
-                              {p.isActive ? "Activa" : "Inactiva"}
-                            </Badge>
                           </div>
                           {p.description && <p className="text-xs text-muted-foreground mt-1 ml-6">{p.description}</p>}
-                          <p className="text-xs text-muted-foreground mt-1 ml-6">
-                            Registrada por: {p.recordedBy || "—"} · {p.createdAt ? new Date(p.createdAt).toLocaleDateString("es-AR") : "—"}
-                          </p>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {(() => {
-                  const guestAlerts = alerts.filter((a) => a.guestId === selectedGuestId);
-                  if (guestAlerts.length === 0) return null;
-                  return (
-                    <div>
-                      <Separator className="my-4" />
-                      <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4" />
-                        Alertas generadas ({guestAlerts.length})
-                      </h4>
-                      <div className="space-y-2 ml-6">
-                        {guestAlerts.map((a) => (
-                          <div key={a.id} className="p-3 border rounded-lg" data-testid={`history-alert-${a.id}`}>
-                            <div className="flex items-center gap-2">
-                              {getPriorityBadge(a.priority)}
-                              <span className="text-sm">{a.alertMessage}</span>
-                              {a.isAcknowledged && (
-                                <Badge variant="outline" className="text-green-600 text-xs">
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  Confirmada
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Área: {a.targetArea} · Reserva: {a.reservationId}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
+                <Separator />
 
-                {preferences.length === 0 && alerts.filter((a) => a.guestId === selectedGuestId).length === 0 && (
-                  <p className="text-center text-muted-foreground py-8">Sin historial registrado</p>
-                )}
+                <div>
+                  <h4 className="font-medium text-sm mb-3 flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4" />
+                    Estadías ({history.length})
+                  </h4>
+                  {historyLoading ? (
+                    <div className="flex justify-center py-4">
+                      <div className="animate-spin h-5 w-5 border-2 border-primary border-t-transparent rounded-full" />
+                    </div>
+                  ) : history.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sin estadías registradas</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {history.map((item: any) => {
+                        const r = item.reservation;
+                        const notes: StayNote[] = item.notes || [];
+                        return (
+                          <div key={r.id} className="border rounded-lg overflow-hidden" data-testid={`history-stay-${r.id}`}>
+                            <div className="flex items-center justify-between px-3 py-2 bg-muted/50">
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="font-medium">Hab. {r.roomId}</span>
+                                <span className="text-muted-foreground">·</span>
+                                <span>{r.checkInDate} → {r.checkOutDate}</span>
+                              </div>
+                              <Badge variant="outline" className="text-xs">
+                                {statusLabels[r.status] || r.status}
+                              </Badge>
+                            </div>
+                            {notes.length > 0 ? (
+                              <div className="divide-y">
+                                {notes.map((note) => (
+                                  <div key={note.id} className="px-3 py-2 flex items-start justify-between gap-2" data-testid={`history-note-${note.id}`}>
+                                    <div className="flex items-start gap-2">
+                                      {getCategoryIcon(note.category)}
+                                      <div>
+                                        <p className="text-sm font-medium">{note.title}</p>
+                                        {note.description && <p className="text-xs text-muted-foreground">{note.description}</p>}
+                                        <p className="text-xs text-muted-foreground">Por: {note.recordedBy || "—"}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                      {getPriorityBadge(note.priority)}
+                                      {note.isResolved ? (
+                                        <Badge variant="outline" className="text-green-600 text-xs">
+                                          <CheckCircle className="h-3 w-3 mr-1" />
+                                          Resuelta
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="text-xs">Pendiente</Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="px-3 py-2 text-xs text-muted-foreground">Sin notas en esta estadía</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </ScrollArea>
           )}
