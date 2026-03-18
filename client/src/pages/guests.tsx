@@ -20,6 +20,15 @@ import {
   CreditCard,
   DollarSign,
   Hotel,
+  ToggleLeft,
+  ToggleRight,
+  X,
+  UtensilsCrossed,
+  Sparkles,
+  DoorOpen,
+  Star,
+  Gift,
+  Briefcase,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +65,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference, Company } from "@shared/schema";
@@ -444,6 +454,240 @@ function ReservationExpandedDetail({ r }: { r: ReservationWithDetails }) {
   );
 }
 
+// ========== PREFERENCES SECTION ==========
+const PREF_CATEGORIES = [
+  { value: "habitacion",    label: "Habitación",     icon: DoorOpen },
+  { value: "alimentacion",  label: "Alimentación",   icon: UtensilsCrossed },
+  { value: "amenities",     label: "Amenities",      icon: Star },
+  { value: "servicio",      label: "Servicio",       icon: Sparkles },
+  { value: "fecha_especial",label: "Fecha Especial", icon: Gift },
+  { value: "motivo_viaje",  label: "Motivo de Viaje",icon: Briefcase },
+  { value: "nota_interna",  label: "Nota Interna",   icon: FileText },
+  { value: "otro",          label: "Otro",           icon: Heart },
+];
+
+const PREF_PRIORITIES = [
+  { value: "low",      label: "Baja",    cls: "bg-gray-100 text-gray-700" },
+  { value: "normal",   label: "Normal",  cls: "bg-blue-100 text-blue-700" },
+  { value: "high",     label: "Alta",    cls: "bg-orange-100 text-orange-700" },
+  { value: "critical", label: "Crítica", cls: "bg-red-100 text-red-700" },
+];
+
+function getCatIcon(cat: string) {
+  const found = PREF_CATEGORIES.find(c => c.value === cat);
+  if (!found) return <Heart className="h-4 w-4 text-muted-foreground" />;
+  const Icon = found.icon;
+  return <Icon className="h-4 w-4 text-muted-foreground" />;
+}
+
+function getPrefPriorityBadge(priority: string) {
+  const p = PREF_PRIORITIES.find(x => x.value === priority);
+  return <Badge className={`text-xs ${p?.cls || ""}`}>{p?.label || priority}</Badge>;
+}
+
+function GuestPreferencesSection({ guestId }: { guestId: string }) {
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [editPref, setEditPref] = useState<GuestPreference | null>(null);
+  const [category, setCategory] = useState("habitacion");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState("normal");
+
+  const { data: preferences = [], isLoading } = useQuery<GuestPreference[]>({
+    queryKey: ["/api/guests", guestId, "preferences"],
+  });
+
+  const resetForm = () => {
+    setCategory("habitacion");
+    setTitle("");
+    setDescription("");
+    setPriority("normal");
+    setEditPref(null);
+    setShowForm(false);
+  };
+
+  const openEdit = (pref: GuestPreference) => {
+    setEditPref(pref);
+    setCategory(pref.category);
+    setTitle(pref.title);
+    setDescription(pref.description || "");
+    setPriority(pref.priority);
+    setShowForm(true);
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!title.trim()) throw new Error("El título es requerido");
+      const body = { category, title: title.trim(), description: description.trim() || null, priority, visibleTo: ["all"], recordedBy: "Recepción" };
+      if (editPref) {
+        return apiRequest("PATCH", `/api/guests/${guestId}/preferences/${editPref.id}`, body);
+      } else {
+        return apiRequest("POST", `/api/guests/${guestId}/preferences`, body);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/guests", guestId, "preferences"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/hospitality/dashboard"] });
+      toast({ title: editPref ? "Preferencia actualizada" : "Preferencia guardada" });
+      resetForm();
+    },
+    onError: (e: any) => toast({ title: e.message || "Error al guardar", variant: "destructive" }),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (prefId: string) => apiRequest("PATCH", `/api/guests/${guestId}/preferences/${prefId}/toggle`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/guests", guestId, "preferences"] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (prefId: string) => apiRequest("DELETE", `/api/guests/${guestId}/preferences/${prefId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/guests", guestId, "preferences"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/hospitality/dashboard"] });
+      toast({ title: "Preferencia eliminada" });
+    },
+  });
+
+  return (
+    <div className="border rounded-lg overflow-hidden" data-testid="guest-preferences-section">
+      <div className="p-3 border-b bg-muted/50 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Heart className="h-4 w-4 text-primary" />
+          <h4 className="font-semibold text-sm">Preferencias de Hospitalidad</h4>
+          <Badge variant="outline" className="text-xs">{preferences.length}</Badge>
+        </div>
+        {!showForm && (
+          <Button size="sm" variant="outline" onClick={() => { resetForm(); setShowForm(true); }} data-testid="btn-add-pref">
+            <Plus className="h-3 w-3 mr-1" />
+            Agregar
+          </Button>
+        )}
+      </div>
+
+      {showForm && (
+        <div className="p-3 border-b bg-blue-50 dark:bg-blue-950/20 space-y-3">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm font-medium">{editPref ? "Editar preferencia" : "Nueva preferencia"}</p>
+            <Button size="icon" variant="ghost" className="h-6 w-6" onClick={resetForm}><X className="h-3 w-3" /></Button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs">Categoría</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger className="h-8 text-xs" data-testid="select-pref-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PREF_CATEGORIES.map(c => (
+                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Prioridad</Label>
+              <Select value={priority} onValueChange={setPriority}>
+                <SelectTrigger className="h-8 text-xs" data-testid="select-pref-priority">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PREF_PRIORITIES.map(p => (
+                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Título *</Label>
+            <Input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Ej: Alergia al maní, Almohada extra, Habitación silenciosa..."
+              className="h-8 text-xs"
+              data-testid="input-pref-title"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Descripción (opcional)</Label>
+            <Textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Detalles adicionales..."
+              rows={2}
+              className="text-xs resize-none"
+              data-testid="input-pref-description"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={resetForm}>Cancelar</Button>
+            <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="btn-save-pref">
+              {saveMutation.isPending ? "Guardando..." : editPref ? "Actualizar" : "Guardar"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="divide-y max-h-[260px] overflow-y-auto">
+        {isLoading ? (
+          <div className="p-4 text-center text-sm text-muted-foreground">Cargando...</div>
+        ) : preferences.length === 0 ? (
+          <div className="p-4 text-center text-sm text-muted-foreground">
+            Sin preferencias registradas. Usá el botón Agregar para cargar gustos y necesidades del huésped.
+          </div>
+        ) : (
+          preferences.map(pref => (
+            <div
+              key={pref.id}
+              className={`flex items-start justify-between p-3 gap-2 ${!pref.isActive ? "opacity-50" : ""}`}
+              data-testid={`pref-item-${pref.id}`}
+            >
+              <div className="flex items-start gap-2 min-w-0">
+                {getCatIcon(pref.category)}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm font-medium">{pref.title}</p>
+                    {getPrefPriorityBadge(pref.priority)}
+                    {!pref.isActive && <Badge variant="outline" className="text-xs">Inactiva</Badge>}
+                  </div>
+                  {pref.description && <p className="text-xs text-muted-foreground mt-0.5">{pref.description}</p>}
+                </div>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <Button
+                  size="icon" variant="ghost" className="h-6 w-6"
+                  onClick={() => toggleMutation.mutate(pref.id)}
+                  title={pref.isActive ? "Desactivar" : "Activar"}
+                  data-testid={`btn-toggle-pref-${pref.id}`}
+                >
+                  {pref.isActive
+                    ? <ToggleRight className="h-4 w-4 text-green-500" />
+                    : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+                <Button
+                  size="icon" variant="ghost" className="h-6 w-6"
+                  onClick={() => openEdit(pref)}
+                  data-testid={`btn-edit-pref-${pref.id}`}
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button
+                  size="icon" variant="ghost" className="h-6 w-6 text-destructive"
+                  onClick={() => deleteMutation.mutate(pref.id)}
+                  data-testid={`btn-delete-pref-${pref.id}`}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function GuestDetailDialog({
   guest,
   open,
@@ -459,13 +703,6 @@ function GuestDetailDialog({
     queryKey: ["/api/reservations"],
   });
 
-  const { data: preferences = [] } = useQuery<GuestPreference[]>({
-    queryKey: ["/api/guests", guest.id, "preferences"],
-    enabled: open,
-  });
-
-  const activePreferences = preferences.filter((p) => p.isActive);
-
   const guestReservations = allReservations?.filter(r => r.guestId === guest.id) || [];
   const totalStays = guestReservations.filter(r => r.status === "checked_out").length;
   const totalNights = guestReservations.reduce((sum, r) => sum + (r.nights || 0), 0);
@@ -473,7 +710,7 @@ function GuestDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Detalle del Huésped</DialogTitle>
           <DialogDescription>Información completa y historial de reservaciones.</DialogDescription>
@@ -602,35 +839,7 @@ function GuestDetailDialog({
             </div>
           )}
 
-          {activePreferences.length > 0 && (
-            <div className="border rounded-lg" data-testid="guest-preferences-section">
-              <div className="p-3 border-b bg-muted/50 flex items-center gap-2">
-                <Heart className="h-4 w-4 text-primary" />
-                <h4 className="font-semibold">Preferencias de Hospitalidad</h4>
-                <Badge variant="outline" className="text-xs">{activePreferences.length}</Badge>
-              </div>
-              <div className="divide-y max-h-[200px] overflow-y-auto">
-                {activePreferences.map((pref) => (
-                  <div key={pref.id} className="flex items-center justify-between p-3 text-sm" data-testid={`guest-pref-${pref.id}`}>
-                    <div>
-                      <p className="font-medium">{pref.title}</p>
-                      {pref.description && <p className="text-xs text-muted-foreground">{pref.description}</p>}
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={`text-xs ${
-                        pref.priority === "critical" ? "border-red-400 text-red-700 dark:text-red-300" :
-                        pref.priority === "high" ? "border-orange-400 text-orange-700 dark:text-orange-300" :
-                        ""
-                      }`}
-                    >
-                      {pref.priority === "critical" ? "Crítica" : pref.priority === "high" ? "Alta" : pref.priority === "low" ? "Baja" : "Normal"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <GuestPreferencesSection guestId={guest.id} />
 
           <div className="border rounded-lg">
             <div className="p-3 border-b bg-muted/50 flex items-center justify-between">
@@ -824,12 +1033,12 @@ export default function GuestsPage() {
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" data-testid={`btn-guest-menu-${guest.id}`}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleViewGuest(guest)}>
+                        <DropdownMenuItem onClick={() => handleViewGuest(guest)} data-testid={`btn-view-guest-${guest.id}`}>
                           <Eye className="mr-2 h-4 w-4" />
                           Ver Detalle
                         </DropdownMenuItem>
