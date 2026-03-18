@@ -11,6 +11,9 @@ import {
   Check,
   Sunrise,
   Sunset,
+  ShoppingCart,
+  XCircle,
+  Plus,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,7 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
-import type { Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, BedType } from "@shared/schema";
+import type { Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany } from "@shared/schema";
 
 export default function NewReservationPage() {
   const { toast } = useToast();
@@ -55,7 +58,6 @@ export default function NewReservationPage() {
   const [notes, setNotes] = useState<string>("");
   const [discountType, setDiscountType] = useState<string>("none");
   const [discountValue, setDiscountValue] = useState<string>("0");
-  const [bedTypeId, setBedTypeId] = useState<string>("");
   const [bedTypeNotes, setBedTypeNotes] = useState<string>("");
   const [earlyCheckIn, setEarlyCheckIn] = useState(false);
   const [earlyCheckInTime, setEarlyCheckInTime] = useState("");
@@ -63,6 +65,35 @@ export default function NewReservationPage() {
   const [lateCheckOut, setLateCheckOut] = useState(false);
   const [lateCheckOutTime, setLateCheckOutTime] = useState("");
   const [lateCheckOutCharge, setLateCheckOutCharge] = useState("");
+
+  const bedConfigOptions = [
+    { value: "MAT", label: "Matrimonial" },
+    { value: "TWIN", label: "Twin (2 individuales)" },
+    { value: "MAT_CC", label: "Matrimonial + Cama chica" },
+    { value: "TWIN_CC", label: "Twin + Cama chica" },
+    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
+    { value: "MAT_CC_EXTRA", label: "Matrimonial + CC + Extra" },
+  ];
+
+  const nrChargePresets = [
+    { label: "Cochera (por día)", description: "Cochera", amount: "2500", category: "otros" },
+    { label: "Media Pensión", description: "Media Pensión", amount: "4500", category: "restaurant" },
+    { label: "Pensión Completa", description: "Pensión Completa", amount: "8000", category: "restaurant" },
+    { label: "Desayuno adicional", description: "Desayuno adicional", amount: "1800", category: "restaurant" },
+    { label: "Cena", description: "Cena", amount: "3500", category: "restaurant" },
+    { label: "Frigobar", description: "Frigobar", amount: "1200", category: "minibar" },
+    { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" },
+    { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" },
+    { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" },
+    { label: "Cargo personalizado", description: "", amount: "", category: "otros" },
+  ];
+  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
+  const [showNrChargeForm, setShowNrChargeForm] = useState(false);
+  const [nrChargePresetLabel, setNrChargePresetLabel] = useState("");
+  const [nrChargeDesc, setNrChargeDesc] = useState("");
+  const [nrChargeAmount, setNrChargeAmount] = useState("");
+  const [nrChargeQty, setNrChargeQty] = useState(1);
+  const [nrChargeCategory, setNrChargeCategory] = useState("otros");
 
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
@@ -74,10 +105,6 @@ export default function NewReservationPage() {
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
     queryKey: ["/api/rate-plans"],
-  });
-
-  const { data: bedTypes } = useQuery<BedType[]>({
-    queryKey: ["/api/bed-types"],
   });
 
   const { data: companies } = useQuery<Company[]>({
@@ -192,8 +219,8 @@ export default function NewReservationPage() {
         source: selectedCompany ? "empresa" : "directo",
         numberOfGuests,
         notes: notes || null,
-        bedTypeId: bedTypeId || null,
-        bedTypeNotes: bedTypeNotes || null,
+        bedTypeId: null,
+        bedTypeNotes: (bedTypeNotes && bedTypeNotes !== "__none__") ? bedTypeNotes : null,
         earlyCheckIn,
         earlyCheckInTime: earlyCheckInTime || null,
         earlyCheckInCharge: earlyCheckInCharge || null,
@@ -201,7 +228,21 @@ export default function NewReservationPage() {
         lateCheckOutTime: lateCheckOutTime || null,
         lateCheckOutCharge: lateCheckOutCharge || null,
       });
-      return res.json();
+      const created = await res.json();
+      if (pendingCharges.length > 0 && created?.id) {
+        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        for (const charge of pendingCharges) {
+          const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
+          await apiRequest("POST", "/api/charges", {
+            description: charge.description,
+            amount: totalAmt,
+            category: charge.category,
+            reservationId: created.id,
+            date: todayStr,
+          });
+        }
+      }
+      return created;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -398,30 +439,21 @@ export default function NewReservationPage() {
               <div className="space-y-2">
                 <Label>Tipo de camaje</Label>
                 <Select
-                  value={bedTypeId}
-                  onValueChange={setBedTypeId}
+                  value={bedTypeNotes}
+                  onValueChange={setBedTypeNotes}
                 >
                   <SelectTrigger data-testid="select-bed-type">
                     <SelectValue placeholder="Seleccionar tipo de camaje..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {bedTypes?.filter(bt => bt.isActive).map((bt) => (
-                      <SelectItem key={bt.id} value={bt.id}>
-                        {bt.name}
+                    <SelectItem value="__none__">Sin especificar</SelectItem>
+                    {bedConfigOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Notas de camaje</Label>
-                <Input
-                  value={bedTypeNotes}
-                  onChange={(e) => setBedTypeNotes(e.target.value)}
-                  placeholder="Preferencias especiales..."
-                  data-testid="input-bed-type-notes"
-                />
               </div>
             </CardContent>
           </Card>
@@ -553,6 +585,84 @@ export default function NewReservationPage() {
                 onChange={(e) => setNotes(e.target.value)}
                 data-testid="input-notes"
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ShoppingCart className="h-4 w-4" />
+                Consumos / Cargos adicionales
+                {pendingCharges.length > 0 && (
+                  <Badge variant="secondary">{pendingCharges.length}</Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {pendingCharges.length === 0 && !showNrChargeForm && (
+                <p className="text-sm text-muted-foreground">Sin cargos adicionales agregados.</p>
+              )}
+              {pendingCharges.length > 0 && (
+                <div className="border rounded-md divide-y">
+                  {pendingCharges.map((charge, idx) => (
+                    <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <span>{charge.description}{charge.quantity > 1 ? ` x${charge.quantity}` : ""}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">${(parseFloat(charge.amount) * charge.quantity).toFixed(2)}</span>
+                        <Button type="button" size="sm" variant="ghost" className="h-5 w-5 p-0 text-destructive" onClick={() => setPendingCharges(prev => prev.filter((_, i) => i !== idx))}>
+                          <XCircle className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between px-3 py-2 text-sm font-semibold bg-muted/30">
+                    <span>Total cargos</span>
+                    <span>${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0).toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+              {showNrChargeForm && (
+                <div className="border rounded-md p-3 space-y-2 bg-muted/20">
+                  <Select value={nrChargePresetLabel} onValueChange={(val) => {
+                    setNrChargePresetLabel(val);
+                    const preset = nrChargePresets.find(p => p.label === val);
+                    if (preset) { setNrChargeDesc(preset.description); setNrChargeAmount(preset.amount); setNrChargeCategory(preset.category); setNrChargeQty(1); }
+                  }}>
+                    <SelectTrigger data-testid="select-nr-charge-preset"><SelectValue placeholder="Tipo de cargo..." /></SelectTrigger>
+                    <SelectContent>
+                      {nrChargePresets.map(p => <SelectItem key={p.label} value={p.label}>{p.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <div className="grid grid-cols-4 gap-1 items-end">
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs text-muted-foreground">Descripción</Label>
+                      <Input value={nrChargeDesc} onChange={(e) => setNrChargeDesc(e.target.value)} placeholder="Descripción" className="h-8 text-sm" data-testid="input-nr-charge-desc" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Precio</Label>
+                      <Input type="number" value={nrChargeAmount} onChange={(e) => setNrChargeAmount(e.target.value)} placeholder="0.00" className="h-8 text-sm" data-testid="input-nr-charge-amount" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Cant.</Label>
+                      <Input type="number" min={1} value={nrChargeQty} onChange={(e) => setNrChargeQty(Math.max(1, parseInt(e.target.value) || 1))} className="h-8 text-sm" data-testid="input-nr-charge-qty" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => { setShowNrChargeForm(false); setNrChargePresetLabel(""); setNrChargeDesc(""); setNrChargeAmount(""); setNrChargeQty(1); }}>Cancelar</Button>
+                    <Button type="button" size="sm" onClick={() => {
+                      if (!nrChargeDesc || !nrChargeAmount) return;
+                      setPendingCharges(prev => [...prev, { description: nrChargeDesc, amount: nrChargeAmount, category: nrChargeCategory, quantity: nrChargeQty }]);
+                      setShowNrChargeForm(false); setNrChargePresetLabel(""); setNrChargeDesc(""); setNrChargeAmount(""); setNrChargeQty(1);
+                    }} data-testid="button-confirm-nr-charge">Agregar cargo</Button>
+                  </div>
+                </div>
+              )}
+              {!showNrChargeForm && (
+                <Button type="button" size="sm" variant="outline" onClick={() => setShowNrChargeForm(true)} data-testid="button-toggle-nr-charge">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Agregar cargo
+                </Button>
+              )}
             </CardContent>
           </Card>
         </div>

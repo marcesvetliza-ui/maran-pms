@@ -28,6 +28,8 @@ import {
   Lock,
   Ban,
   AlertTriangle,
+  ShoppingCart,
+  XCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -152,6 +154,37 @@ export function ReservationFormDialog({
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
+  // Cargos adicionales al crear
+  const newResChargePresets = [
+    { label: "Cochera (por día)", description: "Cochera", amount: "2500", category: "otros" as const },
+    { label: "Media Pensión", description: "Media Pensión", amount: "4500", category: "restaurant" as const },
+    { label: "Pensión Completa", description: "Pensión Completa", amount: "8000", category: "restaurant" as const },
+    { label: "Desayuno adicional", description: "Desayuno adicional", amount: "1800", category: "restaurant" as const },
+    { label: "Cena", description: "Cena", amount: "3500", category: "restaurant" as const },
+    { label: "Frigobar", description: "Frigobar", amount: "1200", category: "minibar" as const },
+    { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" as const },
+    { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" as const },
+    { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" as const },
+    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const },
+  ];
+  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
+  const [showResChargeForm, setShowResChargeForm] = useState(false);
+  const [resChargePreset, setResChargePreset] = useState("");
+  const [resChargeDesc, setResChargeDesc] = useState("");
+  const [resChargeAmount, setResChargeAmount] = useState("");
+  const [resChargeQty, setResChargeQty] = useState(1);
+  const [resChargeCategory, setResChargeCategory] = useState("otros");
+
+  // Opciones de camaje fijas
+  const bedConfigOptions = [
+    { value: "MAT", label: "Matrimonial" },
+    { value: "TWIN", label: "Twin (2 camas)" },
+    { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
+    { value: "TWIN_CC", label: "Twin + Cama cuna" },
+    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
+    { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
+  ];
+
   const [formData, setFormData] = useState<Partial<InsertReservation>>({
     reservationCode: reservation?.reservationCode || "",
     guestId: reservation?.guestId || "",
@@ -226,6 +259,12 @@ export function ReservationFormDialog({
         notes: reservation?.notes || "",
         createdAt: reservation?.createdAt || new Date().toISOString(),
       });
+      setPendingCharges([]);
+      setShowResChargeForm(false);
+      setResChargePreset("");
+      setResChargeDesc("");
+      setResChargeAmount("");
+      setResChargeQty(1);
     }
   }, [open, reservation?.id]);
 
@@ -433,12 +472,28 @@ export function ReservationFormDialog({
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertReservation>) => {
       if (isEditing) {
-        return apiRequest("PATCH", `/api/reservations/${reservation.id}`, data);
+        const res = await apiRequest("PATCH", `/api/reservations/${reservation.id}`, data);
+        return res.json();
       }
-      return apiRequest("POST", "/api/reservations", {
+      const res = await apiRequest("POST", "/api/reservations", {
         ...data,
         reservationCode: data.reservationCode || generatedCode?.code || `RES-${Date.now()}`,
       });
+      const created = await res.json();
+      if (pendingCharges.length > 0) {
+        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        for (const charge of pendingCharges) {
+          const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
+          await apiRequest("POST", "/api/charges", {
+            description: charge.description,
+            amount: totalAmt,
+            category: charge.category,
+            reservationId: created.id,
+            date: todayStr,
+          });
+        }
+      }
+      return created;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -819,45 +874,149 @@ export function ReservationFormDialog({
               </div>
             </div>
 
-            <div className="grid gap-4">
-              <Label className="text-sm font-semibold">Preferencias de camaje</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="bedType">Tipo de camaje</Label>
-                  <Select
-                    value={formData.bedTypeId != null ? String(formData.bedTypeId) : "none"}
-                    onValueChange={(value) =>
-                      setFormData({
-                        ...formData,
-                        bedTypeId: value === "none" ? null : value,
-                      })
-                    }
-                  >
-                    <SelectTrigger data-testid="select-bed-type">
-                      <SelectValue placeholder="Seleccionar tipo de camaje" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sin preferencia</SelectItem>
-                      {bedTypes?.filter(bt => bt.isActive).map((bt) => (
-                        <SelectItem key={bt.id} value={String(bt.id)}>
-                          {bt.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="bedTypeNotes">Notas de camaje</Label>
-                  <Input
-                    id="bedTypeNotes"
-                    value={formData.bedTypeNotes || ""}
-                    onChange={(e) => setFormData({ ...formData, bedTypeNotes: e.target.value })}
-                    placeholder="Preferencias especiales..."
-                    data-testid="input-bed-type-notes"
-                  />
-                </div>
-              </div>
+            <div className="grid gap-2">
+              <Label htmlFor="bedConfig">Tipo de camaje</Label>
+              <Select
+                value={formData.bedTypeNotes || "none"}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, bedTypeNotes: value === "none" ? "" : value })
+                }
+              >
+                <SelectTrigger data-testid="select-bed-config-form">
+                  <SelectValue placeholder="Sin preferencia" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin preferencia</SelectItem>
+                  {bedConfigOptions.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+
+            {!isEditing && (
+              <div className="border rounded-lg">
+                <div className="flex items-center justify-between p-3 border-b bg-muted/40">
+                  <div className="flex items-center gap-2">
+                    <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-semibold text-sm">Consumos / Cargos adicionales</span>
+                    {pendingCharges.length > 0 && (
+                      <Badge variant="secondary" className="text-xs">{pendingCharges.length}</Badge>
+                    )}
+                  </div>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setShowResChargeForm(!showResChargeForm)} data-testid="button-toggle-charge-form">
+                    <Plus className="h-4 w-4 mr-1" />
+                    Agregar
+                  </Button>
+                </div>
+
+                {showResChargeForm && (
+                  <div className="p-3 border-b bg-muted/20 space-y-2">
+                    <Select
+                      value={resChargePreset}
+                      onValueChange={(val) => {
+                        setResChargePreset(val);
+                        const preset = newResChargePresets.find(p => p.label === val);
+                        if (preset) {
+                          setResChargeDesc(preset.description);
+                          setResChargeAmount(preset.amount);
+                          setResChargeCategory(preset.category);
+                          setResChargeQty(1);
+                        }
+                      }}
+                    >
+                      <SelectTrigger data-testid="select-new-res-charge-preset">
+                        <SelectValue placeholder="Seleccionar tipo de cargo..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {newResChargePresets.map(p => (
+                          <SelectItem key={p.label} value={p.label}>{p.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="grid grid-cols-4 gap-2 items-end">
+                      <div className="col-span-2">
+                        <Label className="text-xs text-muted-foreground">Descripción</Label>
+                        <Input
+                          value={resChargeDesc}
+                          onChange={(e) => setResChargeDesc(e.target.value)}
+                          placeholder="Descripción"
+                          data-testid="input-new-res-charge-desc"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Precio unit.</Label>
+                        <Input
+                          type="number"
+                          value={resChargeAmount}
+                          onChange={(e) => setResChargeAmount(e.target.value)}
+                          placeholder="0.00"
+                          data-testid="input-new-res-charge-amount"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Cant.</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={resChargeQty}
+                          onChange={(e) => setResChargeQty(Math.max(1, parseInt(e.target.value) || 1))}
+                          data-testid="input-new-res-charge-qty"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setShowResChargeForm(false); setResChargePreset(""); setResChargeDesc(""); setResChargeAmount(""); setResChargeQty(1); }}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          if (!resChargeDesc || !resChargeAmount) return;
+                          setPendingCharges(prev => [...prev, { description: resChargeDesc, amount: resChargeAmount, category: resChargeCategory, quantity: resChargeQty }]);
+                          setShowResChargeForm(false);
+                          setResChargePreset("");
+                          setResChargeDesc("");
+                          setResChargeAmount("");
+                          setResChargeQty(1);
+                        }}
+                        data-testid="button-confirm-new-res-charge"
+                      >
+                        Agregar cargo
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {pendingCharges.length === 0 ? (
+                  <p className="text-xs text-muted-foreground p-3 text-center">Sin cargos adicionales</p>
+                ) : (
+                  <div className="divide-y">
+                    {pendingCharges.map((charge, idx) => (
+                      <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <span>{charge.description}{charge.quantity > 1 ? ` x${charge.quantity}` : ""}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">${(parseFloat(charge.amount) * charge.quantity).toFixed(2)}</span>
+                          <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => setPendingCharges(prev => prev.filter((_, i) => i !== idx))}>
+                            <XCircle className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex justify-between px-3 py-2 text-sm font-semibold bg-muted/30">
+                      <span>Total cargos</span>
+                      <span>${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="grid gap-3 border rounded-lg p-3">
               <Label className="text-sm font-semibold">Servicios especiales</Label>

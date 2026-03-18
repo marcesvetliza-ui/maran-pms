@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal, ShoppingCart, XCircle } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -265,6 +265,27 @@ function QuickReservationDialog({
   const [selectedAgency, setSelectedAgency] = useState<Agency | null>(null);
   const [packageId, setPackageId] = useState("");
 
+  // Cargos adicionales
+  const quickChargePresets = [
+    { label: "Cochera (por día)", description: "Cochera", amount: "2500", category: "otros" as const },
+    { label: "Media Pensión", description: "Media Pensión", amount: "4500", category: "restaurant" as const },
+    { label: "Pensión Completa", description: "Pensión Completa", amount: "8000", category: "restaurant" as const },
+    { label: "Desayuno adicional", description: "Desayuno adicional", amount: "1800", category: "restaurant" as const },
+    { label: "Cena", description: "Cena", amount: "3500", category: "restaurant" as const },
+    { label: "Frigobar", description: "Frigobar", amount: "1200", category: "minibar" as const },
+    { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" as const },
+    { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" as const },
+    { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" as const },
+    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const },
+  ];
+  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
+  const [showChargeForm, setShowChargeForm] = useState(false);
+  const [chargePresetLabel, setChargePresetLabel] = useState("");
+  const [chargeDesc, setChargeDesc] = useState("");
+  const [chargeAmount, setChargeAmount] = useState("");
+  const [chargeQty, setChargeQty] = useState(1);
+  const [chargeCategory, setChargeCategory] = useState("otros");
+
   const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
   const { data: activePackages } = useQuery<Package[]>({ queryKey: ["/api/packages/active"] });
 
@@ -295,7 +316,8 @@ function QuickReservationDialog({
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
-      return apiRequest("POST", "/api/reservations", data);
+      const res = await apiRequest("POST", "/api/reservations", data);
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -340,6 +362,12 @@ function QuickReservationDialog({
     setAgencyId(null);
     setSelectedAgency(null);
     setPackageId("");
+    setPendingCharges([]);
+    setShowChargeForm(false);
+    setChargePresetLabel("");
+    setChargeDesc("");
+    setChargeAmount("");
+    setChargeQty(1);
   };
 
   const handleSubmit = async () => {
@@ -403,28 +431,45 @@ function QuickReservationDialog({
     const packageNote = selectedPackage ? `[Paquete: ${selectedPackage.name}]` : "";
     const finalNotes = [packageNote, notes].filter(Boolean).join(" ") || null;
 
-    mutation.mutate({
-      guestId: finalGuestId,
-      roomId: reservationData.roomId,
-      roomTypeId: reservationData.roomTypeId,
-      checkInDate: reservationData.checkInDate,
-      checkOutDate,
-      numberOfGuests,
-      nights,
-      status: "confirmed",
-      source,
-      ratePlanId: ratePlanId || null,
-      companyId: companyId || null,
-      agencyId: agencyId || null,
-      bedTypeNotes: bedConfig || null,
-      baseRatePerNight: effectiveRate,
-      finalRatePerNight: effectiveRate,
-      totalRoomAmount: effectiveRate ? (parseFloat(effectiveRate) * nights).toFixed(2) : null,
-      notes: finalNotes,
-      discountType: selectedPackage?.discountPercent ? "percent" : "none",
-      discountValue: selectedPackage?.discountPercent || "0",
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      const createdRes = await mutation.mutateAsync({
+        guestId: finalGuestId,
+        roomId: reservationData.roomId,
+        roomTypeId: reservationData.roomTypeId,
+        checkInDate: reservationData.checkInDate,
+        checkOutDate,
+        numberOfGuests,
+        nights,
+        status: "confirmed",
+        source,
+        ratePlanId: ratePlanId || null,
+        companyId: companyId || null,
+        agencyId: agencyId || null,
+        bedTypeNotes: bedConfig || null,
+        baseRatePerNight: effectiveRate,
+        finalRatePerNight: effectiveRate,
+        totalRoomAmount: effectiveRate ? (parseFloat(effectiveRate) * nights).toFixed(2) : null,
+        notes: finalNotes,
+        discountType: selectedPackage?.discountPercent ? "percent" : "none",
+        discountValue: selectedPackage?.discountPercent || "0",
+        createdAt: new Date().toISOString(),
+      });
+      if (pendingCharges.length > 0 && createdRes?.id) {
+        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        for (const charge of pendingCharges) {
+          const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
+          await apiRequest("POST", "/api/charges", {
+            description: charge.description,
+            amount: totalAmt,
+            category: charge.category,
+            reservationId: createdRes.id,
+            date: todayStr,
+          });
+        }
+      }
+    } catch {
+      // errors handled in mutation.onError
+    }
   };
 
   if (!reservationData) return null;
@@ -671,6 +716,79 @@ function QuickReservationDialog({
               onChange={(e) => setManualRate(e.target.value)}
               data-testid="input-manual-rate"
             />
+          </div>
+
+          <div className="border rounded-lg">
+            <div className="flex items-center justify-between p-2 border-b bg-muted/40">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                <span className="font-semibold text-sm">Consumos / Cargos adicionales</span>
+                {pendingCharges.length > 0 && (
+                  <Badge variant="secondary" className="text-xs">{pendingCharges.length}</Badge>
+                )}
+              </div>
+              <Button type="button" size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setShowChargeForm(!showChargeForm)} data-testid="button-toggle-quick-charge">
+                <Plus className="h-3 w-3 mr-1" />
+                Agregar
+              </Button>
+            </div>
+            {showChargeForm && (
+              <div className="p-2 border-b bg-muted/20 space-y-2">
+                <Select value={chargePresetLabel} onValueChange={(val) => {
+                  setChargePresetLabel(val);
+                  const preset = quickChargePresets.find(p => p.label === val);
+                  if (preset) { setChargeDesc(preset.description); setChargeAmount(preset.amount); setChargeCategory(preset.category); setChargeQty(1); }
+                }}>
+                  <SelectTrigger data-testid="select-quick-charge-preset"><SelectValue placeholder="Tipo de cargo..." /></SelectTrigger>
+                  <SelectContent>
+                    {quickChargePresets.map(p => <SelectItem key={p.label} value={p.label}>{p.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <div className="grid grid-cols-4 gap-1 items-end">
+                  <div className="col-span-2">
+                    <Label className="text-xs text-muted-foreground">Descripción</Label>
+                    <Input value={chargeDesc} onChange={(e) => setChargeDesc(e.target.value)} placeholder="Descripción" className="h-8 text-sm" data-testid="input-quick-charge-desc" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Precio</Label>
+                    <Input type="number" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} placeholder="0.00" className="h-8 text-sm" data-testid="input-quick-charge-amount" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Cant.</Label>
+                    <Input type="number" min={1} value={chargeQty} onChange={(e) => setChargeQty(Math.max(1, parseInt(e.target.value) || 1))} className="h-8 text-sm" data-testid="input-quick-charge-qty" />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-1">
+                  <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setShowChargeForm(false); setChargePresetLabel(""); setChargeDesc(""); setChargeAmount(""); setChargeQty(1); }}>Cancelar</Button>
+                  <Button type="button" size="sm" className="h-7 text-xs" onClick={() => {
+                    if (!chargeDesc || !chargeAmount) return;
+                    setPendingCharges(prev => [...prev, { description: chargeDesc, amount: chargeAmount, category: chargeCategory, quantity: chargeQty }]);
+                    setShowChargeForm(false); setChargePresetLabel(""); setChargeDesc(""); setChargeAmount(""); setChargeQty(1);
+                  }} data-testid="button-confirm-quick-charge">Agregar cargo</Button>
+                </div>
+              </div>
+            )}
+            {pendingCharges.length === 0 ? (
+              <p className="text-xs text-muted-foreground p-2 text-center">Sin cargos adicionales</p>
+            ) : (
+              <div className="divide-y">
+                {pendingCharges.map((charge, idx) => (
+                  <div key={idx} className="flex items-center justify-between px-3 py-1 text-sm">
+                    <span>{charge.description}{charge.quantity > 1 ? ` x${charge.quantity}` : ""}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">${(parseFloat(charge.amount) * charge.quantity).toFixed(2)}</span>
+                      <Button type="button" size="sm" variant="ghost" className="h-5 w-5 p-0 text-destructive" onClick={() => setPendingCharges(prev => prev.filter((_, i) => i !== idx))}>
+                        <XCircle className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <div className="flex justify-between px-3 py-1 text-sm font-semibold bg-muted/30">
+                  <span>Total cargos</span>
+                  <span>${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0).toFixed(2)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-1">
