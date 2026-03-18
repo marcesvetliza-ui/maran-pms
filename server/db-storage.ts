@@ -752,7 +752,7 @@ export class DatabaseStorage implements IStorage {
           if (isGroupRes) {
             occupancy[room.id].push("group_blocked");
           } else if (reservation.status === "checked_in") {
-            if (day === reservation.checkOutDate) {
+            if (reservation.checkOutDate === todayStr) {
               occupancy[room.id].push("checkout_today");
             } else {
               occupancy[room.id].push("checked_in");

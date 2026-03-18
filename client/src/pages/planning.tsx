@@ -69,10 +69,10 @@ function formatDateReadable(dateStr: string) {
 
 export const PLANNING_COLORS: Record<PlanningCellStatus, { bg: string; text: string; label: string; border: string }> = {
   available:      { bg: "bg-white dark:bg-zinc-900",              text: "text-zinc-400",                          label: "Disponible",       border: "border-zinc-200 dark:border-zinc-700" },
-  booked:         { bg: "bg-blue-100 dark:bg-blue-900/40",        text: "text-blue-800 dark:text-blue-200",       label: "Reservado",        border: "border-blue-200 dark:border-blue-700" },
-  checkin_today:  { bg: "bg-emerald-400 dark:bg-emerald-600",     text: "text-white",                             label: "Check-in hoy",     border: "border-emerald-500" },
+  booked:         { bg: "bg-gray-200 dark:bg-gray-700/60",        text: "text-gray-700 dark:text-gray-300",       label: "Reservado",        border: "border-gray-300 dark:border-gray-600" },
+  checkin_today:  { bg: "bg-gray-200 dark:bg-gray-700",           text: "text-gray-700 dark:text-gray-200",       label: "Check-in hoy",     border: "border-green-700 dark:border-green-500 border-2" },
   checked_in:     { bg: "bg-emerald-200 dark:bg-emerald-800",     text: "text-emerald-900 dark:text-emerald-100", label: "Ocupado",          border: "border-emerald-300 dark:border-emerald-600" },
-  checkout_today: { bg: "bg-amber-300 dark:bg-amber-600",         text: "text-amber-900",                         label: "Check-out hoy",    border: "border-amber-400 dark:border-amber-500" },
+  checkout_today: { bg: "bg-emerald-200 dark:bg-emerald-800",     text: "text-emerald-900 dark:text-emerald-100", label: "Check-out hoy",    border: "border-red-500 dark:border-red-400 border-2" },
   maintenance:    { bg: "bg-red-200 dark:bg-red-900/50",          text: "text-red-800 dark:text-red-200",         label: "Mantenimiento",    border: "border-red-300 dark:border-red-700" },
   cleaning:       { bg: "bg-yellow-100 dark:bg-yellow-900/40",    text: "text-yellow-800",                        label: "Limpieza",         border: "border-yellow-200 dark:border-yellow-700" },
   dirty:          { bg: "bg-orange-100 dark:bg-orange-900/40",    text: "text-orange-800",                        label: "Sucia",            border: "border-orange-200 dark:border-orange-700" },
@@ -97,12 +97,38 @@ function getSourceColor(source: ReservationSource): string {
     return "bg-indigo-200 dark:bg-indigo-800/60 border-indigo-300 dark:border-indigo-700";
   }
   if (["directo", "telefono", "web"].includes(source)) {
-    return "bg-blue-200 dark:bg-blue-800/60 border-blue-300 dark:border-blue-700";
+    return "bg-gray-200 dark:bg-gray-700/60 border-gray-300 dark:border-gray-600";
   }
   if (["empresa", "agencia"].includes(source)) {
     return "bg-emerald-200 dark:bg-emerald-800/60 border-emerald-300 dark:border-emerald-700";
   }
-  return "bg-gray-200 dark:bg-gray-800/60 border-gray-300 dark:border-gray-700";
+  return "bg-gray-200 dark:bg-gray-700/60 border-gray-300 dark:border-gray-600";
+}
+
+function getSourceBg(source: ReservationSource): string {
+  if (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(source)) {
+    return "bg-indigo-200 dark:bg-indigo-800/60";
+  }
+  if (["directo", "telefono", "web"].includes(source)) {
+    return "bg-gray-200 dark:bg-gray-700/60";
+  }
+  if (["empresa", "agencia"].includes(source)) {
+    return "bg-emerald-200 dark:bg-emerald-800/60";
+  }
+  return "bg-gray-200 dark:bg-gray-700/60";
+}
+
+function getPlanningCellClasses(status: PlanningCellStatus, source: ReservationSource): string {
+  switch (status) {
+    case "checkin_today":
+      return `${getSourceBg(source)} border-2 border-green-700 dark:border-green-500`;
+    case "checked_in":
+      return "bg-emerald-200 dark:bg-emerald-800 border border-emerald-300 dark:border-emerald-600";
+    case "checkout_today":
+      return "bg-emerald-200 dark:bg-emerald-800 border-2 border-red-500 dark:border-red-400";
+    default:
+      return `${getSourceColor(source)} border`;
+  }
 }
 
 function getGroupCellStyle(groupColor: string | undefined): React.CSSProperties {
@@ -166,15 +192,25 @@ function Legend({ activeStatuses }: { activeStatuses?: Set<PlanningCellStatus> }
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs font-medium text-muted-foreground">Estado:</span>
-        {visibleStatuses.map(([status, c]) => (
-          <div key={status} className="flex items-center gap-1.5">
-            <div className={`w-4 h-4 rounded border ${c.bg} ${c.border}`} />
-            <span className="text-xs text-muted-foreground">{c.label}</span>
-          </div>
-        ))}
+        {visibleStatuses
+          .filter(([s]) => !["checkin_today", "checkout_today", "booked"].includes(s))
+          .map(([status, c]) => (
+            <div key={status} className="flex items-center gap-1.5">
+              <div className={`w-4 h-4 rounded border ${c.bg} ${c.border}`} />
+              <span className="text-xs text-muted-foreground">{c.label}</span>
+            </div>
+          ))}
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-4 rounded bg-gray-200 dark:bg-gray-700 border-2 border-green-700 dark:border-green-500" />
+          <span className="text-xs text-muted-foreground">Check-in hoy</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-4 rounded bg-emerald-200 dark:bg-emerald-800 border-2 border-red-500 dark:border-red-400" />
+          <span className="text-xs text-muted-foreground">Check-out hoy</span>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-xs font-medium text-muted-foreground">Origen:</span>
+        <span className="text-xs font-medium text-muted-foreground">Origen (reservado):</span>
         {sourceItems.map(({ source, label }) => (
           <div key={source} className="flex items-center gap-1.5">
             <div className={`w-4 h-4 rounded border ${getSourceColor(source)}`} />
@@ -184,7 +220,7 @@ function Legend({ activeStatuses }: { activeStatuses?: Set<PlanningCellStatus> }
       </div>
       <div className="flex items-center gap-2 mt-1">
         <span className="text-xs text-muted-foreground italic">
-          Los grupos se muestran con su color asignado individual
+          El check-in hoy conserva el color de origen con borde verde · Los grupos muestran su color asignado
         </span>
       </div>
     </div>
@@ -2119,12 +2155,10 @@ export default function PlanningPage() {
                                           reservationId={reservationId!}
                                           roomId={room.id}
                                           onClick={() => handleCellClick(room, day, status, reservationId)}
-                                          className={`h-8 rounded border flex items-center justify-center transition-all cursor-grab active:cursor-grabbing ${
+                                          className={`h-8 rounded flex items-center justify-center transition-all cursor-grab active:cursor-grabbing ${
                                             reservation.isGroup
-                                              ? ""
-                                              : status === "checkin_today"
-                                                ? getStatusColor("checkin_today")
-                                                : getSourceColor(reservation.source)
+                                              ? "border"
+                                              : getPlanningCellClasses(status, reservation.source)
                                           } hover:ring-2 hover:ring-primary/50`}
                                           style={reservation.isGroup ? getGroupCellStyle(reservation.groupColor) : undefined}
                                           data-testid={`cell-${room.id}-${day}`}
