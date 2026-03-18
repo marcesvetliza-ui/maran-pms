@@ -245,14 +245,14 @@ function GuestFormDialog({
             <div className="grid gap-2">
               <Label>Empresa asociada</Label>
               <Select
-                value={formData.companyId || ""}
-                onValueChange={(v) => setFormData({ ...formData, companyId: v || null })}
+                value={formData.companyId || "__none__"}
+                onValueChange={(v) => setFormData({ ...formData, companyId: v === "__none__" ? null : v })}
               >
                 <SelectTrigger data-testid="select-company">
                   <SelectValue placeholder="Sin empresa" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sin empresa</SelectItem>
+                  <SelectItem value="__none__">Sin empresa</SelectItem>
                   {companies?.map(c => (
                     <SelectItem key={c.id} value={c.id}>{c.razonSocial}</SelectItem>
                   ))}
