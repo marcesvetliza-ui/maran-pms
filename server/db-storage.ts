@@ -3258,6 +3258,12 @@ export class DatabaseStorage implements IStorage {
 
       if (!reservation || reservation.status !== "confirmed") continue;
 
+      const todayStr = getArgentinaToday();
+      if (reservation.checkInDate > todayStr) {
+        skipped++;
+        continue;
+      }
+
       const [room] = await db.select().from(rooms)
         .where(eq(rooms.id, reservation.roomId));
 

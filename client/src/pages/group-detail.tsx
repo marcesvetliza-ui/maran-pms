@@ -515,6 +515,7 @@ export default function GroupDetailPage() {
   const groupId = params.id as string;
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   
   const [showAddBlockDialog, setShowAddBlockDialog] = useState(false);
   const [assigningBlock, setAssigningBlock] = useState<GroupRoomBlockWithDetails | null>(null);
@@ -931,7 +932,7 @@ export default function GroupDetailPage() {
         
         {/* Mass Action Buttons */}
         <div className="flex gap-2 flex-wrap">
-          {group.reservations.some(r => r.status === "confirmed") && (
+          {group.reservations.some(r => r.status === "confirmed" && r.checkInDate <= today) && (
             <Button
               variant="default"
               onClick={() => setShowCheckInConfirm(true)}
