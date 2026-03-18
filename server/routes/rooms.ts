@@ -170,6 +170,36 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
+  app.get("/api/rooms/available", async (req, res) => {
+    try {
+      const { checkIn, checkOut, roomTypeId } = req.query as { checkIn?: string; checkOut?: string; roomTypeId?: string };
+      if (!checkIn || !checkOut) {
+        return res.status(400).json({ error: "checkIn and checkOut son requeridos" });
+      }
+      const rooms = await storage.getRooms();
+      const allReservations = await storage.getReservations();
+
+      let filtered = rooms.filter(r => r.status !== "maintenance" && r.status !== "blocked");
+      if (roomTypeId) {
+        filtered = filtered.filter(r => r.roomTypeId === roomTypeId);
+      }
+
+      const activeStatuses = ["reserved", "checked_in", "confirmed"];
+      const available = filtered.filter(room => {
+        const conflict = allReservations.find(res => {
+          if (!activeStatuses.includes(res.status)) return false;
+          if (res.roomId !== room.id) return false;
+          return res.checkInDate < checkOut && res.checkOutDate > checkIn;
+        });
+        return !conflict;
+      });
+
+      res.json(available);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching available rooms" });
+    }
+  });
+
   app.get("/api/rooms/:id", async (req, res) => {
     try {
       const room = await storage.getRoom(req.params.id);

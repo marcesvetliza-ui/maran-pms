@@ -327,13 +327,20 @@ function AssignBlockDialog({
     Array.from({ length: pending }, () => ({ roomId: "", firstName: group.name, lastName: group.name }))
   );
 
-  const { data: rooms } = useQuery<RoomWithType[]>({
-    queryKey: ["/api/rooms"],
+  const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
+    queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        checkIn: defaultCheckIn,
+        checkOut: defaultCheckOut,
+        roomTypeId: block.roomTypeId,
+      });
+      const res = await fetch(`/api/rooms/available?${params}`);
+      if (!res.ok) throw new Error("Error al cargar habitaciones");
+      return res.json();
+    },
+    enabled: !!defaultCheckIn && !!defaultCheckOut,
   });
-
-  const availableRooms = rooms?.filter(
-    (r) => r.roomTypeId === block.roomTypeId && r.status !== "maintenance"
-  ) || [];
 
   const chosenRoomIds = rows.map(r => r.roomId).filter(Boolean);
 
@@ -392,7 +399,10 @@ function AssignBlockDialog({
           </DialogTitle>
           <DialogDescription>
             Bloque de {block.quantity} habitaciones. {assignedCount} ya asignadas, {pending} pendientes.
-            {defaultCheckIn && ` Check-in: ${new Date(defaultCheckIn).toLocaleDateString("es-AR")} | Check-out: ${new Date(defaultCheckOut).toLocaleDateString("es-AR")}`}
+            {defaultCheckIn && (() => {
+              const fmt = (d: string) => { const [y,m,dd] = d.split("-").map(Number); return new Date(y, m-1, dd).toLocaleDateString("es-AR"); };
+              return ` Check-in: ${fmt(defaultCheckIn)} | Check-out: ${fmt(defaultCheckOut)}`;
+            })()}
           </DialogDescription>
         </DialogHeader>
 

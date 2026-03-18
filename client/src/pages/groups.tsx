@@ -739,7 +739,8 @@ export default function GroupsPage() {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("es-AR", {
+    const [year, month, day] = dateStr.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString("es-AR", {
       day: "2-digit",
       month: "short",
       year: "numeric",
