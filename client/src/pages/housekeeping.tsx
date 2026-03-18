@@ -13,11 +13,16 @@ import {
   XCircle,
   MoreHorizontal,
   MessageSquare,
+  Package,
+  Search,
+  Pencil,
+  Plus,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -38,11 +43,17 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom } from "@shared/schema";
+import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound } from "@shared/schema";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "inspected";
 type TaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep";
@@ -280,6 +291,475 @@ function RoomCard({
   );
 }
 
+// ===================== LOST & FOUND =====================
+
+const LF_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
+  en_custodia: { label: "En custodia", className: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+  contactado:  { label: "Contactado",  className: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
+  entregado:   { label: "Entregado",   className: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
+  descartado:  { label: "Descartado",  className: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400" },
+};
+
+const LF_CATEGORY_ICON: Record<string, string> = {
+  ropa: "👔", electronica: "📱", documento: "📄", accesorio: "💍", otro: "📦",
+};
+
+const LF_CATEGORY_LABEL: Record<string, string> = {
+  ropa: "Ropa", electronica: "Electrónica", documento: "Documento", accesorio: "Accesorio", otro: "Otro",
+};
+
+function LostFoundCard({
+  item,
+  onEdit,
+  onDeliver,
+  onStatusChange,
+}: {
+  item: LostFoundItem;
+  onEdit: () => void;
+  onDeliver: () => void;
+  onStatusChange: (status: string) => void;
+}) {
+  const cfg = LF_STATUS_CONFIG[item.status] || LF_STATUS_CONFIG.en_custodia;
+  const daysInCustody = Math.floor((Date.now() - new Date(item.foundDate + "T12:00:00").getTime()) / 86400000);
+
+  return (
+    <div className="flex items-start justify-between p-4 border rounded-lg hover:bg-muted/30 transition-colors" data-testid={`lost-found-card-${item.id}`}>
+      <div className="flex items-start gap-3 min-w-0">
+        <span className="text-2xl mt-0.5 shrink-0">{LF_CATEGORY_ICON[item.category] || "📦"}</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium">{item.description}</span>
+            <Badge className={`${cfg.className} border-0 text-xs`}>{cfg.label}</Badge>
+            {daysInCustody > 30 && item.status === "en_custodia" && (
+              <Badge variant="destructive" className="text-xs">+30 días</Badge>
+            )}
+          </div>
+          <div className="text-sm text-muted-foreground mt-0.5">
+            <span className="font-mono">{item.codigo}</span>
+            {" · "}{item.location}
+            {" · "}{new Date(item.foundDate + "T12:00:00").toLocaleDateString("es-AR")}
+            {" · "}Encontrado por: {item.foundBy}
+          </div>
+          {item.storageLocation && (
+            <p className="text-xs text-muted-foreground">Guardado en: {item.storageLocation}</p>
+          )}
+          {item.notes && (
+            <p className="text-xs text-muted-foreground italic mt-0.5">{item.notes}</p>
+          )}
+          {item.status === "entregado" && item.claimedBy && (
+            <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+              Entregado a: {item.claimedBy}{item.claimedDate && ` · ${new Date(item.claimedDate + "T12:00:00").toLocaleDateString("es-AR")}`}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 ml-4 shrink-0">
+        {item.status === "en_custodia" && (
+          <Button size="sm" variant="outline" onClick={() => onStatusChange("contactado")} data-testid={`button-contacted-${item.id}`}>
+            Contactado
+          </Button>
+        )}
+        {(item.status === "en_custodia" || item.status === "contactado") && (
+          <Button size="sm" onClick={onDeliver} data-testid={`button-deliver-${item.id}`}>
+            Entregar
+          </Button>
+        )}
+        <Button size="icon" variant="ghost" onClick={onEdit} data-testid={`button-edit-lf-${item.id}`}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function LostFoundForm({
+  item,
+  open,
+  onOpenChange,
+  onSubmit,
+  isPending,
+}: {
+  item: LostFoundItem | null;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSubmit: (data: Partial<InsertLostFound>) => void;
+  isPending: boolean;
+}) {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const [description, setDescription] = useState(item?.description || "");
+  const [category, setCategory] = useState<string>(item?.category || "otro");
+  const [location, setLocation] = useState(item?.location || "");
+  const [foundDate, setFoundDate] = useState(item?.foundDate || today);
+  const [foundBy, setFoundBy] = useState(item?.foundBy || "");
+  const [storageLocation, setStorageLocation] = useState(item?.storageLocation || "");
+  const [notes, setNotes] = useState(item?.notes || "");
+  const [lookupRoom, setLookupRoom] = useState("");
+  const [lookupResult, setLookupResult] = useState<{ guest?: { firstName: string; lastName: string }; reservation?: { checkOutDate: string; id: string; guestId: string | null } } | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [guestId, setGuestId] = useState<string | null>(item?.guestId || null);
+  const [reservationId, setReservationId] = useState<string | null>(item?.reservationId || null);
+
+  const handleLookup = async () => {
+    if (!lookupRoom.trim()) return;
+    setLookupLoading(true);
+    try {
+      const res = await fetch(`/api/lost-found/lookup-room/${lookupRoom.trim()}`);
+      if (res.ok) setLookupResult(await res.json());
+      else setLookupResult(null);
+    } catch { setLookupResult(null); }
+    setLookupLoading(false);
+  };
+
+  const handleSubmit = () => {
+    if (!description.trim() || !location.trim() || !foundDate || !foundBy.trim()) return;
+    onSubmit({
+      description: description.trim(),
+      category: category as any,
+      location: location.trim(),
+      foundDate,
+      foundBy: foundBy.trim(),
+      storageLocation: storageLocation.trim() || undefined,
+      notes: notes.trim() || undefined,
+      guestId: guestId || undefined,
+      reservationId: reservationId || undefined,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{item ? "Editar objeto" : "Registrar objeto perdido"}</DialogTitle>
+          <DialogDescription>
+            {item ? `Código: ${item.codigo}` : "El código se generará automáticamente"}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label>Descripción *</Label>
+            <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej: Notebook Dell negra, Pasaporte argentino..." data-testid="input-lf-description" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Categoría *</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger data-testid="select-lf-category"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(LF_CATEGORY_LABEL).map(([v, l]) => (
+                    <SelectItem key={v} value={v}>{LF_CATEGORY_ICON[v]} {l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Fecha encontrado *</Label>
+              <Input type="date" value={foundDate} onChange={e => setFoundDate(e.target.value)} data-testid="input-lf-date" />
+            </div>
+          </div>
+          <div>
+            <Label>Lugar donde fue encontrado *</Label>
+            <div className="flex gap-2">
+              <Input
+                value={location}
+                onChange={e => setLocation(e.target.value)}
+                placeholder="Ej: Hab. 305, Lobby, Restaurant..."
+                data-testid="input-lf-location"
+                className="flex-1"
+              />
+              <div className="flex gap-1">
+                <Input
+                  value={lookupRoom}
+                  onChange={e => setLookupRoom(e.target.value)}
+                  placeholder="Hab."
+                  className="w-20"
+                  data-testid="input-lf-lookup-room"
+                  onKeyDown={e => e.key === "Enter" && handleLookup()}
+                />
+                <Button type="button" variant="outline" size="sm" onClick={handleLookup} disabled={lookupLoading} data-testid="button-lf-lookup">
+                  <Search className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            {lookupResult && (
+              <div className="mt-1 p-2 bg-muted rounded text-xs">
+                {lookupResult.guest ? (
+                  <div className="flex items-center justify-between">
+                    <span>Último huésped: <strong>{lookupResult.guest.firstName} {lookupResult.guest.lastName}</strong>{lookupResult.reservation && ` · CO: ${new Date(lookupResult.reservation.checkOutDate + "T12:00:00").toLocaleDateString("es-AR")}`}</span>
+                    <Button
+                      type="button" size="sm" variant="link" className="text-xs h-auto p-0"
+                      onClick={() => {
+                        setGuestId(lookupResult.reservation?.guestId || null);
+                        setReservationId(lookupResult.reservation?.id || null);
+                      }}
+                    >
+                      Asociar
+                    </Button>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">Sin reservas en esa habitación</span>
+                )}
+                {(guestId || reservationId) && (
+                  <p className="text-green-600 dark:text-green-400 mt-0.5">✓ Huésped asociado</p>
+                )}
+              </div>
+            )}
+          </div>
+          <div>
+            <Label>Encontrado por *</Label>
+            <Input value={foundBy} onChange={e => setFoundBy(e.target.value)} placeholder="Nombre del empleado" data-testid="input-lf-found-by" />
+          </div>
+          <div>
+            <Label>Lugar de custodia</Label>
+            <Input value={storageLocation} onChange={e => setStorageLocation(e.target.value)} placeholder="Ej: Depósito, Recepción..." data-testid="input-lf-storage" />
+          </div>
+          <div>
+            <Label>Notas</Label>
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Observaciones adicionales..." rows={2} data-testid="input-lf-notes" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={isPending || !description.trim() || !location.trim() || !foundDate || !foundBy.trim()} data-testid="button-lf-save">
+            {isPending ? "Guardando..." : item ? "Guardar cambios" : "Registrar objeto"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeliveryDialog({
+  item,
+  open,
+  onOpenChange,
+  onConfirm,
+  isPending,
+}: {
+  item: LostFoundItem;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onConfirm: (data: { status: string; claimedBy: string; claimedDate: string; deliveryType: string; deliveredBy: string; notes?: string }) => void;
+  isPending: boolean;
+}) {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const [claimedBy, setClaimedBy] = useState("");
+  const [claimedDate, setClaimedDate] = useState(today);
+  const [deliveryType, setDeliveryType] = useState("retiro_hotel");
+  const [deliveredBy, setDeliveredBy] = useState("");
+  const [notes, setNotes] = useState("");
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Registrar entrega</DialogTitle>
+          <DialogDescription>{item.description} · {item.codigo}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label>Retirado por *</Label>
+            <Input value={claimedBy} onChange={e => setClaimedBy(e.target.value)} placeholder="Nombre de quien retira" data-testid="input-delivery-claimed-by" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Fecha de retiro *</Label>
+              <Input type="date" value={claimedDate} onChange={e => setClaimedDate(e.target.value)} data-testid="input-delivery-date" />
+            </div>
+            <div>
+              <Label>Tipo de entrega</Label>
+              <Select value={deliveryType} onValueChange={setDeliveryType}>
+                <SelectTrigger data-testid="select-delivery-type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="retiro_hotel">Retiro en hotel</SelectItem>
+                  <SelectItem value="envio">Envío</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label>Entregado por (operador)</Label>
+            <Input value={deliveredBy} onChange={e => setDeliveredBy(e.target.value)} placeholder="Nombre del empleado que entrega" data-testid="input-delivery-by" />
+          </div>
+          <div>
+            <Label>Notas</Label>
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Observaciones..." rows={2} data-testid="input-delivery-notes" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button
+            onClick={() => onConfirm({ status: "entregado", claimedBy, claimedDate, deliveryType, deliveredBy, notes: notes || undefined })}
+            disabled={isPending || !claimedBy.trim() || !claimedDate}
+            data-testid="button-delivery-confirm"
+          >
+            {isPending ? "Procesando..." : "Confirmar entrega"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LostFoundTab() {
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [editingItem, setEditingItem] = useState<LostFoundItem | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("activos");
+  const [categoryFilter, setCategoryFilter] = useState<string>("todos");
+  const [searchText, setSearchText] = useState("");
+  const [showDeliveryDialog, setShowDeliveryDialog] = useState(false);
+  const [deliveringItem, setDeliveringItem] = useState<LostFoundItem | null>(null);
+
+  const { data: items = [], isLoading } = useQuery<LostFoundItem[]>({
+    queryKey: ["/api/lost-found", statusFilter, categoryFilter, searchText],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (statusFilter !== "activos" && statusFilter !== "todos") params.set("status", statusFilter);
+      if (categoryFilter !== "todos") params.set("category", categoryFilter);
+      if (searchText) params.set("search", searchText);
+      return fetch(`/api/lost-found?${params}`).then(r => r.json());
+    },
+  });
+
+  const visibleItems = statusFilter === "activos"
+    ? items.filter(i => i.status === "en_custodia" || i.status === "contactado")
+    : items;
+
+  const createMutation = useMutation({
+    mutationFn: (data: Partial<InsertLostFound>) =>
+      apiRequest("POST", "/api/lost-found", data).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lost-found"] });
+      setShowForm(false);
+      toast({ title: "Objeto registrado exitosamente" });
+    },
+    onError: () => toast({ title: "Error al registrar", variant: "destructive" }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Partial<InsertLostFound>) =>
+      apiRequest("PATCH", `/api/lost-found/${id}`, data).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lost-found"] });
+      setShowForm(false);
+      setEditingItem(null);
+      toast({ title: "Objeto actualizado" });
+    },
+    onError: () => toast({ title: "Error al actualizar", variant: "destructive" }),
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, ...data }: { id: string; status: string; claimedBy?: string; claimedDate?: string; deliveryType?: string; deliveredBy?: string; notes?: string }) =>
+      apiRequest("PATCH", `/api/lost-found/${id}/status`, data).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lost-found"] });
+      setShowDeliveryDialog(false);
+      setDeliveringItem(null);
+      toast({ title: "Estado actualizado" });
+    },
+    onError: () => toast({ title: "Error al actualizar estado", variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-4 mt-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-1 flex-wrap">
+          <div className="relative flex-1 min-w-48 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por descripción, lugar, código..."
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              className="pl-9"
+              data-testid="input-lf-search"
+            />
+          </div>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-36" data-testid="select-lf-status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="activos">Activos</SelectItem>
+              <SelectItem value="en_custodia">En custodia</SelectItem>
+              <SelectItem value="contactado">Contactado</SelectItem>
+              <SelectItem value="entregado">Entregados</SelectItem>
+              <SelectItem value="descartado">Descartados</SelectItem>
+              <SelectItem value="todos">Todos</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-36" data-testid="select-lf-category">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todas categorías</SelectItem>
+              {Object.entries(LF_CATEGORY_LABEL).map(([v, l]) => (
+                <SelectItem key={v} value={v}>{LF_CATEGORY_ICON[v]} {l}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button onClick={() => { setEditingItem(null); setShowForm(true); }} data-testid="button-lf-new">
+          <Plus className="h-4 w-4 mr-1" /> Registrar objeto
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-lg" />)}
+        </div>
+      ) : visibleItems.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Package className="h-12 w-12 mx-auto mb-3 opacity-30" />
+          <p className="text-sm font-medium">No hay objetos registrados</p>
+          <p className="text-xs mt-1">Los objetos encontrados en el hotel aparecerán aquí</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visibleItems.map(item => (
+            <LostFoundCard
+              key={item.id}
+              item={item}
+              onEdit={() => { setEditingItem(item); setShowForm(true); }}
+              onDeliver={() => { setDeliveringItem(item); setShowDeliveryDialog(true); }}
+              onStatusChange={status => updateStatusMutation.mutate({ id: item.id, status })}
+            />
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <LostFoundForm
+          key={editingItem?.id ?? "new"}
+          item={editingItem}
+          open={showForm}
+          onOpenChange={setShowForm}
+          isPending={createMutation.isPending || updateMutation.isPending}
+          onSubmit={data => {
+            if (editingItem) {
+              updateMutation.mutate({ id: editingItem.id, ...data });
+            } else {
+              createMutation.mutate(data);
+            }
+          }}
+        />
+      )}
+
+      {showDeliveryDialog && deliveringItem && (
+        <DeliveryDialog
+          item={deliveringItem}
+          open={showDeliveryDialog}
+          onOpenChange={setShowDeliveryDialog}
+          isPending={updateStatusMutation.isPending}
+          onConfirm={data => updateStatusMutation.mutate({ id: deliveringItem.id, ...data })}
+        />
+      )}
+    </div>
+  );
+}
+
+// ===================== HOUSEKEEPING MAIN =====================
+
 export default function Housekeeping() {
   const { toast } = useToast();
   const [floorFilter, setFloorFilter] = useState<string>("all");
@@ -300,6 +780,12 @@ export default function Housekeeping() {
   const { data: tasks, isLoading: tasksLoading } = useQuery<HousekeepingTaskWithRoom[]>({
     queryKey: ["/api/housekeeping", { date: today }],
   });
+
+  const { data: lostFoundActive = [] } = useQuery<LostFoundItem[]>({
+    queryKey: ["/api/lost-found", "en_custodia"],
+    queryFn: () => fetch("/api/lost-found?status=en_custodia").then(r => r.json()),
+  });
+  const lostFoundCount = lostFoundActive.length;
 
   const startTaskMutation = useMutation({
     mutationFn: (taskId: string) => apiRequest("POST", `/api/housekeeping/${taskId}/start`),
@@ -454,44 +940,58 @@ export default function Housekeeping() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-2">
-          <ClipboardCheck className="h-6 w-6 text-muted-foreground" />
-          <h1 className="text-2xl font-bold" data-testid="text-page-title">Housekeeping</h1>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          <Select value={floorFilter} onValueChange={setFloorFilter}>
-            <SelectTrigger className="w-32" data-testid="select-floor-filter">
-              <SelectValue placeholder="Piso" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los pisos</SelectItem>
-              {floors.map(floor => (
-                <SelectItem key={floor} value={floor.toString()}>Piso {floor}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40" data-testid="select-status-filter">
-              <SelectValue placeholder="Estado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los estados</SelectItem>
-              <SelectItem value="available">Disponible</SelectItem>
-              <SelectItem value="occupied">Ocupada</SelectItem>
-              <SelectItem value="dirty">Sucia</SelectItem>
-              <SelectItem value="cleaning">Limpiando</SelectItem>
-              <SelectItem value="maintenance">Mantenimiento</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+    <div className="p-6 space-y-4">
+      <div className="flex items-center gap-2">
+        <ClipboardCheck className="h-6 w-6 text-muted-foreground" />
+        <h1 className="text-2xl font-bold" data-testid="text-page-title">Housekeeping</h1>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <Tabs defaultValue="rooms">
+        <TabsList>
+          <TabsTrigger value="rooms">Habitaciones</TabsTrigger>
+          <TabsTrigger value="lost-found" data-testid="tab-lost-found" className="gap-1">
+            <Package className="h-4 w-4" />
+            Objetos Perdidos
+            {lostFoundCount > 0 && (
+              <Badge className="ml-1 h-5 min-w-5 px-1 text-xs bg-amber-500 text-white border-0 flex items-center justify-center">
+                {lostFoundCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="rooms">
+          <div className="space-y-6 mt-2">
+            <div className="flex items-center justify-end gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <Select value={floorFilter} onValueChange={setFloorFilter}>
+                <SelectTrigger className="w-32" data-testid="select-floor-filter">
+                  <SelectValue placeholder="Piso" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los pisos</SelectItem>
+                  {floors.map(floor => (
+                    <SelectItem key={floor} value={floor.toString()}>Piso {floor}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40" data-testid="select-status-filter">
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los estados</SelectItem>
+                  <SelectItem value="available">Disponible</SelectItem>
+                  <SelectItem value="occupied">Ocupada</SelectItem>
+                  <SelectItem value="dirty">Sucia</SelectItem>
+                  <SelectItem value="cleaning">Limpiando</SelectItem>
+                  <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -578,6 +1078,13 @@ export default function Housekeeping() {
             </div>
           </div>
         ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="lost-found">
+          <LostFoundTab />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={createTaskDialogOpen} onOpenChange={setCreateTaskDialogOpen}>
         <DialogContent>

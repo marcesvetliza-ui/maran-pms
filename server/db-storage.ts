@@ -196,6 +196,11 @@ export class DatabaseStorage implements IStorage {
     return { ...room, roomType: rt };
   }
 
+  async getRoomByNumber(roomNumber: string): Promise<Room | undefined> {
+    const [room] = await db.select().from(rooms).where(eq(rooms.roomNumber, roomNumber));
+    return room;
+  }
+
   async createRoom(room: InsertRoom): Promise<Room> {
     const [created] = await db.insert(rooms).values(room as any).returning();
     return created;

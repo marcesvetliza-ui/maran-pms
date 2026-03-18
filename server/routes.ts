@@ -10,7 +10,8 @@ import { charges, payments, spaPayments, eventPayments, cashMovements, cashShift
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
-import { eq, sql, desc, asc, gte, lte, and } from "drizzle-orm";
+import { lostFoundItems } from "@shared/schema";
+import { eq, sql, desc, asc, gte, lte, and, or, ilike, like } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
 import { registerExportRoutes } from "./exports";
@@ -2860,6 +2861,115 @@ Only respond with the JSON object.`;
       res.json(task);
     } catch (error) {
       res.status(500).json({ error: "Error inspecting task" });
+    }
+  });
+
+  // ==================== LOST & FOUND MODULE ====================
+
+  async function generateLostFoundCode(): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = `LF-${year}-`;
+    const lastItem = await db.select()
+      .from(lostFoundItems)
+      .where(like(lostFoundItems.codigo, `${prefix}%`))
+      .orderBy(desc(lostFoundItems.createdAt))
+      .limit(1);
+    const lastNum = lastItem[0] ? parseInt(lastItem[0].codigo.replace(prefix, "")) : 0;
+    return `${prefix}${String(lastNum + 1).padStart(4, "0")}`;
+  }
+
+  app.get("/api/lost-found", requireAuth, async (req, res) => {
+    try {
+      const { status, category, search } = req.query;
+      const conditions: any[] = [];
+      if (status) conditions.push(eq(lostFoundItems.status, status as string));
+      if (category) conditions.push(eq(lostFoundItems.category, category as string));
+      if (search) {
+        const q = `%${search}%`;
+        conditions.push(or(
+          ilike(lostFoundItems.description, q),
+          ilike(lostFoundItems.location, q),
+          ilike(lostFoundItems.codigo, q),
+          ilike(lostFoundItems.foundBy, q),
+        ));
+      }
+      const items = conditions.length > 0
+        ? await db.select().from(lostFoundItems).where(and(...conditions)).orderBy(desc(lostFoundItems.createdAt))
+        : await db.select().from(lostFoundItems).orderBy(desc(lostFoundItems.createdAt));
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching lost and found items" });
+    }
+  });
+
+  app.post("/api/lost-found", requireAuth, async (req, res) => {
+    try {
+      const codigo = await generateLostFoundCode();
+      const [item] = await db.insert(lostFoundItems).values({ ...req.body, codigo }).returning();
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating lost and found item" });
+    }
+  });
+
+  app.get("/api/lost-found/lookup-room/:roomNumber", requireAuth, async (req, res) => {
+    try {
+      const room = await storage.getRoomByNumber(req.params.roomNumber);
+      if (!room) return res.status(404).json({ error: "Habitación no encontrada" });
+      const [recentReservation] = await db.select()
+        .from(reservations)
+        .where(eq(reservations.roomId, room.id))
+        .orderBy(desc(reservations.checkOutDate))
+        .limit(1);
+      if (!recentReservation) return res.json({ room, reservation: null, guest: null });
+      const guest = recentReservation.guestId ? await storage.getGuest(recentReservation.guestId) : null;
+      res.json({ room, reservation: recentReservation, guest });
+    } catch (error) {
+      res.status(500).json({ error: "Error looking up room" });
+    }
+  });
+
+  app.get("/api/lost-found/:id", requireAuth, async (req, res) => {
+    try {
+      const [item] = await db.select().from(lostFoundItems).where(eq(lostFoundItems.id, req.params.id));
+      if (!item) return res.status(404).json({ error: "Item not found" });
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching item" });
+    }
+  });
+
+  app.patch("/api/lost-found/:id", requireAuth, async (req, res) => {
+    try {
+      const { codigo, createdAt, ...data } = req.body;
+      const [updated] = await db.update(lostFoundItems)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(lostFoundItems.id, req.params.id))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Item not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating item" });
+    }
+  });
+
+  app.patch("/api/lost-found/:id/status", requireAuth, async (req, res) => {
+    try {
+      const { status, claimedBy, claimedDate, deliveryType, deliveredBy, notes } = req.body;
+      const updateData: any = { status, updatedAt: new Date() };
+      if (claimedBy !== undefined) updateData.claimedBy = claimedBy;
+      if (claimedDate !== undefined) updateData.claimedDate = claimedDate;
+      if (deliveryType !== undefined) updateData.deliveryType = deliveryType;
+      if (deliveredBy !== undefined) updateData.deliveredBy = deliveredBy;
+      if (notes !== undefined) updateData.notes = notes;
+      const [updated] = await db.update(lostFoundItems)
+        .set(updateData)
+        .where(eq(lostFoundItems.id, req.params.id))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Item not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating status" });
     }
   });
 

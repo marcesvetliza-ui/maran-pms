@@ -2022,3 +2022,33 @@ export const reservationChangelog = pgTable("reservation_changelog", {
 export const insertReservationChangelogSchema = createInsertSchema(reservationChangelog).omit({ id: true, fecha: true });
 export type InsertReservationChangelog = z.infer<typeof insertReservationChangelogSchema>;
 export type ReservationChangelog = typeof reservationChangelog.$inferSelect;
+
+export type LostFoundStatus = "en_custodia" | "contactado" | "entregado" | "descartado";
+export type LostFoundCategory = "ropa" | "electronica" | "documento" | "accesorio" | "otro";
+
+export const lostFoundItems = pgTable("lost_found_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  codigo: text("codigo").notNull().unique(),
+  description: text("description").notNull(),
+  category: text("category").$type<LostFoundCategory>().notNull().default("otro"),
+  location: text("location").notNull(),
+  foundDate: date("found_date").notNull(),
+  foundBy: text("found_by").notNull(),
+  storageLocation: text("storage_location"),
+  status: text("status").$type<LostFoundStatus>().notNull().default("en_custodia"),
+  guestId: varchar("guest_id"),
+  reservationId: varchar("reservation_id"),
+  notes: text("notes"),
+  claimedBy: text("claimed_by"),
+  claimedDate: date("claimed_date"),
+  deliveryType: text("delivery_type"),
+  deliveredBy: text("delivered_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertLostFoundSchema = createInsertSchema(lostFoundItems).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertLostFound = z.infer<typeof insertLostFoundSchema>;
+export type LostFoundItem = typeof lostFoundItems.$inferSelect;
