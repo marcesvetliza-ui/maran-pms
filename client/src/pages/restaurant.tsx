@@ -429,8 +429,7 @@ export default function RestaurantPage() {
   });
 
   const { data: restaurantInventoryItems = [] } = useQuery<any[]>({
-    queryKey: ["/api/inventory/items", "restaurant"],
-    queryFn: () => fetch("/api/inventory/items?area=restaurant", { credentials: "include" }).then(r => r.json()),
+    queryKey: ["/api/inventory/items"],
     enabled: isRecipeDialogOpen,
   });
 
@@ -3756,7 +3755,9 @@ export default function RestaurantPage() {
                     <SelectItem value="__none__">Sin vínculo (solo costeo)</SelectItem>
                     {restaurantInventoryItems.map((item: any) => (
                       <SelectItem key={item.id} value={item.id}>
-                        {item.name} — Stock: {parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
+                        {item.name}
+                        {item.sku ? ` [${item.sku}]` : ""}
+                        {" — "}{parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
                       </SelectItem>
                     ))}
                   </SelectContent>
