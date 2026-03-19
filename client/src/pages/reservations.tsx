@@ -10,7 +10,6 @@ import {
   Filter,
   MoreHorizontal,
   Pencil,
-  Trash2,
   Eye,
   Calendar,
   User,
@@ -2415,17 +2414,6 @@ export default function ReservationsPage() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/reservations/${id}`, undefined);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Reserva eliminada", description: "La reserva ha sido eliminada del sistema." });
-    },
-  });
 
   const duplicateMutation = useMutation({
     mutationFn: async ({ id, checkInDate, checkOutDate }: { id: string; checkInDate: string; checkOutDate: string }) => {
@@ -2734,14 +2722,6 @@ export default function ReservationsPage() {
                               Anular Reserva
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => deleteMutation.mutate(reservation.id)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Eliminar
-                          </DropdownMenuItem>
                           </>
                         )}
                         {isResLocked(reservation) && (

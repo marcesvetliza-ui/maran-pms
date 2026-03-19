@@ -10,6 +10,7 @@ import {
   AlertCircle,
   LogIn,
   LogOut,
+  XCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -175,6 +176,16 @@ export default function Dashboard() {
 
   const { data: departures = [], isLoading: departuresLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/dashboard/departures"],
+  });
+
+  const { data: cancelledLogs = [] } = useQuery<any[]>({
+    queryKey: ["/api/cancelled-reservations"],
+  });
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayCancelled = cancelledLogs.filter((log: any) => {
+    const d = new Date(log.cancellationDate);
+    const s = d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    return s === todayStr;
   });
 
   const checkInMutation = useMutation({
@@ -444,6 +455,38 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Cancelled Today */}
+      {todayCancelled.length > 0 && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5" />
+              Anulaciones del día
+              <Badge variant="destructive" className="ml-auto">{todayCancelled.length}</Badge>
+            </CardTitle>
+            <CardDescription>Reservas canceladas hoy — registradas con motivo</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {todayCancelled.map((log: any, i: number) => (
+                <div key={i} className="flex flex-col sm:flex-row sm:items-start gap-2 p-3 rounded-md border border-destructive/20 bg-background">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm">{log.guestName} — Hab. {log.roomNumber}</p>
+                    <p className="text-xs text-muted-foreground">{log.reservationCode} · {log.checkInDate} → {log.checkOutDate}</p>
+                    {log.reason && (
+                      <p className="text-xs mt-1 text-destructive/80 italic">Motivo: {log.reason}</p>
+                    )}
+                    {log.cancelledBy && (
+                      <p className="text-xs text-muted-foreground">Por: {log.cancelledBy}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid gap-6 lg:grid-cols-2">

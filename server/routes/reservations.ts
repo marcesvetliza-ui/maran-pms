@@ -378,22 +378,9 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   app.delete("/api/reservations/:id", async (req, res) => {
-    try {
-      const existing = await storage.getReservation(req.params.id);
-      if (!existing) {
-        return res.status(404).json({ error: "Reservation not found" });
-      }
-      if (isReservationLocked(existing)) {
-        return res.status(403).json({ error: "No se puede eliminar una reserva cerrada de días anteriores" });
-      }
-      const deleted = await storage.deleteReservation(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: "Reservation not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting reservation" });
-    }
+    return res.status(405).json({
+      error: "Las reservas no pueden eliminarse. Use POST /api/reservations/:id/cancel para anular con motivo.",
+    });
   });
 
   // Check-in endpoint
