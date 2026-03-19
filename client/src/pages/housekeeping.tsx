@@ -17,6 +17,8 @@ import {
   Search,
   Pencil,
   Plus,
+  LogIn,
+  LogOut,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -115,6 +117,7 @@ function RoomCard({
   const Icon = config.icon;
   const pendingTasks = tasks.filter(t => t.status === "pending" || t.status === "in_progress");
   const hasNotes = tasks.some(t => t.notes);
+  const taskWithNote = tasks.find(t => t.notes && (t.status === "pending" || t.status === "in_progress"));
   
   return (
     <Card className={`${config.bgClass} border transition-all`}>
@@ -285,6 +288,15 @@ function RoomCard({
                 Marcar Sucia
               </Button>
             )}
+          </div>
+        )}
+        {taskWithNote?.notes && (
+          <div
+            className="flex items-start gap-1 mt-1 text-xs text-muted-foreground italic"
+            title={taskWithNote.notes}
+          >
+            <MessageSquare className="h-3 w-3 shrink-0 mt-0.5" />
+            <span className="line-clamp-1">{taskWithNote.notes}</span>
           </div>
         )}
       </CardContent>
@@ -858,9 +870,16 @@ export default function Housekeeping() {
     queryKey: ["/api/rooms"],
   });
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const { data: tasks, isLoading: tasksLoading } = useQuery<HousekeepingTaskWithRoom[]>({
     queryKey: ["/api/housekeeping", { date: today }],
+  });
+
+  const { data: checkouts = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations/check-out"],
+  });
+  const { data: checkins = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations/check-in"],
   });
 
   const { data: lostFoundActive = [] } = useQuery<LostFoundItem[]>({
@@ -946,6 +965,12 @@ export default function Housekeeping() {
     cleaning: rooms.filter(r => r.status === "cleaning").length,
     maintenance: rooms.filter(r => r.status === "maintenance").length,
   } : { available: 0, occupied: 0, dirty: 0, cleaning: 0, maintenance: 0 };
+
+  const salidashoy = checkouts.filter((r: any) => r.checkOutDate === today).length;
+  const entradasHoy = checkins.filter((r: any) => r.checkInDate === today && r.status === "confirmed").length;
+  const continuaciones = rooms?.filter(r => r.status === "occupied").length ?? 0;
+  const tareasHoy = tasks?.length ?? 0;
+  const tareasCompletadas = tasks?.filter(t => t.status === "completed" || t.status === "inspected").length ?? 0;
 
   const handleCreateTask = (roomId: string) => {
     setSelectedRoomId(roomId);
@@ -1044,6 +1069,57 @@ export default function Housekeeping() {
 
         <TabsContent value="rooms">
           <div className="space-y-6 mt-2">
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-muted/30 rounded-lg border">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-md bg-amber-100 dark:bg-amber-900/30">
+                  <LogOut className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold">{salidashoy}</p>
+                  <p className="text-xs text-muted-foreground">Salidas hoy</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-md bg-blue-100 dark:bg-blue-900/30">
+                  <Bed className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold">{continuaciones}</p>
+                  <p className="text-xs text-muted-foreground">Continuaciones</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-md bg-green-100 dark:bg-green-900/30">
+                  <LogIn className="h-4 w-4 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold">{entradasHoy}</p>
+                  <p className="text-xs text-muted-foreground">Entradas hoy</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-md bg-purple-100 dark:bg-purple-900/30">
+                  <CheckCircle className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold">
+                    {tareasCompletadas}
+                    <span className="text-sm font-normal text-muted-foreground">/{tareasHoy}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">Tareas listas</p>
+                </div>
+              </div>
+            </div>
+            {tareasHoy > 0 && (
+              <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden -mt-2">
+                <div
+                  className="h-full bg-green-500 transition-all duration-500"
+                  style={{ width: `${Math.round((tareasCompletadas / tareasHoy) * 100)}%` }}
+                />
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
               <Select value={floorFilter} onValueChange={setFloorFilter}>
