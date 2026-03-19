@@ -1973,6 +1973,66 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async deductStockFromOrder(orderId: string, orderItems: Array<{ menuItemId: string; quantity: number }>) {
+    const deducted: Array<{ itemName: string; quantity: number; unit: string }> = [];
+    const warnings: Array<{ itemName: string; required: number; available: number }> = [];
+    const skipped: Array<{ ingredientName: string; reason: string }> = [];
+
+    for (const orderItem of orderItems) {
+      const recipe = await this.getRecipeByMenuItem(orderItem.menuItemId);
+      if (!recipe || recipe.ingredients.length === 0) {
+        skipped.push({ ingredientName: orderItem.menuItemId, reason: "Sin receta configurada" });
+        continue;
+      }
+
+      for (const ingredient of recipe.ingredients) {
+        if (!ingredient.inventoryItemId) {
+          skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sin vínculo con inventario" });
+          continue;
+        }
+
+        const [invItem] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, ingredient.inventoryItemId));
+        if (!invItem) {
+          skipped.push({ ingredientName: ingredient.ingredientName, reason: "Ítem de inventario no encontrado" });
+          continue;
+        }
+
+        const totalToDeduct = parseFloat(String(ingredient.quantity)) * orderItem.quantity;
+        const currentStock = parseFloat(String(invItem.currentStock ?? 0));
+
+        if (currentStock < totalToDeduct) {
+          warnings.push({ itemName: invItem.name, required: totalToDeduct, available: currentStock });
+        }
+
+        const actualDeduct = Math.min(totalToDeduct, currentStock);
+        if (actualDeduct <= 0) continue;
+
+        const newStock = Math.max(0, currentStock - actualDeduct);
+
+        await db.insert(stockMovements).values({
+          id: randomUUID(),
+          itemId: ingredient.inventoryItemId,
+          movementType: "consumo",
+          quantity: String(actualDeduct),
+          previousStock: String(currentStock),
+          newStock: String(newStock),
+          notes: `Consumo automático — Orden ${orderId}`,
+          sourceType: "restaurant_order",
+          sourceId: orderId,
+          createdAt: new Date(),
+        } as any);
+
+        await db.update(inventoryItems)
+          .set({ currentStock: String(newStock) as any })
+          .where(eq(inventoryItems.id, ingredient.inventoryItemId));
+
+        deducted.push({ itemName: invItem.name, quantity: actualDeduct, unit: invItem.unit });
+      }
+    }
+
+    return { deducted, warnings, skipped };
+  }
+
   async getSpaCabins(): Promise<SpaCabin[]> {
     return db.select().from(spaCabins);
   }

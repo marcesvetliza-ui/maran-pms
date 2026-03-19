@@ -317,6 +317,7 @@ export default function RestaurantPage() {
   const [newIngredientQty, setNewIngredientQty] = useState("");
   const [newIngredientUnit, setNewIngredientUnit] = useState("g");
   const [newIngredientCost, setNewIngredientCost] = useState("");
+  const [newIngredientInventoryId, setNewIngredientInventoryId] = useState("");
   const [newTableNumber, setNewTableNumber] = useState("");
   const [newTableCapacity, setNewTableCapacity] = useState(4);
   const [newTableShape, setNewTableShape] = useState("square");
@@ -425,6 +426,12 @@ export default function RestaurantPage() {
 
   const { data: recipes = [] } = useQuery<Recipe[]>({
     queryKey: ["/api/restaurant/recipes"],
+  });
+
+  const { data: restaurantInventoryItems = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/items", "restaurant"],
+    queryFn: () => fetch("/api/inventory/items?area=restaurant", { credentials: "include" }).then(r => r.json()),
+    enabled: isRecipeDialogOpen,
   });
 
   const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -788,7 +795,7 @@ export default function RestaurantPage() {
   });
 
   const addIngredientMutation = useMutation({
-    mutationFn: async (data: { recipeId: string; ingredientName: string; quantity: string; unit: string; unitCost: string }) => {
+    mutationFn: async (data: { recipeId: string; ingredientName: string; quantity: string; unit: string; unitCost: string; inventoryItemId?: string | null }) => {
       const res = await apiRequest("POST", `/api/restaurant/recipes/${data.recipeId}/ingredients`, data);
       return res.json();
     },
@@ -798,6 +805,7 @@ export default function RestaurantPage() {
       setNewIngredientQty("");
       setNewIngredientUnit("g");
       setNewIngredientCost("");
+      setNewIngredientInventoryId("");
       toast({ title: "Ingrediente agregado" });
     },
   });
@@ -3667,6 +3675,7 @@ export default function RestaurantPage() {
                     <TableHead>Unidad</TableHead>
                     <TableHead className="text-right">Costo Unit.</TableHead>
                     <TableHead className="text-right">Subtotal</TableHead>
+                    <TableHead>Stock</TableHead>
                     <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -3679,6 +3688,13 @@ export default function RestaurantPage() {
                       <TableCell className="text-right">${parseFloat(ing.unitCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
                       <TableCell className="text-right">
                         ${(parseFloat(ing.quantity) * parseFloat(ing.unitCost)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </TableCell>
+                      <TableCell>
+                        {ing.inventoryItemId ? (
+                          <span className="text-xs text-green-600 font-medium">✓ Vinculado</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Solo costeo</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => deleteIngredientMutation.mutate(ing.id)}>
@@ -3712,8 +3728,46 @@ export default function RestaurantPage() {
               </div>
             )}
 
-            <div className="border-t pt-4">
-              <Label className="mb-2 block">Agregar Ingrediente</Label>
+            <div className="border-t pt-4 space-y-3">
+              <Label className="block font-medium">Agregar Ingrediente</Label>
+
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Artículo del inventario (opcional — vincula para descuento automático)</Label>
+                <Select
+                  value={newIngredientInventoryId || "__none__"}
+                  onValueChange={(v) => {
+                    const val = v === "__none__" ? "" : v;
+                    setNewIngredientInventoryId(val);
+                    if (val) {
+                      const item = restaurantInventoryItems.find((i: any) => i.id === val);
+                      if (item) {
+                        setNewIngredientName(item.name);
+                        setNewIngredientUnit(item.unit);
+                        if (item.costPrice) setNewIngredientCost(item.costPrice);
+                      }
+                    }
+                  }}
+                  data-testid="select-ingredient-inventory"
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar del inventario..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin vínculo (solo costeo)</SelectItem>
+                    {restaurantInventoryItems.map((item: any) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name} — Stock: {parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {newIngredientInventoryId ? (
+                  <p className="text-xs text-green-600">✓ Vinculado — el stock se descontará automáticamente al cerrar la orden</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Sin vínculo — solo para costeo, no descuenta stock</p>
+                )}
+              </div>
+
               <div className="grid grid-cols-5 gap-2">
                 <Input
                   placeholder="Nombre"
@@ -3754,7 +3808,6 @@ export default function RestaurantPage() {
               </div>
               <Button
                 size="sm"
-                className="mt-2"
                 onClick={() => {
                   if (!currentRecipe || !newIngredientName || !newIngredientQty) return;
                   addIngredientMutation.mutate({
@@ -3763,6 +3816,7 @@ export default function RestaurantPage() {
                     quantity: newIngredientQty,
                     unit: newIngredientUnit,
                     unitCost: newIngredientCost || "0",
+                    inventoryItemId: newIngredientInventoryId || null,
                   });
                 }}
                 disabled={addIngredientMutation.isPending || !newIngredientName || !newIngredientQty}

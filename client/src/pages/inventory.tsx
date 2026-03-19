@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,6 +27,8 @@ import {
   TrendingDown,
   TrendingUp,
   History,
+  BarChart3,
+  Printer,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -105,6 +109,9 @@ export default function InventoryPage() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("items");
   const [searchQuery, setSearchQuery] = useState("");
+  const today = new Date().toISOString().split("T")[0];
+  const [consumoFrom, setConsumoFrom] = useState(today);
+  const [consumoTo, setConsumoTo] = useState(today);
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
   const [isMovementDialogOpen, setIsMovementDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -129,6 +136,16 @@ export default function InventoryPage() {
 
   const { data: movements = [] } = useQuery<StockMovement[]>({
     queryKey: ["/api/inventory/movements"],
+  });
+
+  const { data: consumoReport, isLoading: consumoLoading } = useQuery<{
+    from: string; to: string;
+    items: Array<{ id: string; item_name: string; unit: string; cost_price: string; total_consumed: string; total_cost: string; orders_count: string }>;
+    totalCosto: number;
+  }>({
+    queryKey: ["/api/inventory/consumo-report", consumoFrom, consumoTo],
+    queryFn: () => fetch(`/api/inventory/consumo-report?from=${consumoFrom}&to=${consumoTo}`, { credentials: "include" }).then(r => r.json()),
+    enabled: activeTab === "consumos",
   });
 
   const createItemMutation = useMutation({
@@ -322,6 +339,10 @@ export default function InventoryPage() {
           <TabsTrigger value="suppliers" data-testid="tab-suppliers">
             <Building2 className="h-4 w-4 mr-2" />
             Proveedores
+          </TabsTrigger>
+          <TabsTrigger value="consumos" data-testid="tab-consumos">
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Consumos
           </TabsTrigger>
         </TabsList>
 
@@ -604,6 +625,86 @@ export default function InventoryPage() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="consumos" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Reporte de Consumos — Restaurante
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm">Desde:</Label>
+                  <Input type="date" value={consumoFrom} onChange={e => setConsumoFrom(e.target.value)} className="w-40" data-testid="input-consumo-from" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm">Hasta:</Label>
+                  <Input type="date" value={consumoTo} onChange={e => setConsumoTo(e.target.value)} className="w-40" data-testid="input-consumo-to" />
+                </div>
+                {consumoReport && (
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const html = `<!DOCTYPE html><html><head><title>Consumos ${consumoFrom} a ${consumoTo}</title>
+<style>body{font-family:Arial,sans-serif;padding:20px;max-width:700px;margin:0 auto}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#f5f5f5}.total{font-weight:bold;background:#eee}</style>
+</head><body><h1>Reporte de Consumos</h1><p>Período: ${consumoFrom} al ${consumoTo}</p>
+<table><thead><tr><th>Artículo</th><th>Unidad</th><th>Cant. Consumida</th><th>Órdenes</th><th>Costo Unit.</th><th>Costo Total</th></tr></thead><tbody>
+${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}</td><td>${parseFloat(r.total_consumed).toLocaleString("es-AR",{minimumFractionDigits:3})}</td><td>${r.orders_count}</td><td>$${parseFloat(r.cost_price||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td><td>$${parseFloat(r.total_cost||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>`).join("")}
+<tr class="total"><td colspan="5">COSTO TOTAL DEL PERÍODO</td><td>$${consumoReport.totalCosto.toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
+</tbody></table><script>window.onload=function(){window.print();}<\/script></body></html>`;
+                    const w = window.open("", "_blank"); if (w) { w.document.write(html); w.document.close(); }
+                  }} data-testid="btn-print-consumo">
+                    <Printer className="h-4 w-4 mr-2" />Imprimir
+                  </Button>
+                )}
+              </div>
+
+              {consumoLoading ? (
+                <div className="space-y-2">{[...Array(5)].map((_,i) => <Skeleton key={i} className="h-10" />)}</div>
+              ) : consumoReport && consumoReport.items.length > 0 ? (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-muted-foreground">{consumoReport.items.length} artículos consumidos</p>
+                    <p className="font-semibold">Costo total: ${consumoReport.totalCosto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Artículo</TableHead>
+                        <TableHead>Unidad</TableHead>
+                        <TableHead className="text-right">Cant. Consumida</TableHead>
+                        <TableHead className="text-center">Órdenes</TableHead>
+                        <TableHead className="text-right">Costo Unit.</TableHead>
+                        <TableHead className="text-right">Costo Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {consumoReport.items.map((row, i) => (
+                        <TableRow key={i} data-testid={`row-consumo-${i}`}>
+                          <TableCell className="font-medium">{row.item_name}</TableCell>
+                          <TableCell>{row.unit}</TableCell>
+                          <TableCell className="text-right">{parseFloat(row.total_consumed).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</TableCell>
+                          <TableCell className="text-center">{row.orders_count}</TableCell>
+                          <TableCell className="text-right">${parseFloat(row.cost_price || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell className="text-right font-semibold">${parseFloat(row.total_cost || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="font-bold border-t-2">
+                        <TableCell colSpan={5} className="text-right">COSTO TOTAL DEL PERÍODO</TableCell>
+                        <TableCell className="text-right">${consumoReport.totalCosto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </>
+              ) : (
+                <p className="text-center text-muted-foreground py-8" data-testid="text-consumo-empty">
+                  No hay consumos registrados para el período seleccionado.
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 

@@ -1,5 +1,8 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+import { requireAuth } from "../auth";
 
 export function registerInventoryRoutes(app: Express) {
   // Item Categories
@@ -149,38 +152,84 @@ export function registerInventoryRoutes(app: Express) {
 
   app.post("/api/inventory/movements", async (req, res) => {
     try {
-      const { itemId, movementType, quantity, notes } = req.body;
+      const { itemId, movementType, quantity, notes, sourceType, sourceId } = req.body;
 
       const item = await storage.getInventoryItem(itemId);
-      if (!item) return res.status(404).json({ error: "Item not found" });
+      if (!item) return res.status(404).json({ error: "Artículo no encontrado" });
 
-      const previousStock = item.currentStock ?? 0;
+      const previousStock = parseFloat(String(item.currentStock ?? 0));
+      const qty = parseFloat(String(quantity));
       let newStock = previousStock;
 
       if (movementType === "entrada") {
-        newStock = previousStock + quantity;
+        newStock = previousStock + qty;
       } else if (movementType === "salida" || movementType === "consumo") {
-        newStock = previousStock - quantity;
+        newStock = previousStock - qty;
         if (newStock < 0) {
-          return res.status(400).json({ error: "Stock insuficiente" });
+          return res.status(400).json({
+            error: `Stock insuficiente para ${item.name}. Stock actual: ${previousStock}, requerido: ${qty}`,
+          });
         }
       } else if (movementType === "ajuste") {
-        newStock = quantity;
+        newStock = qty;
       }
 
       const movement = await storage.createStockMovement({
         itemId,
         movementType,
-        quantity,
-        previousStock,
-        newStock,
+        quantity: String(qty),
+        previousStock: String(previousStock),
+        newStock: String(newStock),
         notes,
+        sourceType: sourceType || "manual",
+        sourceId: sourceId || null,
         createdAt: new Date(),
       });
 
-      res.status(201).json(movement);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating stock movement" });
+      await storage.updateInventoryItem(itemId, { currentStock: String(newStock) as any });
+
+      if (item.minStock && newStock <= parseFloat(String(item.minStock))) {
+        console.warn(`[Inventario] Stock bajo: ${item.name} — ${newStock} ${item.unit} (mín: ${item.minStock})`);
+      }
+
+      res.status(201).json({ movement, newStock, item: { ...item, currentStock: newStock } });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error registrando movimiento de stock" });
+    }
+  });
+
+  app.get("/api/inventory/consumo-report", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from?: string; to?: string };
+      const today = new Date().toISOString().split("T")[0];
+      const fromDate = from || today;
+      const toDate = to || today;
+
+      const consumos = await db.execute(sql`
+        SELECT
+          ii.id,
+          ii.name as item_name,
+          ii.unit,
+          ii.cost_price,
+          SUM(sm.quantity::numeric) as total_consumed,
+          SUM(sm.quantity::numeric * COALESCE(ii.cost_price::numeric, 0)) as total_cost,
+          COUNT(DISTINCT sm.source_id) as orders_count
+        FROM stock_movements sm
+        JOIN inventory_items ii ON sm.item_id = ii.id
+        WHERE sm.movement_type = 'consumo'
+          AND sm.source_type = 'restaurant_order'
+          AND DATE(sm.created_at) BETWEEN ${fromDate} AND ${toDate}
+        GROUP BY ii.id, ii.name, ii.unit, ii.cost_price
+        ORDER BY total_cost DESC
+      `);
+
+      const totalCosto = (consumos.rows as any[]).reduce(
+        (sum, r) => sum + parseFloat(r.total_cost || "0"), 0
+      );
+
+      res.json({ from: fromDate, to: toDate, items: consumos.rows, totalCosto });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error generando reporte de consumo" });
     }
   });
 }

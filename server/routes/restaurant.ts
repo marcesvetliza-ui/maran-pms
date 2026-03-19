@@ -276,7 +276,20 @@ export function registerRestaurantRoutes(app: Express) {
         console.error("Error registrando movimiento de caja:", e);
       }
 
-      res.json(updatedOrder);
+      try {
+        const orderItemsList = await storage.getOrderItems(req.params.id);
+        const stockResult = await storage.deductStockFromOrder(
+          req.params.id,
+          orderItemsList.map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity }))
+        );
+        if (stockResult.warnings.length > 0) {
+          console.warn(`[Stock] Advertencias en orden ${req.params.id}:`, stockResult.warnings);
+        }
+        return res.json({ ...updatedOrder, stockDeducted: stockResult.deducted, stockWarnings: stockResult.warnings });
+      } catch (stockError) {
+        console.error("[Stock] Error en descuento automático:", stockError);
+        return res.json(updatedOrder);
+      }
     } catch (error) {
       res.status(500).json({ error: "Error closing order" });
     }

@@ -494,6 +494,7 @@ export interface IStorage {
   // Stock Movements
   getStockMovements(itemId?: string): Promise<StockMovementWithItem[]>;
   createStockMovement(movement: InsertStockMovement): Promise<StockMovement>;
+  deductStockFromOrder(orderId: string, orderItems: Array<{ menuItemId: string; quantity: number }>): Promise<{ deducted: Array<{ itemName: string; quantity: number; unit: string }>; warnings: Array<{ itemName: string; required: number; available: number }>; skipped: Array<{ ingredientName: string; reason: string }> }>;
 
   // ==================== SPA ====================
   // SPA Cabins
@@ -3585,6 +3586,10 @@ export class MemStorage implements IStorage {
     }
     
     return newMovement;
+  }
+
+  async deductStockFromOrder(_orderId: string, _orderItems: Array<{ menuItemId: string; quantity: number }>) {
+    return { deducted: [], warnings: [], skipped: [] };
   }
 
   // ==================== SPA METHODS ====================
