@@ -253,6 +253,8 @@ export default function SpaPage() {
   const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
   const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
+  const [supplyItemId, setSupplyItemId] = useState("");
+  const [supplyQty, setSupplyQty] = useState("1");
   const [cabinDialogOpen, setCabinDialogOpen] = useState(false);
   const [editingCabin, setEditingCabin] = useState<SpaCabin | null>(null);
   const [cabinName, setCabinName] = useState("");
@@ -339,6 +341,16 @@ export default function SpaPage() {
       return response.json();
     },
     enabled: activeTab === "insumos",
+  });
+
+  const { data: allInventoryItems = [] } = useQuery<InventoryItemWithDetails[]>({
+    queryKey: ["/api/inventory/items", "all-for-spa"],
+    queryFn: async () => {
+      const response = await fetch("/api/inventory/items");
+      if (!response.ok) throw new Error("Error");
+      return response.json();
+    },
+    enabled: isTreatmentDialogOpen && !!editingTreatment,
   });
 
   const activeCabins = cabins.filter((c) => c.isActive === "true");
@@ -590,6 +602,40 @@ export default function SpaPage() {
     onError: () => {
       toast({ title: "Error al eliminar tratamiento", variant: "destructive" });
     },
+  });
+
+  const { data: treatmentSupplies = [], refetch: refetchSupplies } = useQuery<any[]>({
+    queryKey: ["/api/spa/treatments", editingTreatment?.id, "supplies"],
+    queryFn: async () => {
+      if (!editingTreatment?.id) return [];
+      const res = await fetch(`/api/spa/treatments/${editingTreatment.id}/supplies`);
+      return res.json();
+    },
+    enabled: !!editingTreatment?.id,
+  });
+
+  const addSupplyMutation = useMutation({
+    mutationFn: async (data: { inventoryItemId: string; quantity: string; unit: string }) => {
+      return apiRequest("POST", `/api/spa/treatments/${editingTreatment!.id}/supplies`, data);
+    },
+    onSuccess: () => {
+      refetchSupplies();
+      setSupplyItemId("");
+      setSupplyQty("1");
+      toast({ title: "Insumo agregado" });
+    },
+    onError: () => toast({ title: "Error al agregar insumo", variant: "destructive" }),
+  });
+
+  const deleteSupplyMutation = useMutation({
+    mutationFn: async (supplyId: string) => {
+      return apiRequest("DELETE", `/api/spa/treatments/supplies/${supplyId}`);
+    },
+    onSuccess: () => {
+      refetchSupplies();
+      toast({ title: "Insumo eliminado" });
+    },
+    onError: () => toast({ title: "Error al eliminar insumo", variant: "destructive" }),
   });
 
   const handleNewTreatment = () => {
@@ -2025,6 +2071,63 @@ export default function SpaPage() {
                 </SelectContent>
               </Select>
             </div>
+            {editingTreatment && (
+              <div className="border rounded-lg p-3 space-y-3">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <span>🧴</span> Insumos a descontar del inventario
+                </p>
+                {treatmentSupplies.length > 0 ? (
+                  <div className="space-y-1">
+                    {treatmentSupplies.map((s: any) => (
+                      <div key={s.id} className="flex items-center justify-between text-sm bg-muted/40 rounded px-2 py-1" data-testid={`row-supply-${s.id}`}>
+                        <span className="font-medium">{s.inventoryItemName}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">{parseFloat(s.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })} {s.inventoryItemUnit || s.unit}</span>
+                          <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteSupplyMutation.mutate(s.id)} data-testid={`btn-delete-supply-${s.id}`}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Sin insumos configurados — el stock no se descontará al cerrar la cuenta.</p>
+                )}
+                <div className="flex items-end gap-2 pt-1">
+                  <div className="flex-1">
+                    <label className="text-xs text-muted-foreground">Artículo</label>
+                    <Select value={supplyItemId} onValueChange={(v) => {
+                      setSupplyItemId(v);
+                      const item = allInventoryItems.find((i: any) => i.id === v);
+                      if (item) setSupplyQty("1");
+                    }} data-testid="select-supply-item">
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                      <SelectContent>
+                        {allInventoryItems.map((item: any) => (
+                          <SelectItem key={item.id} value={item.id}>{item.name} ({item.unit})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="w-24">
+                    <label className="text-xs text-muted-foreground">Cantidad</label>
+                    <Input type="number" step="0.001" min="0.001" value={supplyQty} onChange={e => setSupplyQty(e.target.value)} className="h-8 text-sm" data-testid="input-supply-qty" />
+                  </div>
+                  <Button type="button" size="sm" className="h-8" disabled={!supplyItemId || !supplyQty || addSupplyMutation.isPending}
+                    onClick={() => {
+                      const item = allInventoryItems.find((i: any) => i.id === supplyItemId);
+                      addSupplyMutation.mutate({ inventoryItemId: supplyItemId, quantity: supplyQty, unit: item?.unit || "" });
+                    }} data-testid="btn-add-supply">
+                    <Plus className="h-3 w-3 mr-1" />Agregar
+                  </Button>
+                </div>
+              </div>
+            )}
+            {!editingTreatment && (
+              <p className="text-xs text-muted-foreground text-center border rounded p-2">
+                Podrás configurar insumos de inventario después de crear el tratamiento.
+              </p>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => { setIsTreatmentDialogOpen(false); setEditingTreatment(null); }}>Cancelar</Button>
               <Button type="submit" disabled={createTreatmentMutation.isPending} data-testid="button-submit-treatment">

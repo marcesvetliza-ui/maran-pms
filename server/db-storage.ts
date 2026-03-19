@@ -55,6 +55,7 @@ import {
   type SpaAccount, type InsertSpaAccount, type SpaAccountStatus, type SpaAccountWithItems,
   type SpaAccountItem, type InsertSpaAccountItem,
   type SpaPayment, type InsertSpaPayment,
+  type TreatmentSupply, type InsertTreatmentSupply,
   type EventRoom, type InsertEventRoom, type EventRoomStatus,
   type Event as HotelEvent, type InsertEvent, type EventStatus, type EventType,
   type EventChargeType, type InsertEventChargeType,
@@ -94,7 +95,7 @@ import {
   orderSplits, recipes, recipeIngredients,
   itemCategories, suppliers, inventoryItems, stockMovements,
   spaCabins, spaTreatmentCategories, spaTreatments, spaAppointments,
-  spaAccounts, spaAccountItems, spaPayments,
+  spaAccounts, spaAccountItems, spaPayments, treatmentSupplies,
   eventRooms, events, eventChargeTypes, eventCharges, eventPayments,
   eventTables, eventTableCharges, eventTablePayments,
   maintenanceStaff, workOrders,
@@ -2317,6 +2318,65 @@ export class DatabaseStorage implements IStorage {
   async deleteSpaPayment(id: string): Promise<boolean> {
     const result = await db.delete(spaPayments).where(eq(spaPayments.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Treatment Supplies
+  async getTreatmentSupplies(treatmentId: string): Promise<TreatmentSupply[]> {
+    return db.select().from(treatmentSupplies).where(eq(treatmentSupplies.treatmentId, treatmentId));
+  }
+
+  async createTreatmentSupply(supply: InsertTreatmentSupply): Promise<TreatmentSupply> {
+    const [created] = await db.insert(treatmentSupplies).values(supply as any).returning();
+    return created;
+  }
+
+  async deleteTreatmentSupply(id: string): Promise<boolean> {
+    const result = await db.delete(treatmentSupplies).where(eq(treatmentSupplies.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async deductStockFromSpaAccount(accountId: string): Promise<void> {
+    try {
+      const accountData = await this.getSpaAccount(accountId);
+      if (!accountData || !accountData.appointmentId) return;
+
+      const [appointment] = await db.select().from(spaAppointments).where(eq(spaAppointments.id, accountData.appointmentId));
+      if (!appointment || !appointment.treatmentId) return;
+
+      const supplies = await this.getTreatmentSupplies(appointment.treatmentId);
+      if (!supplies.length) return;
+
+      for (const supply of supplies) {
+        try {
+          const [invItem] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, supply.inventoryItemId));
+          if (!invItem) continue;
+
+          const prev = parseFloat(invItem.currentStock ?? "0");
+          const qty = parseFloat(supply.quantity);
+          const newStock = Math.max(0, prev - qty);
+
+          await db.update(inventoryItems)
+            .set({ currentStock: String(newStock) })
+            .where(eq(inventoryItems.id, supply.inventoryItemId));
+
+          await db.insert(stockMovements).values({
+            itemId: supply.inventoryItemId,
+            type: "salida",
+            quantity: String(qty),
+            previousStock: String(prev),
+            newStock: String(newStock),
+            reason: "Consumo SPA",
+            sourceType: "spa_account",
+            sourceId: accountId,
+            createdAt: new Date(),
+          } as any);
+        } catch (err) {
+          console.warn(`[SPA] Error descounting stock for item ${supply.inventoryItemId}:`, err);
+        }
+      }
+    } catch (err) {
+      console.warn(`[SPA] Error in deductStockFromSpaAccount:`, err);
+    }
   }
 
   async getEventRooms(): Promise<EventRoom[]> {

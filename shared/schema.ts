@@ -1313,6 +1313,20 @@ export const insertSpaAccountItemSchema = createInsertSchema(spaAccountItems).om
 export type InsertSpaAccountItem = z.infer<typeof insertSpaAccountItemSchema>;
 export type SpaAccountItem = typeof spaAccountItems.$inferSelect;
 
+export const treatmentSupplies = pgTable("treatment_supplies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  treatmentId: varchar("treatment_id").notNull(),
+  inventoryItemId: varchar("inventory_item_id").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
+  unit: text("unit").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertTreatmentSupplySchema = createInsertSchema(treatmentSupplies).omit({ id: true, createdAt: true });
+export type InsertTreatmentSupply = z.infer<typeof insertTreatmentSupplySchema>;
+export type TreatmentSupply = typeof treatmentSupplies.$inferSelect;
+
 export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge";
 
 export const spaPayments = pgTable("spa_payments", {

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { spaPayments, spaProfessionals, spaClients } from "@shared/schema";
+import { spaPayments, spaProfessionals, spaClients, inventoryItems } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, desc } from "drizzle-orm";
 
@@ -442,6 +442,12 @@ export function registerSpaRoutes(app: Express) {
 
       const account = await storage.closeSpaAccount(req.params.id, chargedTo, receiptType);
       if (!account) return res.status(404).json({ error: "Account not found" });
+
+      // Descontar insumos del inventario (nunca bloquea el cierre)
+      storage.deductStockFromSpaAccount(req.params.id).catch((err: any) =>
+        console.warn("[SPA] Error deducting stock:", err)
+      );
+
       res.json(account);
     } catch (error) {
       res.status(500).json({ error: "Error closing spa account" });
@@ -664,6 +670,50 @@ export function registerSpaRoutes(app: Express) {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error deleting spa client" });
+    }
+  });
+
+  // ==================== TREATMENT SUPPLIES ====================
+  app.get("/api/spa/treatments/:id/supplies", async (req, res) => {
+    try {
+      const supplies = await storage.getTreatmentSupplies(req.params.id);
+      // Enrich with inventory item info
+      const enriched = await Promise.all(supplies.map(async (s) => {
+        const [item] = await db.select({ name: inventoryItems.name, unit: inventoryItems.unit })
+          .from(inventoryItems).where(eq(inventoryItems.id, s.inventoryItemId));
+        return { ...s, inventoryItemName: item?.name ?? "—", inventoryItemUnit: item?.unit ?? s.unit };
+      }));
+      res.json(enriched);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching treatment supplies" });
+    }
+  });
+
+  app.post("/api/spa/treatments/:id/supplies", requireAuth, async (req, res) => {
+    try {
+      const { inventoryItemId, quantity, unit, notes } = req.body;
+      if (!inventoryItemId || !quantity) {
+        return res.status(400).json({ error: "inventoryItemId and quantity are required" });
+      }
+      const supply = await storage.createTreatmentSupply({
+        treatmentId: req.params.id,
+        inventoryItemId,
+        quantity: String(quantity),
+        unit: unit || "",
+        notes: notes || null,
+      });
+      res.json(supply);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating treatment supply" });
+    }
+  });
+
+  app.delete("/api/spa/treatments/supplies/:supplyId", requireAuth, async (req, res) => {
+    try {
+      const ok = await storage.deleteTreatmentSupply(req.params.supplyId);
+      res.json({ success: ok });
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting treatment supply" });
     }
   });
 }

@@ -123,6 +123,8 @@ import {
   type SpaPayment,
   type InsertSpaPayment,
   type SpaPaymentMethod,
+  type TreatmentSupply,
+  type InsertTreatmentSupply,
   // Events
   type EventRoom,
   type InsertEventRoom,
@@ -546,6 +548,12 @@ export interface IStorage {
   getSpaPayments(accountId: string): Promise<SpaPayment[]>;
   createSpaPayment(payment: InsertSpaPayment): Promise<SpaPayment>;
   deleteSpaPayment(id: string): Promise<boolean>;
+
+  // Treatment Supplies (SPA inventory)
+  getTreatmentSupplies(treatmentId: string): Promise<TreatmentSupply[]>;
+  createTreatmentSupply(supply: InsertTreatmentSupply): Promise<TreatmentSupply>;
+  deleteTreatmentSupply(id: string): Promise<boolean>;
+  deductStockFromSpaAccount(accountId: string): Promise<void>;
 
   // ==================== EVENTS ====================
   // Event Rooms
@@ -4020,6 +4028,14 @@ export class MemStorage implements IStorage {
 
     return deleted;
   }
+
+  // Treatment Supplies (stubs — no-op in memory)
+  async getTreatmentSupplies(_treatmentId: string): Promise<TreatmentSupply[]> { return []; }
+  async createTreatmentSupply(supply: InsertTreatmentSupply): Promise<TreatmentSupply> {
+    return { ...supply, id: `ts-${Date.now()}`, createdAt: new Date() } as any;
+  }
+  async deleteTreatmentSupply(_id: string): Promise<boolean> { return false; }
+  async deductStockFromSpaAccount(_accountId: string): Promise<void> {}
 
   // ==================== EVENTS ====================
   // Event Rooms
