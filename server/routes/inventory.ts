@@ -113,7 +113,40 @@ export function registerInventoryRoutes(app: Express) {
 
   app.post("/api/inventory/items", async (req, res) => {
     try {
-      const item = await storage.createInventoryItem(req.body);
+      const body = { ...req.body };
+
+      // Auto-generate SKU if not provided
+      if (!body.sku) {
+        const areaPrefixes: Record<string, string> = {
+          spa: "SPA",
+          restaurant: "RST",
+          housekeeping: "HSK",
+          maintenance: "MNT",
+          admin: "ADM",
+          general: "GEN",
+        };
+        // Prefer category area over item area for SKU prefix
+        let area = body.area ?? "general";
+        if (body.categoryId) {
+          const cat = await storage.getItemCategory(body.categoryId);
+          if (cat?.area) area = cat.area;
+        }
+        const prefix = areaPrefixes[area as string] ?? "GEN";
+
+        // Find highest existing numeric suffix for this prefix
+        const allItems = await storage.getInventoryItems();
+        const pattern = new RegExp(`^${prefix}-(\\d+)$`);
+        let maxNum = 0;
+        for (const it of allItems) {
+          if (it.sku) {
+            const m = it.sku.match(pattern);
+            if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+          }
+        }
+        body.sku = `${prefix}-${String(maxNum + 1).padStart(4, "0")}`;
+      }
+
+      const item = await storage.createInventoryItem(body);
       res.status(201).json(item);
     } catch (error) {
       res.status(500).json({ error: "Error creating inventory item" });

@@ -751,7 +751,6 @@ function NewItemForm({
   onCancel: () => void;
 }) {
   const [name, setName] = useState("");
-  const [sku, setSku] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [unit, setUnit] = useState<string>("unidad");
@@ -761,25 +760,15 @@ function NewItemForm({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Nombre</Label>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre del articulo"
-            data-testid="input-item-name"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>SKU (opcional)</Label>
-          <Input
-            value={sku}
-            onChange={(e) => setSku(e.target.value)}
-            placeholder="Codigo SKU"
-            data-testid="input-item-sku"
-          />
-        </div>
+      <div className="space-y-2">
+        <Label>Nombre</Label>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Nombre del artículo"
+          data-testid="input-item-name"
+        />
+        <p className="text-xs text-muted-foreground">El SKU se asignará automáticamente según el área de la categoría (ej: SPA-0001, RST-0042).</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
@@ -869,7 +858,6 @@ function NewItemForm({
           onClick={() => {
             onSubmit({
               name,
-              sku: sku || undefined,
               categoryId: categoryId || undefined,
               supplierId: supplierId || undefined,
               unit: unit as any,
