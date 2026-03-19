@@ -620,6 +620,7 @@ function InvoiceDialog({
             )}
           </div>
         </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

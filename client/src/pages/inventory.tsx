@@ -29,6 +29,9 @@ import {
   History,
   BarChart3,
   Printer,
+  Tag,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -117,6 +120,11 @@ export default function InventoryPage() {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [movementType, setMovementType] = useState<"entrada" | "salida">("entrada");
   const [areaFilter, setAreaFilter] = useState("all");
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<ItemCategory | null>(null);
+  const [catName, setCatName] = useState("");
+  const [catArea, setCatArea] = useState("general");
+  const [catDescription, setCatDescription] = useState("");
 
   const { data: categories = [] } = useQuery<ItemCategory[]>({
     queryKey: ["/api/inventory/categories"],
@@ -183,6 +191,40 @@ export default function InventoryPage() {
         variant: "destructive",
       });
     },
+  });
+
+  const openCategoryDialog = (cat?: ItemCategory) => {
+    setEditingCategory(cat || null);
+    setCatName(cat?.name || "");
+    setCatArea(cat?.area || "general");
+    setCatDescription(cat?.description || "");
+    setIsCategoryDialogOpen(true);
+  };
+
+  const saveCategoryMutation = useMutation({
+    mutationFn: async (data: { name: string; area: string; description: string }) => {
+      const res = editingCategory
+        ? await apiRequest("PATCH", `/api/inventory/categories/${editingCategory.id}`, data)
+        : await apiRequest("POST", "/api/inventory/categories", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
+      setIsCategoryDialogOpen(false);
+      toast({ title: editingCategory ? "Categoría actualizada" : "Categoría creada" });
+    },
+    onError: () => toast({ title: "Error al guardar categoría", variant: "destructive" }),
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/inventory/categories/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
+      toast({ title: "Categoría eliminada" });
+    },
+    onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
   });
 
   const filteredItems = items.filter((item) => {
@@ -339,6 +381,10 @@ export default function InventoryPage() {
           <TabsTrigger value="suppliers" data-testid="tab-suppliers">
             <Building2 className="h-4 w-4 mr-2" />
             Proveedores
+          </TabsTrigger>
+          <TabsTrigger value="categorias" data-testid="tab-categorias">
+            <Tag className="h-4 w-4 mr-2" />
+            Categorías
           </TabsTrigger>
           <TabsTrigger value="consumos" data-testid="tab-consumos">
             <BarChart3 className="h-4 w-4 mr-2" />
@@ -627,6 +673,67 @@ export default function InventoryPage() {
           )}
         </TabsContent>
 
+        <TabsContent value="categorias" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Las categorías determinan el prefijo del SKU automático y el área de cada artículo.
+            </p>
+            <Button onClick={() => openCategoryDialog()} data-testid="btn-new-category">
+              <Plus className="h-4 w-4 mr-2" />
+              Nueva Categoría
+            </Button>
+          </div>
+
+          {categories.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <Tag className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">Sin categorías</h3>
+                <p className="text-muted-foreground">Creá categorías para organizar tu inventario</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {categories.map((cat) => {
+                const areaLabels: Record<string, string> = {
+                  general: "General", spa: "SPA", restaurant: "Restaurante",
+                  housekeeping: "Housekeeping", maintenance: "Mantenimiento", admin: "Administración",
+                };
+                const areaColors: Record<string, string> = {
+                  general: "secondary", spa: "default", restaurant: "destructive",
+                  housekeeping: "outline", maintenance: "outline", admin: "outline",
+                };
+                const itemCount = items.filter(i => i.categoryId === cat.id).length;
+                return (
+                  <Card key={cat.id} data-testid={`cat-card-${cat.id}`} className="flex flex-col">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-base">{cat.name}</CardTitle>
+                        <div className="flex gap-1 shrink-0">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openCategoryDialog(cat)} data-testid={`btn-edit-cat-${cat.id}`}>
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteCategoryMutation.mutate(cat.id)} disabled={itemCount > 0} data-testid={`btn-delete-cat-${cat.id}`}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="text-sm space-y-1 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={areaColors[cat.area] as any}>{areaLabels[cat.area] ?? cat.area}</Badge>
+                        <span className="text-muted-foreground text-xs">SKU: {cat.area === "spa" ? "SPA" : cat.area === "restaurant" ? "RST" : cat.area === "housekeeping" ? "HSK" : cat.area === "maintenance" ? "MNT" : cat.area === "admin" ? "ADM" : "GEN"}-####</span>
+                      </div>
+                      {cat.description && <p className="text-muted-foreground text-xs">{cat.description}</p>}
+                      <p className="text-xs text-muted-foreground">{itemCount} artículo{itemCount !== 1 ? "s" : ""}</p>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
         <TabsContent value="consumos" className="space-y-4">
           <Card>
             <CardHeader className="pb-2">
@@ -731,6 +838,61 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             </DialogTitle>
           </DialogHeader>
           <MovementForm />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingCategory ? "Editar Categoría" : "Nueva Categoría"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Nombre *</Label>
+              <Input
+                value={catName}
+                onChange={(e) => setCatName(e.target.value)}
+                placeholder="Ej: Aceites de Masajes"
+                data-testid="input-cat-name"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Área</Label>
+              <Select value={catArea} onValueChange={setCatArea}>
+                <SelectTrigger data-testid="select-cat-area">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General (GEN)</SelectItem>
+                  <SelectItem value="spa">SPA (SPA)</SelectItem>
+                  <SelectItem value="restaurant">Restaurante (RST)</SelectItem>
+                  <SelectItem value="housekeeping">Housekeeping (HSK)</SelectItem>
+                  <SelectItem value="maintenance">Mantenimiento (MNT)</SelectItem>
+                  <SelectItem value="admin">Administración (ADM)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Descripción (opcional)</Label>
+              <Input
+                value={catDescription}
+                onChange={(e) => setCatDescription(e.target.value)}
+                placeholder="Descripción breve..."
+                data-testid="input-cat-description"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={() => saveCategoryMutation.mutate({ name: catName.trim(), area: catArea, description: catDescription.trim() })}
+              disabled={saveCategoryMutation.isPending || !catName.trim()}
+              data-testid="btn-save-category"
+            >
+              {saveCategoryMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Guardar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
