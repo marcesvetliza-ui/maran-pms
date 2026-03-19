@@ -275,7 +275,7 @@ function AddBlockDialog({
           )}
 
           <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-            <p>Fechas del grupo: {new Date(group.checkInDate).toLocaleDateString("es-AR")} - {new Date(group.checkOutDate).toLocaleDateString("es-AR")}</p>
+            <p>Fechas del grupo: {fmtDate(group.checkInDate)} - {fmtDate(group.checkOutDate)}</p>
           </div>
         </div>
 
@@ -806,8 +806,8 @@ export default function GroupDetailPage() {
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.room?.roomType?.name || "-"}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.guest?.firstName || ""} ${res.guest?.lastName || ""}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${new Date(res.checkInDate).toLocaleDateString("es-AR")}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${new Date(res.checkOutDate).toLocaleDateString("es-AR")}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${fmtDate(res.checkInDate)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${fmtDate(res.checkOutDate)}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${statusLabel(res.status)}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-size:11px;max-width:120px;">${res.notes || ""}</td>
       </tr>
@@ -851,8 +851,8 @@ export default function GroupDetailPage() {
     </div>
     <div class="info-block" style="text-align:right;">
       <p class="info-label">Fechas</p>
-      <p>Check-in: <strong>${new Date(group.checkInDate).toLocaleDateString("es-AR")}</strong></p>
-      <p>Check-out: <strong>${new Date(group.checkOutDate).toLocaleDateString("es-AR")}</strong></p>
+      <p>Check-in: <strong>${fmtDate(group.checkInDate)}</strong></p>
+      <p>Check-out: <strong>${fmtDate(group.checkOutDate)}</strong></p>
       <p>Habitaciones: <strong>${group.reservations.length}</strong></p>
     </div>
   </div>
@@ -860,7 +860,7 @@ export default function GroupDetailPage() {
   <div style="background:#f9f7ff;border:1px solid #d4c8f0;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;">
     <p class="info-label" style="margin:0 0 6px 0;">Evento</p>
     <div style="display:flex;gap:32px;">
-      <div><strong>Fecha:</strong> ${new Date(group.eventDate).toLocaleDateString("es-AR")}</div>
+      <div><strong>Fecha:</strong> ${fmtDate(group.eventDate)}</div>
       ${(group as any).eventSalon ? `<div><strong>Salón:</strong> ${(group as any).eventSalon}</div>` : ""}
       ${(group as any).eventTime ? `<div><strong>Horario:</strong> ${(group as any).eventTime}</div>` : ""}
     </div>
@@ -896,8 +896,16 @@ export default function GroupDetailPage() {
     }
   };
 
+  const fmtDate = (d: string) => {
+    if (!d) return "-";
+    const [y, m, dd] = d.split("-").map(Number);
+    return new Date(y, m - 1, dd).toLocaleDateString("es-AR");
+  };
+
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("es-AR", {
+    if (!dateStr) return "-";
+    const [y, m, dd] = dateStr.split("-").map(Number);
+    return new Date(y, m - 1, dd).toLocaleDateString("es-AR", {
       weekday: "long",
       day: "2-digit",
       month: "long",
@@ -1209,7 +1217,7 @@ export default function GroupDetailPage() {
                         <TableCell>{res.guest?.firstName} {res.guest?.lastName}</TableCell>
                         <TableCell>{res.room?.roomNumber}</TableCell>
                         <TableCell className="text-sm">
-                          {new Date(res.checkInDate).toLocaleDateString("es-AR")} - {new Date(res.checkOutDate).toLocaleDateString("es-AR")}
+                          {fmtDate(res.checkInDate)} - {fmtDate(res.checkOutDate)}
                         </TableCell>
                         <TableCell>
                           <Badge variant={res.status === "confirmed" ? "default" : "secondary"}>
@@ -1318,7 +1326,7 @@ export default function GroupDetailPage() {
                             <TableCell>
                               <Badge variant="outline">{gc.category}</Badge>
                             </TableCell>
-                            <TableCell className="text-sm">{new Date(gc.date).toLocaleDateString("es-AR")}</TableCell>
+                            <TableCell className="text-sm">{fmtDate(gc.date)}</TableCell>
                             <TableCell className="text-right font-medium">${parseFloat(gc.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
                             <TableCell>
                               <Button
@@ -1424,7 +1432,7 @@ export default function GroupDetailPage() {
                       <TableBody>
                         {folio.groupPayments.map((gp) => (
                           <TableRow key={gp.id} data-testid={`row-group-payment-${gp.id}`}>
-                            <TableCell className="text-sm">{new Date(gp.date).toLocaleDateString("es-AR")}</TableCell>
+                            <TableCell className="text-sm">{fmtDate(gp.date)}</TableCell>
                             <TableCell>
                               <Badge variant="secondary">{gp.method}</Badge>
                             </TableCell>
@@ -1659,7 +1667,7 @@ export default function GroupDetailPage() {
               Rooming List - {group.name}
             </DialogTitle>
             <DialogDescription>
-              {group.groupCode} | {new Date(group.checkInDate).toLocaleDateString("es-AR")} - {new Date(group.checkOutDate).toLocaleDateString("es-AR")}
+              {group.groupCode} | {fmtDate(group.checkInDate)} - {fmtDate(group.checkOutDate)}
             </DialogDescription>
           </DialogHeader>
 
@@ -1681,11 +1689,11 @@ export default function GroupDetailPage() {
             <div className="flex gap-4 text-sm flex-wrap">
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <span>Check-in: <strong>{new Date(group.checkInDate).toLocaleDateString("es-AR")}</strong></span>
+                <span>Check-in: <strong>{fmtDate(group.checkInDate)}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <span>Check-out: <strong>{new Date(group.checkOutDate).toLocaleDateString("es-AR")}</strong></span>
+                <span>Check-out: <strong>{fmtDate(group.checkOutDate)}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <DoorOpen className="h-4 w-4 text-muted-foreground" />
@@ -1722,8 +1730,8 @@ export default function GroupDetailPage() {
                             ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}`
                             : "-"}
                         </TableCell>
-                        <TableCell>{new Date(res.checkInDate).toLocaleDateString("es-AR")}</TableCell>
-                        <TableCell>{new Date(res.checkOutDate).toLocaleDateString("es-AR")}</TableCell>
+                        <TableCell>{fmtDate(res.checkInDate)}</TableCell>
+                        <TableCell>{fmtDate(res.checkOutDate)}</TableCell>
                         <TableCell>
                           <Badge 
                             variant={
