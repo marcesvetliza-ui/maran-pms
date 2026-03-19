@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
   FileText, Plus, Trash2, Search, ArrowLeft, Building2,
-  CreditCard, Landmark, Receipt, ChevronRight, CheckCircle2, Clock, FileDown,
+  CreditCard, Landmark, Receipt, ChevronRight, CheckCircle2, Clock, FileDown, Package,
 } from "lucide-react";
 import { Link } from "wouter";
 import { getLocalToday } from "@/lib/utils";
@@ -195,6 +195,16 @@ const emptyForm = () => ({
 
 // ─── Subcomponent: New Invoice Dialog ────────────────────────────────────────
 
+interface InvItemRow {
+  name: string;
+  categoryId: string;
+  quantity: string;
+  unit: string;
+  costPrice: string;
+}
+
+const UNITS = ["unidad", "kg", "g", "litro", "ml", "caja", "paquete", "rollo", "metro", "par"];
+
 function InvoiceDialog({
   open,
   onClose,
@@ -209,8 +219,19 @@ function InvoiceDialog({
   const { toast } = useToast();
   const [form, setForm] = useState(emptyForm());
   const [step, setStep] = useState(0);
+  const [invItems, setInvItems] = useState<InvItemRow[]>([]);
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
+
+  const { data: itemCategories = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/categories"],
+    enabled: open,
+  });
+
+  const addInvRow = () => setInvItems((p) => [...p, { name: "", categoryId: "", quantity: "1", unit: "unidad", costPrice: "0" }]);
+  const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
+  const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
+    setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
 
   const handleSupplierChange = (id: string) => {
     const s = suppliers.find((x) => String(x.id) === id);
@@ -234,15 +255,53 @@ function InvoiceDialog({
     );
   }, [form]);
 
+  const resetDialog = () => { onClose(); setForm(emptyForm()); setStep(0); setInvItems([]); };
+
   const createMut = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/purchase-invoices", data),
-    onSuccess: () => {
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/purchase-invoices", data);
+      return res.json();
+    },
+    onSuccess: async (invoice: any) => {
+      // Create inventory items if any were added in step 4
+      let inventoryCount = 0;
+      const validItems = invItems.filter((r) => r.name.trim());
+      for (const row of validItems) {
+        try {
+          const itemRes = await apiRequest("POST", "/api/inventory/items", {
+            name: row.name.trim(),
+            categoryId: row.categoryId || undefined,
+            supplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
+            unit: row.unit,
+            costPrice: row.costPrice,
+            currentStock: row.quantity,
+            minStock: 0,
+          });
+          const item = await itemRes.json();
+          // Link movement to invoice
+          await apiRequest("POST", "/api/inventory/movements", {
+            itemId: item.id,
+            type: "entrada",
+            quantity: row.quantity,
+            reason: `Comprobante ${invoice.numero_comprobante_ext || invoice.numero_comprobante || invoice.id} — ${form.proveedorNombre}`,
+            sourceType: "purchase_invoice",
+            sourceId: String(invoice.id),
+          });
+          inventoryCount++;
+        } catch (e) {
+          console.warn("Error creating inventory item:", e);
+        }
+      }
+      if (inventoryCount > 0) {
+        queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
-      onClose();
-      setForm(emptyForm());
-      setStep(0);
-      toast({ title: "Comprobante registrado", description: "El asiento contable fue generado automáticamente." });
+      resetDialog();
+      const desc = inventoryCount > 0
+        ? `El asiento contable fue generado. Se ingresaron ${inventoryCount} artículo(s) al inventario.`
+        : "El asiento contable fue generado automáticamente.";
+      toast({ title: "Comprobante registrado", description: desc });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -255,12 +314,12 @@ function InvoiceDialog({
     createMut.mutate({ ...form, supplierId: form.supplierId ? parseInt(form.supplierId) : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
   };
 
-  const steps = ["Encabezado", "Montos", "Retenciones", "Clasificación"];
+  const steps = ["Encabezado", "Montos", "Retenciones", "Clasificación", "Inventario"];
   const isResumen = form.tipoComprobante === "RESUMEN-BANCO" || form.tipoComprobante === "LIQ-TARJETA";
   const isNC = form.tipoComprobante.startsWith("NC");
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setForm(emptyForm()); } }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) resetDialog(); }}>
       <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Registrar Comprobante</DialogTitle>
@@ -467,7 +526,81 @@ function InvoiceDialog({
               </Card>
             </>
           )}
-        </div>
+
+          {step === 4 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
+                <Package className="h-4 w-4 shrink-0" />
+                <span>Opcional — Cargá los productos o insumos que recibiste con esta factura. Se crearán en inventario con su SKU automático y el stock inicial indicado.</span>
+              </div>
+
+              {invItems.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead className="text-xs">Nombre</TableHead>
+                        <TableHead className="text-xs">Categoría</TableHead>
+                        <TableHead className="text-xs w-20">Cant.</TableHead>
+                        <TableHead className="text-xs w-24">Unidad</TableHead>
+                        <TableHead className="text-xs w-24">Costo unit.</TableHead>
+                        <TableHead className="text-xs w-8"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {invItems.map((row, i) => (
+                        <TableRow key={i} data-testid={`row-inv-item-${i}`}>
+                          <TableCell className="py-1">
+                            <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Nombre del artículo" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
+                          </TableCell>
+                          <TableCell className="py-1">
+                            <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Categoría..." /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">— Sin categoría —</SelectItem>
+                                {itemCategories.map((cat: any) => (
+                                  <SelectItem key={cat.id} value={cat.id}>{cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="py-1">
+                            <Input type="number" min="0" step="0.001" value={row.quantity} onChange={(e) => updateInvRow(i, "quantity", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-qty-${i}`} />
+                          </TableCell>
+                          <TableCell className="py-1">
+                            <Select value={row.unit} onValueChange={(v) => updateInvRow(i, "unit", v)}>
+                              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="py-1">
+                            <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
+                          </TableCell>
+                          <TableCell className="py-1">
+                            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              <Button type="button" variant="outline" size="sm" onClick={addInvRow} data-testid="btn-add-inv-item">
+                <Plus className="h-4 w-4 mr-2" />Agregar artículo
+              </Button>
+
+              {invItems.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Sin artículos — el comprobante se registrará sin ingresar nada al inventario.
+                </p>
+              )}
+            </div>
+          )}
 
         <DialogFooter className="flex items-center justify-between">
           <div>
@@ -476,12 +609,13 @@ function InvoiceDialog({
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => { onClose(); setStep(0); setForm(emptyForm()); }}>Cancelar</Button>
+            <Button variant="ghost" onClick={resetDialog}>Cancelar</Button>
             {step < steps.length - 1 ? (
               <Button onClick={() => setStep((p) => p + 1)} data-testid="btn-next-step">Siguiente</Button>
             ) : (
               <Button onClick={handleSubmit} disabled={createMut.isPending} data-testid="btn-submit-invoice">
-                Registrar comprobante
+                {createMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
+                {invItems.filter(r => r.name.trim()).length > 0 ? `Registrar + ${invItems.filter(r => r.name.trim()).length} artículo(s)` : "Registrar comprobante"}
               </Button>
             )}
           </div>
