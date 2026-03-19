@@ -866,6 +866,12 @@ export default function GroupDetailPage() {
     </div>
   </div>
   ` : ""}
+  ${group.notes ? `
+  <div style="background:#fffbea;border:1px solid #e6d87a;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;">
+    <p class="info-label" style="margin:0 0 6px 0;">Notas de la estadía</p>
+    <p style="margin:0;white-space:pre-wrap;">${group.notes}</p>
+  </div>
+  ` : ""}
   <table>
     <thead>
       <tr>
