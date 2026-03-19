@@ -45,6 +45,8 @@ import {
   ClipboardList,
   Ban,
   AlertTriangle,
+  BarChart3,
+  CreditCard,
 } from "lucide-react";
 
 type CashConfig = {
@@ -174,36 +176,61 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
   );
 }
 
-function printClosingSummary(shift: CashShift, movements: CashMovement[]) {
+function printClosingSummary(
+  shift: CashShift,
+  movements: CashMovement[],
+  efectivoSistema: number,
+  efectivoContado: number
+) {
+  const activos = movements.filter(m => !m.anulado);
+  const anulados = movements.filter(m => m.anulado);
   const summary = buildSummaryFromMovements(movements);
   const totalGeneral = Object.values(summary).reduce((s, v) => s + v.total, 0);
   const areaLabel = AREA_LABEL_MAP[shift.area] || shift.area;
+  const diferencia = efectivoContado - efectivoSistema;
+
+  const anulSection = anulados.length > 0 ? `
+<h2 style="margin-top:24px">Movimientos Anulados (${anulados.length})</h2>
+<table><thead><tr><th>Hora</th><th>Descripción</th><th>Método</th><th>Monto</th><th>Motivo anulación</th></tr></thead><tbody>
+${anulados.map(m => `<tr style="color:#999;text-decoration:line-through"><td>${formatTime(m.createdAt)}</td><td>${m.description || (m as any).sourceLabel || "-"}</td><td>${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td><td>${formatCurrency(Math.abs(parseFloat(String(m.amount))))}</td><td>${(m as any).motivoAnulacion || "-"}</td></tr>`).join("")}
+</tbody></table>` : "";
+
+  const diferenciaSection = `
+<div style="margin-top:16px;padding:12px;border:2px solid ${Math.abs(diferencia) > 0 ? "#e53e3e" : "#38a169"};border-radius:6px;background:${Math.abs(diferencia) > 0 ? "#fff5f5" : "#f0fff4"}">
+  <p><strong>Efectivo sistema:</strong> ${formatCurrency(efectivoSistema)}</p>
+  <p><strong>Efectivo contado:</strong> ${formatCurrency(efectivoContado)}</p>
+  <p style="font-size:16px;font-weight:bold;color:${diferencia !== 0 ? "#e53e3e" : "#38a169"}">
+    Diferencia: ${diferencia > 0 ? "+" : ""}${formatCurrency(diferencia)}
+  </p>
+</div>`;
 
   const html = `<!DOCTYPE html><html><head><title>Cierre de Turno - ${areaLabel}</title>
-<style>body{font-family:Arial,sans-serif;padding:20px;max-width:600px;margin:0 auto}
+<style>body{font-family:Arial,sans-serif;padding:20px;max-width:650px;margin:0 auto}
 table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left}
-th{background:#f5f5f5}.total{font-weight:bold;background:#eee}h1{font-size:18px}h2{font-size:14px;color:#666}</style>
+th{background:#f5f5f5}.total{font-weight:bold;background:#eee}h1{font-size:18px}h2{font-size:14px;color:#555;margin-top:20px}
+.footer{text-align:center;margin-top:24px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:8px}</style>
 </head><body>
-<h1>Cierre de Turno - ${areaLabel}</h1>
-<h2>Turno #${shift.shiftNumber}</h2>
-<p><strong>Abierto por:</strong> ${shift.openedBy} - ${formatTime(shift.openedAt)}</p>
-<p><strong>Cerrado por:</strong> ${shift.closedBy || "-"} - ${shift.closedAt ? formatTime(shift.closedAt) : "-"}</p>
+<h1>Cierre de Turno — ${areaLabel}</h1>
+<p><strong>Turno #${shift.shiftNumber}</strong></p>
+<p><strong>Abierto por:</strong> ${shift.openedBy} — ${formatTime(shift.openedAt)}</p>
+<p><strong>Cerrado por:</strong> ${shift.closedBy || "-"} — ${shift.closedAt ? formatTime(shift.closedAt) : "-"}</p>
+${diferenciaSection}
+<h2>Resumen por Método de Pago</h2>
 <table><thead><tr><th>Método</th><th>Transacciones</th><th>Total</th></tr></thead><tbody>
 ${Object.entries(summary).map(([m, d]) => `<tr><td>${PAYMENT_METHOD_MAP[m] || m}</td><td>${d.count}</td><td>${formatCurrency(d.total)}</td></tr>`).join("")}
 <tr class="total"><td>TOTAL GENERAL</td><td>${Object.values(summary).reduce((s, v) => s + v.count, 0)}</td><td>${formatCurrency(totalGeneral)}</td></tr>
 </tbody></table>
-<h2>Movimientos</h2>
+<h2>Movimientos del Turno (${activos.length} activos)</h2>
 <table><thead><tr><th>Hora</th><th>Descripción</th><th>Método</th><th>Tipo</th><th>Monto</th></tr></thead><tbody>
-${movements.map(m => `<tr><td>${formatTime(m.createdAt)}</td><td>${m.description || m.sourceLabel || "-"}</td><td>${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td><td>${m.movementType === "income" ? "Ingreso" : "Egreso"}</td><td>${formatCurrency(m.amount)}</td></tr>`).join("")}
+${activos.map(m => `<tr><td>${formatTime(m.createdAt)}</td><td>${m.description || (m as any).sourceLabel || "-"}</td><td>${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td><td>${m.movementType === "income" ? "Ingreso" : "Egreso"}</td><td>${formatCurrency(parseFloat(String(m.amount)))}</td></tr>`).join("")}
 </tbody></table>
+${anulSection}
+<div class="footer">Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites & Towers</div>
+<script>window.onload=function(){window.print();}<\/script>
 </body></html>`;
 
   const w = window.open("", "_blank");
-  if (w) {
-    w.document.write(html);
-    w.document.close();
-    w.print();
-  }
+  if (w) { w.document.write(html); w.document.close(); }
 }
 
 function AreaTab({ area, config }: { area: string; config: CashConfig }) {
@@ -230,7 +257,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [movMethod, setMovMethod] = useState("cash");
   const [movAmount, setMovAmount] = useState("");
   const [movReceipt, setMovReceipt] = useState("");
-  const [closingSummaryData, setClosingSummaryData] = useState<{ shift: CashShift; movements: CashMovement[]; turnoNuevo?: CashShift } | null>(null);
+  const [closingSummaryData, setClosingSummaryData] = useState<{ shift: CashShift; movements: CashMovement[]; turnoNuevo?: CashShift; efectivoContado: number; efectivoSistema: number } | null>(null);
 
   const efectivoContado =
     billetes1000 * 1000 + billetes500 * 500 + billetes200 * 200 +
@@ -360,7 +387,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       });
     },
     onSuccess: (result: any) => {
-      setClosingSummaryData({ shift: { ...currentShift!, closedBy, closedAt: new Date().toISOString() }, movements, turnoNuevo: result.turnoNuevo });
+      const sysEfect = movements.filter(m => !m.anulado && m.paymentMethod === "cash").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+      setClosingSummaryData({ shift: { ...currentShift!, closedBy, closedAt: new Date().toISOString() }, movements, turnoNuevo: result.turnoNuevo, efectivoContado, efectivoSistema: sysEfect });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/summary"] });
@@ -829,7 +857,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
 
               <DialogFooter>
                 <Button
-                  onClick={() => printClosingSummary(closingSummaryData.shift, closingSummaryData.movements)}
+                  onClick={() => printClosingSummary(closingSummaryData.shift, closingSummaryData.movements, closingSummaryData.efectivoSistema, closingSummaryData.efectivoContado)}
                   data-testid={`btn-print-closing-${area}`}
                 >
                   <Printer className="h-4 w-4 mr-2" />
@@ -1102,6 +1130,173 @@ function HistorialTab() {
   );
 }
 
+const MODULO_LABEL: Record<string, string> = {
+  reserva: "Recepción",
+  spa: "SPA",
+  eventos: "Eventos",
+  restaurant: "Restaurante",
+};
+
+function printResumenDia(fecha: string, data: { movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }) {
+  const { movimientos, totalPorMetodo, porModulo, totalGeneral } = data;
+  const html = `<!DOCTYPE html><html><head><title>Resumen del Día — ${fecha}</title>
+<style>body{font-family:Arial,sans-serif;padding:20px;max-width:700px;margin:0 auto}
+table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left}
+th{background:#f5f5f5}.total{font-weight:bold;background:#eee}h1{font-size:18px}h2{font-size:14px;color:#555;margin-top:20px}
+.footer{text-align:center;margin-top:24px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:8px}</style>
+</head><body>
+<h1>Resumen de Ingresos del Día — ${fecha}</h1>
+<h2>Por Área</h2>
+<table><thead><tr><th>Área</th><th>Total</th></tr></thead><tbody>
+${Object.entries(porModulo).map(([m, v]) => `<tr><td>${MODULO_LABEL[m] || m}</td><td>${formatCurrency(v as number)}</td></tr>`).join("")}
+<tr class="total"><td>TOTAL GENERAL</td><td>${formatCurrency(totalGeneral)}</td></tr>
+</tbody></table>
+<h2>Por Método de Pago</h2>
+<table><thead><tr><th>Método</th><th>Total</th></tr></thead><tbody>
+${Object.entries(totalPorMetodo).map(([m, v]) => `<tr><td>${PAYMENT_METHOD_MAP[m] || m}</td><td>${formatCurrency(v as number)}</td></tr>`).join("")}
+<tr class="total"><td>TOTAL</td><td>${formatCurrency(totalGeneral)}</td></tr>
+</tbody></table>
+<h2>Detalle de Movimientos (${movimientos.length})</h2>
+<table><thead><tr><th>Área</th><th>Descripción</th><th>Referencia</th><th>Método</th><th>Monto</th></tr></thead><tbody>
+${movimientos.map(m => `<tr><td>${MODULO_LABEL[m.modulo] || m.modulo}</td><td>${m.descripcion || "-"}</td><td>${m.referencia || "-"}</td><td>${PAYMENT_METHOD_MAP[m.metodo] || m.metodo}</td><td>${formatCurrency(m.monto)}</td></tr>`).join("")}
+</tbody></table>
+<div class="footer">Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites & Towers</div>
+<script>window.onload=function(){window.print();}<\/script>
+</body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+function ResumenDiaTab() {
+  const today = new Date().toISOString().split("T")[0];
+  const [fecha, setFecha] = useState(today);
+  const { data, isLoading } = useQuery<{ fecha: string; movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }>({
+    queryKey: ["/api/reports/caja-unificada", fecha],
+    queryFn: async () => {
+      const res = await fetch(`/api/reports/caja-unificada?fecha=${fecha}`, { credentials: "include" });
+      return res.json();
+    },
+  });
+
+  const modulos = ["reserva", "spa", "eventos", "restaurant"];
+
+  return (
+    <div className="space-y-6 mt-4">
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium">Fecha:</label>
+          <Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-44" data-testid="input-resumen-dia-fecha" />
+        </div>
+        {data && (
+          <Button variant="outline" size="sm" onClick={() => printResumenDia(fecha, data)} data-testid="btn-print-resumen-dia">
+            <Printer className="h-4 w-4 mr-2" />
+            Imprimir
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}
+        </div>
+      ) : data ? (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {modulos.map(mod => {
+              const total = data.porModulo?.[mod] || 0;
+              return (
+                <Card key={mod} data-testid={`card-resumen-${mod}`}>
+                  <CardContent className="pt-4 pb-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CreditCard className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">{MODULO_LABEL[mod]}</span>
+                    </div>
+                    <p className="text-2xl font-bold">{formatCurrency(total)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {data.movimientos.filter(m => m.modulo === mod).length} movimientos
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Resumen por Método de Pago
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Método</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Object.entries(data.totalPorMetodo || {}).map(([m, v]) => (
+                    <TableRow key={m}>
+                      <TableCell>{PAYMENT_METHOD_MAP[m] || m}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(v as number)}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="font-bold border-t-2">
+                    <TableCell>TOTAL GENERAL</TableCell>
+                    <TableCell className="text-right">{formatCurrency(data.totalGeneral)}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {data.movimientos.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Detalle de Movimientos ({data.movimientos.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Área</TableHead>
+                      <TableHead>Descripción</TableHead>
+                      <TableHead>Referencia</TableHead>
+                      <TableHead>Método</TableHead>
+                      <TableHead className="text-right">Monto</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.movimientos.map((m, i) => (
+                      <TableRow key={i} data-testid={`row-resumen-mov-${i}`}>
+                        <TableCell>
+                          <Badge variant="secondary">{MODULO_LABEL[m.modulo] || m.modulo}</Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">{m.descripcion || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs">{m.referencia || "-"}</TableCell>
+                        <TableCell>{PAYMENT_METHOD_MAP[m.metodo] || m.metodo}</TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(m.monto)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {data.movimientos.length === 0 && (
+            <div className="text-center py-12 text-muted-foreground" data-testid="text-resumen-empty">
+              No hay movimientos registrados para el {fecha}
+            </div>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export default function CashRegister() {
   const { data: configs, isLoading } = useQuery<CashConfig[]>({
     queryKey: ["/api/cash/configs"],
@@ -1141,6 +1336,10 @@ export default function CashRegister() {
           <TabsTrigger value="historial" data-testid="tab-historial">
             Historial
           </TabsTrigger>
+          <TabsTrigger value="resumen-dia" data-testid="tab-resumen-dia">
+            <BarChart3 className="h-4 w-4 mr-1" />
+            Resumen del Día
+          </TabsTrigger>
         </TabsList>
 
         {activeConfigs.map((c) => (
@@ -1151,6 +1350,10 @@ export default function CashRegister() {
 
         <TabsContent value="historial">
           <HistorialTab />
+        </TabsContent>
+
+        <TabsContent value="resumen-dia">
+          <ResumenDiaTab />
         </TabsContent>
       </Tabs>
     </div>

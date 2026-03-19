@@ -854,15 +854,19 @@ export async function registerRoutes(
       todos.push(...(evtRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
 
       const porMetodo: Record<string, number> = {};
+      const porModulo: Record<string, number> = {};
       for (const p of todos) {
         const m = (p as any).metodo || "otros";
         porMetodo[m] = (porMetodo[m] || 0) + parseFloat((p as any).monto || "0");
+        const mod = (p as any).modulo || "otros";
+        porModulo[mod] = (porModulo[mod] || 0) + parseFloat((p as any).monto || "0");
       }
 
       res.json({
         fecha,
         movimientos: todos,
         totalPorMetodo: porMetodo,
+        porModulo,
         totalGeneral: todos.reduce((s, p) => s + parseFloat((p as any).monto || "0"), 0),
       });
     } catch (e: any) {
