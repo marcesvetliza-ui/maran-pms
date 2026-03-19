@@ -81,6 +81,12 @@ import type {
   GroupCharge,
 } from "@shared/schema";
 
+const fmtDate = (d: string) => {
+  if (!d) return "-";
+  const [y, m, dd] = d.split("-").map(Number);
+  return new Date(y, m - 1, dd).toLocaleDateString("es-AR");
+};
+
 function GroupStatusBadge({ status }: { status: GroupStatus }) {
   const statusConfig: Record<GroupStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
     tentative: { label: "Tentativo", variant: "outline" },
@@ -900,12 +906,6 @@ export default function GroupDetailPage() {
       printWindow.document.write(html);
       printWindow.document.close();
     }
-  };
-
-  const fmtDate = (d: string) => {
-    if (!d) return "-";
-    const [y, m, dd] = d.split("-").map(Number);
-    return new Date(y, m - 1, dd).toLocaleDateString("es-AR");
   };
 
   const formatDate = (dateStr: string) => {
