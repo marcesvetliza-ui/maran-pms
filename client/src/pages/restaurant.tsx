@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "@/components/ui/command";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Switch } from "@/components/ui/switch";
@@ -318,6 +320,8 @@ export default function RestaurantPage() {
   const [newIngredientUnit, setNewIngredientUnit] = useState("g");
   const [newIngredientCost, setNewIngredientCost] = useState("");
   const [newIngredientInventoryId, setNewIngredientInventoryId] = useState("");
+  const [ingredientComboOpen, setIngredientComboOpen] = useState(false);
+  const [ingredientSearch, setIngredientSearch] = useState("");
   const [newTableNumber, setNewTableNumber] = useState("");
   const [newTableCapacity, setNewTableCapacity] = useState(4);
   const [newTableShape, setNewTableShape] = useState("square");
@@ -805,6 +809,8 @@ export default function RestaurantPage() {
       setNewIngredientUnit("g");
       setNewIngredientCost("");
       setNewIngredientInventoryId("");
+      setIngredientSearch("");
+      setIngredientComboOpen(false);
       toast({ title: "Ingrediente agregado" });
     },
   });
@@ -3730,83 +3736,105 @@ export default function RestaurantPage() {
             <div className="border-t pt-4 space-y-3">
               <Label className="block font-medium">Agregar Ingrediente</Label>
 
+              {/* Buscador de artículo del inventario */}
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Artículo del inventario (opcional — vincula para descuento automático)</Label>
-                <Select
-                  value={newIngredientInventoryId || "__none__"}
-                  onValueChange={(v) => {
-                    const val = v === "__none__" ? "" : v;
-                    setNewIngredientInventoryId(val);
-                    if (val) {
-                      const item = restaurantInventoryItems.find((i: any) => i.id === val);
-                      if (item) {
-                        setNewIngredientName(item.name);
-                        setNewIngredientUnit(item.unit);
-                        if (item.costPrice) setNewIngredientCost(item.costPrice);
-                      }
-                    }
-                  }}
-                  data-testid="select-ingredient-inventory"
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar del inventario..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sin vínculo (solo costeo)</SelectItem>
-                    {restaurantInventoryItems.map((item: any) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name}
-                        {item.sku ? ` [${item.sku}]` : ""}
-                        {" — "}{parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {newIngredientInventoryId ? (
-                  <p className="text-xs text-green-600">✓ Vinculado — el stock se descontará automáticamente al cerrar la orden</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Sin vínculo — solo para costeo, no descuenta stock</p>
-                )}
+                <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
+                <Popover open={ingredientComboOpen} onOpenChange={setIngredientComboOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-between font-normal"
+                      data-testid="btn-ingredient-combo"
+                    >
+                      <span className={newIngredientName ? "" : "text-muted-foreground"}>
+                        {newIngredientName || "Buscar artículo..."}
+                      </span>
+                      <svg className="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="p-0 w-[420px]" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Escribí el nombre del artículo..."
+                        value={ingredientSearch}
+                        onValueChange={setIngredientSearch}
+                        data-testid="input-ingredient-search"
+                      />
+                      <CommandList className="max-h-60">
+                        <CommandEmpty>
+                          <p className="text-sm text-muted-foreground py-2">No se encontraron artículos en el inventario</p>
+                        </CommandEmpty>
+                        {restaurantInventoryItems
+                          .filter((i: any) =>
+                            !ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
+                            (i.sku && i.sku.toLowerCase().includes(ingredientSearch.toLowerCase()))
+                          )
+                          .map((item: any) => (
+                            <CommandItem
+                              key={item.id}
+                              value={item.name}
+                              onSelect={() => {
+                                setNewIngredientInventoryId(item.id);
+                                setNewIngredientName(item.name);
+                                setNewIngredientUnit(item.unit);
+                                setNewIngredientCost(item.costPrice || "0");
+                                setIngredientSearch("");
+                                setIngredientComboOpen(false);
+                              }}
+                              data-testid={`combo-item-${item.id}`}
+                            >
+                              <div className="flex flex-col py-0.5">
+                                <span className="font-medium">{item.name}{item.sku ? <span className="text-muted-foreground font-normal"> [{item.sku}]</span> : ""}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  Stock: {parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
+                                  {parseFloat(item.costPrice || "0") > 0
+                                    ? ` — Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}`
+                                    : " — Sin precio cargado"}
+                                </span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {newIngredientInventoryId
+                  ? <p className="text-xs text-green-600">✓ Vinculado — el stock se descontará al cerrar la orden</p>
+                  : <p className="text-xs text-muted-foreground">Seleccioná un artículo para vincular el stock automáticamente</p>
+                }
               </div>
 
-              <div className="grid grid-cols-5 gap-2">
-                <Input
-                  placeholder="Nombre"
-                  value={newIngredientName}
-                  onChange={(e) => setNewIngredientName(e.target.value)}
-                  className="col-span-2"
-                  data-testid="input-ingredient-name"
-                />
-                <Input
-                  type="number"
-                  placeholder="Cant."
-                  step="0.001"
-                  value={newIngredientQty}
-                  onChange={(e) => setNewIngredientQty(e.target.value)}
-                  data-testid="input-ingredient-qty"
-                />
-                <Select value={newIngredientUnit} onValueChange={setNewIngredientUnit}>
-                  <SelectTrigger data-testid="select-ingredient-unit">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="g">g</SelectItem>
-                    <SelectItem value="kg">kg</SelectItem>
-                    <SelectItem value="ml">ml</SelectItem>
-                    <SelectItem value="l">l</SelectItem>
-                    <SelectItem value="unidad">unidad</SelectItem>
-                    <SelectItem value="porcion">porcion</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  type="number"
-                  placeholder="$/u"
-                  step="0.01"
-                  value={newIngredientCost}
-                  onChange={(e) => setNewIngredientCost(e.target.value)}
-                  data-testid="input-ingredient-cost"
-                />
-              </div>
+              {/* Cantidad + Unidad (auto) + Precio unit. (auto) */}
+              {newIngredientName && (
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">Cantidad *</Label>
+                    <Input
+                      type="number"
+                      placeholder="Ej: 2"
+                      step="0.001"
+                      value={newIngredientQty}
+                      onChange={(e) => setNewIngredientQty(e.target.value)}
+                      data-testid="input-ingredient-qty"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Unidad</Label>
+                    <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm font-medium min-w-14 justify-center">
+                      {newIngredientUnit}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Costo unit.</Label>
+                    <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm min-w-28">
+                      {parseFloat(newIngredientCost || "0") > 0
+                        ? `$${parseFloat(newIngredientCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+                        : <span className="text-muted-foreground text-xs italic">sin precio</span>
+                      }
+                    </div>
+                  </div>
+                </div>
+              )}
               <Button
                 size="sm"
                 onClick={() => {
