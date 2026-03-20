@@ -1159,15 +1159,22 @@ export async function registerRoutes(
 
   app.patch("/api/cash/movements/:id/anular", requireAuth, async (req, res) => {
     try {
-      const { motivoAnulacion, anuladoPor } = req.body;
+      const { motivoAnulacion, anuladoPor, forceAdmin } = req.body;
       if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "Motivo requerido" });
       const [mov] = await db.select().from(cashMovements).where(eq(cashMovements.id, req.params.id));
       if (!mov) return res.status(404).json({ error: "Movimiento no encontrado" });
       if (mov.anulado) return res.status(400).json({ error: "Ya está anulado" });
-      if (mov.shiftId) {
+      if (mov.shiftId && !forceAdmin) {
         const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, mov.shiftId));
         if (shift && shift.status === "closed") {
           return res.status(403).json({ error: "No se puede anular movimientos de un turno cerrado" });
+        }
+      }
+      // forceAdmin solo lo pueden usar admin/manager
+      if (forceAdmin) {
+        const user = req.user as any;
+        if (!user || !["admin", "manager"].includes(user.role)) {
+          return res.status(403).json({ error: "Solo administradores pueden forzar anulación en turnos cerrados" });
         }
       }
       await db.update(cashMovements)

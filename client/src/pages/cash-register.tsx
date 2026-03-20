@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAuth } from "@/App";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -234,6 +235,8 @@ ${anulSection}
 }
 
 function AreaTab({ area, config }: { area: string; config: CashConfig }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "manager";
   const { toast } = useToast();
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
   const [closeShiftDialog, setCloseShiftDialog] = useState(false);
@@ -365,14 +368,16 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
 
   const [anularMovTarget, setAnularMovTarget] = useState<number | null>(null);
   const [anularMovMotivo, setAnularMovMotivo] = useState("");
+  const [anularMovForce, setAnularMovForce] = useState(false);
 
   const anularMovementMutation = useMutation({
-    mutationFn: async ({ id, motivo }: { id: number; motivo: string }) =>
-      apiRequest("PATCH", `/api/cash/movements/${id}/anular`, { motivoAnulacion: motivo }),
+    mutationFn: async ({ id, motivo, force }: { id: number; motivo: string; force?: boolean }) =>
+      apiRequest("PATCH", `/api/cash/movements/${id}/anular`, { motivoAnulacion: motivo || "Corrección admin", forceAdmin: force }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
       setAnularMovTarget(null);
       setAnularMovMotivo("");
+      setAnularMovForce(false);
       toast({ title: "Movimiento anulado", description: "El movimiento fue anulado correctamente" });
     },
     onError: (err: any) => {
@@ -555,13 +560,13 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                         </TableCell>
                         <TableCell className={`text-right font-medium ${m.anulado ? "line-through text-muted-foreground" : ""}`}>{formatCurrency(m.amount)}</TableCell>
                         <TableCell className="text-right">
-                          {!m.anulado && m.sourceType === "manual" && (
+                          {!m.anulado && (m.sourceType === "manual" || isAdmin) && (
                             <Button
                               size="icon"
                               variant="ghost"
                               className="h-6 w-6"
-                              onClick={() => { setAnularMovTarget(m.id); setAnularMovMotivo(""); }}
-                              title="Anular movimiento"
+                              onClick={() => { setAnularMovTarget(m.id); setAnularMovMotivo(""); setAnularMovForce(false); }}
+                              title={m.sourceType !== "manual" ? "Anular movimiento (admin)" : "Anular movimiento"}
                               data-testid={`button-anular-movement-${m.id}`}
                             >
                               <Ban className="h-3 w-3 text-destructive" />
@@ -649,7 +654,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="income">Ingreso</SelectItem>
-                  <SelectItem value="expense">Egreso</SelectItem>
+                  {isAdmin && <SelectItem value="expense">Egreso (solo admin)</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -906,7 +911,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
 
       {/* Anular Movimiento Dialog */}
       <Dialog open={anularMovTarget !== null} onOpenChange={(open) => {
-        if (!open) { setAnularMovTarget(null); setAnularMovMotivo(""); }
+        if (!open) { setAnularMovTarget(null); setAnularMovMotivo(""); setAnularMovForce(false); }
       }}>
         <DialogContent className="w-[95vw] max-w-[400px]">
           <DialogHeader>
@@ -928,16 +933,30 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               rows={3}
               data-testid="input-motivo-anular-mov"
             />
+            {isAdmin && (
+              <div className="flex items-center gap-2 p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                <input
+                  type="checkbox"
+                  id="force-anular-check"
+                  checked={anularMovForce}
+                  onChange={(e) => setAnularMovForce(e.target.checked)}
+                  data-testid="check-force-anular"
+                />
+                <Label htmlFor="force-anular-check" className="text-amber-800 dark:text-amber-300 text-sm cursor-pointer">
+                  Forzar anulación (omitir restricción de turno cerrado)
+                </Label>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setAnularMovTarget(null); setAnularMovMotivo(""); }}>
+            <Button variant="outline" onClick={() => { setAnularMovTarget(null); setAnularMovMotivo(""); setAnularMovForce(false); }}>
               Cancelar
             </Button>
             <Button
               variant="destructive"
               onClick={() => {
                 if (anularMovTarget === null) return;
-                anularMovementMutation.mutate({ id: anularMovTarget, motivo: anularMovMotivo });
+                anularMovementMutation.mutate({ id: anularMovTarget, motivo: anularMovMotivo, force: anularMovForce });
               }}
               disabled={anularMovementMutation.isPending}
               data-testid="button-confirm-anular-mov"
