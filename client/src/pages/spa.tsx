@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator, SelectLabel, SelectGroup } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
@@ -336,22 +336,14 @@ export default function SpaPage() {
   const { data: spaInventoryItems = [] } = useQuery<InventoryItemWithDetails[]>({
     queryKey: ["/api/inventory/items", "spa"],
     queryFn: async () => {
-      const response = await fetch("/api/inventory/items?area=spa");
+      const response = await fetch("/api/inventory/items?area=spa", { credentials: "include" });
       if (!response.ok) throw new Error("Error");
       return response.json();
     },
-    enabled: activeTab === "insumos",
+    enabled: activeTab === "insumos" || (isTreatmentDialogOpen && !!editingTreatment),
   });
 
-  const { data: allInventoryItems = [] } = useQuery<InventoryItemWithDetails[]>({
-    queryKey: ["/api/inventory/items", "all-for-spa"],
-    queryFn: async () => {
-      const response = await fetch("/api/inventory/items");
-      if (!response.ok) throw new Error("Error");
-      return response.json();
-    },
-    enabled: isTreatmentDialogOpen && !!editingTreatment,
-  });
+  const allInventoryItems = spaInventoryItems;
 
   const activeCabins = cabins.filter((c) => c.isActive === "true");
 
@@ -637,6 +629,40 @@ export default function SpaPage() {
     },
     onError: () => toast({ title: "Error al eliminar insumo", variant: "destructive" }),
   });
+
+  const [isCreatingProfesional, setIsCreatingProfesional] = useState(false);
+
+  const handleAddSupply = async () => {
+    if (!editingTreatment || !supplyQty) return;
+
+    if (supplyItemId === "__profesional__") {
+      setIsCreatingProfesional(true);
+      try {
+        let profItem = spaInventoryItems.find((i: any) => i.name === "Profesional");
+        if (!profItem) {
+          const spaCategory = spaInventoryItems.find((i: any) => i.category)?.category;
+          const res = await apiRequest("POST", "/api/inventory/items", {
+            name: "Profesional",
+            unit: "hora",
+            costPrice: "0",
+            currentStock: "0",
+            minStock: "0",
+            ...(spaCategory ? { categoryId: spaCategory.id } : {}),
+          });
+          profItem = await res.json();
+          queryClient.invalidateQueries({ queryKey: ["/api/inventory/items", "spa"] });
+        }
+        addSupplyMutation.mutate({ inventoryItemId: (profItem as any).id, quantity: supplyQty, unit: "hora" });
+      } catch {
+        toast({ title: "Error al crear el ítem Profesional", variant: "destructive" });
+      } finally {
+        setIsCreatingProfesional(false);
+      }
+    } else {
+      const item = allInventoryItems.find((i: any) => i.id === supplyItemId);
+      addSupplyMutation.mutate({ inventoryItemId: supplyItemId, quantity: supplyQty, unit: item?.unit || "" });
+    }
+  };
 
   const handleNewTreatment = () => {
     setEditingTreatment(null);
@@ -2095,32 +2121,54 @@ export default function SpaPage() {
                 )}
                 <div className="flex items-end gap-2 pt-1">
                   <div className="flex-1">
-                    <label className="text-xs text-muted-foreground">Artículo</label>
+                    <label className="text-xs text-muted-foreground">Artículo (solo SPA)</label>
                     <Select value={supplyItemId} onValueChange={(v) => {
                       setSupplyItemId(v);
-                      const item = allInventoryItems.find((i: any) => i.id === v);
-                      if (item) setSupplyQty("1");
+                      if (v !== "__profesional__") {
+                        const item = allInventoryItems.find((i: any) => i.id === v);
+                        if (item) setSupplyQty("1");
+                      } else {
+                        setSupplyQty("1");
+                      }
                     }} data-testid="select-supply-item">
                       <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
                       <SelectContent>
-                        {allInventoryItems.map((item: any) => (
-                          <SelectItem key={item.id} value={item.id}>{item.name} ({item.unit})</SelectItem>
-                        ))}
+                        <SelectGroup>
+                          <SelectLabel className="text-xs text-amber-600">Honorarios</SelectLabel>
+                          <SelectItem value="__profesional__">⭐ Profesional</SelectItem>
+                        </SelectGroup>
+                        <SelectSeparator />
+                        <SelectGroup>
+                          <SelectLabel className="text-xs">Insumos SPA</SelectLabel>
+                          {allInventoryItems.map((item: any) => (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.name} ({item.unit})
+                              {parseFloat(item.costPrice || "0") > 0 ? ` — $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : ""}
+                            </SelectItem>
+                          ))}
+                          {allInventoryItems.length === 0 && (
+                            <SelectItem value="__empty__" disabled>Sin artículos SPA en inventario</SelectItem>
+                          )}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="w-24">
-                    <label className="text-xs text-muted-foreground">Cantidad</label>
+                    <label className="text-xs text-muted-foreground">{supplyItemId === "__profesional__" ? "Horas" : "Cantidad"}</label>
                     <Input type="number" step="0.001" min="0.001" value={supplyQty} onChange={e => setSupplyQty(e.target.value)} className="h-8 text-sm" data-testid="input-supply-qty" />
                   </div>
-                  <Button type="button" size="sm" className="h-8" disabled={!supplyItemId || !supplyQty || addSupplyMutation.isPending}
-                    onClick={() => {
-                      const item = allInventoryItems.find((i: any) => i.id === supplyItemId);
-                      addSupplyMutation.mutate({ inventoryItemId: supplyItemId, quantity: supplyQty, unit: item?.unit || "" });
-                    }} data-testid="btn-add-supply">
-                    <Plus className="h-3 w-3 mr-1" />Agregar
+                  <Button type="button" size="sm" className="h-8" disabled={!supplyItemId || !supplyQty || addSupplyMutation.isPending || isCreatingProfesional}
+                    onClick={handleAddSupply}
+                    data-testid="btn-add-supply">
+                    {(addSupplyMutation.isPending || isCreatingProfesional) ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Plus className="h-3 w-3 mr-1" />}
+                    Agregar
                   </Button>
                 </div>
+                {supplyItemId === "__profesional__" && (
+                  <p className="text-xs text-amber-600">
+                    ⭐ El ítem "Profesional" se crea automáticamente con costo $0. Editá su precio desde Inventario cuando lo tengas.
+                  </p>
+                )}
               </div>
             )}
             {!editingTreatment && (
