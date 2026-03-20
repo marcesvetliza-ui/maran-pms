@@ -50,6 +50,8 @@ import {
   Pencil,
   Minus,
   ClipboardList,
+  ChevronLeft,
+  CheckCircle2,
 } from "lucide-react";
 
 type RestaurantArea = {
@@ -279,7 +281,7 @@ export default function RestaurantPage() {
   const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
   const [currentOrder, setCurrentOrder] = useState<RestaurantOrder | null>(null);
   const [newCovers, setNewCovers] = useState(2);
-  const [orderView, setOrderView] = useState<"folio" | "menu" | "delete" | "comanda">("menu");
+  const [orderView, setOrderView] = useState<"folio" | "menu" | "delete" | "comanda" | "review">("menu");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [pendingItem, setPendingItem] = useState<MenuItem | null>(null);
   const [itemNotes, setItemNotes] = useState("");
@@ -2158,6 +2160,60 @@ export default function RestaurantPage() {
             </div>
           )}
 
+          {orderView === "review" && (
+            <div className="flex-1 overflow-y-auto space-y-4">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-lg">Confirmar Comanda</h3>
+              </div>
+              {getOrderItems().length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">No hay items en este pedido</p>
+              ) : (
+                <div className="space-y-3">
+                  {[1, 2, 3].map(course => {
+                    const courseItems = getOrderItems().filter(i => (i.course || 1) === course);
+                    if (courseItems.length === 0) return null;
+                    const nullItems = course === 1 ? getOrderItems().filter(i => i.course === null) : [];
+                    const allItems = course === 1 ? [...courseItems, ...nullItems] : courseItems;
+                    if (allItems.length === 0) return null;
+                    return (
+                      <div key={course} className="rounded-lg border overflow-hidden">
+                        <div className="bg-muted/60 px-3 py-1.5 flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs font-semibold">{courseLabels[course]}</Badge>
+                        </div>
+                        <div className="divide-y">
+                          {allItems.map((item) => (
+                            <div key={item.id} className="flex items-center justify-between px-3 py-2">
+                              <div>
+                                <span className="font-medium text-sm">
+                                  {item.notes?.startsWith("[") ? item.notes.match(/^\[(.+?)\]/)?.[1] || item.menuItem?.name || "Item" : item.menuItem?.name || "Item"}
+                                </span>
+                                {item.notes && !item.notes.startsWith("[") && (
+                                  <span className="text-xs text-muted-foreground ml-1 italic">({item.notes})</span>
+                                )}
+                                {item.notes?.startsWith("[") && item.notes.replace(/^\[.+?\]\s*/, "") && (
+                                  <span className="text-xs text-muted-foreground ml-1 italic">({item.notes.replace(/^\[.+?\]\s*/, "")})</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-sm text-muted-foreground">x{item.quantity}</span>
+                                <span className="text-sm font-medium">${(parseFloat(item.price || "0") * item.quantity).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center justify-between pt-2 border-t text-base font-bold">
+                    <span>Total</span>
+                    <span>${parseFloat(getUpdatedOrder()?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {orderView === "delete" && (
             <div className="flex-1 overflow-y-auto space-y-4">
               <h3 className="font-semibold text-lg">Eliminar Items</h3>
@@ -2445,28 +2501,60 @@ export default function RestaurantPage() {
           )}
 
           <DialogFooter className="flex-col sm:flex-row gap-2 border-t pt-4">
-            <Button
-              variant="destructive"
-              size="lg"
-              className="w-full sm:w-auto"
-              onClick={() => {
-                setIsOrderDialogOpen(false);
-                setCloseReceiptType("ticket");
-                setClosePaymentMethod("efectivo");
-                setIsCloseDialogOpen(true);
-              }}
-              data-testid="button-close-table"
-            >
-              <CreditCard className="h-5 w-5 mr-2" />
-              Cerrar Mesa
-            </Button>
-            <Button
-              onClick={() => setIsOrderDialogOpen(false)}
-              className="w-full sm:w-auto"
-              data-testid="button-done"
-            >
-              Listo
-            </Button>
+            {orderView === "review" ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-full sm:w-auto"
+                  onClick={() => setOrderView("menu")}
+                  data-testid="button-review-back"
+                >
+                  <ChevronLeft className="h-5 w-5 mr-1" />
+                  Agregar más
+                </Button>
+                <Button
+                  size="lg"
+                  className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white"
+                  onClick={() => setIsOrderDialogOpen(false)}
+                  data-testid="button-send-order"
+                >
+                  <CheckCircle2 className="h-5 w-5 mr-2" />
+                  Enviar comanda
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="destructive"
+                  size="lg"
+                  className="w-full sm:w-auto"
+                  onClick={() => {
+                    setIsOrderDialogOpen(false);
+                    setCloseReceiptType("ticket");
+                    setClosePaymentMethod("efectivo");
+                    setIsCloseDialogOpen(true);
+                  }}
+                  data-testid="button-close-table"
+                >
+                  <CreditCard className="h-5 w-5 mr-2" />
+                  Cerrar Mesa
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (getOrderItems().length > 0) {
+                      setOrderView("review");
+                    } else {
+                      setIsOrderDialogOpen(false);
+                    }
+                  }}
+                  className="w-full sm:w-auto"
+                  data-testid="button-done"
+                >
+                  Listo
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
