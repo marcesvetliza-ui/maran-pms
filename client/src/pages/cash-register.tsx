@@ -187,46 +187,130 @@ function printClosingSummary(
   const anulados = movements.filter(m => m.anulado);
   const summary = buildSummaryFromMovements(movements);
   const totalGeneral = Object.values(summary).reduce((s, v) => s + v.total, 0);
+  const totalTx = Object.values(summary).reduce((s, v) => s + v.count, 0);
   const areaLabel = AREA_LABEL_MAP[shift.area] || shift.area;
   const diferencia = efectivoContado - efectivoSistema;
 
-  const anulSection = anulados.length > 0 ? `
-<h2 style="margin-top:24px">Movimientos Anulados (${anulados.length})</h2>
-<table><thead><tr><th>Hora</th><th>Descripción</th><th>Método</th><th>Monto</th><th>Motivo anulación</th></tr></thead><tbody>
-${anulados.map(m => `<tr style="color:#999;text-decoration:line-through"><td>${formatTime(m.createdAt)}</td><td>${m.description || (m as any).sourceLabel || "-"}</td><td>${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td><td>${formatCurrency(Math.abs(parseFloat(String(m.amount))))}</td><td>${(m as any).motivoAnulacion || "-"}</td></tr>`).join("")}
-</tbody></table>` : "";
+  // Group active movements by payment method
+  const byMethod: Record<string, CashMovement[]> = {};
+  for (const m of activos) {
+    if (!byMethod[m.paymentMethod]) byMethod[m.paymentMethod] = [];
+    byMethod[m.paymentMethod].push(m);
+  }
 
-  const diferenciaSection = `
-<div style="margin-top:16px;padding:12px;border:2px solid ${Math.abs(diferencia) > 0 ? "#e53e3e" : "#38a169"};border-radius:6px;background:${Math.abs(diferencia) > 0 ? "#fff5f5" : "#f0fff4"}">
-  <p><strong>Efectivo sistema:</strong> ${formatCurrency(efectivoSistema)}</p>
-  <p><strong>Efectivo contado:</strong> ${formatCurrency(efectivoContado)}</p>
-  <p style="font-size:16px;font-weight:bold;color:${diferencia !== 0 ? "#e53e3e" : "#38a169"}">
-    Diferencia: ${diferencia > 0 ? "+" : ""}${formatCurrency(diferencia)}
-  </p>
-</div>`;
+  const methodBoxes = Object.entries(byMethod).map(([method, movs]) => {
+    const label = PAYMENT_METHOD_MAP[method] || method;
+    const total = movs.reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+    const isEfectivo = method === "cash";
+    const borderColor = isEfectivo ? "#2b6cb0" : "#553c9a";
+    const headerBg = isEfectivo ? "#ebf8ff" : "#faf5ff";
+    const rows = movs.map(m => {
+      const amt = parseFloat(String(m.amount));
+      const esIngreso = m.movementType === "income";
+      return `<tr>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${formatTime(m.createdAt)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${m.description || (m as any).sourceLabel || "-"}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:center">
+          <span style="background:${esIngreso ? "#c6f6d5" : "#fed7d7"};color:${esIngreso ? "#276749" : "#9b2c2c"};padding:1px 6px;border-radius:3px;font-size:10px">${esIngreso ? "Ingreso" : "Egreso"}</span>
+        </td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;text-align:right;font-weight:${esIngreso ? "600" : "normal"};color:${esIngreso ? "#276749" : "#9b2c2c"}">${esIngreso ? "" : "-"}${formatCurrency(amt)}</td>
+      </tr>`;
+    }).join("");
+
+    const diferenciaEfectivo = isEfectivo ? `
+      <div style="margin-top:8px;padding:8px;background:${Math.abs(diferencia) > 0 ? "#fff5f5" : "#f0fff4"};border:1px solid ${Math.abs(diferencia) > 0 ? "#fc8181" : "#9ae6b4"};border-radius:4px">
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Sistema:</span><span>${formatCurrency(efectivoSistema)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Contado:</span><span>${formatCurrency(efectivoContado)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:${diferencia !== 0 ? "#c53030" : "#276749"};margin-top:4px">
+          <span>Diferencia:</span><span>${diferencia > 0 ? "+" : ""}${formatCurrency(diferencia)}</span>
+        </div>
+      </div>` : "";
+
+    return `
+    <div style="border:2px solid ${borderColor};border-radius:8px;margin-bottom:16px;overflow:hidden;page-break-inside:avoid">
+      <div style="background:${headerBg};padding:10px 14px;border-bottom:1px solid ${borderColor};display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:bold;font-size:14px;color:${borderColor}">${label}</span>
+        <span style="font-weight:bold;font-size:15px">${formatCurrency(total)}</span>
+      </div>
+      <div style="padding:8px 0">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:#f9f9f9">
+              <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Hora</th>
+              <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Descripción</th>
+              <th style="padding:4px 8px;font-size:10px;text-align:center;color:#888;font-weight:600;text-transform:uppercase">Tipo</th>
+              <th style="padding:4px 8px;font-size:10px;text-align:right;color:#888;font-weight:600;text-transform:uppercase">Monto</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${isEfectivo ? `<div style="padding:0 12px 12px 12px">${diferenciaEfectivo}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  const anulSection = anulados.length > 0 ? `
+<div style="border:1px solid #ccc;border-radius:6px;margin-top:8px;overflow:hidden">
+  <div style="background:#f5f5f5;padding:8px 12px;font-weight:bold;font-size:12px;color:#666">
+    Movimientos Anulados (${anulados.length})
+  </div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead><tr style="background:#fafafa">
+      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Hora</th>
+      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Descripción</th>
+      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Método</th>
+      <th style="padding:5px 8px;font-size:10px;text-align:right;border-bottom:1px solid #eee">Monto</th>
+      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Motivo</th>
+    </tr></thead>
+    <tbody>${anulados.map(m => `<tr style="color:#aaa">
+      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${formatTime(m.createdAt)}</td>
+      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${m.description || (m as any).sourceLabel || "-"}</td>
+      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0">${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td>
+      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right;text-decoration:line-through">${formatCurrency(Math.abs(parseFloat(String(m.amount))))}</td>
+      <td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">${(m as any).motivoAnulacion || "-"}</td>
+    </tr>`).join("")}</tbody>
+  </table>
+</div>` : "";
 
   const html = `<!DOCTYPE html><html><head><title>Cierre de Turno - ${areaLabel}</title>
-<style>body{font-family:Arial,sans-serif;padding:20px;max-width:650px;margin:0 auto}
-table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left}
-th{background:#f5f5f5}.total{font-weight:bold;background:#eee}h1{font-size:18px}h2{font-size:14px;color:#555;margin-top:20px}
-.footer{text-align:center;margin-top:24px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:8px}</style>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;padding:20px;max-width:680px;margin:0 auto;color:#222}
+  @media print{body{padding:10px}}
+</style>
 </head><body>
-<h1>Cierre de Turno — ${areaLabel}</h1>
-<p><strong>Turno #${shift.shiftNumber}</strong></p>
-<p><strong>Abierto por:</strong> ${shift.openedBy} — ${formatTime(shift.openedAt)}</p>
-<p><strong>Cerrado por:</strong> ${shift.closedBy || "-"} — ${shift.closedAt ? formatTime(shift.closedAt) : "-"}</p>
-${diferenciaSection}
-<h2>Resumen por Método de Pago</h2>
-<table><thead><tr><th>Método</th><th>Transacciones</th><th>Total</th></tr></thead><tbody>
-${Object.entries(summary).map(([m, d]) => `<tr><td>${PAYMENT_METHOD_MAP[m] || m}</td><td>${d.count}</td><td>${formatCurrency(d.total)}</td></tr>`).join("")}
-<tr class="total"><td>TOTAL GENERAL</td><td>${Object.values(summary).reduce((s, v) => s + v.count, 0)}</td><td>${formatCurrency(totalGeneral)}</td></tr>
-</tbody></table>
-<h2>Movimientos del Turno (${activos.length} activos)</h2>
-<table><thead><tr><th>Hora</th><th>Descripción</th><th>Método</th><th>Tipo</th><th>Monto</th></tr></thead><tbody>
-${activos.map(m => `<tr><td>${formatTime(m.createdAt)}</td><td>${m.description || (m as any).sourceLabel || "-"}</td><td>${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td><td>${m.movementType === "income" ? "Ingreso" : "Egreso"}</td><td>${formatCurrency(parseFloat(String(m.amount)))}</td></tr>`).join("")}
-</tbody></table>
+<div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #333">
+  <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Maran Suites & Towers</div>
+  <div style="font-size:20px;font-weight:bold;margin:4px 0">Cierre de Turno</div>
+  <div style="font-size:14px;color:#555">${areaLabel} — Turno #${shift.shiftNumber}</div>
+</div>
+
+<div style="display:flex;justify-content:space-between;margin-bottom:16px;font-size:12px;gap:16px">
+  <div>
+    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Abierto por</div>
+    <div><strong>${shift.openedBy || "-"}</strong> ${formatTime(shift.openedAt)}</div>
+  </div>
+  <div>
+    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Cerrado por</div>
+    <div><strong>${shift.closedBy || "-"}</strong> ${shift.closedAt ? formatTime(shift.closedAt) : "-"}</div>
+  </div>
+  <div style="text-align:right">
+    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Total general</div>
+    <div style="font-size:16px;font-weight:bold">${formatCurrency(totalGeneral)}</div>
+    <div style="color:#888;font-size:10px">${totalTx} transacciones</div>
+  </div>
+</div>
+
+<div style="font-size:12px;font-weight:600;color:#444;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #ddd">
+  Detalle por Forma de Pago
+</div>
+
+${methodBoxes}
+
 ${anulSection}
-<div class="footer">Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites & Towers</div>
+
+<div style="text-align:center;margin-top:20px;padding-top:10px;border-top:1px solid #eee;font-size:10px;color:#aaa">
+  Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites & Towers
+</div>
 <script>window.onload=function(){window.print();}<\/script>
 </body></html>`;
 
