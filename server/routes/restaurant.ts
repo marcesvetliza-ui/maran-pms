@@ -225,7 +225,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId } = req.body;
       const effectiveReservationId = reservationId || roomReservationId;
 
       let finalTotal = parseFloat(order.total || "0");
@@ -274,6 +274,24 @@ export function registerRestaurantRoutes(app: Express) {
         );
       } catch (e) {
         console.error("Error registrando movimiento de caja:", e);
+      }
+
+      // Si es cuenta corriente y hay entidad especificada, crear movimiento CC
+      if (paymentMethod === "cuenta_corriente" && ccEntityType && ccEntityId) {
+        try {
+          const today = new Date().toISOString().split("T")[0];
+          const label = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
+          await storage.createAccountMovement({
+            entityType: ccEntityType as "company" | "agency",
+            entityId: ccEntityId,
+            date: today,
+            type: "cargo",
+            description: label,
+            amount: String(finalTotal.toFixed(2)),
+          });
+        } catch (e) {
+          console.error("Error creando movimiento CC para restaurant:", e);
+        }
       }
 
       try {

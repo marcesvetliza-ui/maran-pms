@@ -358,6 +358,8 @@ export default function RestaurantPage() {
   const [reservationSearchText, setReservationSearchText] = useState("");
   const [closeBillingName, setCloseBillingName] = useState("");
   const [closeBillingCuit, setCloseBillingCuit] = useState("");
+  const [closeCcEntityType, setCloseCcEntityType] = useState<"company" | "agency">("company");
+  const [closeCcEntityId, setCloseCcEntityId] = useState("");
 
   const courseLabels: Record<number, string> = { 1: "Entradas", 2: "Platos Principales", 3: "Postres" };
   const courseShortLabels: Record<number, string> = { 1: "Entrada", 2: "Principal", 3: "Postre" };
@@ -442,6 +444,13 @@ export default function RestaurantPage() {
   const { data: restaurantInventoryItems = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/items"],
     enabled: isRecipeDialogOpen,
+  });
+
+  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/companies"],
+  });
+  const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/agencies"],
   });
 
   const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -645,7 +654,7 @@ export default function RestaurantPage() {
   });
 
   const closeOrderMutation = useMutation({
-    mutationFn: async (data: { orderId: string; receiptType: string; paymentMethod: string; discount?: number; discountType?: string; roomReservationId?: string; billingName?: string; billingCuit?: string }) => {
+    mutationFn: async (data: { orderId: string; receiptType: string; paymentMethod: string; discount?: number; discountType?: string; roomReservationId?: string; billingName?: string; billingCuit?: string; ccEntityType?: string; ccEntityId?: string }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
         receiptType: data.receiptType,
@@ -655,6 +664,8 @@ export default function RestaurantPage() {
         roomReservationId: data.roomReservationId,
         billingName: data.billingName,
         billingCuit: data.billingCuit,
+        ccEntityType: data.ccEntityType,
+        ccEntityId: data.ccEntityId,
       });
       return res.json();
     },
@@ -668,6 +679,8 @@ export default function RestaurantPage() {
       setCloseRoomId("");
       setCloseBillingName("");
       setCloseBillingCuit("");
+      setCloseCcEntityType("company");
+      setCloseCcEntityId("");
       toast({ title: "Pedido cerrado" });
     },
   });
@@ -2698,6 +2711,38 @@ export default function RestaurantPage() {
                   );
                 })()}
 
+                {/* Selector de empresa/agencia para CC */}
+                {closePaymentMethod === "cuenta_corriente" && (
+                  <div className="space-y-3 p-3 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Cuenta Corriente — ¿A quién se carga?</p>
+                    <div className="flex gap-2">
+                      <Select value={closeCcEntityType} onValueChange={(v) => { setCloseCcEntityType(v as "company" | "agency"); setCloseCcEntityId(""); }}>
+                        <SelectTrigger className="w-32" data-testid="select-cc-entity-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="company">Empresa</SelectItem>
+                          <SelectItem value="agency">Agencia</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={closeCcEntityId} onValueChange={setCloseCcEntityId}>
+                        <SelectTrigger className="flex-1" data-testid="select-cc-entity">
+                          <SelectValue placeholder="Seleccionar..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {closeCcEntityType === "company"
+                            ? companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
+                            : agencies.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {!closeCcEntityId && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">Si no seleccionás una entidad, el cargo no se registrará en ninguna Cuenta Corriente.</p>
+                    )}
+                  </div>
+                )}
+
                 {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && closePaymentMethod !== "cuenta_habitacion" && (
                   <div className="space-y-3 p-3 border rounded-md bg-muted/30">
                     <p className="text-sm font-medium">Datos de facturación</p>
@@ -2968,6 +3013,8 @@ export default function RestaurantPage() {
                         roomReservationId: closePaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
                         billingName: closeBillingName || undefined,
                         billingCuit: closeBillingCuit || undefined,
+                        ccEntityType: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityType : undefined,
+                        ccEntityId: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityId : undefined,
                       });
                     }
                   }}

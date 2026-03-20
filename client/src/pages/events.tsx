@@ -303,6 +303,8 @@ export default function EventsPage() {
   const [paymentIsAdvance, setPaymentIsAdvance] = useState(false);
   const [paymentReservationId, setPaymentReservationId] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentCcEntityType, setPaymentCcEntityType] = useState<"company" | "agency">("company");
+  const [paymentCcEntityId, setPaymentCcEntityId] = useState("");
   const [tableChargeDesc, setTableChargeDesc] = useState("");
   const [tableChargeQty, setTableChargeQty] = useState(1);
   const [tableChargePrice, setTableChargePrice] = useState("");
@@ -346,6 +348,13 @@ export default function EventsPage() {
     queryKey: ["/api/events", selectedEvent?.id, "tables"],
     queryFn: () => fetch(`/api/events/${selectedEvent!.id}/tables`).then(r => r.json()),
     enabled: !!selectedEvent && selectedEvent.eventType === "table_event",
+  });
+
+  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/companies"],
+  });
+  const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/agencies"],
   });
 
   const eventsMap = planningData?.events || {};
@@ -523,6 +532,8 @@ export default function EventsPage() {
       setPaymentIsAdvance(false);
       setPaymentReservationId("");
       setPaymentNotes("");
+      setPaymentCcEntityType("company");
+      setPaymentCcEntityId("");
       toast({ title: "Pago registrado" });
     },
     onError: () => {
@@ -797,6 +808,8 @@ export default function EventsPage() {
         isAdvance: paymentIsAdvance,
         reservationId: paymentMethod === "room_charge" ? paymentReservationId : null,
         notes: paymentNotes || null,
+        ccEntityType: paymentMethod === "cuenta_corriente" && paymentCcEntityId ? paymentCcEntityType : undefined,
+        ccEntityId: paymentMethod === "cuenta_corriente" && paymentCcEntityId ? paymentCcEntityId : undefined,
       },
     });
   };
@@ -2078,6 +2091,39 @@ export default function EventsPage() {
                                 ))}
                               </SelectContent>
                             </Select>
+                          )}
+                          {paymentMethod === "cuenta_corriente" && (
+                            <div className="space-y-1 p-2 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                              <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                                {selectedEvent?.companyId
+                                  ? `Se cargará automáticamente a la empresa vinculada al evento.`
+                                  : "¿A quién se carga?"}
+                              </p>
+                              {!selectedEvent?.companyId && (
+                                <div className="flex gap-2">
+                                  <Select value={paymentCcEntityType} onValueChange={(v) => { setPaymentCcEntityType(v as "company" | "agency"); setPaymentCcEntityId(""); }}>
+                                    <SelectTrigger className="w-28" data-testid="select-cc-entity-type">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="company">Empresa</SelectItem>
+                                      <SelectItem value="agency">Agencia</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <Select value={paymentCcEntityId} onValueChange={setPaymentCcEntityId}>
+                                    <SelectTrigger className="flex-1" data-testid="select-cc-entity">
+                                      <SelectValue placeholder="Seleccionar..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {paymentCcEntityType === "company"
+                                        ? companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
+                                        : agencies.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                                      }
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
+                            </div>
                           )}
                           <div className="flex items-center gap-4">
                             <label className="flex items-center gap-2 text-sm">

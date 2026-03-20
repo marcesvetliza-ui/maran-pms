@@ -281,7 +281,7 @@ export function registerEventsRoutes(app: Express) {
       if (existingEvent.status === "invoiced") {
         return res.status(400).json({ error: "No se pueden agregar pagos a un evento facturado" });
       }
-      const { amount, method, isAdvance, reservationId, notes } = req.body;
+      const { amount, method, isAdvance, reservationId, notes, ccEntityType, ccEntityId } = req.body;
       if (!amount || !method) {
         return res.status(400).json({ error: "amount and method are required" });
       }
@@ -313,6 +313,28 @@ export function registerEventsRoutes(app: Express) {
         );
       } catch (e) {
         console.error("Error registrando movimiento de caja:", e);
+      }
+
+      // Si es cuenta corriente, crear movimiento en CC
+      if (method === "cuenta_corriente") {
+        const evt = await storage.getEvent(req.params.eventId);
+        const entityType = ccEntityType || (evt?.companyId ? "company" : null);
+        const entityId = ccEntityId || evt?.companyId || null;
+        if (entityType && entityId) {
+          try {
+            const today = new Date().toISOString().split("T")[0];
+            await storage.createAccountMovement({
+              entityType: entityType as "company" | "agency",
+              entityId,
+              date: today,
+              type: "cargo",
+              description: `Evento: ${evt?.name || req.params.eventId}`,
+              amount: String(parseFloat(amount).toFixed(2)),
+            });
+          } catch (e) {
+            console.error("Error creando movimiento CC para evento:", e);
+          }
+        }
       }
 
       res.status(201).json(payment);
