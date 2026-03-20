@@ -447,7 +447,22 @@ export default function RestaurantPage() {
     r.status !== "cancelled" && r.status !== "completed"
   );
 
-  const sortedCategories = [...menuCategories].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  const getCategoryPriority = (name: string) => {
+    const n = name.toLowerCase();
+    if (n.includes("sin alcohol")) return 1;
+    if (n.includes("bebida") && !n.includes("alcohol")) return 2;
+    if (n.includes("con alcohol") || (n.includes("bebida") && n.includes("alcohol"))) return 3;
+    if (n.includes("alcohol")) return 4;
+    if (n.includes("entrada")) return 5;
+    if (n.includes("postre")) return 90;
+    return 50;
+  };
+  const sortedCategories = [...menuCategories].sort((a, b) => {
+    const pa = getCategoryPriority(a.name);
+    const pb = getCategoryPriority(b.name);
+    if (pa !== pb) return pa - pb;
+    return (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
+  });
 
   const createReservationMutation = useMutation({
     mutationFn: async (data: ReservationFormValues) => {
