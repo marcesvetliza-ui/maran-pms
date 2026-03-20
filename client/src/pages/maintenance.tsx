@@ -626,11 +626,13 @@ export default function MaintenancePage() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="none">Ninguna</SelectItem>
-                          {rooms.map((room) => (
-                            <SelectItem key={room.id} value={room.id}>
-                              {room.roomNumber} (Piso {room.floor})
-                            </SelectItem>
-                          ))}
+                          {[...rooms]
+                            .sort((a, b) => Number(a.roomNumber) - Number(b.roomNumber))
+                            .map((room) => (
+                              <SelectItem key={room.id} value={room.id}>
+                                Hab. {room.roomNumber} — Piso {room.floor}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
