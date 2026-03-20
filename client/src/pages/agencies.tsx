@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -144,6 +144,14 @@ export default function AgenciesPage() {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingAgency, setEditingAgency] = useState<Agency | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") === "1") {
+      setShowForm(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAgencyId, setSelectedAgencyId] = useState<string | null>(null);
   const [reportFrom, setReportFrom] = useState("");

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -126,6 +126,14 @@ export default function CompaniesPage() {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") === "1") {
+      setShowForm(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
   const [searchTerm, setSearchTerm] = useState("");
   const [viewingAccountCompany, setViewingAccountCompany] = useState<Company | null>(null);
   const [viewingCompanyDetail, setViewingCompanyDetail] = useState<Company | null>(null);

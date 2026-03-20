@@ -271,6 +271,37 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
+  app.get("/api/account-movements/report", async (req, res) => {
+    try {
+      const { from, to } = req.query as { from?: string; to?: string };
+      const summary = await storage.getAccountSummary();
+      const entityNames: Record<string, string> = {};
+      summary.companies.forEach(c => { entityNames[c.id] = c.name; });
+      summary.agencies.forEach(a => { entityNames[a.id] = a.name; });
+
+      const movements: any[] = [];
+      for (const c of summary.companies) {
+        const ms = await storage.getAccountMovements("company", c.id);
+        ms.forEach(m => movements.push({ ...m, entityName: c.name, entityTypeName: "Empresa" }));
+      }
+      for (const a of summary.agencies) {
+        const ms = await storage.getAccountMovements("agency", a.id);
+        ms.forEach(m => movements.push({ ...m, entityName: a.name, entityTypeName: "Agencia" }));
+      }
+
+      const filtered = movements.filter(m => {
+        if (from && m.date < from) return false;
+        if (to && m.date > to) return false;
+        return true;
+      }).sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt).localeCompare(String(a.createdAt)));
+
+      res.json(filtered);
+    } catch (error) {
+      console.error("Error fetching account movements report:", error);
+      res.status(500).json({ error: "Error fetching report" });
+    }
+  });
+
   // Guests
   app.get("/api/guests", async (req, res) => {
     try {
