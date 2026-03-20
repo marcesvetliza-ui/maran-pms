@@ -131,8 +131,8 @@ function AppLayout() {
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
       <div className="flex h-screen w-full">
         <AppSidebar />
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <header className="flex items-center justify-between gap-4 px-4 py-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+        <div className="flex flex-col flex-1 min-h-0">
+          <header className="flex items-center justify-between gap-4 px-4 py-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shrink-0">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex items-center gap-3">
               {user && (
@@ -154,7 +154,7 @@ function AppLayout() {
               <ThemeToggle />
             </div>
           </header>
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-y-auto overscroll-contain">
             <Router />
           </main>
         </div>

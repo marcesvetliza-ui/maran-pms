@@ -604,7 +604,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       )}
 
       <Dialog open={openShiftDialog} onOpenChange={setOpenShiftDialog}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Abrir Turno - {config.areaLabel}</DialogTitle>
           </DialogHeader>
@@ -641,7 +641,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       </Dialog>
 
       <Dialog open={movementDialog} onOpenChange={setMovementDialog}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Registrar Movimiento Manual</DialogTitle>
           </DialogHeader>
@@ -718,16 +718,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       </Dialog>
 
       <Dialog open={closeShiftDialog} onOpenChange={(open) => { if (!open) { setCloseShiftDialog(false); resetCloseDialog(); } }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>
               Cerrar Turno — {config.areaLabel}
               {currentShift && <span className="ml-2 text-sm font-normal text-muted-foreground">Turno #{currentShift.shiftNumber}</span>}
             </DialogTitle>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-1 -mr-1">
           {closeStep === 1 && (
-            <div className="space-y-4">
+            <div className="space-y-4 pb-2">
               <SummaryTable movements={movements} />
 
               <div className="border rounded-lg p-4 space-y-2 bg-muted/20">
@@ -810,7 +811,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           )}
 
           {closeStep === 2 && (
-            <div className="space-y-4">
+            <div className="space-y-4 pb-2">
               <div className="flex items-center gap-2 text-green-700">
                 <span className="text-lg">✓</span>
                 <span className="font-medium">Turno #{currentShift?.shiftNumber} listo para cerrarse</span>
@@ -826,8 +827,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               </div>
             </div>
           )}
+          </div>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 shrink-0 pt-2 border-t">
             {closeStep === 2 && (
               <Button variant="outline" onClick={() => setCloseStep(1)}>← Atrás</Button>
             )}
@@ -846,7 +848,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       </Dialog>
 
       <Dialog open={tomarTurnoDialog} onOpenChange={setTomarTurnoDialog}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[95vw] max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Tomar turno — {config.areaLabel}</DialogTitle>
           </DialogHeader>
@@ -863,12 +865,12 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       </Dialog>
 
       <Dialog open={!!closingSummaryData} onOpenChange={() => setClosingSummaryData(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Resumen de Cierre</DialogTitle>
           </DialogHeader>
           {closingSummaryData && (
-            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            <div className="space-y-4 pr-1">
               <SummaryTable movements={closingSummaryData.movements} />
 
               {changelogHoy.length > 0 && (
@@ -1107,7 +1109,7 @@ function HistorialTab() {
       </Card>
 
       <Dialog open={!!detailShiftId} onOpenChange={() => setDetailShiftId(null)}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detalle del Turno</DialogTitle>
           </DialogHeader>
