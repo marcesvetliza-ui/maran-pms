@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { insertCompanySchema, type Company, type AccountMovement, type Guest, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
+import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 
 const companyFormSchema = insertCompanySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -509,20 +510,14 @@ export default function CompaniesPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
-                <FormField control={form.control} name="localidad" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Localidad</FormLabel>
-                    <FormControl><Input {...field} data-testid="input-company-localidad" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name="provincia" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Provincia</FormLabel>
-                    <FormControl><Input {...field} data-testid="input-company-provincia" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <ProvinciaCiudadSelect
+                  provincia={form.watch("provincia") || ""}
+                  localidad={form.watch("localidad") || ""}
+                  onProvinciaChange={(v) => { form.setValue("provincia", v); form.setValue("localidad", ""); }}
+                  onLocalidadChange={(v) => form.setValue("localidad", v)}
+                  testIdProvincia="select-company-provincia"
+                  testIdLocalidad="select-company-localidad"
+                />
                 <FormField control={form.control} name="codigoPostal" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Código Postal</FormLabel>

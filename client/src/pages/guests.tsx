@@ -70,6 +70,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference, Company } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
+import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 
 function GuestFormDialog({
   guest,
@@ -96,6 +97,7 @@ function GuestFormDialog({
     documentNumber: guest?.documentNumber || "",
     nationality: guest?.nationality || "",
     direccion: guest?.direccion || "",
+    provincia: guest?.provincia || "",
     localidad: guest?.localidad || "",
     codigoPostal: guest?.codigoPostal || "",
     fechaNacimiento: guest?.fechaNacimiento || "",
@@ -241,16 +243,14 @@ function GuestFormDialog({
                 data-testid="input-nationality"
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="localidad">Ciudad / Localidad</Label>
-              <Input
-                id="localidad"
-                value={formData.localidad || ""}
-                onChange={(e) => setFormData({ ...formData, localidad: e.target.value })}
-                placeholder="Buenos Aires"
-                data-testid="input-localidad"
-              />
-            </div>
+            <ProvinciaCiudadSelect
+              provincia={formData.provincia || ""}
+              localidad={formData.localidad || ""}
+              onProvinciaChange={(v) => setFormData({ ...formData, provincia: v, localidad: "" })}
+              onLocalidadChange={(v) => setFormData({ ...formData, localidad: v })}
+              testIdProvincia="select-guest-provincia"
+              testIdLocalidad="select-guest-localidad"
+            />
 
             <div className="grid gap-2">
               <Label>Empresa asociada</Label>
