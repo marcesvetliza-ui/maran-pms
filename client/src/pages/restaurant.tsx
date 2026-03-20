@@ -358,6 +358,7 @@ export default function RestaurantPage() {
   const [closeBillingCuit, setCloseBillingCuit] = useState("");
 
   const courseLabels: Record<number, string> = { 1: "Entradas", 2: "Platos Principales", 3: "Postres" };
+  const courseShortLabels: Record<number, string> = { 1: "Entrada", 2: "Principal", 3: "Postre" };
 
   function inferCourseFromCategory(categoryName: string): number | null {
     const name = categoryName.toLowerCase();
@@ -1982,7 +1983,7 @@ export default function RestaurantPage() {
                     data-testid="button-advance-course"
                   >
                     {advanceCourseMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChefHat className="h-4 w-4 mr-1" />}
-                    Sale — Despachar Principal
+                    Sale — {courseShortLabels[(getUpdatedOrder()?.activeCourse || 1) + 1] || "Siguiente"}
                   </Button>
                 )}
                 <Button
