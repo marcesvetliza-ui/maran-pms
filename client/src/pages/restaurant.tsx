@@ -2138,9 +2138,6 @@ export default function RestaurantPage() {
                 <Button variant="outline" onClick={() => setOrderView("menu")} className="flex-1" data-testid="button-comanda-add-more">
                   <Plus className="h-4 w-4 mr-1" /> Agregar Items
                 </Button>
-                <Button variant="destructive" onClick={() => { setIsCloseDialogOpen(true); setIsOrderDialogOpen(false); }} className="flex-1" data-testid="button-comanda-close">
-                  <Receipt className="h-4 w-4 mr-1" /> Cerrar Cuenta
-                </Button>
               </div>
             </div>
           )}
