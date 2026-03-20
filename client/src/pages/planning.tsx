@@ -1874,11 +1874,10 @@ export default function PlanningPage() {
 
   const goToDate = (date: Date | undefined) => {
     if (!date) return;
-    // Use local date values to avoid timezone offset issues
     const y = date.getFullYear();
     const m = date.getMonth();
     const d = date.getDate();
-    const start = new Date(y, m, d - 1);
+    const start = new Date(y, m, d);
     const end = new Date(y, m, d + 14);
     setDateRange({
       start: toArgentinaDateStr(start),
