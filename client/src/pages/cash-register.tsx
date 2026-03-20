@@ -251,7 +251,10 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [billetes200, setBilletes200] = useState(0);
   const [billetes100, setBilletes100] = useState(0);
   const [billetes50, setBilletes50] = useState(0);
+  const [billetes20, setBilletes20] = useState(0);
+  const [billetes10, setBilletes10] = useState(0);
   const [monedas, setMonedas] = useState(0);
+  const [extrasConteo, setExtrasConteo] = useState<{ label: string; amount: number }[]>([]);
   const [movType, setMovType] = useState("income");
   const [movDesc, setMovDesc] = useState("");
   const [movMethod, setMovMethod] = useState("cash");
@@ -261,7 +264,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
 
   const efectivoContado =
     billetes1000 * 1000 + billetes500 * 500 + billetes200 * 200 +
-    billetes100 * 100 + billetes50 * 50 + monedas;
+    billetes100 * 100 + billetes50 * 50 + billetes20 * 20 + billetes10 * 10 +
+    monedas + extrasConteo.reduce((s, e) => s + e.amount, 0);
 
   function resetCloseDialog() {
     setCloseStep(1);
@@ -270,7 +274,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     setOperadorSiguiente("");
     setEnviarAdmin(true);
     setBilletes1000(0); setBilletes500(0); setBilletes200(0);
-    setBilletes100(0); setBilletes50(0); setMonedas(0);
+    setBilletes100(0); setBilletes50(0); setBilletes20(0); setBilletes10(0);
+    setMonedas(0); setExtrasConteo([]);
   }
 
   const { data: currentShift, isLoading: shiftLoading } = useQuery<CashShift | null>({
@@ -728,6 +733,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                   { label: "Billetes $200",   val: billetes200,  set: setBilletes200,  mult: 200  },
                   { label: "Billetes $100",   val: billetes100,  set: setBilletes100,  mult: 100  },
                   { label: "Billetes $50",    val: billetes50,   set: setBilletes50,   mult: 50   },
+                  { label: "Billetes $20",    val: billetes20,   set: setBilletes20,   mult: 20   },
+                  { label: "Billetes $10",    val: billetes10,   set: setBilletes10,   mult: 10   },
                   { label: "Monedas ($)",     val: monedas,      set: setMonedas,      mult: 1    },
                 ].map(({ label, val, set, mult }) => (
                   <div key={label} className="flex items-center gap-3">
@@ -737,6 +744,34 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                     {mult > 1 && <span className="text-xs text-muted-foreground">= ${(val * mult).toLocaleString("es-AR")}</span>}
                   </div>
                 ))}
+
+                {/* Extras: moneda extranjera, cheques, otros */}
+                <div className="border-t pt-2 space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Otros (cheques, moneda extranjera, etc.)</p>
+                  {extrasConteo.map((ex, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        value={ex.label}
+                        onChange={e => setExtrasConteo(prev => prev.map((r, j) => j === i ? { ...r, label: e.target.value } : r))}
+                        placeholder="Descripción (ej: USD 50)"
+                        className="h-7 text-xs flex-1"
+                      />
+                      <Input
+                        type="number" min={0} step="0.01"
+                        value={ex.amount || ""}
+                        onChange={e => setExtrasConteo(prev => prev.map((r, j) => j === i ? { ...r, amount: parseFloat(e.target.value) || 0 } : r))}
+                        placeholder="Monto $"
+                        className="w-24 h-7 text-xs"
+                      />
+                      <button onClick={() => setExtrasConteo(prev => prev.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive text-xs px-1">✕</button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setExtrasConteo(prev => [...prev, { label: "", amount: 0 }])}
+                    className="text-xs text-primary hover:underline"
+                  >+ Agregar fila</button>
+                </div>
+
                 <div className="border-t pt-2 flex justify-between text-sm font-semibold">
                   <span>Total contado:</span>
                   <span>${efectivoContado.toLocaleString("es-AR")}</span>

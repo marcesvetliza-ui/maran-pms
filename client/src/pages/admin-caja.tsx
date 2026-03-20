@@ -516,7 +516,10 @@ function ArqueoDialog({ open, onClose, saldoActual }: { open: boolean; onClose: 
   const [billetes200, setBilletes200] = useState("");
   const [billetes100, setBilletes100] = useState("");
   const [billetes50, setBilletes50] = useState("");
+  const [billetes20, setBilletes20] = useState("");
+  const [billetes10, setBilletes10] = useState("");
   const [monedas, setMonedas] = useState("");
+  const [extrasConteo, setExtrasConteo] = useState<{ label: string; amount: string }[]>([]);
   const [observaciones, setObservaciones] = useState("");
   const [confirmDif, setConfirmDif] = useState(false);
 
@@ -526,7 +529,10 @@ function ArqueoDialog({ open, onClose, saldoActual }: { open: boolean; onClose: 
     (parseInt(billetes200) || 0) * 200 +
     (parseInt(billetes100) || 0) * 100 +
     (parseInt(billetes50) || 0) * 50 +
-    (parseFloat(monedas) || 0);
+    (parseInt(billetes20) || 0) * 20 +
+    (parseInt(billetes10) || 0) * 10 +
+    (parseFloat(monedas) || 0) +
+    extrasConteo.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
 
   const diferencia = totalFisico - saldoActual;
 
@@ -543,7 +549,8 @@ function ArqueoDialog({ open, onClose, saldoActual }: { open: boolean; onClose: 
 
   const resetForm = () => {
     setBilletes1000(""); setBilletes500(""); setBilletes200(""); setBilletes100("");
-    setBilletes50(""); setMonedas(""); setObservaciones(""); setConfirmDif(false);
+    setBilletes50(""); setBilletes20(""); setBilletes10(""); setMonedas("");
+    setExtrasConteo([]); setObservaciones(""); setConfirmDif(false);
   };
 
   const handleConfirm = () => {
@@ -581,6 +588,8 @@ function ArqueoDialog({ open, onClose, saldoActual }: { open: boolean; onClose: 
               { label: "Billetes $200", val: billetes200, set: setBilletes200, mult: 200 },
               { label: "Billetes $100", val: billetes100, set: setBilletes100, mult: 100 },
               { label: "Billetes $50", val: billetes50, set: setBilletes50, mult: 50 },
+              { label: "Billetes $20", val: billetes20, set: setBilletes20, mult: 20 },
+              { label: "Billetes $10", val: billetes10, set: setBilletes10, mult: 10 },
             ].map(({ label, val, set, mult }) => (
               <div key={label} className="grid grid-cols-3 gap-2 items-center">
                 <span className="text-sm text-muted-foreground">{label}</span>
@@ -609,6 +618,37 @@ function ArqueoDialog({ open, onClose, saldoActual }: { open: boolean; onClose: 
                 data-testid="input-arqueo-monedas"
               />
               <span className="text-sm text-right">${fPeso(parseFloat(monedas) || 0)}</span>
+            </div>
+
+            {/* Extras: cheques, moneda extranjera, otros */}
+            <div className="border-t pt-2 space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">Otros (cheques, moneda extranjera, etc.)</p>
+              {extrasConteo.map((ex, i) => (
+                <div key={i} className="grid grid-cols-3 gap-2 items-center">
+                  <Input
+                    value={ex.label}
+                    onChange={e => { setExtrasConteo(prev => prev.map((r, j) => j === i ? { ...r, label: e.target.value } : r)); setConfirmDif(false); }}
+                    placeholder="Descripción (ej: USD 50)"
+                    className="text-xs col-span-1"
+                  />
+                  <Input
+                    type="number" min="0" step="0.01"
+                    value={ex.amount}
+                    onChange={e => { setExtrasConteo(prev => prev.map((r, j) => j === i ? { ...r, amount: e.target.value } : r)); setConfirmDif(false); }}
+                    placeholder="Monto $"
+                    className="text-center"
+                  />
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">${fPeso(parseFloat(ex.amount) || 0)}</span>
+                    <button onClick={() => { setExtrasConteo(prev => prev.filter((_, j) => j !== i)); setConfirmDif(false); }} className="text-muted-foreground hover:text-destructive text-xs ml-2">✕</button>
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={() => setExtrasConteo(prev => [...prev, { label: "", amount: "" }])}
+                className="text-xs text-primary hover:underline"
+                data-testid="button-add-extra-conteo"
+              >+ Agregar fila</button>
             </div>
           </div>
 
