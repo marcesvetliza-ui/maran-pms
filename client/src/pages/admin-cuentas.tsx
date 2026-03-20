@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Users2,
   Building2,
@@ -13,6 +13,8 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,8 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 type Movement = {
   id: string;
@@ -37,6 +41,20 @@ type Movement = {
 
 export default function AdminCuentasPage() {
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+
+  const reconcileMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/reconcile-cc-payments"),
+    onSuccess: (data: any) => {
+      toast({
+        title: "Reconciliación completada",
+        description: data.message || `${data.created} movimientos creados`,
+      });
+    },
+    onError: () => {
+      toast({ title: "Error en reconciliación", variant: "destructive" });
+    },
+  });
 
   const [reporteFrom, setReporteFrom] = useState(() => {
     const d = new Date();
@@ -193,6 +211,34 @@ export default function AdminCuentasPage() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Reconciliación de pagos CC existentes */}
+      <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10">
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium">Sincronizar pagos en CC</p>
+                <p className="text-xs text-muted-foreground">
+                  Si hay pagos registrados con "Cta. Cte." que no aparecen en las cuentas corrientes, usá este botón para sincronizarlos.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => reconcileMutation.mutate()}
+              disabled={reconcileMutation.isPending}
+              className="border-amber-300 dark:border-amber-700 shrink-0"
+              data-testid="button-reconcile-cc"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${reconcileMutation.isPending ? "animate-spin" : ""}`} />
+              {reconcileMutation.isPending ? "Sincronizando..." : "Sincronizar ahora"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Separator />
 

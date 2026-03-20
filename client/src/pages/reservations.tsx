@@ -1859,6 +1859,7 @@ function ReservationDetailDialog({
                             <SelectContent>
                               <SelectItem value="guest">Huésped</SelectItem>
                               <SelectItem value="company">Empresa</SelectItem>
+                              <SelectItem value="agency">Agencia</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

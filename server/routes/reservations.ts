@@ -629,13 +629,20 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
+      // Los movimientos CC se crean al registrar el pago; al checkout solo creamos los que faltan (pagos registrados antes del fix)
       const reservationPayments = await storage.getPayments(req.params.id);
       const ccPayments = reservationPayments.filter(p => p.method === "cuenta_corriente");
       if (ccPayments.length > 0) {
         const guest = reservation.guest;
         const guestName = guest ? `${guest.firstName} ${guest.lastName}` : "Huésped";
         const roomNum = reservation.room?.roomNumber || reservation.roomId;
+        // Verificar si ya existen movimientos CC para esta reserva
+        const existingMovements = await storage.getAccountMovementsByReservation(reservation.id);
+        const existingAmounts = existingMovements.map(m => parseFloat(m.amount).toFixed(2));
         for (const ccPayment of ccPayments) {
+          const amtStr = parseFloat(ccPayment.amount).toFixed(2);
+          // Solo crear si no existe un movimiento con el mismo monto para esta reserva
+          if (existingAmounts.includes(amtStr)) continue;
           if (ccPayment.billingTarget === "company" && reservation.companyId) {
             await storage.createAccountMovement({
               entityType: "company",
@@ -643,7 +650,7 @@ export function registerReservationsRoutes(app: Express) {
               date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
               type: "cargo",
               description: `Estadía ${reservation.reservationCode} — Hab. ${roomNum}`,
-              amount: parseFloat(ccPayment.amount).toFixed(2),
+              amount: amtStr,
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
@@ -655,7 +662,7 @@ export function registerReservationsRoutes(app: Express) {
               date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
               type: "cargo",
               description: `Estadía ${reservation.reservationCode} — Hab. ${roomNum}`,
-              amount: parseFloat(ccPayment.amount).toFixed(2),
+              amount: amtStr,
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
@@ -927,7 +934,7 @@ export function registerReservationsRoutes(app: Express) {
           return res.status(403).json({ error: "No se puede agregar pagos a una reserva cerrada de días anteriores" });
         }
       }
-      if (req.body.billingTarget && !["guest", "company"].includes(req.body.billingTarget)) {
+      if (req.body.billingTarget && !["guest", "company", "agency"].includes(req.body.billingTarget)) {
         req.body.billingTarget = "guest";
       }
       if (!req.body.date) {
@@ -935,6 +942,49 @@ export function registerReservationsRoutes(app: Express) {
         req.body.date = now.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       }
       const payment = await storage.createPayment(req.body);
+
+      // Registrar movimiento en Cuenta Corriente al momento del pago (no esperar al checkout)
+      if (req.body.method === "cuenta_corriente" && req.body.reservationId) {
+        try {
+          const reservationForCC = req.body.reservationId ? await storage.getReservation(req.body.reservationId) : null;
+          if (reservationForCC) {
+            const guestName = reservationForCC.guest
+              ? `${reservationForCC.guest.firstName} ${reservationForCC.guest.lastName}`
+              : "Huésped";
+            const roomNum = reservationForCC.room?.roomNumber || reservationForCC.roomId;
+            const billingTarget = req.body.billingTarget || "guest";
+            const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+            if (billingTarget === "company" && reservationForCC.companyId) {
+              await storage.createAccountMovement({
+                entityType: "company",
+                entityId: reservationForCC.companyId,
+                date: today,
+                type: "cargo",
+                description: `Estadía ${reservationForCC.reservationCode} — Hab. ${roomNum}`,
+                amount: parseFloat(req.body.amount).toFixed(2),
+                reservationId: reservationForCC.id,
+                reservationCode: reservationForCC.reservationCode,
+                guestName,
+              });
+            } else if (billingTarget === "agency" && reservationForCC.agencyId) {
+              await storage.createAccountMovement({
+                entityType: "agency",
+                entityId: reservationForCC.agencyId,
+                date: today,
+                type: "cargo",
+                description: `Estadía ${reservationForCC.reservationCode} — Hab. ${roomNum}`,
+                amount: parseFloat(req.body.amount).toFixed(2),
+                reservationId: reservationForCC.id,
+                reservationCode: reservationForCC.reservationCode,
+                guestName,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Error creando movimiento CC al registrar pago:", e);
+        }
+      }
 
       try {
         const methodMap: Record<string, string> = {

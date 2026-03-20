@@ -375,6 +375,74 @@ export async function registerRoutes(
     }
   });
 
+  // Reconciliación de pagos CC sin movimiento en Cuenta Corriente
+  app.post("/api/admin/reconcile-cc-payments", requireAuth, async (req, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      // Obtener todos los pagos con método cuenta_corriente
+      const allPayments = await db.execute(sql`
+        SELECT p.*, r.reservation_code, r.company_id, r.agency_id, r.room_id,
+               g.first_name, g.last_name, ro.room_number
+        FROM payments p
+        JOIN reservations r ON p.reservation_id = r.id
+        LEFT JOIN guests g ON r.guest_id = g.id
+        LEFT JOIN rooms ro ON r.room_id = ro.id
+        WHERE p.method = 'cuenta_corriente'
+          AND p.status != 'anulado'
+      `);
+
+      let created = 0;
+      let skipped = 0;
+
+      for (const pay of (allPayments.rows as any[])) {
+        const billingTarget = pay.billing_target;
+        if (!billingTarget || billingTarget === "guest") { skipped++; continue; }
+
+        // Verificar si ya existe un movimiento para esta reserva con este monto
+        const existing = await storage.getAccountMovementsByReservation(pay.reservation_id);
+        const amtStr = parseFloat(pay.amount).toFixed(2);
+        if (existing.some(m => parseFloat(m.amount).toFixed(2) === amtStr)) { skipped++; continue; }
+
+        const guestName = pay.first_name ? `${pay.first_name} ${pay.last_name}` : "Huésped";
+        const roomNum = pay.room_number || pay.room_id || "N/A";
+
+        if (billingTarget === "company" && pay.company_id) {
+          await storage.createAccountMovement({
+            entityType: "company",
+            entityId: pay.company_id,
+            date: pay.date || today,
+            type: "cargo",
+            description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
+            amount: amtStr,
+            reservationId: pay.reservation_id,
+            reservationCode: pay.reservation_code,
+            guestName,
+          });
+          created++;
+        } else if (billingTarget === "agency" && pay.agency_id) {
+          await storage.createAccountMovement({
+            entityType: "agency",
+            entityId: pay.agency_id,
+            date: pay.date || today,
+            type: "cargo",
+            description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
+            amount: amtStr,
+            reservationId: pay.reservation_id,
+            reservationCode: pay.reservation_code,
+            guestName,
+          });
+          created++;
+        } else {
+          skipped++;
+        }
+      }
+
+      res.json({ created, skipped, message: `Reconciliación completa: ${created} movimientos creados, ${skipped} omitidos` });
+    } catch (error) {
+      console.error("Error en reconciliación CC:", error);
+      res.status(500).json({ error: "Error en reconciliación" });
+    }
+  });
 
   // ==================== SYSTEM NOTIFICATIONS ====================
 

@@ -91,7 +91,7 @@ export default function CheckOutPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [paymentReference, setPaymentReference] = useState("");
-  const [paymentBillingTarget, setPaymentBillingTarget] = useState<"guest" | "company">("guest");
+  const [paymentBillingTarget, setPaymentBillingTarget] = useState<"guest" | "company" | "agency">("guest");
   const [checkoutComplete, setCheckoutComplete] = useState(false);
   const [finalSummary, setFinalSummary] = useState<{ guestName: string; roomNumber: string; checkOutDate: string; totalPaid: number; methods: string[] } | null>(null);
 
@@ -131,7 +131,7 @@ export default function CheckOutPage() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; billingTarget: "guest" | "company" }) => {
+    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; billingTarget: "guest" | "company" | "agency" }) => {
       return apiRequest("POST", "/api/payments", {
         reservationId: selectedReservation!.id,
         amount: data.amount,
@@ -508,13 +508,14 @@ export default function CheckOutPage() {
                       </div>
                       <div>
                         <Label>Facturar a</Label>
-                        <Select value={paymentBillingTarget} onValueChange={(v) => setPaymentBillingTarget(v as "guest" | "company")}>
+                        <Select value={paymentBillingTarget} onValueChange={(v) => setPaymentBillingTarget(v as "guest" | "company" | "agency")}>
                           <SelectTrigger data-testid="select-billing-target">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="guest">Huésped</SelectItem>
                             <SelectItem value="company">Empresa</SelectItem>
+                            <SelectItem value="agency">Agencia</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

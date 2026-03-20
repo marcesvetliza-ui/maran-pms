@@ -3806,6 +3806,13 @@ export class DatabaseStorage implements IStorage {
     return movements.reduce((sum, m) => sum + parseFloat(m.amount), 0);
   }
 
+  async getAccountMovementsByReservation(reservationId: string): Promise<AccountMovement[]> {
+    return await db.select()
+      .from(accountMovements)
+      .where(eq(accountMovements.reservationId, reservationId))
+      .orderBy(desc(accountMovements.createdAt));
+  }
+
   async createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement> {
     const [created] = await db.insert(accountMovements).values(data as any).returning();
     return created;
