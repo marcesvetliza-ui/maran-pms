@@ -47,6 +47,7 @@ import AdminConsultasPage from "@/pages/admin-consultas";
 import AdminCajaPage, { AdminCajaConfigPage } from "@/pages/admin-caja";
 import BillingPage from "@/pages/billing";
 import AdminReportesPage from "@/pages/admin-reportes";
+import AdminCuentasPage from "@/pages/admin-cuentas";
 import LoginPage from "@/pages/login";
 import HelpChat from "@/components/help-chat";
 import { LogOut, User } from "lucide-react";
@@ -113,6 +114,7 @@ function Router() {
       <Route path="/admin/caja/configuracion" component={AdminCajaConfigPage} />
       <Route path="/billing" component={BillingPage} />
       <Route path="/admin/reportes" component={AdminReportesPage} />
+      <Route path="/admin/cuentas" component={AdminCuentasPage} />
       <Route component={NotFound} />
     </Switch>
   );
