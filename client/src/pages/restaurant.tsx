@@ -322,6 +322,8 @@ export default function RestaurantPage() {
   const [newIngredientInventoryId, setNewIngredientInventoryId] = useState("");
   const [ingredientComboOpen, setIngredientComboOpen] = useState(false);
   const [ingredientSearch, setIngredientSearch] = useState("");
+  const [recipeSearch, setRecipeSearch] = useState("");
+  const [recipeCategoryFilter, setRecipeCategoryFilter] = useState("all");
   const [newTableNumber, setNewTableNumber] = useState("");
   const [newTableCapacity, setNewTableCapacity] = useState(4);
   const [newTableShape, setNewTableShape] = useState("square");
@@ -1686,6 +1688,37 @@ export default function RestaurantPage() {
             </div>
           </div>
 
+          {menuItems.length > 0 && (
+            <div className="flex gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-52">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar plato..."
+                  value={recipeSearch}
+                  onChange={(e) => setRecipeSearch(e.target.value)}
+                  className="pl-9"
+                  data-testid="input-recipe-search"
+                />
+              </div>
+              <Select value={recipeCategoryFilter} onValueChange={setRecipeCategoryFilter}>
+                <SelectTrigger className="w-48" data-testid="select-recipe-category">
+                  <SelectValue placeholder="Todas las categorías" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las categorías</SelectItem>
+                  {menuCategories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(recipeSearch || recipeCategoryFilter !== "all") && (
+                <Button variant="ghost" size="sm" onClick={() => { setRecipeSearch(""); setRecipeCategoryFilter("all"); }} data-testid="btn-clear-recipe-filters">
+                  Limpiar filtros
+                </Button>
+              )}
+            </div>
+          )}
+
           {menuItems.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
@@ -1710,7 +1743,13 @@ export default function RestaurantPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {menuItems.map((item) => {
+                    {menuItems
+                      .filter((item) => {
+                        const matchSearch = !recipeSearch || item.name.toLowerCase().includes(recipeSearch.toLowerCase());
+                        const matchCat = recipeCategoryFilter === "all" || item.categoryId === recipeCategoryFilter;
+                        return matchSearch && matchCat;
+                      })
+                      .map((item) => {
                       const recipe = recipes.find(r => r.menuItemId === item.id);
                       const cost = recipe?.ingredients.reduce((sum, ing) => sum + parseFloat(ing.quantity) * parseFloat(ing.unitCost || "0"), 0) || 0;
                       const price = parseFloat(item.price);
@@ -1751,6 +1790,17 @@ export default function RestaurantPage() {
                         </TableRow>
                       );
                     })}
+                    {menuItems.filter((item) => {
+                      const matchSearch = !recipeSearch || item.name.toLowerCase().includes(recipeSearch.toLowerCase());
+                      const matchCat = recipeCategoryFilter === "all" || item.categoryId === recipeCategoryFilter;
+                      return matchSearch && matchCat;
+                    }).length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                          No se encontraron platos con ese criterio de búsqueda
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </CardContent>
