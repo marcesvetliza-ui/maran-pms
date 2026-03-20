@@ -555,7 +555,7 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.patch("/api/restaurant/orders/:id/split/:splitId", async (req, res) => {
     try {
-      const { method, receiptType } = req.body;
+      const { method, receiptType, roomReservationId } = req.body;
       if (!method) return res.status(400).json({ error: "Método de pago requerido" });
 
       const split = await storage.updateOrderSplit(req.params.splitId, {
@@ -565,6 +565,22 @@ export function registerRestaurantRoutes(app: Express) {
         paidAt: new Date(),
       });
       if (!split) return res.status(404).json({ error: "Split not found" });
+
+      // If charging to room, create the charge on the reservation
+      if (method === "cuenta_habitacion" && roomReservationId) {
+        const order = await storage.getRestaurantOrder(req.params.id);
+        try {
+          await storage.createCharge({
+            reservationId: roomReservationId,
+            description: `Restaurante - Pedido ${order?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
+            amount: split.amount,
+            category: "restaurant",
+            date: new Date().toISOString().split("T")[0],
+          });
+        } catch (e) {
+          console.error("Error creando cargo a habitación en split:", e);
+        }
+      }
 
       const allSplits = await storage.getOrderSplits(req.params.id);
       const allPaid = allSplits.every((s: any) => s.isPaid === "true");
@@ -576,6 +592,7 @@ export function registerRestaurantRoutes(app: Express) {
           closedAt: new Date(),
           paymentMethod: method,
           receiptType: receiptType || null,
+          chargedToRoom: method === "cuenta_habitacion" ? "true" : "false",
         });
         if (order?.tableId) {
           await storage.updateRestaurantTable(order.tableId, { status: "available" });

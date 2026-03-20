@@ -344,6 +344,8 @@ export default function RestaurantPage() {
   const [splitPayMethod, setSplitPayMethod] = useState("efectivo");
   const [splitPayMethods, setSplitPayMethods] = useState<Record<string, string>>({});
   const [splitReceiptTypes, setSplitReceiptTypes] = useState<Record<string, string>>({});
+  const [splitRoomIds, setSplitRoomIds] = useState<Record<string, string>>({});
+  const [splitRoomSearchFilters, setSplitRoomSearchFilters] = useState<Record<string, string>>({});
   const [menuSearch, setMenuSearch] = useState("");
   const menuSearchRef = useRef<HTMLInputElement>(null);
   const [showItemNotes, setShowItemNotes] = useState(false);
@@ -576,10 +578,11 @@ export default function RestaurantPage() {
   });
 
   const paySplitMutation = useMutation({
-    mutationFn: async (data: { orderId: string; splitId: string; method: string; receiptType: string }) => {
+    mutationFn: async (data: { orderId: string; splitId: string; method: string; receiptType: string; roomReservationId?: string }) => {
       const res = await apiRequest("PATCH", `/api/restaurant/orders/${data.orderId}/split/${data.splitId}`, {
         method: data.method,
         receiptType: data.receiptType,
+        roomReservationId: data.roomReservationId,
       });
       return res.json();
     },
@@ -2735,48 +2738,86 @@ export default function RestaurantPage() {
                           {split.isPaid === "true" ? (
                             <Badge variant="default" className="bg-green-600">Pagado - {paymentMethodLabels[split.method || ""] || split.method}</Badge>
                           ) : (
-                            <div className="flex gap-2 items-end">
-                              <div className="flex-1 space-y-1">
-                                <Select value={splitPayMethods[split.id] || "efectivo"} onValueChange={(v) => setSplitPayMethods(prev => ({ ...prev, [split.id]: v }))}>
-                                  <SelectTrigger className="h-8" data-testid={`select-split-method-${split.splitNumber}`}>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {Object.entries(paymentMethodLabels).map(([v, l]) => (
-                                      <SelectItem key={v} value={v}>{l}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                            <div className="space-y-2">
+                              <div className="flex gap-2 items-center">
+                                <div className="flex-1">
+                                  <Select value={splitPayMethods[split.id] || "efectivo"} onValueChange={(v) => setSplitPayMethods(prev => ({ ...prev, [split.id]: v }))}>
+                                    <SelectTrigger className="h-8" data-testid={`select-split-method-${split.splitNumber}`}>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {Object.entries(paymentMethodLabels).map(([v, l]) => (
+                                        <SelectItem key={v} value={v}>{l}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex-1">
+                                  <Select value={splitReceiptTypes[split.id] || "ticket"} onValueChange={(v) => setSplitReceiptTypes(prev => ({ ...prev, [split.id]: v }))}>
+                                    <SelectTrigger className="h-8" data-testid={`select-split-receipt-${split.splitNumber}`}>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {Object.entries(receiptTypeLabels).map(([v, l]) => (
+                                        <SelectItem key={v} value={v}>{l}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    if (currentOrder) {
+                                      const method = splitPayMethods[split.id] || "efectivo";
+                                      if (method === "cuenta_habitacion" && !splitRoomIds[split.id]) {
+                                        toast({ title: "Seleccioná una habitación", variant: "destructive" });
+                                        return;
+                                      }
+                                      paySplitMutation.mutate({
+                                        orderId: currentOrder.id,
+                                        splitId: split.id,
+                                        method,
+                                        receiptType: splitReceiptTypes[split.id] || "ticket",
+                                        roomReservationId: method === "cuenta_habitacion" ? splitRoomIds[split.id] : undefined,
+                                      });
+                                    }
+                                  }}
+                                  disabled={paySplitMutation.isPending}
+                                  data-testid={`button-pay-split-${split.splitNumber}`}
+                                >
+                                  Cobrar
+                                </Button>
                               </div>
-                              <div className="flex-1 space-y-1">
-                                <Select value={splitReceiptTypes[split.id] || "ticket"} onValueChange={(v) => setSplitReceiptTypes(prev => ({ ...prev, [split.id]: v }))}>
-                                  <SelectTrigger className="h-8" data-testid={`select-split-receipt-${split.splitNumber}`}>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {Object.entries(receiptTypeLabels).map(([v, l]) => (
-                                      <SelectItem key={v} value={v}>{l}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  if (currentOrder) {
-                                    paySplitMutation.mutate({
-                                      orderId: currentOrder.id,
-                                      splitId: split.id,
-                                      method: splitPayMethods[split.id] || "efectivo",
-                                      receiptType: splitReceiptTypes[split.id] || "ticket",
-                                    });
-                                  }
-                                }}
-                                disabled={paySplitMutation.isPending}
-                                data-testid={`button-pay-split-${split.splitNumber}`}
-                              >
-                                Cobrar
-                              </Button>
+                              {(splitPayMethods[split.id] || "efectivo") === "cuenta_habitacion" && (
+                                <div className="space-y-1 p-2 bg-muted/50 rounded-md border">
+                                  <Label className="text-xs text-muted-foreground">Habitación a cargar</Label>
+                                  <Input
+                                    placeholder="Buscar por número o huésped..."
+                                    value={splitRoomSearchFilters[split.id] || ""}
+                                    onChange={(e) => setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: e.target.value }))}
+                                    className="h-7 text-sm"
+                                    data-testid={`input-split-room-search-${split.splitNumber}`}
+                                  />
+                                  <Select value={splitRoomIds[split.id] || ""} onValueChange={(v) => setSplitRoomIds(prev => ({ ...prev, [split.id]: v }))}>
+                                    <SelectTrigger className="h-8 text-sm" data-testid={`select-split-room-${split.splitNumber}`}>
+                                      <SelectValue placeholder="Seleccionar habitación..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {inHouseRooms
+                                        .filter((r) => {
+                                          const search = splitRoomSearchFilters[split.id] || "";
+                                          return search === "" || r.roomNumber.includes(search) || r.guestName.toLowerCase().includes(search.toLowerCase());
+                                        })
+                                        .map(r => (
+                                          <SelectItem key={r.roomId} value={r.reservationId}>{r.roomNumber} — {r.guestName}</SelectItem>
+                                        ))}
+                                      {inHouseRooms.length === 0 && (
+                                        <SelectItem value="__empty__" disabled>No hay habitaciones ocupadas</SelectItem>
+                                      )}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
