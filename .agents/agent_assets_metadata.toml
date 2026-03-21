@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Jwr6ksoE4fCwuGV0OVYQl"
+uri = "file://codigo-maran.zip"
+type = "unspecified"
+title = "Código completo - Maran Suite System"
