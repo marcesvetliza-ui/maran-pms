@@ -954,11 +954,14 @@ export function registerReservationsRoutes(app: Express) {
             const roomNum = reservationForCC.room?.roomNumber || reservationForCC.roomId;
             const billingTarget = req.body.billingTarget || "guest";
             const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            // Use reservation's linked entity or override from payment body
+            const targetCompanyId = reservationForCC.companyId || req.body.companyId || null;
+            const targetAgencyId = reservationForCC.agencyId || req.body.agencyId || null;
 
-            if (billingTarget === "company" && reservationForCC.companyId) {
+            if (billingTarget === "company" && targetCompanyId) {
               await storage.createAccountMovement({
                 entityType: "company",
-                entityId: reservationForCC.companyId,
+                entityId: targetCompanyId,
                 date: today,
                 type: "cargo",
                 description: `Estadía ${reservationForCC.reservationCode} — Hab. ${roomNum}`,
@@ -967,10 +970,10 @@ export function registerReservationsRoutes(app: Express) {
                 reservationCode: reservationForCC.reservationCode,
                 guestName,
               });
-            } else if (billingTarget === "agency" && reservationForCC.agencyId) {
+            } else if (billingTarget === "agency" && targetAgencyId) {
               await storage.createAccountMovement({
                 entityType: "agency",
-                entityId: reservationForCC.agencyId,
+                entityId: targetAgencyId,
                 date: today,
                 type: "cargo",
                 description: `Estadía ${reservationForCC.reservationCode} — Hab. ${roomNum}`,
@@ -979,6 +982,8 @@ export function registerReservationsRoutes(app: Express) {
                 reservationCode: reservationForCC.reservationCode,
                 guestName,
               });
+            } else if (billingTarget !== "guest") {
+              console.warn(`[CC] Pago CC con billingTarget=${billingTarget} pero sin entityId para reserva ${reservationForCC.reservationCode}`);
             }
           }
         } catch (e) {

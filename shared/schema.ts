@@ -252,6 +252,8 @@ export const payments = pgTable("payments", {
   receivedBy: varchar("received_by"),
   notes: text("notes"),
   billingTarget: text("billing_target").$type<BillingTarget>().default("guest"),
+  companyId: varchar("company_id"),
+  agencyId: varchar("agency_id"),
   status: text("status").notNull().default("active"),
   anuladoPor: text("anulado_por"),
   motivoAnulacion: text("motivo_anulacion"),

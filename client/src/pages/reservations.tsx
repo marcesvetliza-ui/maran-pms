@@ -1230,7 +1230,7 @@ function ReservationDetailDialog({
     notes: "",
     billingTarget: "guest" as "guest" | "company",
   });
-  const [paymentRows, setPaymentRows] = useState<Array<{ amount: string; method: string; reference: string; billingTarget: string }>>([
+  const [paymentRows, setPaymentRows] = useState<Array<{ amount: string; method: string; reference: string; billingTarget: string; companyId?: string; agencyId?: string }>>([
     { amount: "", method: "efectivo", reference: "", billingTarget: "guest" },
   ]);
 
@@ -1271,6 +1271,16 @@ function ReservationDetailDialog({
       const res = await fetch(`/api/reservations/${reservation.id}/changelog`, { credentials: "include" });
       return res.json();
     },
+  });
+
+  const { data: companiesForCC = [] } = useQuery<Company[]>({
+    queryKey: ["/api/companies"],
+    enabled: paymentRows.some(r => r.method === "cuenta_corriente" && r.billingTarget === "company" && !reservation.companyId),
+  });
+
+  const { data: agenciesForCC = [] } = useQuery<Agency[]>({
+    queryKey: ["/api/agencies"],
+    enabled: paymentRows.some(r => r.method === "cuenta_corriente" && r.billingTarget === "agency" && !reservation.agencyId),
   });
 
   const addChargeMutation = useMutation({
@@ -1419,7 +1429,9 @@ function ReservationDetailDialog({
           billingTarget: row.billingTarget as "guest" | "company",
           reservationId: reservation.id,
           date: getLocalToday(),
-        });
+          ...(row.companyId ? { companyId: row.companyId } : {}),
+          ...(row.agencyId ? { agencyId: row.agencyId } : {}),
+        } as any);
         successCount++;
       } catch {
         if (successCount > 0) {
@@ -1863,6 +1875,63 @@ function ReservationDetailDialog({
                             </SelectContent>
                           </Select>
                         </div>
+                        {/* Selector de empresa/agencia para cuenta corriente */}
+                        {row.method === "cuenta_corriente" && row.billingTarget === "company" && !reservation.companyId && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <Select
+                              value={row.companyId || ""}
+                              onValueChange={(value) => {
+                                const updated = [...paymentRows];
+                                updated[index].companyId = value;
+                                setPaymentRows(updated);
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-xs" data-testid={`select-cc-company-${index}`}>
+                                <SelectValue placeholder="Seleccionar empresa..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {companiesForCC.map(c => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.razonSocial || c.nombreFantasia}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        {row.method === "cuenta_corriente" && row.billingTarget === "company" && reservation.companyId && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            CC: {(reservation as any).company?.razonSocial || "empresa vinculada"}
+                          </p>
+                        )}
+                        {row.method === "cuenta_corriente" && row.billingTarget === "agency" && !reservation.agencyId && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <Select
+                              value={row.agencyId || ""}
+                              onValueChange={(value) => {
+                                const updated = [...paymentRows];
+                                updated[index].agencyId = value;
+                                setPaymentRows(updated);
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-xs" data-testid={`select-cc-agency-${index}`}>
+                                <SelectValue placeholder="Seleccionar agencia..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {agenciesForCC.map(a => (
+                                  <SelectItem key={a.id} value={a.id}>
+                                    {a.razonSocial || a.nombreFantasia}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        {row.method === "cuenta_corriente" && row.billingTarget === "agency" && reservation.agencyId && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            CC: {(reservation as any).agency?.razonSocial || "agencia vinculada"}
+                          </p>
+                        )}
                         {paymentRows.length > 1 && (
                           <Button
                             variant="ghost"

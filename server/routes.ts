@@ -381,7 +381,8 @@ export async function registerRoutes(
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       // Obtener todos los pagos con método cuenta_corriente
       const allPayments = await db.execute(sql`
-        SELECT p.*, r.reservation_code, r.company_id, r.agency_id, r.room_id,
+        SELECT p.*, 
+               r.reservation_code, r.company_id as res_company_id, r.agency_id as res_agency_id, r.room_id,
                g.first_name, g.last_name, ro.room_number
         FROM payments p
         JOIN reservations r ON p.reservation_id = r.id
@@ -406,10 +407,14 @@ export async function registerRoutes(
         const guestName = pay.first_name ? `${pay.first_name} ${pay.last_name}` : "Huésped";
         const roomNum = pay.room_number || pay.room_id || "N/A";
 
-        if (billingTarget === "company" && pay.company_id) {
+        // Use payment's own company/agency if available, fall back to reservation's
+        const effectiveCompanyId = pay.company_id || pay.res_company_id || null;
+        const effectiveAgencyId = pay.agency_id || pay.res_agency_id || null;
+
+        if (billingTarget === "company" && effectiveCompanyId) {
           await storage.createAccountMovement({
             entityType: "company",
-            entityId: pay.company_id,
+            entityId: effectiveCompanyId,
             date: pay.date || today,
             type: "cargo",
             description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
@@ -419,10 +424,10 @@ export async function registerRoutes(
             guestName,
           });
           created++;
-        } else if (billingTarget === "agency" && pay.agency_id) {
+        } else if (billingTarget === "agency" && effectiveAgencyId) {
           await storage.createAccountMovement({
             entityType: "agency",
-            entityId: pay.agency_id,
+            entityId: effectiveAgencyId,
             date: pay.date || today,
             type: "cargo",
             description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
