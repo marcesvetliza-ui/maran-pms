@@ -5,7 +5,7 @@ import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
-import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks } from "@shared/schema";
+import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks, rooms } from "@shared/schema";
 import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
@@ -1845,6 +1845,155 @@ export async function registerRoutes(
       res.end(pdfBuffer);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ==================== TABLERO OPERATIVO ====================
+  app.get("/api/operaciones/resumen", requireAuth, async (req, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", {
+        timeZone: "America/Argentina/Buenos_Aires",
+      });
+
+      // 1. Check-ins del día
+      const checkInsHoy = await db
+        .select({
+          id: reservations.id,
+          reservationCode: reservations.reservationCode,
+          checkInDate: reservations.checkInDate,
+          checkOutDate: reservations.checkOutDate,
+          status: reservations.status,
+          roomId: reservations.roomId,
+          guestId: reservations.guestId,
+        })
+        .from(reservations)
+        .where(and(
+          eq(reservations.checkInDate, today),
+          inArray(reservations.status, ["confirmed", "pending", "tentative"] as any)
+        ));
+
+      // 2. Check-outs del día
+      const checkOutsHoy = await db
+        .select({
+          id: reservations.id,
+          reservationCode: reservations.reservationCode,
+          checkInDate: reservations.checkInDate,
+          checkOutDate: reservations.checkOutDate,
+          status: reservations.status,
+          roomId: reservations.roomId,
+          guestId: reservations.guestId,
+        })
+        .from(reservations)
+        .where(and(
+          eq(reservations.checkOutDate, today),
+          eq(reservations.status, "checked_in")
+        ));
+
+      // 3. Folios con saldo — query única optimizada con JOIN
+      const foliosRaw = await db.execute(sql`
+        SELECT
+          r.id AS "reservationId",
+          r.reservation_code AS "reservationCode",
+          r.room_id AS "roomId",
+          r.guest_id AS "guestId",
+          COALESCE(SUM(CASE WHEN c.status = 'active' THEN c.amount::numeric ELSE 0 END), 0) -
+          COALESCE(SUM(CASE WHEN p.status = 'active' THEN p.amount::numeric ELSE 0 END), 0) AS balance
+        FROM reservations r
+        LEFT JOIN charges c ON c.reservation_id = r.id
+        LEFT JOIN payments p ON p.reservation_id = r.id
+        WHERE r.status = 'checked_in'
+        GROUP BY r.id, r.reservation_code, r.room_id, r.guest_id
+        HAVING (
+          COALESCE(SUM(CASE WHEN c.status = 'active' THEN c.amount::numeric ELSE 0 END), 0) -
+          COALESCE(SUM(CASE WHEN p.status = 'active' THEN p.amount::numeric ELSE 0 END), 0)
+        ) > 0.01
+        ORDER BY balance DESC
+      `);
+      const foliosConSaldo = (foliosRaw.rows as any[]).map(r => ({
+        ...r,
+        balance: Math.round(Number(r.balance) * 100) / 100,
+      }));
+
+      // 4. Cajas abiertas
+      const cajasAbiertas = await db
+        .select({
+          id: cashShifts.id,
+          area: cashShifts.area,
+          shiftNumber: cashShifts.shiftNumber,
+          openedBy: cashShifts.openedBy,
+          openedAt: cashShifts.openedAt,
+          autoCreado: cashShifts.autoCreado,
+        })
+        .from(cashShifts)
+        .where(eq(cashShifts.status, "open"));
+
+      // 5. Habitaciones sucias
+      const habitacionesSucias = await db
+        .select({ id: rooms.id, roomNumber: rooms.roomNumber, floor: rooms.floor })
+        .from(rooms)
+        .where(eq(rooms.status, "dirty"));
+
+      // 6. Tareas de housekeeping de hoy
+      const tareasHoy = await db
+        .select({ id: housekeepingTasks.id, status: housekeepingTasks.status })
+        .from(housekeepingTasks)
+        .where(eq(housekeepingTasks.scheduledDate, today));
+
+      const tareasPendientes = tareasHoy.filter(t => t.status === "pending").length;
+      const tareasEnProceso = tareasHoy.filter(t => t.status === "in_progress").length;
+      const tareasCompletadas = tareasHoy.filter(t => t.status === "completed" || t.status === "verified").length;
+
+      // 7. Incidencias abiertas
+      let incidenciasAbiertas = 0;
+      let incidenciasCriticas = 0;
+      try {
+        const incidents = await db
+          .select({ severity: systemIncidents.severity, status: systemIncidents.status })
+          .from(systemIncidents)
+          .where(inArray(systemIncidents.status, ["pendiente", "en_revision"] as any));
+        incidenciasAbiertas = incidents.length;
+        incidenciasCriticas = incidents.filter(i => i.severity === "critica").length;
+      } catch { /* tabla puede no existir */ }
+
+      // 8. Recaudación del día por área — única query con filtro de fecha
+      const movimientosHoy = await db.execute(sql`
+        SELECT area, amount, movement_type
+        FROM cash_movements
+        WHERE
+          DATE(created_at AT TIME ZONE 'America/Argentina/Buenos_Aires') = ${today}::date
+          AND anulado = false
+      `);
+      const recaudacionPorArea: Record<string, number> = {};
+      for (const mov of movimientosHoy.rows as any[]) {
+        if (!recaudacionPorArea[mov.area]) recaudacionPorArea[mov.area] = 0;
+        const amt = parseFloat(mov.amount);
+        recaudacionPorArea[mov.area] += mov.movement_type === "income" ? amt : -amt;
+      }
+      const totalRecaudado = Object.values(recaudacionPorArea).reduce((s, v) => s + v, 0);
+
+      res.json({
+        fecha: today,
+        checkIns: { total: checkInsHoy.length, reservas: checkInsHoy },
+        checkOuts: { total: checkOutsHoy.length, reservas: checkOutsHoy },
+        foliosConSaldo: { total: foliosConSaldo.length, items: foliosConSaldo },
+        cajas: {
+          abiertas: cajasAbiertas.length,
+          detalle: cajasAbiertas,
+          recaudacionPorArea,
+          totalRecaudado: Math.round(totalRecaudado * 100) / 100,
+        },
+        housekeeping: {
+          habitacionesSucias: habitacionesSucias.length,
+          tareasPendientes,
+          tareasEnProceso,
+          tareasCompletadas,
+          totalTareas: tareasHoy.length,
+        },
+        incidencias: { abiertas: incidenciasAbiertas, criticas: incidenciasCriticas },
+      });
+    } catch (error) {
+      console.error("Error en tablero operativo:", error);
+      res.status(500).json({ error: "Error generando resumen operativo" });
     }
   });
 

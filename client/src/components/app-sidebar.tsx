@@ -3,6 +3,7 @@ import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   LayoutDashboard,
+  Activity,
   TrendingUp,
   BarChart2,
   CalendarDays,
@@ -68,8 +69,9 @@ const menuSections = [
   {
     titulo: "Gerencia",
     items: [
-      { label: "Dashboard",  icon: LayoutDashboard, href: "/"          },
-      { label: "Ejecutivo",  icon: TrendingUp,       href: "/executive" },
+      { label: "Dashboard",    icon: LayoutDashboard, href: "/"             },
+      { label: "Operaciones",  icon: Activity,        href: "/operaciones"  },
+      { label: "Ejecutivo",    icon: TrendingUp,      href: "/executive"    },
       { label: "Reportes",   icon: BarChart2,        href: "/reports"   },
     ],
   },

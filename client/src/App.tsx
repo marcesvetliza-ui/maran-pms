@@ -10,6 +10,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
+import OperacionesPage from "@/pages/operaciones";
 import PlanningPage from "@/pages/planning";
 import RoomsPage from "@/pages/rooms";
 import ReservationsPage from "@/pages/reservations";
@@ -77,6 +78,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/operaciones" component={OperacionesPage} />
       <Route path="/planning" component={PlanningPage} />
       <Route path="/rooms" component={RoomsPage} />
       <Route path="/reservations" component={ReservationsPage} />
