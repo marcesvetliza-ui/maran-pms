@@ -2069,3 +2069,36 @@ export const insertLostFoundSchema = createInsertSchema(lostFoundItems).omit({
 });
 export type InsertLostFound = z.infer<typeof insertLostFoundSchema>;
 export type LostFoundItem = typeof lostFoundItems.$inferSelect;
+
+// ==================== SYSTEM INCIDENTS ====================
+export type IncidentSeverity = "baja" | "media" | "alta" | "critica";
+export type IncidentStatus = "pendiente" | "en_revision" | "resuelto" | "descartado";
+export type IncidentModule =
+  | "planning" | "reservas" | "check-in" | "check-out"
+  | "grupos" | "restaurant" | "spa" | "eventos"
+  | "housekeeping" | "hospitalidad" | "inventario"
+  | "cajas" | "reportes" | "administracion" | "otro";
+
+export const systemIncidents = pgTable("system_incidents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  module: text("module").$type<IncidentModule>().notNull().default("otro"),
+  severity: text("severity").$type<IncidentSeverity>().notNull().default("media"),
+  status: text("status").$type<IncidentStatus>().notNull().default("pendiente"),
+  reportedBy: text("reported_by").notNull(),
+  reportedAt: timestamp("reported_at").notNull().defaultNow(),
+  assignedTo: text("assigned_to"),
+  resolvedBy: text("resolved_by"),
+  resolvedAt: timestamp("resolved_at"),
+  resolutionNotes: text("resolution_notes"),
+  screenshotUrl: text("screenshot_url"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSystemIncidentSchema = createInsertSchema(systemIncidents).omit({
+  id: true, createdAt: true, updatedAt: true, resolvedAt: true,
+});
+export type InsertSystemIncident = z.infer<typeof insertSystemIncidentSchema>;
+export type SystemIncident = typeof systemIncidents.$inferSelect;

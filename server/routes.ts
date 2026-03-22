@@ -11,7 +11,7 @@ import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
-import { lostFoundItems } from "@shared/schema";
+import { lostFoundItems, systemIncidents } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
@@ -1845,6 +1845,90 @@ export async function registerRoutes(
       res.end(pdfBuffer);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ==================== SYSTEM INCIDENTS ====================
+  // IMPORTANT: /stats must be registered BEFORE /:id to avoid Express matching "stats" as an ID
+  app.get("/api/incidents/stats", requireAuth, async (req, res) => {
+    try {
+      const all = await db.select().from(systemIncidents);
+      res.json({
+        total: all.length,
+        pendiente: all.filter(i => i.status === "pendiente").length,
+        en_revision: all.filter(i => i.status === "en_revision").length,
+        resuelto: all.filter(i => i.status === "resuelto").length,
+        criticos: all.filter(i => i.severity === "critica" && i.status !== "resuelto" && i.status !== "descartado").length,
+        altos: all.filter(i => i.severity === "alta" && i.status !== "resuelto" && i.status !== "descartado").length,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching incident stats" });
+    }
+  });
+
+  app.get("/api/incidents", requireAuth, async (req, res) => {
+    try {
+      const { status, severity, module } = req.query;
+      const conditions = [];
+      if (status && status !== "all") conditions.push(eq(systemIncidents.status, status as string));
+      if (severity && severity !== "all") conditions.push(eq(systemIncidents.severity, severity as string));
+      if (module && module !== "all") conditions.push(eq(systemIncidents.module, module as string));
+      const incidents = await db
+        .select()
+        .from(systemIncidents)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(systemIncidents.reportedAt));
+      res.json(incidents);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching incidents" });
+    }
+  });
+
+  app.post("/api/incidents", requireAuth, async (req, res) => {
+    try {
+      const { title, description, module, severity, reportedBy, screenshotUrl } = req.body;
+      if (!title || !description || !reportedBy) {
+        return res.status(400).json({ error: "Título, descripción y quien reporta son requeridos" });
+      }
+      const [incident] = await db.insert(systemIncidents).values({
+        title, description,
+        module: module || "otro",
+        severity: severity || "media",
+        status: "pendiente",
+        reportedBy,
+        reportedAt: new Date(),
+        screenshotUrl: screenshotUrl || null,
+      }).returning();
+      res.status(201).json(incident);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating incident" });
+    }
+  });
+
+  app.patch("/api/incidents/:id", requireAuth, async (req, res) => {
+    try {
+      const { status, assignedTo, resolvedBy, resolutionNotes } = req.body;
+      const updateData: any = { updatedAt: new Date() };
+      if (status) updateData.status = status;
+      if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
+      if (resolvedBy) updateData.resolvedBy = resolvedBy;
+      if (resolutionNotes !== undefined) updateData.resolutionNotes = resolutionNotes;
+      if (status === "resuelto" || status === "descartado") updateData.resolvedAt = new Date();
+      const [updated] = await db.update(systemIncidents).set(updateData)
+        .where(eq(systemIncidents.id, req.params.id)).returning();
+      if (!updated) return res.status(404).json({ error: "Incidente no encontrado" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating incident" });
+    }
+  });
+
+  app.delete("/api/incidents/:id", requireRole(["admin"]), async (req, res) => {
+    try {
+      await db.delete(systemIncidents).where(eq(systemIncidents.id, req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting incident" });
     }
   });
 
