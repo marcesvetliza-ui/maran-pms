@@ -982,6 +982,19 @@ export function registerReservationsRoutes(app: Express) {
                 reservationCode: reservationForCC.reservationCode,
                 guestName,
               });
+            } else if (billingTarget === "guest" && reservationForCC.guestId) {
+              // CC para huésped individual (persona física)
+              await storage.createAccountMovement({
+                entityType: "guest",
+                entityId: reservationForCC.guestId,
+                date: today,
+                type: "cargo",
+                description: `Estadía ${reservationForCC.reservationCode} — Hab. ${roomNum}`,
+                amount: parseFloat(req.body.amount).toFixed(2),
+                reservationId: reservationForCC.id,
+                reservationCode: reservationForCC.reservationCode,
+                guestName,
+              });
             } else if (billingTarget !== "guest") {
               console.warn(`[CC] Pago CC con billingTarget=${billingTarget} pero sin entityId para reserva ${reservationForCC.reservationCode}`);
             }

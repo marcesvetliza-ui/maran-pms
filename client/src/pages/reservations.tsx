@@ -30,6 +30,7 @@ import {
   ShoppingCart,
   XCircle,
   FileText,
+  Users2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1875,13 +1876,13 @@ function ReservationDetailDialog({
                             </SelectContent>
                           </Select>
                         </div>
-                        {/* Aviso cuando cuenta_corriente se usa sin empresa/agencia */}
+                        {/* Aviso CC huésped individual */}
                         {row.method === "cuenta_corriente" && row.billingTarget === "guest" && (
-                          <div className="flex items-start gap-1.5 mt-1 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 px-2 py-1.5">
-                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-                            <p className="text-xs text-amber-700 dark:text-amber-400 leading-tight">
-                              Sin empresa/agencia asociada. El cargo <strong>no</strong> quedará registrado en ninguna Cuenta Corriente.
-                              ¿Desea continuar de todas formas?
+                          <div className="flex items-start gap-1.5 mt-1 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 px-2 py-1.5">
+                            <Users2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-blue-700 dark:text-blue-400 leading-tight">
+                              El cargo se registrará en la Cuenta Corriente del huésped
+                              {reservation.guest ? <strong> {reservation.guest.firstName} {reservation.guest.lastName}</strong> : ""}.
                             </p>
                           </div>
                         )}

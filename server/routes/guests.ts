@@ -275,9 +275,6 @@ export function registerGuestsRoutes(app: Express) {
     try {
       const { from, to } = req.query as { from?: string; to?: string };
       const summary = await storage.getAccountSummary();
-      const entityNames: Record<string, string> = {};
-      summary.companies.forEach(c => { entityNames[c.id] = c.name; });
-      summary.agencies.forEach(a => { entityNames[a.id] = a.name; });
 
       const movements: any[] = [];
       for (const c of summary.companies) {
@@ -287,6 +284,10 @@ export function registerGuestsRoutes(app: Express) {
       for (const a of summary.agencies) {
         const ms = await storage.getAccountMovements("agency", a.id);
         ms.forEach(m => movements.push({ ...m, entityName: a.name, entityTypeName: "Agencia" }));
+      }
+      for (const g of summary.guests) {
+        const ms = await storage.getAccountMovements("guest", g.id);
+        ms.forEach(m => movements.push({ ...m, entityName: g.name, entityTypeName: "Huésped" }));
       }
 
       const filtered = movements.filter(m => {

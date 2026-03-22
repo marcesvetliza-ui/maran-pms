@@ -15,6 +15,7 @@ import {
   Minus,
   RefreshCw,
   AlertCircle,
+  User,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,7 @@ export default function AdminCuentasPage() {
   const { data: accountSummary, isLoading: summaryLoading } = useQuery<{
     companies: { id: string; name: string; balance: number }[];
     agencies: { id: string; name: string; balance: number }[];
+    guests: { id: string; name: string; balance: number }[];
   }>({
     queryKey: ["/api/account-summary"],
   });
@@ -80,7 +82,8 @@ export default function AdminCuentasPage() {
 
   const totalCompaniesDebt = accountSummary?.companies.reduce((sum, c) => sum + c.balance, 0) || 0;
   const totalAgenciesDebt = accountSummary?.agencies.reduce((sum, a) => sum + a.balance, 0) || 0;
-  const totalDebt = totalCompaniesDebt + totalAgenciesDebt;
+  const totalGuestsDebt = accountSummary?.guests?.reduce((sum, g) => sum + g.balance, 0) || 0;
+  const totalDebt = totalCompaniesDebt + totalAgenciesDebt + totalGuestsDebt;
 
   const reporteCharges = reporteMovements.filter(m => parseFloat(m.amount) > 0);
   const reportePayments = reporteMovements.filter(m => parseFloat(m.amount) < 0);
@@ -102,14 +105,15 @@ export default function AdminCuentasPage() {
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-cuentas-title">
             Cuentas Corrientes
           </h1>
-          <p className="text-muted-foreground text-sm">Empresas y Agencias — saldos pendientes y movimientos</p>
+          <p className="text-muted-foreground text-sm">Empresas, Agencias y Huéspedes — saldos pendientes y movimientos</p>
         </div>
       </div>
 
       {/* Resumen de deuda */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {summaryLoading ? (
           <>
+            <Skeleton className="h-24 rounded-xl" />
             <Skeleton className="h-24 rounded-xl" />
             <Skeleton className="h-24 rounded-xl" />
             <Skeleton className="h-24 rounded-xl" />
@@ -142,6 +146,21 @@ export default function AdminCuentasPage() {
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {accountSummary?.agencies.length || 0} agencia(s) con saldo
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card data-testid="card-cc-huespedes-total">
+              <CardContent className="pt-6 text-center">
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Huéspedes</p>
+                </div>
+                <p className={`text-2xl font-bold ${totalGuestsDebt > 0 ? "text-red-600" : "text-green-600"}`} data-testid="text-guests-debt">
+                  ${totalGuestsDebt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {accountSummary?.guests?.length || 0} huésped(es) con saldo
                 </p>
               </CardContent>
             </Card>
@@ -211,6 +230,33 @@ export default function AdminCuentasPage() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Lista de huéspedes con saldo en CC */}
+      {(accountSummary?.guests?.length ?? 0) > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <User className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold">Huéspedes con saldo pendiente</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {accountSummary!.guests!.map(g => (
+              <div
+                key={g.id}
+                className="flex items-center justify-between p-3 rounded-lg border bg-background"
+                data-testid={`row-cc-huesped-${g.id}`}
+              >
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">{g.name}</span>
+                </div>
+                <span className={`text-sm font-bold ${g.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                  ${g.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Reconciliación de pagos CC existentes */}
       <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10">

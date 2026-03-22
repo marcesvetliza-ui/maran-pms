@@ -382,7 +382,8 @@ export async function registerRoutes(
       // Obtener todos los pagos con método cuenta_corriente
       const allPayments = await db.execute(sql`
         SELECT p.*, 
-               r.reservation_code, r.company_id as res_company_id, r.agency_id as res_agency_id, r.room_id,
+               r.reservation_code, r.company_id as res_company_id, r.agency_id as res_agency_id,
+               r.guest_id, r.room_id,
                g.first_name, g.last_name, ro.room_number
         FROM payments p
         JOIN reservations r ON p.reservation_id = r.id
@@ -396,8 +397,7 @@ export async function registerRoutes(
       let skipped = 0;
 
       for (const pay of (allPayments.rows as any[])) {
-        const billingTarget = pay.billing_target;
-        if (!billingTarget || billingTarget === "guest") { skipped++; continue; }
+        const billingTarget = pay.billing_target || "guest";
 
         // Verificar si ya existe un movimiento para esta reserva con este monto
         const existing = await storage.getAccountMovementsByReservation(pay.reservation_id);
@@ -410,6 +410,7 @@ export async function registerRoutes(
         // Use payment's own company/agency if available, fall back to reservation's
         const effectiveCompanyId = pay.company_id || pay.res_company_id || null;
         const effectiveAgencyId = pay.agency_id || pay.res_agency_id || null;
+        const guestId = pay.guest_id || null;
 
         if (billingTarget === "company" && effectiveCompanyId) {
           await storage.createAccountMovement({
@@ -428,6 +429,19 @@ export async function registerRoutes(
           await storage.createAccountMovement({
             entityType: "agency",
             entityId: effectiveAgencyId,
+            date: pay.date || today,
+            type: "cargo",
+            description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
+            amount: amtStr,
+            reservationId: pay.reservation_id,
+            reservationCode: pay.reservation_code,
+            guestName,
+          });
+          created++;
+        } else if (billingTarget === "guest" && guestId) {
+          await storage.createAccountMovement({
+            entityType: "guest",
+            entityId: guestId,
             date: pay.date || today,
             type: "cargo",
             description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,

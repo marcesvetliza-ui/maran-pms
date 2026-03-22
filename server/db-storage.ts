@@ -3821,6 +3821,7 @@ export class DatabaseStorage implements IStorage {
   async getAccountSummary(): Promise<{
     companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
     agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
+    guests: { id: string; name: string; balance: number; lastMovement: string | null }[];
   }> {
     const allMovements = await db.select().from(accountMovements);
     const allCompanies = await db.select().from(companies);
@@ -3837,6 +3838,13 @@ export class DatabaseStorage implements IStorage {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return movements[0]?.date || null;
     };
+
+    // Find all guest IDs that have CC movements
+    const guestMovements = allMovements.filter(m => m.entityType === "guest");
+    const guestIds = [...new Set(guestMovements.map(m => m.entityId))];
+    const guestRows = guestIds.length > 0
+      ? await db.select().from(guests).where(inArray(guests.id, guestIds))
+      : [];
 
     return {
       companies: allCompanies
@@ -3857,6 +3865,14 @@ export class DatabaseStorage implements IStorage {
           lastMovement: lastMovementDate("agency", a.id),
         }))
         .filter(a => a.balance !== 0),
+      guests: guestRows
+        .map(g => ({
+          id: g.id,
+          name: `${g.firstName} ${g.lastName}`,
+          balance: calcBalance("guest", g.id),
+          lastMovement: lastMovementDate("guest", g.id),
+        }))
+        .filter(g => g.balance !== 0),
     };
   }
 }

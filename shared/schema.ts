@@ -1713,7 +1713,7 @@ export type InsertCashClosingSummary = z.infer<typeof insertCashClosingSummarySc
 export type CashClosingSummary = typeof cashClosingSummaries.$inferSelect;
 
 export type AccountMovementType = "cargo" | "pago" | "nota_credito" | "ajuste";
-export type AccountEntityType = "company" | "agency";
+export type AccountEntityType = "company" | "agency" | "guest";
 
 export const accountMovements = pgTable("account_movements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
