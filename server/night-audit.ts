@@ -6,6 +6,7 @@ import {
   charges,
   payments,
   rooms,
+  guests,
   nightAuditLogs,
   systemNotifications,
 } from "@shared/schema";
@@ -54,17 +55,25 @@ export async function runNightAudit(options: {
     }
   }
 
-  const detail: any[] = [];
-  let reservationsProcessed = 0;
-  let reservationsSkipped = 0;
-  let totalPosted = 0;
   let auditStatus: "success" | "partial" | "failed" = "success";
   const errors: string[] = [];
 
   try {
-    // PASO 1 — Postear cargo de alojamiento por cada habitación ocupada
-    const activeReservations = await db
-      .select()
+    // ============================================================
+    // PASO 1 — Snapshot de habitaciones ocupadas esa noche
+    // (solo conteo/reporte, sin postear cargos)
+    // ============================================================
+    const inHouseReservations = await db
+      .select({
+        id: reservations.id,
+        reservationCode: reservations.reservationCode,
+        roomId: reservations.roomId,
+        checkInDate: reservations.checkInDate,
+        checkOutDate: reservations.checkOutDate,
+        guestId: reservations.guestId,
+        finalRatePerNight: reservations.finalRatePerNight,
+        baseRatePerNight: reservations.baseRatePerNight,
+      })
       .from(reservations)
       .where(
         and(
@@ -74,96 +83,66 @@ export async function runNightAudit(options: {
         ),
       );
 
-    naLog(`Reservas activas encontradas: ${activeReservations.length}`);
+    naLog(`Habitaciones ocupadas: ${inHouseReservations.length}`);
 
-    for (const reservation of activeReservations) {
-      try {
-        const existingCharge = await db
-          .select({ id: charges.id })
-          .from(charges)
-          .where(
-            and(
-              eq(charges.reservationId, reservation.id),
-              eq(charges.date, auditDate),
-              eq(charges.category, "room"),
-              sql`${charges.description} LIKE '%Night Audit%'`,
-            ),
-          )
-          .limit(1);
+    // Calcular saldo pendiente por folio (cargos - pagos) — un solo JOIN cada uno
+    const inHouseIds = inHouseReservations.map((r) => r.id);
+    let folioDetail: any[] = [];
 
-        if (existingCharge.length > 0) {
-          detail.push({
-            reservationId: reservation.id,
-            reservationCode: reservation.reservationCode,
-            action: "skipped",
-            reason: "Cargo ya posteado para esta noche",
-          });
-          reservationsSkipped++;
-          continue;
-        }
+    if (inHouseIds.length > 0) {
+      const chargesSums = await db
+        .select({
+          reservationId: charges.reservationId,
+          total: sql<number>`COALESCE(SUM(${charges.amount}::numeric), 0)`,
+        })
+        .from(charges)
+        .where(inArray(charges.reservationId, inHouseIds))
+        .groupBy(charges.reservationId);
 
-        const ratePerNight = parseFloat(
-          reservation.finalRatePerNight || reservation.baseRatePerNight || "0",
-        );
+      const paymentsSums = await db
+        .select({
+          reservationId: payments.reservationId,
+          total: sql<number>`COALESCE(SUM(${payments.amount}::numeric), 0)`,
+        })
+        .from(payments)
+        .where(inArray(payments.reservationId, inHouseIds))
+        .groupBy(payments.reservationId);
 
-        if (ratePerNight <= 0) {
-          detail.push({
-            reservationId: reservation.id,
-            reservationCode: reservation.reservationCode,
-            action: "skipped",
-            reason: "Tarifa cero o no configurada",
-            rate: ratePerNight,
-          });
-          reservationsSkipped++;
-          continue;
-        }
+      const chargesMap = new Map(chargesSums.map((c) => [c.reservationId, Number(c.total)]));
+      const paymentsMap = new Map(paymentsSums.map((p) => [p.reservationId, Number(p.total)]));
 
-        const room = reservation.roomId
-          ? await db
-              .select({ roomNumber: rooms.roomNumber })
-              .from(rooms)
-              .where(eq(rooms.id, reservation.roomId))
-              .limit(1)
-          : [];
+      // Obtener números de habitación
+      const roomIds = inHouseReservations.map((r) => r.roomId).filter(Boolean) as string[];
+      const roomNumbers = roomIds.length > 0
+        ? await db
+            .select({ id: rooms.id, roomNumber: rooms.roomNumber })
+            .from(rooms)
+            .where(inArray(rooms.id, roomIds))
+        : [];
+      const roomMap = new Map(roomNumbers.map((r) => [r.id, r.roomNumber]));
 
-        const roomNumber = room[0]?.roomNumber ?? "?";
-
-        await db.insert(charges).values({
-          id: randomUUID(),
-          reservationId: reservation.id,
-          description: `Alojamiento Hab. ${roomNumber} — ${auditDate} (Night Audit)`,
-          amount: ratePerNight.toFixed(2),
-          date: auditDate,
-          category: "room",
-          createdBy: "night_audit",
-        });
-
-        totalPosted += ratePerNight;
-        reservationsProcessed++;
-
-        detail.push({
-          reservationId: reservation.id,
-          reservationCode: reservation.reservationCode,
-          roomNumber,
-          action: "posted",
-          amount: ratePerNight,
-          date: auditDate,
-        });
-
-        naLog(`✓ Cargo posteado: ${reservation.reservationCode} - Hab ${roomNumber} - $${ratePerNight}`);
-      } catch (err: any) {
-        errors.push(`Error en reserva ${reservation.reservationCode}: ${err.message}`);
-        auditStatus = "partial";
-        detail.push({
-          reservationId: reservation.id,
-          reservationCode: reservation.reservationCode,
-          action: "error",
-          error: err.message,
-        });
-      }
+      folioDetail = inHouseReservations.map((r) => {
+        const totalCharges = chargesMap.get(r.id) ?? 0;
+        const totalPaid = paymentsMap.get(r.id) ?? 0;
+        const balance = totalCharges - totalPaid;
+        return {
+          reservationId: r.id,
+          reservationCode: r.reservationCode,
+          roomNumber: r.roomId ? roomMap.get(r.roomId) ?? "?" : "?",
+          checkOutDate: r.checkOutDate,
+          totalCharges,
+          totalPaid,
+          balance,
+          hasBalance: balance > 0,
+        };
+      });
     }
 
-    // PASO 2 — Verificar prepagos/garantías del día siguiente (con JOIN, sin N+1)
+    const foliosConSaldo = folioDetail.filter((f) => f.hasBalance);
+
+    // ============================================================
+    // PASO 2 — Verificar prepagos/garantías del día siguiente (JOIN, sin N+1)
+    // ============================================================
     const arrivalsNextDay = await db
       .select()
       .from(reservations)
@@ -179,14 +158,14 @@ export async function runNightAudit(options: {
     let arrivalsWithoutPrepago = 0;
 
     if (arrivalsNextDay.length > 0) {
-      const reservationIds = arrivalsNextDay.map((r) => r.id);
+      const ids = arrivalsNextDay.map((r) => r.id);
       const paymentSums = await db
         .select({
           reservationId: payments.reservationId,
           total: sql<number>`COALESCE(SUM(${payments.amount}::numeric), 0)`,
         })
         .from(payments)
-        .where(inArray(payments.reservationId, reservationIds))
+        .where(inArray(payments.reservationId, ids))
         .groupBy(payments.reservationId);
 
       const paymentMap = new Map(paymentSums.map((p) => [p.reservationId, Number(p.total)]));
@@ -196,19 +175,18 @@ export async function runNightAudit(options: {
         const hasPrepago = totalPaid > 0;
         if (hasPrepago) arrivalsWithPrepago++;
         else arrivalsWithoutPrepago++;
-
         arrivalsDetail.push({
           reservationId: arrival.id,
           reservationCode: arrival.reservationCode,
-          checkInDate: arrival.checkInDate,
           totalPaid,
           hasPrepago,
-          rate: arrival.finalRatePerNight || arrival.baseRatePerNight,
         });
       }
     }
 
+    // ============================================================
     // PASO 3 — Guardar registro del audit
+    // ============================================================
     const [auditLog] = await db
       .insert(nightAuditLogs)
       .values({
@@ -217,27 +195,32 @@ export async function runNightAudit(options: {
         executedAt: new Date(),
         executedBy,
         isManual,
-        reservationsProcessed,
-        reservationsSkipped,
-        totalPosted: totalPosted.toFixed(2),
+        reservationsProcessed: inHouseReservations.length, // habitaciones ocupadas
+        reservationsSkipped: foliosConSaldo.length,         // folios con saldo
+        totalPosted: "0",                                   // no se postean cargos
         arrivalsNextDay: arrivalsNextDay.length,
         arrivalsWithPrepago,
         arrivalsWithoutPrepago,
         status: auditStatus,
         notes: errors.length > 0 ? errors.join(" | ") : null,
-        detail: JSON.stringify({ charges: detail, arrivals: arrivalsDetail }),
+        detail: JSON.stringify({
+          inHouse: folioDetail,
+          arrivals: arrivalsDetail,
+        }),
       })
       .returning();
 
+    // ============================================================
     // PASO 4 — Notificación interna
+    // ============================================================
     try {
       await db.insert(systemNotifications).values({
         id: randomUUID(),
         type: "hospitality_alert" as any,
-        title: `Night Audit ${auditDate} — ${auditStatus === "success" ? "✓ Completado" : "⚠ Parcial"}`,
-        message: `Se postearon ${reservationsProcessed} cargos por $${totalPosted.toFixed(2)}. ${arrivalsNextDay.length} llegadas mañana (${arrivalsWithoutPrepago} sin prepago).`,
+        title: `Night Audit ${auditDate} — ✓ Completado`,
+        message: `${inHouseReservations.length} hab. ocupadas (${foliosConSaldo.length} con saldo). ${arrivalsNextDay.length} llegadas mañana (${arrivalsWithoutPrepago} sin prepago).`,
         area: "all" as any,
-        priority: auditStatus === "success" ? "normal" : ("high" as any),
+        priority: arrivalsWithoutPrepago > 0 ? ("high" as any) : "normal",
         isRead: false,
         createdAt: new Date(),
       });
@@ -250,9 +233,11 @@ export async function runNightAudit(options: {
       executedAt: new Date().toISOString(),
       executedBy,
       isManual,
-      reservationsProcessed,
-      reservationsSkipped,
-      totalPosted: totalPosted.toFixed(2),
+      inHouse: {
+        total: inHouseReservations.length,
+        conSaldo: foliosConSaldo.length,
+        folios: folioDetail,
+      },
       arrivals: {
         total: arrivalsNextDay.length,
         withPrepago: arrivalsWithPrepago,
@@ -263,7 +248,7 @@ export async function runNightAudit(options: {
       auditLogId: auditLog.id,
     };
 
-    naLog(`✓ Completado: ${reservationsProcessed} cargos, $${totalPosted.toFixed(2)}`);
+    naLog(`✓ Completado: ${inHouseReservations.length} in-house, ${arrivalsNextDay.length} llegadas mañana`);
     return { success: true, message: "Night audit completado", data: result };
   } catch (err: any) {
     naLog(`✗ Error crítico: ${err.message}`);
@@ -274,8 +259,8 @@ export async function runNightAudit(options: {
         executedAt: new Date(),
         executedBy,
         isManual,
-        reservationsProcessed,
-        reservationsSkipped,
+        reservationsProcessed: 0,
+        reservationsSkipped: 0,
         totalPosted: "0",
         arrivalsNextDay: 0,
         arrivalsWithPrepago: 0,

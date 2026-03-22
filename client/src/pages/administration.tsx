@@ -600,7 +600,7 @@ function NightAuditTab() {
       queryClient.invalidateQueries({ queryKey: ["/api/night-audit"] });
       toast({
         title: "Night Audit completado",
-        description: `${data.reservationsProcessed} cargos posteados por $${Number(data.totalPosted).toLocaleString("es-AR")}`,
+        description: `${data.inHouse?.total ?? 0} hab. ocupadas, ${data.arrivals?.total ?? 0} llegadas mañana`,
       });
     } catch (err: any) {
       toast({ title: "Error en Night Audit", description: err.message, variant: "destructive" });
@@ -720,10 +720,10 @@ function NightAuditTab() {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               {[
-                { label: "Cargos posteados", value: lastResult.reservationsProcessed },
-                { label: "Total posteado", value: `$${Number(lastResult.totalPosted).toLocaleString("es-AR")}` },
-                { label: "Saltados", value: lastResult.reservationsSkipped },
+                { label: "Hab. ocupadas", value: lastResult.inHouse?.total ?? 0 },
+                { label: "Folios con saldo", value: lastResult.inHouse?.conSaldo ?? 0 },
                 { label: "Llegadas mañana", value: lastResult.arrivals?.total ?? 0 },
+                { label: "Sin prepago", value: lastResult.arrivals?.withoutPrepago ?? 0 },
               ].map(({ label, value }) => (
                 <div key={label} className="text-center">
                   <p className="text-2xl font-bold">{value}</p>
@@ -762,11 +762,11 @@ function NightAuditTab() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Fecha auditada</TableHead>
+                  <TableHead>Fecha</TableHead>
                   <TableHead>Ejecutado</TableHead>
                   <TableHead>Por</TableHead>
-                  <TableHead className="text-center">Cargos</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-center">Hab. ocupadas</TableHead>
+                  <TableHead className="text-center">Con saldo</TableHead>
                   <TableHead className="text-center">Llegadas mañana</TableHead>
                   <TableHead>Estado</TableHead>
                 </TableRow>
@@ -781,8 +781,14 @@ function NightAuditTab() {
                     </TableCell>
                     <TableCell className="text-sm">{audit.executedBy}</TableCell>
                     <TableCell className="text-center text-sm">{audit.reservationsProcessed}</TableCell>
-                    <TableCell className="text-right text-sm font-medium">
-                      ${Number(audit.totalPosted).toLocaleString("es-AR")}
+                    <TableCell className="text-center text-sm">
+                      {audit.reservationsSkipped > 0 ? (
+                        <Badge className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          {audit.reservationsSkipped}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">0</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-center text-sm">
                       {audit.arrivalsNextDay}
