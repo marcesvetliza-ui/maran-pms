@@ -1875,6 +1875,32 @@ function ReservationDetailDialog({
                             </SelectContent>
                           </Select>
                         </div>
+                        {/* Aviso cuando cuenta_corriente se usa sin empresa/agencia */}
+                        {row.method === "cuenta_corriente" && row.billingTarget === "guest" && (
+                          <div className="flex items-start gap-1.5 mt-1 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 px-2 py-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-amber-700 dark:text-amber-400 leading-tight">
+                              Sin empresa/agencia asociada. El cargo <strong>no</strong> quedará registrado en ninguna Cuenta Corriente.
+                              ¿Desea continuar de todas formas?
+                            </p>
+                          </div>
+                        )}
+                        {row.method === "cuenta_corriente" && row.billingTarget === "company" && !reservation.companyId && !row.companyId && (
+                          <div className="flex items-start gap-1.5 mt-1 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 px-2 py-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-amber-700 dark:text-amber-400 leading-tight">
+                              Seleccioná una empresa para que el cargo quede registrado en su cuenta corriente.
+                            </p>
+                          </div>
+                        )}
+                        {row.method === "cuenta_corriente" && row.billingTarget === "agency" && !reservation.agencyId && !row.agencyId && (
+                          <div className="flex items-start gap-1.5 mt-1 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 px-2 py-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-amber-700 dark:text-amber-400 leading-tight">
+                              Seleccioná una agencia para que el cargo quede registrado en su cuenta corriente.
+                            </p>
+                          </div>
+                        )}
                         {/* Selector de empresa/agencia para cuenta corriente */}
                         {row.method === "cuenta_corriente" && row.billingTarget === "company" && !reservation.companyId && (
                           <div className="flex items-center gap-1 mt-1">
