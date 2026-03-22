@@ -11,7 +11,7 @@ import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
-import { lostFoundItems, systemIncidents } from "@shared/schema";
+import { lostFoundItems, systemIncidents, events as eventsTable } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
@@ -1971,6 +1971,32 @@ export async function registerRoutes(
       }
       const totalRecaudado = Object.values(recaudacionPorArea).reduce((s, v) => s + v, 0);
 
+      // 9. Eventos del día (startDate <= hoy <= endDate, no cancelados)
+      const eventosHoy = await db
+        .select({
+          id: eventsTable.id,
+          eventCode: eventsTable.eventCode,
+          name: eventsTable.name,
+          eventType: eventsTable.eventType,
+          contactName: eventsTable.contactName,
+          attendees: eventsTable.attendees,
+          startDate: eventsTable.startDate,
+          endDate: eventsTable.endDate,
+          startTime: eventsTable.startTime,
+          endTime: eventsTable.endTime,
+          status: eventsTable.status,
+          eventRoomId: eventsTable.eventRoomId,
+        })
+        .from(eventsTable)
+        .where(
+          and(
+            lte(eventsTable.startDate, today),
+            gte(eventsTable.endDate, today),
+            ne(eventsTable.status, "cancelled" as any)
+          )
+        )
+        .orderBy(asc(eventsTable.startTime));
+
       res.json({
         fecha: today,
         checkIns: { total: checkInsHoy.length, reservas: checkInsHoy },
@@ -1990,6 +2016,7 @@ export async function registerRoutes(
           totalTareas: tareasHoy.length,
         },
         incidencias: { abiertas: incidenciasAbiertas, criticas: incidenciasCriticas },
+        eventos: { total: eventosHoy.length, items: eventosHoy },
       });
     } catch (error) {
       console.error("Error en tablero operativo:", error);

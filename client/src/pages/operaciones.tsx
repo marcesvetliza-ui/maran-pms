@@ -7,7 +7,7 @@ import { useLocation } from "wouter";
 import {
   LogIn, LogOut, CreditCard, Building2,
   CheckCircle, AlertTriangle, RefreshCw,
-  Wallet, ClipboardCheck,
+  Wallet, ClipboardCheck, PartyPopper, Clock,
 } from "lucide-react";
 
 const AREA_LABEL: Record<string, string> = {
@@ -147,8 +147,8 @@ export default function OperacionesPage() {
             </Card>
           </div>
 
-          {/* Fila 2 — Cajas + Housekeeping + Incidencias */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Fila 2 — Cajas + Housekeeping + Incidencias + Eventos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Cajas */}
             <Card>
               <CardHeader className="pb-3">
@@ -303,6 +303,59 @@ export default function OperacionesPage() {
                   onClick={() => navigate("/administration")}
                 >
                   Ver bitácora
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Eventos del día */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <PartyPopper className="h-4 w-4" />
+                  Eventos de hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {(data?.eventos?.total ?? 0) === 0 ? (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <CheckCircle className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">Sin eventos hoy</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {data.eventos.items.map((ev: any) => (
+                      <div
+                        key={ev.id}
+                        className="p-2 rounded-md border bg-muted/20 space-y-1"
+                        data-testid={`evento-row-${ev.id}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-medium leading-tight">{ev.name}</p>
+                          <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 capitalize">
+                            {ev.eventType}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          {ev.startTime && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {ev.startTime}{ev.endTime ? ` - ${ev.endTime}` : ""}
+                            </span>
+                          )}
+                          {ev.attendees && (
+                            <span>{ev.attendees} personas</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{ev.contactName}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Button
+                  variant="outline" size="sm" className="w-full"
+                  onClick={() => navigate("/events")}
+                >
+                  Ver todos los eventos
                 </Button>
               </CardContent>
             </Card>
