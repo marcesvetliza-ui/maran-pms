@@ -124,6 +124,14 @@ app.use((req, res, next) => {
 
   await registerRoutes(httpServer, app);
 
+  try {
+    const { setupNightAuditScheduler } = await import("./night-audit");
+    setupNightAuditScheduler();
+    log("Night Audit scheduler iniciado");
+  } catch (err: any) {
+    console.error("Night audit scheduler error (non-blocking):", err.message);
+  }
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

@@ -2102,3 +2102,31 @@ export const insertSystemIncidentSchema = createInsertSchema(systemIncidents).om
 });
 export type InsertSystemIncident = z.infer<typeof insertSystemIncidentSchema>;
 export type SystemIncident = typeof systemIncidents.$inferSelect;
+
+// ==================== NIGHT AUDIT ====================
+export type NightAuditStatus = "success" | "partial" | "failed";
+
+export const nightAuditLogs = pgTable("night_audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  auditDate: date("audit_date").notNull(),
+  executedAt: timestamp("executed_at").notNull().defaultNow(),
+  executedBy: text("executed_by").notNull().default("sistema"),
+  isManual: boolean("is_manual").notNull().default(false),
+  reservationsProcessed: integer("reservations_processed").notNull().default(0),
+  reservationsSkipped: integer("reservations_skipped").notNull().default(0),
+  totalPosted: decimal("total_posted", { precision: 12, scale: 2 }).notNull().default("0"),
+  arrivalsNextDay: integer("arrivals_next_day").notNull().default(0),
+  arrivalsWithPrepago: integer("arrivals_with_prepago").notNull().default(0),
+  arrivalsWithoutPrepago: integer("arrivals_without_prepago").notNull().default(0),
+  status: text("status").$type<NightAuditStatus>().notNull().default("success"),
+  notes: text("notes"),
+  detail: text("detail"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNightAuditLogSchema = createInsertSchema(nightAuditLogs).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertNightAuditLog = z.infer<typeof insertNightAuditLogSchema>;
+export type NightAuditLog = typeof nightAuditLogs.$inferSelect;

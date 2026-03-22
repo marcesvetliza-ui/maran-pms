@@ -11,7 +11,7 @@ import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
-import { lostFoundItems, systemIncidents, events as eventsTable } from "@shared/schema";
+import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
@@ -2126,6 +2126,71 @@ export async function registerRoutes(
   registerAdminCashRoutes(app);
   registerBillingRoutes(app);
   registerReportsRoutes(app);
+
+  // ==================== NIGHT AUDIT ====================
+  app.post("/api/night-audit/run", requireAuth, async (req, res) => {
+    try {
+      const { runNightAudit, nightAuditAlreadyRan } = await import("./night-audit");
+      const { forceDate, force } = req.body;
+      const userName = (req.user as any)?.fullName || (req.user as any)?.username || "manual";
+      const targetDate = forceDate ||
+        new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const alreadyRan = await nightAuditAlreadyRan(targetDate);
+      if (alreadyRan && !force) {
+        return res.status(409).json({
+          error: "El night audit ya se ejecutó para esta fecha",
+          alreadyRan: true,
+        });
+      }
+      const result = await runNightAudit({ executedBy: userName, isManual: true, forceDate });
+      if (result.success) {
+        res.json(result.data);
+      } else {
+        res.status(500).json({ error: result.message });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: "Error ejecutando night audit: " + error.message });
+    }
+  });
+
+  app.get("/api/night-audit/history", requireAuth, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string || "30");
+      const history = await db
+        .select()
+        .from(nightAuditLogs)
+        .orderBy(desc(nightAuditLogs.executedAt))
+        .limit(limit);
+      res.json(history);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching night audit history" });
+    }
+  });
+
+  app.get("/api/night-audit/status", requireAuth, async (req, res) => {
+    try {
+      const { nightAuditAlreadyRan } = await import("./night-audit");
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const yesterday = new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const [lastAudit] = await db
+        .select()
+        .from(nightAuditLogs)
+        .orderBy(desc(nightAuditLogs.executedAt))
+        .limit(1);
+      const todayRan = await nightAuditAlreadyRan(today);
+      const yesterdayRan = await nightAuditAlreadyRan(yesterday);
+      res.json({
+        today,
+        yesterday,
+        lastAudit: lastAudit || null,
+        todayRan,
+        yesterdayRan,
+        nextScheduled: "00:05 hora Argentina",
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching night audit status" });
+    }
+  });
 
   return httpServer;
 }
