@@ -31,7 +31,11 @@ import {
   Trash2,
   Edit,
   Play,
+  ChevronRight,
 } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/App";
+import type { SystemIncident } from "@shared/schema";
 
 type Room = {
   id: string;
@@ -144,6 +148,291 @@ const staffFormSchema = z.object({
 });
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
+
+const SEVERITY_CONFIG: Record<string, { label: string; color: string }> = {
+  baja:    { label: "Baja",    color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
+  media:   { label: "Media",   color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" },
+  alta:    { label: "Alta",    color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
+  critica: { label: "Crítica", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+};
+const STATUS_CONFIG_INC: Record<string, { label: string; color: string }> = {
+  pendiente:   { label: "Pendiente",   color: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
+  en_revision: { label: "En revisión", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+  resuelto:    { label: "Resuelto",    color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
+  descartado:  { label: "Descartado",  color: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500" },
+};
+const INC_MODULES = [
+  "planning", "reservas", "check-in", "check-out", "grupos",
+  "restaurant", "spa", "eventos", "housekeeping", "hospitalidad",
+  "inventario", "cajas", "reportes", "administracion", "otro",
+];
+
+function IncidenciasTab() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterSeverity, setFilterSeverity] = useState("all");
+  const [filterModule, setFilterModule] = useState("all");
+  const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState<SystemIncident | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newModule, setNewModule] = useState("otro");
+  const [newSeverity, setNewSeverity] = useState("media");
+  const [updateStatus, setUpdateStatus] = useState("");
+  const [updateAssigned, setUpdateAssigned] = useState("");
+  const [updateResolution, setUpdateResolution] = useState("");
+  const [updateResolvedBy, setUpdateResolvedBy] = useState("");
+
+  const queryParams = new URLSearchParams();
+  if (filterStatus !== "all") queryParams.set("status", filterStatus);
+  if (filterSeverity !== "all") queryParams.set("severity", filterSeverity);
+  if (filterModule !== "all") queryParams.set("module", filterModule);
+
+  const { data: incidents = [], isLoading } = useQuery<SystemIncident[]>({
+    queryKey: ["/api/incidents", filterStatus, filterSeverity, filterModule],
+    queryFn: async () => {
+      const res = await fetch(`/api/incidents?${queryParams.toString()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error cargando incidentes");
+      return res.json();
+    },
+  });
+
+  const { data: stats } = useQuery<any>({
+    queryKey: ["/api/incidents/stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/incidents/stats", { credentials: "include" });
+      if (!res.ok) return {};
+      return res.json();
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await fetch("/api/incidents", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(data) });
+      if (!res.ok) throw new Error("Error al crear incidente");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/incidents/stats"] });
+      setIsNewDialogOpen(false);
+      setNewTitle(""); setNewDesc(""); setNewModule("otro"); setNewSeverity("media");
+      toast({ title: "Incidencia registrada" });
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo registrar la incidencia", variant: "destructive" }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+      const res = await fetch(`/api/incidents/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(data) });
+      if (!res.ok) throw new Error("Error al actualizar");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/incidents/stats"] });
+      setIsDetailDialogOpen(false);
+      toast({ title: "Incidencia actualizada" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/incidents/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Error al eliminar");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/incidents/stats"] });
+      setIsDetailDialogOpen(false);
+      toast({ title: "Incidencia eliminada" });
+    },
+  });
+
+  const openDetail = (incident: SystemIncident) => {
+    setSelectedIncident(incident);
+    setUpdateStatus(incident.status);
+    setUpdateAssigned(incident.assignedTo || "");
+    setUpdateResolution(incident.resolutionNotes || "");
+    setUpdateResolvedBy(incident.resolvedBy || "");
+    setIsDetailDialogOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Card className="border-l-4 border-l-gray-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.pendiente ?? 0}</p><p className="text-xs text-muted-foreground">Pendientes</p></CardContent></Card>
+        <Card className="border-l-4 border-l-blue-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.en_revision ?? 0}</p><p className="text-xs text-muted-foreground">En revisión</p></CardContent></Card>
+        <Card className="border-l-4 border-l-red-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.criticos ?? 0}</p><p className="text-xs text-muted-foreground">Críticos abiertos</p></CardContent></Card>
+        <Card className="border-l-4 border-l-green-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.resuelto ?? 0}</p><p className="text-xs text-muted-foreground">Resueltos</p></CardContent></Card>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-36"><SelectValue placeholder="Estado" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="pendiente">Pendiente</SelectItem>
+            <SelectItem value="en_revision">En revisión</SelectItem>
+            <SelectItem value="resuelto">Resuelto</SelectItem>
+            <SelectItem value="descartado">Descartado</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterSeverity} onValueChange={setFilterSeverity}>
+          <SelectTrigger className="w-36"><SelectValue placeholder="Gravedad" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas</SelectItem>
+            <SelectItem value="critica">Crítica</SelectItem>
+            <SelectItem value="alta">Alta</SelectItem>
+            <SelectItem value="media">Media</SelectItem>
+            <SelectItem value="baja">Baja</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterModule} onValueChange={setFilterModule}>
+          <SelectTrigger className="w-40"><SelectValue placeholder="Módulo" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los módulos</SelectItem>
+            {INC_MODULES.map(m => (
+              <SelectItem key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="ml-auto">
+          <Button onClick={() => setIsNewDialogOpen(true)} data-testid="btn-new-incident">
+            <Plus className="h-4 w-4 mr-2" />Reportar incidencia
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-8 text-center text-muted-foreground">Cargando...</div>
+          ) : incidents.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground">No hay incidencias con los filtros actuales</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Título</TableHead>
+                  <TableHead>Módulo</TableHead>
+                  <TableHead>Gravedad</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Reportado por</TableHead>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead className="w-10"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {incidents.map((incident) => (
+                  <TableRow key={incident.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openDetail(incident)} data-testid={`incident-row-${incident.id}`}>
+                    <TableCell className="font-medium max-w-[200px] truncate">{incident.title}</TableCell>
+                    <TableCell className="capitalize text-sm">{incident.module}</TableCell>
+                    <TableCell><Badge className={`text-xs ${SEVERITY_CONFIG[incident.severity]?.color}`}>{SEVERITY_CONFIG[incident.severity]?.label ?? incident.severity}</Badge></TableCell>
+                    <TableCell><Badge className={`text-xs ${STATUS_CONFIG_INC[incident.status]?.color}`}>{STATUS_CONFIG_INC[incident.status]?.label ?? incident.status}</Badge></TableCell>
+                    <TableCell className="text-sm">{incident.reportedBy}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{new Date(incident.reportedAt).toLocaleDateString("es-AR")}</TableCell>
+                    <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={isNewDialogOpen} onOpenChange={setIsNewDialogOpen}>
+        <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Reportar incidencia</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><Label>Título *</Label><Input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Descripción breve del problema" data-testid="input-incident-title" /></div>
+            <div><Label>Descripción detallada *</Label><Textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="¿Qué pasó? ¿Cómo reproducirlo?" rows={4} data-testid="input-incident-desc" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Módulo</Label>
+                <Select value={newModule} onValueChange={setNewModule}>
+                  <SelectTrigger data-testid="select-incident-module"><SelectValue /></SelectTrigger>
+                  <SelectContent>{INC_MODULES.map(m => <SelectItem key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Gravedad</Label>
+                <Select value={newSeverity} onValueChange={setNewSeverity}>
+                  <SelectTrigger data-testid="select-incident-severity"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="baja">Baja — no bloquea</SelectItem>
+                    <SelectItem value="media">Media — dificulta</SelectItem>
+                    <SelectItem value="alta">Alta — bloquea parcial</SelectItem>
+                    <SelectItem value="critica">Crítica — sistema caído</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div><Label>Reportado por</Label><Input value={user?.fullName || user?.username || ""} readOnly className="bg-muted" data-testid="input-incident-reporter" /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={() => createMutation.mutate({ title: newTitle, description: newDesc, module: newModule, severity: newSeverity, reportedBy: user?.fullName || user?.username || "Usuario" })} disabled={!newTitle.trim() || !newDesc.trim() || createMutation.isPending} data-testid="btn-submit-incident">
+              {createMutation.isPending ? "Guardando..." : "Reportar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
+        <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5" />{selectedIncident?.title}</DialogTitle></DialogHeader>
+          {selectedIncident && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge className={SEVERITY_CONFIG[selectedIncident.severity]?.color}>{SEVERITY_CONFIG[selectedIncident.severity]?.label}</Badge>
+                <Badge variant="outline" className="capitalize">{selectedIncident.module}</Badge>
+                <Badge className={STATUS_CONFIG_INC[selectedIncident.status]?.color}>{STATUS_CONFIG_INC[selectedIncident.status]?.label}</Badge>
+              </div>
+              <div className="text-sm text-muted-foreground border rounded-lg p-3 bg-muted/20 whitespace-pre-wrap">{selectedIncident.description}</div>
+              <div className="text-xs text-muted-foreground">Reportado por <strong>{selectedIncident.reportedBy}</strong> el {new Date(selectedIncident.reportedAt).toLocaleString("es-AR")}</div>
+              {selectedIncident.resolvedAt && <div className="text-xs text-muted-foreground">Resuelto por <strong>{selectedIncident.resolvedBy}</strong> el {new Date(selectedIncident.resolvedAt).toLocaleString("es-AR")}</div>}
+              <div className="border-t pt-4 space-y-3">
+                <p className="text-sm font-medium">Actualizar estado</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Estado</Label>
+                    <Select value={updateStatus} onValueChange={setUpdateStatus}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pendiente">Pendiente</SelectItem>
+                        <SelectItem value="en_revision">En revisión</SelectItem>
+                        <SelectItem value="resuelto">Resuelto</SelectItem>
+                        <SelectItem value="descartado">Descartado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div><Label className="text-xs">Asignado a</Label><Input value={updateAssigned} onChange={e => setUpdateAssigned(e.target.value)} placeholder="Responsable" /></div>
+                </div>
+                {(updateStatus === "resuelto" || updateStatus === "descartado") && (
+                  <div><Label className="text-xs">Resuelto por</Label><Input value={updateResolvedBy} onChange={e => setUpdateResolvedBy(e.target.value)} placeholder="Quien resolvió" /></div>
+                )}
+                <div><Label className="text-xs">Notas de resolución</Label><Textarea value={updateResolution} onChange={e => setUpdateResolution(e.target.value)} placeholder="¿Cómo se resolvió?" rows={3} /></div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="flex-wrap gap-2">
+            {user?.role === "admin" && selectedIncident && (
+              <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(selectedIncident.id)} disabled={deleteMutation.isPending} className="mr-auto">Eliminar</Button>
+            )}
+            <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>Cerrar</Button>
+            <Button onClick={() => selectedIncident && updateMutation.mutate({ id: selectedIncident.id, data: { status: updateStatus, assignedTo: updateAssigned || null, resolvedBy: updateResolvedBy || null, resolutionNotes: updateResolution || null } })} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? "Guardando..." : "Guardar cambios"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 export default function MaintenancePage() {
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
@@ -406,6 +695,10 @@ export default function MaintenancePage() {
         <TabsList>
           <TabsTrigger value="orders" data-testid="tab-orders">Ordenes de Trabajo</TabsTrigger>
           <TabsTrigger value="staff" data-testid="tab-staff">Personal</TabsTrigger>
+          <TabsTrigger value="bitacora" data-testid="tab-bitacora">
+            <AlertTriangle className="h-4 w-4 mr-1" />
+            Bitácora
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="orders" className="space-y-4">
@@ -514,6 +807,10 @@ export default function MaintenancePage() {
               </TableBody>
             </Table>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="bitacora" className="space-y-4">
+          <IncidenciasTab />
         </TabsContent>
 
         <TabsContent value="staff" className="space-y-4">

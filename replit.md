@@ -49,7 +49,8 @@ Preferred communication style: Simple, everyday language.
 - **Group Management**: Mass check-in/out/payment, consolidated invoicing, mass room assignment, printable rooming lists.
 - **Package Module**: Display of packages with validity and discounts.
 - **Dashboards & Reports**: Executive dashboard with KPIs, YoY comparison, charts, real-time room status. Comprehensive reports module with various tabbed reports, period selectors, and CSV export.
-- **Cash Register & Shift Audit**: Tracks shifts, movements, closing summaries, and automatic payment recording.
+- **Cash Register & Shift Audit**: Tracks shifts, movements, closing summaries, and automatic payment recording. Includes **Night Audit** tab (automated nightly snapshot at 00:05 Argentina time — counts in-house rooms, folio balances, next-day arrivals without prepayment; manual execution available).
+- **Bitácora de Incidencias**: Incident log module (severity/status/module tracking, CRUD with admin-only delete) — located in the **Maintenance** module under its own tab.
 - **Staff Help Chatbot**: Floating help button integrated with OpenAI gpt-4o-mini for answering operational questions.
 - **Travel Agencies Module**: CRUD for agencies, commission tracking, per-agency stats, and global commission reports.
 - **Administration Module**: Central hub for financial sub-modules (Facturación, CC Empresas, CC Agencias, Comprobantes, Reportes, Caja).

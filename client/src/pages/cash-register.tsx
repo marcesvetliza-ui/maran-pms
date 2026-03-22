@@ -48,6 +48,9 @@ import {
   AlertTriangle,
   BarChart3,
   CreditCard,
+  Moon,
+  RefreshCw,
+  CheckCircle,
 } from "lucide-react";
 
 type CashConfig = {
@@ -1437,6 +1440,207 @@ function ResumenDiaTab() {
   );
 }
 
+const NA_STATUS_COLOR: Record<string, string> = {
+  success: "text-green-600", partial: "text-yellow-600", failed: "text-red-600",
+};
+const NA_STATUS_LABEL: Record<string, string> = {
+  success: "Exitoso", partial: "Parcial", failed: "Fallido",
+};
+
+function NightAuditTab() {
+  const { toast } = useToast();
+  const [isRunning, setIsRunning] = useState(false);
+  const [forceDate, setForceDate] = useState("");
+  const [lastResult, setLastResult] = useState<any>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const { data: status, refetch: refetchStatus } = useQuery<any>({
+    queryKey: ["/api/night-audit/status"],
+    refetchInterval: 60_000,
+  });
+
+  const { data: history = [], refetch: refetchHistory } = useQuery<any[]>({
+    queryKey: ["/api/night-audit/history"],
+  });
+
+  const runAudit = async (force = false) => {
+    setIsRunning(true);
+    setShowConfirm(false);
+    try {
+      const body: any = { force };
+      if (forceDate) body.forceDate = forceDate;
+      const res = await fetch("/api/night-audit/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (res.status === 409) { setShowConfirm(true); setIsRunning(false); return; }
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Error"); }
+      const data = await res.json();
+      setLastResult(data);
+      refetchStatus(); refetchHistory();
+      queryClient.invalidateQueries({ queryKey: ["/api/night-audit"] });
+      toast({ title: "Night Audit completado", description: `${data.inHouse?.total ?? 0} hab. ocupadas, ${data.arrivals?.total ?? 0} llegadas mañana` });
+    } catch (err: any) {
+      toast({ title: "Error en Night Audit", description: err.message, variant: "destructive" });
+    } finally { setIsRunning(false); }
+  };
+
+  return (
+    <div className="space-y-6 pt-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className={`border-l-4 ${status?.yesterdayRan ? "border-l-green-400" : "border-l-red-400"}`}>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              {status?.yesterdayRan ? <CheckCircle className="h-4 w-4 text-green-600" /> : <AlertTriangle className="h-4 w-4 text-red-600" />}
+              <span className="text-sm font-medium">Anoche</span>
+            </div>
+            <p className={`text-sm ${status?.yesterdayRan ? "text-green-600" : "text-red-600"}`}>
+              {status?.yesterdayRan ? "Ejecutado correctamente" : "⚠ No se ejecutó"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Próxima ejecución</span>
+            </div>
+            <p className="text-sm text-muted-foreground">{status?.nextScheduled ?? "00:05 hora Argentina"}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Moon className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Último audit</span>
+            </div>
+            {status?.lastAudit ? (
+              <div>
+                <p className={`text-sm font-medium ${NA_STATUS_COLOR[status.lastAudit.status]}`}>
+                  {NA_STATUS_LABEL[status.lastAudit.status]} — {status.lastAudit.auditDate}
+                </p>
+                <p className="text-xs text-muted-foreground">{new Date(status.lastAudit.executedAt).toLocaleString("es-AR")}</p>
+              </div>
+            ) : <p className="text-sm text-muted-foreground">Sin registros</p>}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3"><CardTitle className="text-sm">Ejecución manual</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">El night audit se ejecuta automáticamente a las 00:05. Podés ejecutarlo manualmente si es necesario.</p>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <Label className="text-xs">Fecha a auditar (vacío = anoche)</Label>
+              <Input type="date" value={forceDate} onChange={e => setForceDate(e.target.value)} className="w-44" data-testid="input-audit-date" />
+            </div>
+            <Button onClick={() => runAudit(false)} disabled={isRunning} data-testid="btn-run-night-audit">
+              {isRunning ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Ejecutando...</> : <><Moon className="h-4 w-4 mr-2" />Ejecutar Night Audit</>}
+            </Button>
+          </div>
+          {showConfirm && (
+            <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md space-y-2">
+              <p className="text-sm font-medium text-yellow-800 dark:text-yellow-400">⚠ Ya se ejecutó el night audit para esta fecha</p>
+              <p className="text-xs text-yellow-700 dark:text-yellow-500">¿Querés ejecutarlo de nuevo?</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="destructive" onClick={() => runAudit(true)}>Ejecutar de todas formas</Button>
+                <Button size="sm" variant="outline" onClick={() => setShowConfirm(false)}>Cancelar</Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {lastResult && (
+        <Card className="border-green-200 dark:border-green-800">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2 text-green-700 dark:text-green-400">
+              <CheckCircle className="h-4 w-4" />Resultado — {lastResult.auditDate}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              {[
+                { label: "Hab. ocupadas", value: lastResult.inHouse?.total ?? 0 },
+                { label: "Folios con saldo", value: lastResult.inHouse?.conSaldo ?? 0 },
+                { label: "Llegadas mañana", value: lastResult.arrivals?.total ?? 0 },
+                { label: "Sin prepago", value: lastResult.arrivals?.withoutPrepago ?? 0 },
+              ].map(({ label, value }) => (
+                <div key={label} className="text-center">
+                  <p className="text-2xl font-bold">{value}</p>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                </div>
+              ))}
+            </div>
+            {(lastResult.arrivals?.withoutPrepago ?? 0) > 0 && (
+              <div className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-md">
+                <p className="text-sm text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                  <AlertTriangle className="h-4 w-4" />{lastResult.arrivals.withoutPrepago} llegada(s) para mañana sin prepago
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader className="pb-3"><CardTitle className="text-sm">Historial de ejecuciones</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {(history as any[]).length === 0 ? (
+            <p className="text-sm text-muted-foreground p-4 text-center">Sin registros aún</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Ejecutado</TableHead>
+                  <TableHead>Por</TableHead>
+                  <TableHead className="text-center">Hab. ocupadas</TableHead>
+                  <TableHead className="text-center">Con saldo</TableHead>
+                  <TableHead className="text-center">Llegadas mañana</TableHead>
+                  <TableHead>Estado</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(history as any[]).map((audit) => (
+                  <TableRow key={audit.id}>
+                    <TableCell className="font-mono text-sm">{audit.auditDate}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {new Date(audit.executedAt).toLocaleString("es-AR")}
+                      {audit.isManual && <Badge variant="outline" className="ml-1 text-[10px]">manual</Badge>}
+                    </TableCell>
+                    <TableCell className="text-sm">{audit.executedBy}</TableCell>
+                    <TableCell className="text-center text-sm">{audit.reservationsProcessed}</TableCell>
+                    <TableCell className="text-center text-sm">
+                      {audit.reservationsSkipped > 0
+                        ? <Badge className="text-[10px] bg-amber-100 text-amber-700">{audit.reservationsSkipped}</Badge>
+                        : <span className="text-muted-foreground">0</span>}
+                    </TableCell>
+                    <TableCell className="text-center text-sm">
+                      {audit.arrivalsNextDay}
+                      {audit.arrivalsWithoutPrepago > 0 && (
+                        <Badge className="ml-1 text-[10px] bg-amber-100 text-amber-700">{audit.arrivalsWithoutPrepago} sin prepago</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={`text-xs ${audit.status === "success" ? "bg-green-100 text-green-700" : audit.status === "partial" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>
+                        {NA_STATUS_LABEL[audit.status] ?? audit.status}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function CashRegister() {
   const { data: configs, isLoading } = useQuery<CashConfig[]>({
     queryKey: ["/api/cash/configs"],
@@ -1480,6 +1684,10 @@ export default function CashRegister() {
             <BarChart3 className="h-4 w-4 mr-1" />
             Resumen del Día
           </TabsTrigger>
+          <TabsTrigger value="night-audit" data-testid="tab-night-audit">
+            <Moon className="h-4 w-4 mr-1" />
+            Night Audit
+          </TabsTrigger>
         </TabsList>
 
         {activeConfigs.map((c) => (
@@ -1494,6 +1702,10 @@ export default function CashRegister() {
 
         <TabsContent value="resumen-dia">
           <ResumenDiaTab />
+        </TabsContent>
+
+        <TabsContent value="night-audit">
+          <NightAuditTab />
         </TabsContent>
       </Tabs>
     </div>

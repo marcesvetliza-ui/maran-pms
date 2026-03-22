@@ -99,18 +99,20 @@ const categoryLabels: Record<string, string> = {
   amenities: "Amenidades",
 };
 
-// ==================== INCIDENCIAS TAB ====================
+// IncidenciasTab moved to maintenance.tsx
+// NightAuditTab moved to cash-register.tsx
+
 const SEVERITY_CONFIG: Record<string, { label: string; color: string }> = {
-  baja:    { label: "Baja",     color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
-  media:   { label: "Media",    color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" },
-  alta:    { label: "Alta",     color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
-  critica: { label: "Crítica",  color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  baja:    { label: "Baja",     color: "bg-green-100 text-green-700" },
+  media:   { label: "Media",    color: "bg-yellow-100 text-yellow-700" },
+  alta:    { label: "Alta",     color: "bg-orange-100 text-orange-700" },
+  critica: { label: "Crítica",  color: "bg-red-100 text-red-700" },
 };
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pendiente:   { label: "Pendiente",    color: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
-  en_revision: { label: "En revisión",  color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
-  resuelto:    { label: "Resuelto",     color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
-  descartado:  { label: "Descartado",   color: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500" },
+  pendiente:   { label: "Pendiente",   color: "bg-gray-100 text-gray-700" },
+  en_revision: { label: "En revisión", color: "bg-blue-100 text-blue-700" },
+  resuelto:    { label: "Resuelto",    color: "bg-green-100 text-green-700" },
+  descartado:  { label: "Descartado",  color: "bg-gray-100 text-gray-500" },
 };
 const MODULES = [
   "planning", "reservas", "check-in", "check-out", "grupos",
@@ -1128,14 +1130,6 @@ export default function AdministrationPage() {
             <Wallet className="w-4 h-4 mr-2" />
             Cajas
           </TabsTrigger>
-          <TabsTrigger value="incidencias" data-testid="tab-admin-incidencias">
-            <AlertTriangle className="w-4 h-4 mr-2" />
-            Bitácora
-          </TabsTrigger>
-          <TabsTrigger value="night-audit" data-testid="tab-night-audit">
-            <Moon className="w-4 h-4 mr-2" />
-            Night Audit
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-4">
@@ -1638,13 +1632,6 @@ export default function AdministrationPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="incidencias" className="space-y-4">
-          <IncidenciasTab />
-        </TabsContent>
-
-        <TabsContent value="night-audit" className="space-y-4">
-          <NightAuditTab />
-        </TabsContent>
       </Tabs>
 
       <Dialog open={!!editingCashConfig} onOpenChange={(open) => { if (!open) setEditingCashConfig(null); }}>
