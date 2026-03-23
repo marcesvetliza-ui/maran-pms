@@ -203,6 +203,15 @@ export default function AdminCuentasPage() {
 
         <Button
           variant="outline"
+          onClick={() => navigate("/admin/cc-huespedes")}
+          data-testid="button-cc-otros"
+        >
+          <User className="h-4 w-4 mr-2" />
+          Ver Otros
+        </Button>
+
+        <Button
+          variant="outline"
           onClick={() => navigate("/agencies?tab=comisiones")}
           data-testid="button-cc-comisiones"
         >

@@ -54,7 +54,7 @@ Preferred communication style: Simple, everyday language.
 - **Staff Help Chatbot**: Floating help button integrated with OpenAI gpt-4o-mini for answering operational questions.
 - **Travel Agencies Module**: CRUD for agencies, commission tracking, per-agency stats, and global commission reports.
 - **Administration Module**: Central hub for financial sub-modules (Facturación, CC Empresas, CC Agencias, Comprobantes, Reportes, Caja).
-- **Cuenta Corriente Module**: Tracks `account_movements` for companies/agencies, auto-triggers on checkout, provides real-time debt totals.
+- **Cuenta Corriente Module**: Tracks `account_movements` for companies, agencies, and individual guests (`entityType: "company" | "agency" | "guest"`), auto-triggers on checkout, provides real-time debt totals. Dedicated page `/admin/cc-huespedes` for guest CC accounts.
 - **Contable (Accounting) Modules**:
     - **Database Schema**: Dedicated tables for accounting suppliers, accounts, purchase invoices, payment orders, accounting entries, and IIBB retentions.
     - **Backend Logic**: Functions for automatic accounting entries (`generarAsiento()`, `generarAsientoOP()`) and API routes for CRUD operations on accounting entities.

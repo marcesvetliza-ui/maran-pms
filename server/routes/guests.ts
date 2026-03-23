@@ -190,6 +190,41 @@ export function registerGuestsRoutes(app: Express) {
   });
 
   // Account Movements (Cuenta Corriente)
+  app.get("/api/guests/:id/account", async (req, res) => {
+    try {
+      const movements = await storage.getAccountMovements("guest", req.params.id);
+      const balance = await storage.getAccountBalance("guest", req.params.id);
+      res.json({ movements, balance });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching guest account" });
+    }
+  });
+
+  app.post("/api/guests/:id/account/payment", async (req, res) => {
+    try {
+      const guest = await storage.getGuest(req.params.id);
+      if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
+      const { amount, description, reference, date } = req.body;
+      if (!amount || parseFloat(amount) <= 0) {
+        return res.status(400).json({ error: "Monto inválido" });
+      }
+      const movement = await storage.createAccountMovement({
+        entityType: "guest",
+        entityId: req.params.id,
+        date: date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+        type: "pago",
+        description: description || "Pago recibido",
+        amount: (-parseFloat(amount)).toFixed(2),
+        reference: reference || null,
+        guestName: `${guest.firstName} ${guest.lastName}`,
+        createdBy: req.body.createdBy || null,
+      });
+      res.json(movement);
+    } catch (error) {
+      res.status(500).json({ error: "Error registering payment" });
+    }
+  });
+
   app.get("/api/companies/:id/account", async (req, res) => {
     try {
       const movements = await storage.getAccountMovements("company", req.params.id);
