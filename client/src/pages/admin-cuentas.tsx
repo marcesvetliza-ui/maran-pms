@@ -105,7 +105,7 @@ export default function AdminCuentasPage() {
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-cuentas-title">
             Cuentas Corrientes
           </h1>
-          <p className="text-muted-foreground text-sm">Empresas, Agencias y Huéspedes — saldos pendientes y movimientos</p>
+          <p className="text-muted-foreground text-sm">Empresas, Agencias y Clientes — saldos pendientes y movimientos</p>
         </div>
       </div>
 
@@ -154,13 +154,13 @@ export default function AdminCuentasPage() {
               <CardContent className="pt-6 text-center">
                 <div className="flex items-center justify-center gap-2 mb-1">
                   <User className="h-4 w-4 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">Huéspedes</p>
+                  <p className="text-sm text-muted-foreground">Clientes</p>
                 </div>
                 <p className={`text-2xl font-bold ${totalGuestsDebt > 0 ? "text-red-600" : "text-green-600"}`} data-testid="text-guests-debt">
                   ${totalGuestsDebt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {accountSummary?.guests?.length || 0} huésped(es) con saldo
+                  {accountSummary?.guests?.length || 0} cliente(s) con saldo
                 </p>
               </CardContent>
             </Card>
@@ -240,12 +240,12 @@ export default function AdminCuentasPage() {
         </DropdownMenu>
       </div>
 
-      {/* Lista de huéspedes con saldo en CC */}
+      {/* Lista de clientes con saldo en CC */}
       {(accountSummary?.guests?.length ?? 0) > 0 && (
         <div>
           <div className="flex items-center gap-2 mb-3">
             <User className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-base font-semibold">Huéspedes con saldo pendiente</h2>
+            <h2 className="text-base font-semibold">Clientes con saldo pendiente</h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {accountSummary!.guests!.map(g => (

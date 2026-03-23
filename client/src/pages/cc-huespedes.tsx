@@ -127,10 +127,10 @@ export default function CcHuespedesPage() {
         </Button>
         <div>
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-cc-huespedes-title">
-            CC Otros (Huéspedes)
+            CC Clientes
           </h1>
           <p className="text-muted-foreground text-sm">
-            Cuentas corrientes de personas físicas — saldos y movimientos
+            Clientes con deuda en cuenta corriente — alojamiento, eventos, restaurante y otros
           </p>
         </div>
       </div>
@@ -140,13 +140,13 @@ export default function CcHuespedesPage() {
         <Card className={`border-2 ${totalDebt > 0 ? "border-red-200 dark:border-red-800 bg-red-50/30 dark:bg-red-950/10" : "border-green-200 dark:border-green-800"}`}>
           <CardContent className="pt-6 pb-4 flex items-center justify-between flex-wrap gap-4">
             <div>
-              <p className="text-sm text-muted-foreground">Total pendiente — Huéspedes</p>
+              <p className="text-sm text-muted-foreground">Total pendiente — Clientes</p>
               <p className={`text-3xl font-bold ${totalDebt > 0 ? "text-red-600" : "text-green-600"}`}
                 data-testid="text-total-cc-huespedes">
                 ${totalDebt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {guests.length} huésped(es) con saldo
+                {guests.length} cliente(s) con saldo
               </p>
             </div>
             <User className="h-10 w-10 text-muted-foreground/30" />
@@ -158,7 +158,7 @@ export default function CcHuespedesPage() {
       <div className="relative">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar huésped..."
+          placeholder="Buscar cliente..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-9"
@@ -176,7 +176,7 @@ export default function CcHuespedesPage() {
           <User className="h-12 w-12 mx-auto mb-3 opacity-20" />
           <p className="text-sm">
             {guests.length === 0
-              ? "No hay huéspedes con cuenta corriente activa"
+              ? "No hay clientes con cuenta corriente activa"
               : "Sin resultados para la búsqueda"}
           </p>
         </div>
