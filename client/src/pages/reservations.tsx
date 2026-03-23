@@ -32,6 +32,7 @@ import {
   FileText,
   Users2,
   Ticket,
+  Gift,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -751,26 +752,40 @@ export function ReservationFormDialog({
                   onValueChange={(val) => {
                     if (val === "__none__") {
                       setSelectedPackageId("");
+                      // Reset price to rate plan values (or clear if no rate plan)
+                      const plan = ratePlans?.find(p => p.id === formData.ratePlanId);
+                      if (plan) {
+                        const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+                        const rate = getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2);
+                        const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
+                        setFormData(prev => ({ ...prev, baseRatePerNight: rate, ...totals, notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim() || "" }));
+                      } else {
+                        setFormData(prev => ({ ...prev, baseRatePerNight: "", finalRatePerNight: "", totalRoomAmount: "", notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim() || "" }));
+                      }
                       return;
                     }
                     setSelectedPackageId(val);
                     const pkg = activePackages.find(p => p.id === val);
-                    if (pkg && pkg.nights) {
+                    if (pkg) {
+                      const nights = pkg.nights || 1;
                       const checkIn = formData.checkInDate || today;
                       const d = new Date(checkIn + "T12:00:00");
-                      d.setDate(d.getDate() + pkg.nights);
+                      d.setDate(d.getDate() + nights);
                       const newCheckOut = toArgentinaDateStr(d);
-                      const ratePerNight = (parseFloat(pkg.basePrice) / pkg.nights).toFixed(2);
-                      const nights = pkg.nights;
-                      const total = (parseFloat(ratePerNight) * nights).toFixed(2);
+                      const totalPrice = parseFloat(pkg.basePrice);
+                      const ratePerNight = (totalPrice / nights).toFixed(2);
                       setFormData(prev => ({
                         ...prev,
                         checkOutDate: newCheckOut,
                         nights,
                         baseRatePerNight: ratePerNight,
                         finalRatePerNight: ratePerNight,
-                        totalRoomAmount: total,
-                        notes: [`[Paquete: ${pkg.name}]`, prev.notes].filter(Boolean).join(" "),
+                        totalRoomAmount: totalPrice.toFixed(2),
+                        discountType: "none",
+                        discountValue: "0",
+                        notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
+                          ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
+                          : `[Paquete: ${pkg.name}]`,
                       }));
                     }
                   }}
@@ -787,6 +802,22 @@ export function ReservationFormDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {selectedPackageId && (() => {
+                  const pkg = activePackages.find(p => p.id === selectedPackageId);
+                  if (!pkg) return null;
+                  return (
+                    <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 px-3 py-2">
+                      <Gift className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-semibold text-green-800 dark:text-green-300">{pkg.name}</span>
+                        <span className="text-xs text-green-700 dark:text-green-400 ml-1">· {pkg.nights} noche{pkg.nights !== 1 ? "s" : ""}</span>
+                      </div>
+                      <span className="text-sm font-bold text-green-800 dark:text-green-300 whitespace-nowrap">
+                        ${Number(pkg.basePrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -914,7 +945,11 @@ export function ReservationFormDialog({
                     title="La tarifa se establece automáticamente según el plan tarifario"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">Definida por el plan tarifario seleccionado</p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedPackageId
+                    ? "Definida por el paquete seleccionado"
+                    : "Definida por el plan tarifario seleccionado"}
+                </p>
               </div>
             </div>
 
