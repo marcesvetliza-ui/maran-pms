@@ -2447,12 +2447,14 @@ export default function ReservationsPage() {
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | undefined>();
 
   const todayStr = getLocalToday();
-  const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all">("upcoming");
+  const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created">("upcoming");
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState("");
+  const [createdFrom, setCreatedFrom] = useState(todayStr);
+  const [createdTo, setCreatedTo] = useState(todayStr);
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
-    queryKey: ["/api/reservations", dateMode, dateFrom, dateTo],
+    queryKey: ["/api/reservations", dateMode, dateFrom, dateTo, createdFrom, createdTo],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (dateMode === "today") {
@@ -2463,6 +2465,10 @@ export default function ReservationsPage() {
         if (dateTo) params.set("dateTo", dateTo);
       } else if (dateMode === "all") {
         params.set("dateMode", "all");
+      } else if (dateMode === "created") {
+        params.set("dateField", "createdAt");
+        if (createdFrom) params.set("dateFrom", createdFrom);
+        if (createdTo) params.set("dateTo", createdTo);
       }
       const res = await fetch(`/api/reservations?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch reservations");
@@ -2547,7 +2553,11 @@ export default function ReservationsPage() {
 
       return matchesSearch && matchesStatus;
     })
-    ?.sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
+    ?.sort((a, b) =>
+      dateMode === "created"
+        ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        : a.checkInDate.localeCompare(b.checkInDate)
+    );
 
   const isResLocked = (r: ReservationWithDetails) => {
     return r.status === "checked_out" || r.status === "cancelled";
@@ -2634,6 +2644,15 @@ export default function ReservationsPage() {
               >
                 Todas
               </Button>
+              <Button
+                variant={dateMode === "created" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("created")}
+                data-testid="button-filter-created"
+              >
+                <CalendarRange className="h-3.5 w-3.5 mr-1.5" />
+                Por fecha de creación
+              </Button>
               {dateMode === "range" && (
                 <div className="flex items-center gap-2 ml-2">
                   <Input
@@ -2650,6 +2669,25 @@ export default function ReservationsPage() {
                     onChange={(e) => setDateTo(e.target.value)}
                     className="h-8 w-36 text-sm"
                     data-testid="input-date-to"
+                  />
+                </div>
+              )}
+              {dateMode === "created" && (
+                <div className="flex items-center gap-2 ml-2">
+                  <Input
+                    type="date"
+                    value={createdFrom}
+                    onChange={(e) => setCreatedFrom(e.target.value)}
+                    className="h-8 w-36 text-sm"
+                    data-testid="input-created-from"
+                  />
+                  <span className="text-muted-foreground text-sm">→</span>
+                  <Input
+                    type="date"
+                    value={createdTo}
+                    onChange={(e) => setCreatedTo(e.target.value)}
+                    className="h-8 w-36 text-sm"
+                    data-testid="input-created-to"
                   />
                 </div>
               )}

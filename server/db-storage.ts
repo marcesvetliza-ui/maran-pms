@@ -384,10 +384,18 @@ export class DatabaseStorage implements IStorage {
     dateFrom?: string;
     dateTo?: string;
     dateMode?: string;
+    dateField?: string;
   }): Promise<ReservationWithDetails[]> {
     const conditions = [];
 
     if (options?.dateMode === "all") {
+    } else if (options?.dateField === "createdAt" && (options?.dateFrom || options?.dateTo)) {
+      if (options.dateFrom) {
+        conditions.push(sql`DATE(${reservations.createdAt}) >= ${options.dateFrom}`);
+      }
+      if (options.dateTo) {
+        conditions.push(sql`DATE(${reservations.createdAt}) <= ${options.dateTo}`);
+      }
     } else if (options?.dateFrom || options?.dateTo) {
       if (options.dateFrom) {
         conditions.push(gte(reservations.checkInDate, options.dateFrom));

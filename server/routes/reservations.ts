@@ -12,11 +12,12 @@ export function registerReservationsRoutes(app: Express) {
   // Reservations
   app.get("/api/reservations", async (req, res) => {
     try {
-      const { dateFrom, dateTo, dateMode } = req.query;
+      const { dateFrom, dateTo, dateMode, dateField } = req.query;
       const reservationList = await storage.getReservations({
         dateFrom: dateFrom as string | undefined,
         dateTo: dateTo as string | undefined,
         dateMode: dateMode as string | undefined,
+        dateField: dateField as string | undefined,
       });
       res.json(reservationList);
     } catch (error) {
