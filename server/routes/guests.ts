@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
+import { requireAuth } from "../auth";
 
 export function registerGuestsRoutes(app: Express) {
   // Companies
@@ -445,6 +446,55 @@ export function registerGuestsRoutes(app: Express) {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error deleting bed type" });
+    }
+  });
+
+  // Guest Preferences
+  app.get("/api/guests/:guestId/preferences", async (req, res) => {
+    try {
+      const prefs = await storage.getGuestPreferences(req.params.guestId);
+      res.json(prefs);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching preferences" });
+    }
+  });
+
+  app.post("/api/guests/:guestId/preferences", requireAuth, async (req, res) => {
+    try {
+      const pref = await storage.createGuestPreference({ ...req.body, guestId: req.params.guestId });
+      res.status(201).json(pref);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating preference" });
+    }
+  });
+
+  app.patch("/api/guests/:guestId/preferences/:prefId", requireAuth, async (req, res) => {
+    try {
+      const pref = await storage.updateGuestPreference(req.params.prefId, req.body);
+      if (!pref) return res.status(404).json({ error: "Preference not found" });
+      res.json(pref);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating preference" });
+    }
+  });
+
+  app.patch("/api/guests/:guestId/preferences/:prefId/toggle", requireAuth, async (req, res) => {
+    try {
+      const pref = await storage.toggleGuestPreference(req.params.prefId);
+      if (!pref) return res.status(404).json({ error: "Preference not found" });
+      res.json(pref);
+    } catch (error) {
+      res.status(500).json({ error: "Error toggling preference" });
+    }
+  });
+
+  app.delete("/api/guests/:guestId/preferences/:prefId", requireAuth, async (req, res) => {
+    try {
+      const deleted = await storage.deleteGuestPreference(req.params.prefId);
+      if (!deleted) return res.status(404).json({ error: "Preference not found" });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting preference" });
     }
   });
 }
