@@ -3897,8 +3897,8 @@ export default function RestaurantPage() {
 
       {/* Recipe Dialog */}
       <Dialog open={isRecipeDialogOpen} onOpenChange={setIsRecipeDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl flex flex-col max-h-[90vh]">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <ChefHat className="h-5 w-5" />
               Receta - {selectedRecipeItem?.name}
@@ -3909,7 +3909,7 @@ export default function RestaurantPage() {
               )}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto flex-1 pr-1">
             {currentRecipe && currentRecipe.ingredients.length > 0 && (
               <Table>
                 <TableHeader>
@@ -4096,7 +4096,7 @@ export default function RestaurantPage() {
               </Button>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-2 border-t">
             <Button onClick={() => setIsRecipeDialogOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
