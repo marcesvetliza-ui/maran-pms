@@ -2108,6 +2108,13 @@ export type SystemIncident = typeof systemIncidents.$inferSelect;
 // ==================== NIGHT AUDIT ====================
 export type NightAuditStatus = "success" | "partial" | "failed";
 
+export const planningDayNotes = pgTable("planning_day_notes", {
+  date: text("date").primaryKey(),
+  note: text("note").notNull().default(""),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+export type PlanningDayNote = typeof planningDayNotes.$inferSelect;
+
 export const nightAuditLogs = pgTable("night_audit_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   auditDate: date("audit_date").notNull(),

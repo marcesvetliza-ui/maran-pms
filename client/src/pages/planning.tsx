@@ -19,7 +19,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -1831,6 +1830,34 @@ export default function PlanningPage() {
     refetchInterval: 30000,
   });
 
+  const [editingNoteDate, setEditingNoteDate] = useState<string | null>(null);
+  const [editingNoteValue, setEditingNoteValue] = useState("");
+
+  const { data: dayNotes = [] } = useQuery<{ date: string; note: string }[]>({
+    queryKey: ["/api/planning/day-notes", dateRange.start, dateRange.end],
+    queryFn: async () => {
+      const res = await fetch(`/api/planning/day-notes?from=${dateRange.start}&to=${dateRange.end}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const dayNotesMap = Object.fromEntries(dayNotes.map((n) => [n.date, n.note]));
+
+  const saveNoteMutation = useMutation({
+    mutationFn: async ({ date, note }: { date: string; note: string }) => {
+      const res = await apiRequest("PUT", `/api/planning/day-notes/${date}`, { note });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/planning/day-notes"] });
+      setEditingNoteDate(null);
+    },
+    onError: () => {
+      toast({ title: "Error al guardar nota", variant: "destructive" });
+    },
+  });
+
   const { data: guests = [] } = useQuery<Guest[]>({
     queryKey: ["/api/guests"],
     queryFn: async () => {
@@ -2129,7 +2156,7 @@ export default function PlanningPage() {
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0 overflow-auto">
+        <CardContent className="p-0 overflow-x-auto">
           {isLoading ? (
             <div className="p-4 space-y-2">
               {[...Array(10)].map((_, i) => (
@@ -2138,7 +2165,7 @@ export default function PlanningPage() {
             </div>
           ) : data ? (
             <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-              <ScrollArea className="h-full">
+              <div className="overflow-x-auto">
               <div className="min-w-max">
                 <table className="w-full border-collapse">
                   <thead className="sticky top-0 z-20 bg-background">
@@ -2163,6 +2190,49 @@ export default function PlanningPage() {
                               <span className="text-muted-foreground capitalize">{info.monthName}</span>
                             </div>
                           </th>
+                        );
+                      })}
+                    </tr>
+                    {/* ── FILA DE NOTAS DEL DÍA ─────────────────────── */}
+                    <tr className="border-b bg-amber-50/60 dark:bg-amber-950/20">
+                      <td className="sticky left-0 z-30 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 border-r whitespace-nowrap w-24">
+                        Notas
+                      </td>
+                      {data.days.map((day) => {
+                        const info = formatDate(day);
+                        const note = dayNotesMap[day] || "";
+                        const isEditing = editingNoteDate === day;
+                        return (
+                          <td
+                            key={day}
+                            className={`px-0.5 py-0.5 min-w-[60px] align-middle ${
+                              info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : ""
+                            }`}
+                          >
+                            {isEditing ? (
+                              <input
+                                autoFocus
+                                value={editingNoteValue}
+                                onChange={(e) => setEditingNoteValue(e.target.value)}
+                                onBlur={() => saveNoteMutation.mutate({ date: day, note: editingNoteValue })}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveNoteMutation.mutate({ date: day, note: editingNoteValue });
+                                  if (e.key === "Escape") setEditingNoteDate(null);
+                                }}
+                                className="w-full text-[10px] px-1 py-0.5 rounded border border-amber-400 bg-white dark:bg-gray-900 focus:outline-none"
+                                data-testid={`input-day-note-${day}`}
+                              />
+                            ) : (
+                              <div
+                                onClick={() => { setEditingNoteDate(day); setEditingNoteValue(note); }}
+                                title={note || "Clic para agregar nota"}
+                                className="text-[10px] text-center text-amber-700 dark:text-amber-400 truncate cursor-pointer px-1 py-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40 min-h-[18px]"
+                                data-testid={`cell-day-note-${day}`}
+                              >
+                                {note || <span className="text-amber-300 dark:text-amber-700">·</span>}
+                              </div>
+                            )}
+                          </td>
                         );
                       })}
                     </tr>
@@ -2391,8 +2461,7 @@ export default function PlanningPage() {
                   </tbody>
                 </table>
               </div>
-              <ScrollBar orientation="horizontal" />
-            </ScrollArea>
+              </div>
             <DragOverlay dropAnimation={null}>
               {dragActiveReservation ? (
                 <div className="h-8 rounded border bg-primary/20 border-primary flex items-center justify-center px-2 shadow-lg min-w-[60px]">
