@@ -905,6 +905,104 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Bulk transfer charges + accommodation to another reservation
+  app.post("/api/reservations/:id/bulk-transfer", requireAuth, async (req, res) => {
+    try {
+      const sourceId = req.params.id;
+      const { targetReservationId, chargeIds = [], includeAccommodation = false, transferNote = "" } = req.body;
+      const operator = (req as any).user?.username || "Sistema";
+
+      if (!targetReservationId) return res.status(400).json({ error: "Se requiere reserva destino" });
+      if (sourceId === targetReservationId) return res.status(400).json({ error: "Origen y destino no pueden ser iguales" });
+
+      const sourceRes = await storage.getReservation(sourceId);
+      if (!sourceRes) return res.status(404).json({ error: "Reserva origen no encontrada" });
+
+      const targetRes = await storage.getReservation(targetReservationId);
+      if (!targetRes) return res.status(404).json({ error: "Reserva destino no encontrada" });
+
+      if (targetRes.status !== "checked_in" && targetRes.status !== "confirmed") {
+        return res.status(400).json({ error: "La reserva destino debe estar activa (confirmada o con check-in)" });
+      }
+
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const sourceRoom = sourceRes.room?.number || sourceRes.roomId || "?";
+      const sourceGuest = sourceRes.guest ? `${sourceRes.guest.firstName} ${sourceRes.guest.lastName}` : "Huésped";
+      const targetRoom = targetRes.room?.number || targetRes.roomId || "?";
+      const targetGuest = targetRes.guest ? `${targetRes.guest.firstName} ${targetRes.guest.lastName}` : "Huésped";
+      const noteRef = transferNote ? ` — ${transferNote}` : "";
+
+      let chargesTransferred = 0;
+      let accommodationTransferred = false;
+
+      // Move selected extra charges to target reservation
+      for (const chargeId of chargeIds) {
+        const charge = await storage.getCharge(chargeId);
+        if (!charge || charge.reservationId !== sourceId || charge.status !== "active") continue;
+        await storage.updateCharge(chargeId, {
+          reservationId: targetReservationId,
+          description: `${charge.description} [Transf. Hab.${sourceRoom} – ${sourceGuest}]`,
+          createdBy: operator,
+        });
+        chargesTransferred++;
+      }
+
+      // Transfer accommodation charge (room total)
+      if (includeAccommodation && parseFloat(sourceRes.totalRoomAmount || "0") > 0) {
+        const roomAmount = parseFloat(sourceRes.totalRoomAmount!);
+
+        // Create a charge in target representing the accommodation of the source
+        await storage.createCharge({
+          reservationId: targetReservationId,
+          description: `Alojamiento Hab.${sourceRoom} – ${sourceGuest}${noteRef}`,
+          amount: String(roomAmount),
+          date: today,
+          category: "room",
+          createdBy: operator,
+        });
+
+        // Register a payment on source to zero out the room balance
+        await storage.createPayment({
+          reservationId: sourceId,
+          amount: String(roomAmount),
+          method: "transferencia",
+          date: today,
+          reference: `Transferido a Hab.${targetRoom} – ${targetGuest}`,
+          receivedBy: operator,
+          notes: `Cargo de alojamiento transferido a reserva de Hab.${targetRoom}${noteRef}`,
+          billingTarget: "guest",
+          status: "active",
+        });
+
+        accommodationTransferred = true;
+      }
+
+      // Add note to source reservation
+      const sourceNoteText = [
+        includeAccommodation && accommodationTransferred ? `Alojamiento ($${sourceRes.totalRoomAmount})` : null,
+        chargesTransferred > 0 ? `${chargesTransferred} cargo(s) extra` : null,
+      ].filter(Boolean).join(" y ");
+
+      if (sourceNoteText) {
+        const existingNotes = sourceRes.notes || "";
+        const newNote = `[Transf. a Hab.${targetRoom}/${targetGuest}] ${sourceNoteText} transferido(s)${noteRef}`;
+        await storage.updateReservation(sourceId, {
+          notes: existingNotes ? `${existingNotes}\n${newNote}` : newNote,
+        });
+      }
+
+      res.json({
+        success: true,
+        chargesTransferred,
+        accommodationTransferred,
+        targetReservationId,
+      });
+    } catch (error) {
+      console.error("[bulk-transfer] Error:", error);
+      res.status(500).json({ error: "Error al transferir cargos" });
+    }
+  });
+
   // Payments
   app.get("/api/reservations/:reservationId/payments", async (req, res) => {
     try {

@@ -1291,6 +1291,11 @@ function ReservationDetailDialog({
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
   const [targetReservationId, setTargetReservationId] = useState<string>("");
+  const [showBulkTransfer, setShowBulkTransfer] = useState(false);
+  const [bulkTargetReservationId, setBulkTargetReservationId] = useState<string>("");
+  const [bulkSelectedChargeIds, setBulkSelectedChargeIds] = useState<Set<string>>(new Set());
+  const [bulkIncludeAccommodation, setBulkIncludeAccommodation] = useState(false);
+  const [bulkTransferNote, setBulkTransferNote] = useState("");
   const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [newCharge, setNewCharge] = useState({
@@ -1330,12 +1335,11 @@ function ReservationDetailDialog({
       const res = await fetch("/api/reservations");
       if (!res.ok) throw new Error("Failed to fetch reservations");
       const all = await res.json();
-      // Filter to only show checked_in or confirmed reservations, excluding current
       return all.filter((r: ReservationWithDetails) => 
         (r.status === "checked_in" || r.status === "confirmed") && r.id !== reservation.id
       );
     },
-    enabled: transferringChargeId !== null,
+    enabled: transferringChargeId !== null || showBulkTransfer,
   });
 
   const { data: charges, refetch: refetchCharges } = useQuery<Charge[]>({
@@ -1471,6 +1475,29 @@ function ReservationDetailDialog({
     },
     onError: () => {
       toast({ title: "Error", description: "No se pudo transferir el cargo.", variant: "destructive" });
+    },
+  });
+
+  const bulkTransferMutation = useMutation({
+    mutationFn: async (data: { targetReservationId: string; chargeIds: string[]; includeAccommodation: boolean; transferNote: string }) => {
+      return apiRequest("POST", `/api/reservations/${reservation.id}/bulk-transfer`, data);
+    },
+    onSuccess: (data: any) => {
+      refetchCharges();
+      refetchPayments();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] });
+      setShowBulkTransfer(false);
+      setBulkTargetReservationId("");
+      setBulkSelectedChargeIds(new Set());
+      setBulkIncludeAccommodation(false);
+      setBulkTransferNote("");
+      const parts = [];
+      if (data.accommodationTransferred) parts.push("alojamiento");
+      if (data.chargesTransferred > 0) parts.push(`${data.chargesTransferred} cargo(s) extra`);
+      toast({ title: "Transferencia realizada", description: `Se transfirió: ${parts.join(" y ")}.` });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error al transferir", description: err?.message || "No se pudo completar la transferencia.", variant: "destructive" });
     },
   });
 
@@ -1671,6 +1698,27 @@ function ReservationDetailDialog({
                 {reservation.voucherNotes && (
                   <p className="text-sm mt-1"><span className="text-muted-foreground">Observación:</span> {reservation.voucherNotes}</p>
                 )}
+              </div>
+            )}
+
+            {!isLocked && (
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2 border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300"
+                  onClick={() => {
+                    setBulkSelectedChargeIds(new Set());
+                    setBulkIncludeAccommodation(false);
+                    setBulkTargetReservationId("");
+                    setBulkTransferNote("");
+                    setShowBulkTransfer(true);
+                  }}
+                  data-testid="button-bulk-transfer"
+                >
+                  <ArrowRightLeft className="h-4 w-4" />
+                  Transferir folio a otra habitación
+                </Button>
               </div>
             )}
 
@@ -2339,6 +2387,165 @@ function ReservationDetailDialog({
               data-testid="button-confirm-transfer"
             >
               {transferChargeMutation.isPending ? "Transfiriendo..." : "Transferir Cargo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Transfer Dialog */}
+      <Dialog open={showBulkTransfer} onOpenChange={(open) => {
+        if (!open) {
+          setShowBulkTransfer(false);
+          setBulkTargetReservationId("");
+          setBulkSelectedChargeIds(new Set());
+          setBulkIncludeAccommodation(false);
+          setBulkTransferNote("");
+        }
+      }}>
+        <DialogContent className="w-[95vw] max-w-[520px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-blue-600" />
+              Transferir folio a otra habitación
+            </DialogTitle>
+            <DialogDescription>
+              Seleccioná qué cargos querés pasar a otra reserva. El saldo de esta quedará en $0 para los ítems transferidos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Destination reservation */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Reserva destino</label>
+              <Select value={bulkTargetReservationId} onValueChange={setBulkTargetReservationId} disabled={isActiveReservationsLoading}>
+                <SelectTrigger data-testid="select-bulk-target-reservation">
+                  <SelectValue placeholder={isActiveReservationsLoading ? "Cargando..." : "Seleccionar habitación / huésped..."} />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeReservations?.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      Hab. {r.room?.roomNumber} — {r.guest?.firstName} {r.guest?.lastName}
+                      {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}
+                    </SelectItem>
+                  ))}
+                  {(!activeReservations || activeReservations.length === 0) && !isActiveReservationsLoading && (
+                    <div className="p-2 text-sm text-muted-foreground text-center">No hay otras habitaciones activas</div>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Accommodation line */}
+            <div className="border rounded-lg divide-y">
+              <div className="flex items-center gap-3 p-3">
+                <input
+                  type="checkbox"
+                  id="bulk-accommodation"
+                  className="h-4 w-4 rounded border-gray-300"
+                  checked={bulkIncludeAccommodation}
+                  onChange={(e) => setBulkIncludeAccommodation(e.target.checked)}
+                  data-testid="checkbox-include-accommodation"
+                />
+                <label htmlFor="bulk-accommodation" className="flex-1 flex justify-between items-center cursor-pointer text-sm">
+                  <span className="font-medium">Alojamiento</span>
+                  <span className="font-semibold tabular-nums">
+                    ${Number(reservation.totalRoomAmount || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                  </span>
+                </label>
+              </div>
+
+              {/* Active extra charges */}
+              {activeConsumptionCharges.length === 0 ? (
+                <div className="p-3 text-sm text-muted-foreground text-center">Sin consumos adicionales</div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 p-2 bg-muted/30">
+                    <input
+                      type="checkbox"
+                      id="bulk-all-charges"
+                      className="h-4 w-4 rounded border-gray-300"
+                      checked={bulkSelectedChargeIds.size === activeConsumptionCharges.length && activeConsumptionCharges.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setBulkSelectedChargeIds(new Set(activeConsumptionCharges.map(c => c.id)));
+                        } else {
+                          setBulkSelectedChargeIds(new Set());
+                        }
+                      }}
+                    />
+                    <label htmlFor="bulk-all-charges" className="text-xs text-muted-foreground cursor-pointer">
+                      Seleccionar todos los consumos
+                    </label>
+                  </div>
+                  {activeConsumptionCharges.map((charge) => (
+                    <div key={charge.id} className="flex items-center gap-3 p-3">
+                      <input
+                        type="checkbox"
+                        id={`bulk-charge-${charge.id}`}
+                        className="h-4 w-4 rounded border-gray-300"
+                        checked={bulkSelectedChargeIds.has(charge.id)}
+                        onChange={(e) => {
+                          const next = new Set(bulkSelectedChargeIds);
+                          if (e.target.checked) next.add(charge.id);
+                          else next.delete(charge.id);
+                          setBulkSelectedChargeIds(next);
+                        }}
+                        data-testid={`checkbox-charge-${charge.id}`}
+                      />
+                      <label htmlFor={`bulk-charge-${charge.id}`} className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                        <span className="truncate">{charge.description}</span>
+                        <span className="font-medium tabular-nums shrink-0">${Number(charge.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      </label>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            {/* Total to transfer */}
+            {(bulkIncludeAccommodation || bulkSelectedChargeIds.size > 0) && (
+              <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800 text-sm font-semibold">
+                <span className="text-blue-800 dark:text-blue-300">Total a transferir</span>
+                <span className="text-blue-900 dark:text-blue-200 tabular-nums">
+                  ${(
+                    (bulkIncludeAccommodation ? Number(reservation.totalRoomAmount || 0) : 0) +
+                    activeConsumptionCharges
+                      .filter(c => bulkSelectedChargeIds.has(c.id))
+                      .reduce((sum, c) => sum + Number(c.amount), 0)
+                  ).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
+
+            {/* Optional note */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Referencia / Observación <span className="text-muted-foreground font-normal">(opcional)</span></label>
+              <Input
+                placeholder="Ej: Familia García, empresa XYZ, etc."
+                value={bulkTransferNote}
+                onChange={(e) => setBulkTransferNote(e.target.value)}
+                data-testid="input-bulk-transfer-note"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBulkTransfer(false)}>Cancelar</Button>
+            <Button
+              onClick={() => bulkTransferMutation.mutate({
+                targetReservationId: bulkTargetReservationId,
+                chargeIds: Array.from(bulkSelectedChargeIds),
+                includeAccommodation: bulkIncludeAccommodation,
+                transferNote: bulkTransferNote,
+              })}
+              disabled={
+                !bulkTargetReservationId ||
+                (!bulkIncludeAccommodation && bulkSelectedChargeIds.size === 0) ||
+                bulkTransferMutation.isPending
+              }
+              data-testid="button-confirm-bulk-transfer"
+            >
+              {bulkTransferMutation.isPending ? "Transfiriendo..." : "Confirmar transferencia"}
             </Button>
           </DialogFooter>
         </DialogContent>
