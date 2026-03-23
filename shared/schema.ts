@@ -207,6 +207,8 @@ export const reservations = pgTable("reservations", {
   lateCheckOutTime: text("late_check_out_time"),
   lateCheckOutCharge: numeric("late_check_out_charge", { precision: 10, scale: 2 }),
   notes: text("notes"),
+  voucherCode: text("voucher_code"),
+  voucherNotes: text("voucher_notes"),
   createdAt: timestamp("created_at").notNull(),
   lastModifiedBy: varchar("last_modified_by"),
 });

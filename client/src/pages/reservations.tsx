@@ -31,6 +31,7 @@ import {
   XCircle,
   FileText,
   Users2,
+  Ticket,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -175,6 +176,7 @@ export function ReservationFormDialog({
   const [resChargeAmount, setResChargeAmount] = useState("");
   const [resChargeQty, setResChargeQty] = useState(1);
   const [resChargeCategory, setResChargeCategory] = useState("otros");
+  const [hasVoucher, setHasVoucher] = useState(!!(reservation?.voucherCode || reservation?.voucherNotes));
 
   // Opciones de camaje fijas
   const bedConfigOptions = [
@@ -214,6 +216,8 @@ export function ReservationFormDialog({
     lateCheckOutTime: reservation?.lateCheckOutTime || "",
     lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
     notes: reservation?.notes || "",
+    voucherCode: reservation?.voucherCode || "",
+    voucherNotes: reservation?.voucherNotes || "",
     createdAt: reservation?.createdAt || new Date().toISOString(),
   });
 
@@ -258,6 +262,8 @@ export function ReservationFormDialog({
         lateCheckOutTime: reservation?.lateCheckOutTime || "",
         lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
         notes: reservation?.notes || "",
+        voucherCode: reservation?.voucherCode || "",
+        voucherNotes: reservation?.voucherNotes || "",
         createdAt: reservation?.createdAt || new Date().toISOString(),
       });
       setPendingCharges([]);
@@ -266,6 +272,7 @@ export function ReservationFormDialog({
       setResChargeDesc("");
       setResChargeAmount("");
       setResChargeQty(1);
+      setHasVoucher(!!(reservation?.voucherCode || reservation?.voucherNotes));
     }
   }, [open, reservation?.id]);
 
@@ -689,6 +696,52 @@ export function ReservationFormDialog({
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Voucher */}
+            <div className="grid gap-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="hasVoucher"
+                  checked={hasVoucher}
+                  onCheckedChange={(checked) => {
+                    setHasVoucher(checked);
+                    if (!checked) {
+                      setFormData(prev => ({ ...prev, voucherCode: "", voucherNotes: "" }));
+                    }
+                  }}
+                  data-testid="switch-has-voucher"
+                />
+                <Label htmlFor="hasVoucher" className="flex items-center gap-1.5 cursor-pointer">
+                  <Ticket className="h-4 w-4 text-muted-foreground" />
+                  Tiene voucher
+                </Label>
+              </div>
+            </div>
+            {hasVoucher && (
+              <div className="grid gap-3 pl-6 border-l-2 border-amber-300 dark:border-amber-700">
+                <div className="grid gap-2">
+                  <Label htmlFor="voucherCode">Número / Código de Voucher</Label>
+                  <Input
+                    id="voucherCode"
+                    placeholder="Ej: VCH-2026-00123"
+                    value={formData.voucherCode || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, voucherCode: e.target.value }))}
+                    data-testid="input-voucher-code"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="voucherNotes">Observaciones del voucher</Label>
+                  <Textarea
+                    id="voucherNotes"
+                    placeholder="Ej: Voucher de regalo 2 noches, válido hasta dic 2026"
+                    value={formData.voucherNotes || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, voucherNotes: e.target.value }))}
+                    rows={2}
+                    data-testid="textarea-voucher-notes"
+                  />
+                </div>
+              </div>
+            )}
 
             {activePackages && activePackages.length > 0 && (
               <div className="grid gap-2">
@@ -1571,6 +1624,20 @@ function ReservationDetailDialog({
                 <ReservationStatusBadge status={reservation.status} />
               </div>
             </div>
+            {(reservation.voucherCode || reservation.voucherNotes) && (
+              <div className="p-3 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/20">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Ticket className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">Voucher</p>
+                </div>
+                {reservation.voucherCode && (
+                  <p className="text-sm"><span className="text-muted-foreground">Código:</span> <span className="font-medium font-mono">{reservation.voucherCode}</span></p>
+                )}
+                {reservation.voucherNotes && (
+                  <p className="text-sm mt-1"><span className="text-muted-foreground">Observación:</span> {reservation.voucherNotes}</p>
+                )}
+              </div>
+            )}
 
             <div className="border rounded-lg">
               <div className="p-3 border-b bg-muted/50">
@@ -2782,9 +2849,16 @@ export default function ReservationsPage() {
                         {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
                       </div>
                       <div>
-                        <p className="font-medium">
-                          {reservation.guest?.firstName} {reservation.guest?.lastName}
-                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-medium">
+                            {reservation.guest?.firstName} {reservation.guest?.lastName}
+                          </p>
+                          {reservation.voucherCode && (
+                            <span title={`Voucher: ${reservation.voucherCode}`}>
+                              <Ticket className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-muted-foreground">{reservation.guest?.email}</p>
                       </div>
                     </div>
