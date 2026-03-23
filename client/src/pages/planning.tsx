@@ -2156,7 +2156,7 @@ export default function PlanningPage() {
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0 overflow-x-auto">
+        <CardContent className="p-0">
           {isLoading ? (
             <div className="p-4 space-y-2">
               {[...Array(10)].map((_, i) => (
@@ -2165,7 +2165,7 @@ export default function PlanningPage() {
             </div>
           ) : data ? (
             <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-              <div className="overflow-x-auto">
+              <div className={`overflow-auto ${isFullscreen ? "max-h-[calc(100vh-80px)]" : headerCollapsed ? "max-h-[calc(100vh-200px)]" : "max-h-[calc(100vh-390px)]"}`}>
               <div className="min-w-max">
                 <table className="w-full border-collapse">
                   <thead className="sticky top-0 z-20 bg-background">
