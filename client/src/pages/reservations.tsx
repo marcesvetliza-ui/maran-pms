@@ -33,6 +33,7 @@ import {
   Users2,
   Ticket,
   Gift,
+  PlusCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1521,6 +1522,23 @@ function ReservationDetailDialog({
     setChargeQty(1);
   };
 
+  // Quickly add one more unit of an existing charge (for cochera, etc.)
+  const handleRepeatCharge = (charge: typeof consumptionCharges[0]) => {
+    // Strip "(xN)" from description to get the base item name
+    const baseDesc = charge.description.replace(/\s*\(x\d+\)$/, "").trim();
+    // Find unit price from presets, fallback to stored amount
+    const preset = chargePresets.find(p => p.description.toLowerCase() === baseDesc.toLowerCase());
+    const unitAmount = preset ? preset.amount : charge.amount;
+    const unitCategory = (preset?.category || charge.category) as typeof newCharge.category;
+    addChargeMutation.mutate({
+      description: baseDesc,
+      amount: unitAmount,
+      category: unitCategory,
+      reservationId: reservation.id,
+      date: getLocalToday(),
+    });
+  };
+
 
   const handleAddPayment = () => {
     if (!newPayment.amount) return;
@@ -1900,6 +1918,17 @@ function ReservationDetailDialog({
                       </span>
                       {!isLocked && !isAnulado && (
                         <>
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-6 w-6"
+                          onClick={() => handleRepeatCharge(charge)}
+                          title="Agregar una unidad más de este cargo"
+                          disabled={addChargeMutation.isPending}
+                          data-testid={`button-repeat-charge-${charge.id}`}
+                        >
+                          <PlusCircle className="h-3 w-3 text-green-600" />
+                        </Button>
                         <Button 
                           size="icon" 
                           variant="ghost" 
