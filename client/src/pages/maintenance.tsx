@@ -32,8 +32,11 @@ import {
   Edit,
   Play,
   ChevronRight,
+  Lock,
+  CalendarRange,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/App";
 import type { SystemIncident } from "@shared/schema";
 
@@ -50,6 +53,16 @@ type MaintenanceStaff = {
   email: string | null;
   specialty: string | null;
   isActive: string;
+};
+
+type MaintenanceBlock = {
+  id: string;
+  workOrderId: string | null;
+  roomId: string;
+  blockFrom: string;
+  blockTo: string;
+  blockedBy: string;
+  notes: string | null;
 };
 
 type WorkOrder = {
@@ -72,6 +85,7 @@ type WorkOrder = {
   actualCost: string | null;
   notes: string | null;
   room?: Room;
+  maintenanceBlock?: MaintenanceBlock | null;
   assignedTo?: MaintenanceStaff;
 };
 
@@ -440,7 +454,12 @@ export default function MaintenancePage() {
   const [isNewStaffDialogOpen, setIsNewStaffDialogOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<MaintenanceStaff | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("active");
+  // Block state (optional room blocking - never auto-blocks)
+  const [blockRoom, setBlockRoom] = useState(false);
+  const [blockFrom, setBlockFrom] = useState("");
+  const [blockTo, setBlockTo] = useState("");
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const { data: dashboardStats, isLoading: isLoadingStats } = useQuery<DashboardStats>({
     queryKey: ["/api/maintenance/dashboard"],
@@ -486,18 +505,28 @@ export default function MaintenancePage() {
 
   const createOrderMutation = useMutation({
     mutationFn: async (data: WorkOrderFormValues) => {
+      const roomIdClean = data.roomId && data.roomId !== "none" ? data.roomId : null;
       return apiRequest("POST", "/api/maintenance/work-orders", {
         ...data,
-        roomId: data.roomId && data.roomId !== "none" ? data.roomId : null,
+        roomId: roomIdClean,
         assignedToId: data.assignedToId && data.assignedToId !== "none" ? data.assignedToId : null,
         status: data.assignedToId && data.assignedToId !== "none" ? "assigned" : "pending",
+        // Block fields — only sent when toggle is on
+        blockRoom: blockRoom && !!roomIdClean && !!blockFrom && !!blockTo,
+        blockFrom: blockRoom ? blockFrom : undefined,
+        blockTo: blockRoom ? blockTo : undefined,
+        blockedBy: blockRoom ? (user?.username || "Sistema") : undefined,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance/work-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
       setIsNewOrderDialogOpen(false);
       orderForm.reset();
+      setBlockRoom(false);
+      setBlockFrom("");
+      setBlockTo("");
       toast({ title: "Orden de trabajo creada", description: "La orden fue creada exitosamente" });
     },
     onError: () => {
@@ -742,7 +771,14 @@ export default function MaintenancePage() {
                       <TableCell className="font-mono text-sm">{order.orderCode}</TableCell>
                       <TableCell className="font-medium">{order.title}</TableCell>
                       <TableCell>
-                        {order.room ? `Hab. ${order.room.roomNumber}` : order.location || "-"}
+                        <div className="flex items-center gap-1.5">
+                          <span>{order.room ? `Hab. ${order.room.roomNumber}` : order.location || "-"}</span>
+                          {order.maintenanceBlock && (
+                            <span title={`Bloqueada: ${order.maintenanceBlock.blockFrom} → ${order.maintenanceBlock.blockTo}`}>
+                              <Lock className="h-3.5 w-3.5 text-orange-500" />
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>{categoryLabels[order.category]}</TableCell>
                       <TableCell>
@@ -1019,6 +1055,54 @@ export default function MaintenancePage() {
                   </FormItem>
                 )}
               />
+              {/* Bloqueo opcional de habitación */}
+              {orderForm.watch("roomId") && orderForm.watch("roomId") !== "none" && orderForm.watch("roomId") !== "" && (
+                <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Lock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                      <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Bloquear habitación en el planning</span>
+                    </div>
+                    <Switch
+                      checked={blockRoom}
+                      onCheckedChange={setBlockRoom}
+                      data-testid="switch-block-room"
+                    />
+                  </div>
+                  {blockRoom && (
+                    <div className="space-y-3 pt-1">
+                      <p className="text-xs text-orange-700 dark:text-orange-400">
+                        La habitación aparecerá bloqueada en el planning durante el período indicado.
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Desde</Label>
+                          <Input
+                            type="date"
+                            value={blockFrom}
+                            onChange={e => setBlockFrom(e.target.value)}
+                            data-testid="input-block-from"
+                            className="text-sm"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Hasta</Label>
+                          <Input
+                            type="date"
+                            value={blockTo}
+                            onChange={e => setBlockTo(e.target.value)}
+                            data-testid="input-block-to"
+                            className="text-sm"
+                          />
+                        </div>
+                      </div>
+                      {blockFrom && blockTo && blockTo < blockFrom && (
+                        <p className="text-xs text-red-600">La fecha de fin debe ser posterior a la de inicio.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <FormField
                 control={orderForm.control}
                 name="notes"
@@ -1084,6 +1168,28 @@ export default function MaintenancePage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Descripcion</p>
                   <p>{selectedOrder.description}</p>
+                </div>
+              )}
+              {selectedOrder.maintenanceBlock && (
+                <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Lock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Habitación bloqueada en el planning</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Desde</p>
+                      <p className="font-medium">{selectedOrder.maintenanceBlock.blockFrom}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Hasta</p>
+                      <p className="font-medium">{selectedOrder.maintenanceBlock.blockTo}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Bloqueado por</p>
+                      <p className="font-medium">{selectedOrder.maintenanceBlock.blockedBy}</p>
+                    </div>
+                  </div>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-4">

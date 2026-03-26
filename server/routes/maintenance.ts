@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
+import { requireAuth } from "../auth";
 
 export function registerMaintenanceRoutes(app: Express) {
   // Maintenance Staff
@@ -62,7 +63,14 @@ export function registerMaintenanceRoutes(app: Express) {
       } else {
         orders = await storage.getWorkOrders();
       }
-      res.json(orders);
+      // Attach maintenance block to each order
+      const allBlocks = await storage.getMaintenanceBlocks();
+      const blocksByOrderId = new Map(allBlocks.filter(b => b.workOrderId).map(b => [b.workOrderId!, b]));
+      const ordersWithBlocks = orders.map(o => ({
+        ...o,
+        maintenanceBlock: blocksByOrderId.get(o.id) || null,
+      }));
+      res.json(ordersWithBlocks);
     } catch (error) {
       res.status(500).json({ error: "Error fetching work orders" });
     }
@@ -72,7 +80,9 @@ export function registerMaintenanceRoutes(app: Express) {
     try {
       const order = await storage.getWorkOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Work order not found" });
-      res.json(order);
+      const allBlocks = await storage.getMaintenanceBlocks();
+      const block = allBlocks.find(b => b.workOrderId === order.id) || null;
+      res.json({ ...order, maintenanceBlock: block });
     } catch (error) {
       res.status(500).json({ error: "Error fetching work order" });
     }
@@ -81,7 +91,8 @@ export function registerMaintenanceRoutes(app: Express) {
   app.post("/api/maintenance/work-orders", async (req, res) => {
     try {
       const orderCode = storage.generateWorkOrderCode();
-      const body = { ...req.body };
+      const { blockRoom, blockFrom, blockTo, blockedBy, ...rest } = req.body;
+      const body = { ...rest };
       if (body.scheduledDate === "") body.scheduledDate = null;
       if (body.estimatedCost === "") body.estimatedCost = null;
       if (body.roomId === "" || body.roomId === "none") body.roomId = null;
@@ -89,12 +100,27 @@ export function registerMaintenanceRoutes(app: Express) {
       if (body.location === "") body.location = null;
       if (body.description === "") body.description = null;
       if (body.notes === "") body.notes = null;
+
       const order = await storage.createWorkOrder({
         ...body,
         orderCode,
         reportedAt: new Date(),
       });
-      res.status(201).json(order);
+
+      // Optionally create a maintenance block (NEVER auto-block; only if explicitly requested)
+      let maintenanceBlock = null;
+      if (blockRoom && body.roomId && blockFrom && blockTo && blockedBy) {
+        maintenanceBlock = await storage.createMaintenanceBlock({
+          workOrderId: order.id,
+          roomId: body.roomId,
+          blockFrom,
+          blockTo,
+          blockedBy,
+          notes: body.notes || null,
+        });
+      }
+
+      res.status(201).json({ ...order, maintenanceBlock });
     } catch (error) {
       console.error("Error creating work order:", error);
       res.status(500).json({ error: "Error creating work order" });
@@ -117,10 +143,45 @@ export function registerMaintenanceRoutes(app: Express) {
 
   app.delete("/api/maintenance/work-orders/:id", async (req, res) => {
     try {
+      // Remove associated maintenance block if any
+      await storage.deleteMaintenanceBlockByWorkOrder(req.params.id);
       await storage.deleteWorkOrder(req.params.id);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting work order" });
+    }
+  });
+
+  // Maintenance Blocks
+  app.get("/api/maintenance/blocks", async (req, res) => {
+    try {
+      const { roomId, from, to } = req.query;
+      const blocks = await storage.getMaintenanceBlocks({
+        roomId: roomId as string | undefined,
+        from: from as string | undefined,
+        to: to as string | undefined,
+      });
+      res.json(blocks);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching maintenance blocks" });
+    }
+  });
+
+  app.post("/api/maintenance/blocks", requireAuth, async (req, res) => {
+    try {
+      const block = await storage.createMaintenanceBlock(req.body);
+      res.status(201).json(block);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating maintenance block" });
+    }
+  });
+
+  app.delete("/api/maintenance/blocks/:id", requireAuth, async (req, res) => {
+    try {
+      await storage.deleteMaintenanceBlock(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting maintenance block" });
     }
   });
 
@@ -135,7 +196,7 @@ export function registerMaintenanceRoutes(app: Express) {
       const completedToday = orders.filter(o => {
         if (o.status !== "completed" || !o.completedAt) return false;
         const today = new Date().toISOString().split("T")[0];
-        return o.completedAt.startsWith(today);
+        return o.completedAt.toString().startsWith(today);
       }).length;
       const urgent = orders.filter(o => o.priority === "urgent" && o.status !== "completed" && o.status !== "cancelled").length;
 

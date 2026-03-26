@@ -1408,7 +1408,24 @@ export type WorkOrder = typeof workOrders.$inferSelect;
 export type WorkOrderWithDetails = WorkOrder & {
   room?: Room;
   assignedTo?: MaintenanceStaff;
+  maintenanceBlock?: MaintenanceBlock;
 };
+
+// Maintenance Room Blocks (bloqueos de habitación por mantenimiento con fechas)
+export const maintenanceBlocks = pgTable("maintenance_blocks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workOrderId: varchar("work_order_id"),
+  roomId: varchar("room_id").notNull(),
+  blockFrom: date("block_from").notNull(),
+  blockTo: date("block_to").notNull(),
+  blockedBy: text("blocked_by").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertMaintenanceBlockSchema = createInsertSchema(maintenanceBlocks).omit({ id: true, createdAt: true });
+export type InsertMaintenanceBlock = z.infer<typeof insertMaintenanceBlockSchema>;
+export type MaintenanceBlock = typeof maintenanceBlocks.$inferSelect;
 
 // ============== ADMINISTRATION MODULE ==============
 

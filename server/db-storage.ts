@@ -98,7 +98,8 @@ import {
   spaAccounts, spaAccountItems, spaPayments, treatmentSupplies,
   eventRooms, events, eventChargeTypes, eventCharges, eventPayments,
   eventTables, eventTableCharges, eventTablePayments,
-  maintenanceStaff, workOrders,
+  maintenanceStaff, workOrders, maintenanceBlocks,
+  type MaintenanceBlock, type InsertMaintenanceBlock,
   systemUsers, systemSettings, auditLogs,
   packages, packageItems,
   systemNotifications, webCheckins,
@@ -763,15 +764,28 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Load maintenance blocks for the period
+    const allMaintenanceBlocks = await this.getMaintenanceBlocks({ from: startDate, to: endDate });
+    // Index by roomId for fast lookup
+    const maintenanceBlocksByRoom = new Map<string, Array<{ blockFrom: string; blockTo: string; id: string }>>();
+    for (const blk of allMaintenanceBlocks) {
+      if (!maintenanceBlocksByRoom.has(blk.roomId)) maintenanceBlocksByRoom.set(blk.roomId, []);
+      maintenanceBlocksByRoom.get(blk.roomId)!.push({ blockFrom: blk.blockFrom, blockTo: blk.blockTo, id: blk.id });
+    }
+
     for (const room of allRooms) {
       occupancy[room.id] = [];
       cellReservations[room.id] = {};
       cellGroupBlocks[room.id] = {};
 
       const todayStr = getArgentinaToday();
+      const roomBlocks = maintenanceBlocksByRoom.get(room.id) || [];
 
       for (const day of days) {
-        if (room.status === "maintenance") {
+        // Check permanent room status OR date-range maintenance block
+        const isBlockedForDay = room.status === "maintenance" ||
+          roomBlocks.some(b => day >= b.blockFrom && day <= b.blockTo);
+        if (isBlockedForDay) {
           occupancy[room.id].push("maintenance");
           continue;
         }
@@ -2734,6 +2748,33 @@ export class DatabaseStorage implements IStorage {
   async deleteWorkOrder(id: string): Promise<boolean> {
     const result = await db.delete(workOrders).where(eq(workOrders.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Maintenance Blocks
+  async getMaintenanceBlocks(filters?: { roomId?: string; from?: string; to?: string }): Promise<MaintenanceBlock[]> {
+    let q = db.select().from(maintenanceBlocks).$dynamic();
+    if (filters?.roomId) q = q.where(eq(maintenanceBlocks.roomId, filters.roomId)) as any;
+    const blocks = await q.orderBy(asc(maintenanceBlocks.blockFrom));
+    if (!filters?.from && !filters?.to) return blocks;
+    return blocks.filter(b => {
+      if (filters?.to && b.blockFrom > filters.to) return false;
+      if (filters?.from && b.blockTo < filters.from) return false;
+      return true;
+    });
+  }
+
+  async createMaintenanceBlock(block: InsertMaintenanceBlock): Promise<MaintenanceBlock> {
+    const [created] = await db.insert(maintenanceBlocks).values(block as any).returning();
+    return created;
+  }
+
+  async deleteMaintenanceBlock(id: string): Promise<boolean> {
+    const result = await db.delete(maintenanceBlocks).where(eq(maintenanceBlocks.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async deleteMaintenanceBlockByWorkOrder(workOrderId: string): Promise<void> {
+    await db.delete(maintenanceBlocks).where(eq(maintenanceBlocks.workOrderId, workOrderId));
   }
 
   generateWorkOrderCode(): string {
