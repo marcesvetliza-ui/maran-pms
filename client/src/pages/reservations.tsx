@@ -2685,12 +2685,14 @@ function CancelReservationDialog({
       onOpenChange(false);
       onSuccess();
     },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "No se pudo anular la reserva.",
-        variant: "destructive",
-      });
+    onError: (error: Error) => {
+      let description = "No se pudo anular la reserva.";
+      try {
+        const body = JSON.parse(error.message.replace(/^\d+:\s*/, ""));
+        if (body.error) description = body.error;
+      } catch {}
+      toast({ title: "Error", description, variant: "destructive" });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
     },
   });
 
