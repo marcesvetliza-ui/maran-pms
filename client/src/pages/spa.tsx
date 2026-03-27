@@ -392,15 +392,16 @@ export default function SpaPage() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (createdApt: SpaAppointment) => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
-      toast({ title: "Turno creado correctamente" });
+      toast({ title: "Turno creado — imprimiendo comanda..." });
       setIsNewDialogOpen(false);
       form.reset({
         cabinId: "", treatmentId: "", professionalId: "", guestName: "", guestLastName: "",
         guestPhone: "", guestEmail: "", appointmentDate: dateStr,
         startTime: "", reservationId: "", notes: "",
       });
+      setTimeout(() => printComandaTermica(createdApt), 300);
     },
     onError: (error: Error) => {
       toast({ title: error.message, variant: "destructive" });
@@ -875,7 +876,7 @@ export default function SpaPage() {
     }
   };
 
-  const printSpaConfirmation = (apt: SpaAppointment) => {
+  const printComandaTermica = (apt: SpaAppointment) => {
     const treatment = treatments.find(t => t.id === apt.treatmentId);
     const cabin = cabins.find(c => c.id === apt.cabinId);
     const professional = professionals.find(p => p.id === apt.professionalId);
@@ -888,44 +889,103 @@ export default function SpaPage() {
       return d.innerHTML;
     };
 
-    const clientName = esc(`${apt.guestName} ${apt.guestLastName || ""}`);
-    const dateStr = esc(format(parseISO(apt.appointmentDate), "EEEE d 'de' MMMM yyyy", { locale: es }));
-    const timeRange = esc(`${apt.startTime} - ${apt.endTime}`);
-    const treatmentName = esc(treatment?.name || "N/A");
-    const duration = `${treatment?.durationMinutes || 0} minutos`;
-    const cabinName = esc(cabin?.name || "N/A");
-    const profName = professional ? esc(`${professional.name} ${professional.lastName || ""}`) : "";
-    const price = `$${treatment ? parseFloat(treatment.price).toLocaleString() : "0"}`;
-    const notes = apt.notes ? esc(apt.notes) : "";
+    const clientName = `${apt.guestName} ${apt.guestLastName || ""}`.trim();
+    const aptDate = apt.appointmentDate.split("-").map(Number);
+    const dateLabel = format(new Date(aptDate[0], aptDate[1] - 1, aptDate[2]), "dd/MM/yyyy", { locale: es });
+    const dayLabel = format(new Date(aptDate[0], aptDate[1] - 1, aptDate[2]), "EEEE", { locale: es });
+    const timeRange = `${apt.startTime} - ${apt.endTime}`;
+    const treatmentName = treatment?.name || "N/A";
+    const duration = treatment ? `${treatment.durationMinutes} min` : "";
+    const cabinName = cabin?.name || "N/A";
+    const profName = professional ? `${professional.name} ${professional.lastName || ""}`.trim() : "";
+    const price = treatment ? `$${parseFloat(treatment.price).toLocaleString("es-AR")}` : "$0";
+    const notes = apt.notes || "";
+    const now = format(new Date(), "dd/MM/yyyy HH:mm");
 
-    printWindow.document.write(`
-      <html><head><title>Confirmación SPA</title>
-      <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
-        h1 { text-align: center; color: #333; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        .info { margin: 15px 0; }
-        .info label { font-weight: bold; display: inline-block; width: 140px; }
-        .footer { margin-top: 30px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #ccc; padding-top: 10px; }
-      </style></head><body>
-      <h1>Confirmación de Turno SPA</h1>
-      <h2 style="text-align:center;color:#666;">Maran Suites & Towers</h2>
-      <div class="info"><label>Cliente:</label> ${clientName}</div>
-      <div class="info"><label>Fecha:</label> ${dateStr}</div>
-      <div class="info"><label>Horario:</label> ${timeRange}</div>
-      <div class="info"><label>Tratamiento:</label> ${treatmentName}</div>
-      <div class="info"><label>Duración:</label> ${duration}</div>
-      <div class="info"><label>Gabinete:</label> ${cabinName}</div>
-      ${profName ? `<div class="info"><label>Profesional:</label> ${profName}</div>` : ""}
-      <div class="info"><label>Precio:</label> ${price}</div>
-      ${notes ? `<div class="info"><label>Notas:</label> ${notes}</div>` : ""}
-      <div class="footer">
-        <p>Le agradecemos por elegir nuestro SPA. ¡Lo esperamos!</p>
-        <p>Por cancelaciones, comunicarse con al menos 2 horas de anticipación.</p>
-      </div>
-      </body></html>
-    `);
+    const buildCopy = (copyLabel: string, withSignature: boolean) => `
+      <div class="copy">
+        <div class="header">
+          <div class="hotel">MARAN SUITES &amp; TOWERS</div>
+          <div class="spa-title">★ SPA ★</div>
+          <div class="copy-label">${esc(copyLabel)}</div>
+        </div>
+        <div class="divider">================================</div>
+        <div class="row"><span class="lbl">COMANDA N°:</span> <span>${esc(apt.id.slice(-6).toUpperCase())}</span></div>
+        <div class="row"><span class="lbl">EMITIDA:</span> <span>${esc(now)}</span></div>
+        <div class="divider">--------------------------------</div>
+        <div class="section-title">CLIENTE</div>
+        <div class="row-full">${esc(clientName)}</div>
+        ${apt.guestPhone ? `<div class="row-full">Tel: ${esc(apt.guestPhone)}</div>` : ""}
+        <div class="divider">--------------------------------</div>
+        <div class="section-title">SERVICIO</div>
+        <div class="row-full big">${esc(treatmentName)}</div>
+        ${duration ? `<div class="row-full small">Duración: ${esc(duration)}</div>` : ""}
+        <div class="divider">--------------------------------</div>
+        <div class="section-title">TURNO</div>
+        <div class="row"><span class="lbl">Día:</span> <span>${esc(dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1))}</span></div>
+        <div class="row"><span class="lbl">Fecha:</span> <span>${esc(dateLabel)}</span></div>
+        <div class="row"><span class="lbl">Horario:</span> <span>${esc(timeRange)}</span></div>
+        <div class="row"><span class="lbl">Gabinete:</span> <span>${esc(cabinName)}</span></div>
+        ${profName ? `<div class="row"><span class="lbl">Prof.:</span> <span>${esc(profName)}</span></div>` : ""}
+        <div class="divider">--------------------------------</div>
+        <div class="row price-row"><span class="lbl">TOTAL:</span> <span class="price">${esc(price)}</span></div>
+        ${notes ? `<div class="divider">--------------------------------</div><div class="section-title">OBSERVACIONES</div><div class="row-full small">${esc(notes)}</div>` : ""}
+        <div class="divider">================================</div>
+        ${withSignature ? `
+          <div class="signature-area">
+            <div class="small center">Firma y aclaración del cliente</div>
+            <div class="signature-line"></div>
+            <div class="small center">Acepto las condiciones del servicio</div>
+            <div class="small center mt4">Cancelaciones: 2 hs. de anticipación</div>
+          </div>
+        ` : `
+          <div class="footer-note">¡Gracias por elegirnos!</div>
+          <div class="small center">Consultas: Recepción</div>
+        `}
+      </div>`;
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Comanda SPA</title>
+<style>
+  @page { margin: 4mm; size: 80mm auto; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; width: 300px; margin: 0 auto; color: #000; background: #fff; }
+  .copy { width: 100%; padding: 4px 2px; }
+  .header { text-align: center; margin-bottom: 4px; }
+  .hotel { font-size: 13px; font-weight: bold; letter-spacing: 1px; }
+  .spa-title { font-size: 12px; font-weight: bold; margin: 2px 0; }
+  .copy-label { font-size: 10px; border: 1px solid #000; display: inline-block; padding: 1px 8px; margin-top: 3px; letter-spacing: 1px; }
+  .divider { text-align: center; font-size: 10px; color: #555; margin: 3px 0; letter-spacing: 1px; white-space: nowrap; overflow: hidden; }
+  .section-title { font-weight: bold; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin: 2px 0 1px 0; }
+  .row { display: flex; justify-content: space-between; gap: 4px; margin: 1px 0; }
+  .row-full { margin: 1px 0; }
+  .lbl { font-weight: bold; white-space: nowrap; }
+  .big { font-size: 12px; font-weight: bold; }
+  .small { font-size: 9px; color: #444; }
+  .center { text-align: center; }
+  .price-row { font-size: 13px; font-weight: bold; margin: 2px 0; }
+  .price { font-size: 14px; font-weight: bold; }
+  .signature-area { margin: 6px 0 4px 0; }
+  .signature-line { border-bottom: 1px solid #000; margin: 14px 4px 4px 4px; }
+  .footer-note { text-align: center; font-weight: bold; font-size: 12px; margin: 4px 0 2px 0; }
+  .mt4 { margin-top: 4px; }
+  .page-cut { border-top: 2px dashed #888; margin: 6px 0; text-align: center; font-size: 9px; color: #888; padding-top: 2px; }
+  @media print {
+    .page-cut { page-break-after: always; border: none; }
+    body { width: 100%; }
+  }
+</style>
+</head><body>
+${buildCopy("COPIA CLIENTE", false)}
+<div class="page-cut">✂ &nbsp; CORTAR &nbsp; ✂</div>
+${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
+<script>window.onload = function(){ window.print(); }<\/script>
+</body></html>`);
     printWindow.document.close();
-    printWindow.print();
+  };
+
+  const printSpaConfirmation = (apt: SpaAppointment) => {
+    printComandaTermica(apt);
   };
 
   if (cabinsLoading || appointmentsLoading) {
@@ -1693,8 +1753,8 @@ export default function SpaPage() {
               )}
 
               <DialogFooter className="flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => printSpaConfirmation(selectedAppointment)} data-testid="button-print-confirmation">
-                  <Printer className="h-4 w-4 mr-1" /> Imprimir
+                <Button variant="outline" size="sm" onClick={() => printComandaTermica(selectedAppointment)} data-testid="button-print-confirmation">
+                  <Printer className="h-4 w-4 mr-1" /> Reimprimir comanda
                 </Button>
                 {["pending", "confirmed"].includes(selectedAppointment.status) && (
                   <Button variant="outline" size="sm" onClick={() => handleEditAppointment(selectedAppointment)} data-testid="button-edit-appointment">
