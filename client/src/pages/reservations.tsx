@@ -1343,9 +1343,18 @@ function ReservationDetailDialog({
       const res = await fetch("/api/reservations");
       if (!res.ok) throw new Error("Failed to fetch reservations");
       const all = await res.json();
-      return all.filter((r: ReservationWithDetails) => 
-        (r.status === "checked_in" || r.status === "confirmed") && r.id !== reservation.id
-      );
+      return all
+        .filter((r: ReservationWithDetails) => 
+          (r.status === "checked_in" || r.status === "confirmed") && r.id !== reservation.id
+        )
+        .sort((a: ReservationWithDetails, b: ReservationWithDetails) => {
+          if (a.status !== b.status) {
+            return a.status === "checked_in" ? -1 : 1;
+          }
+          const numA = parseInt(a.room?.roomNumber || "0", 10);
+          const numB = parseInt(b.room?.roomNumber || "0", 10);
+          return numA - numB;
+        });
     },
     enabled: transferringChargeId !== null || showBulkTransfer,
   });
@@ -2396,7 +2405,8 @@ function ReservationDetailDialog({
                   <SelectContent>
                     {activeReservations?.map((r) => (
                       <SelectItem key={r.id} value={r.id}>
-                        Hab. {r.room?.roomNumber} - {r.guest?.firstName} {r.guest?.lastName}
+                        Hab. {r.room?.roomNumber} — {r.guest?.firstName} {r.guest?.lastName}
+                        {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}
                       </SelectItem>
                     ))}
                     {(!activeReservations || activeReservations.length === 0) && !isActiveReservationsLoading && (
