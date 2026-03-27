@@ -169,6 +169,18 @@ export function registerGroupsRoutes(app: Express) {
       if (!roomId || !guestFirstName) {
         return res.status(400).json({ error: "Room ID and guest first name are required" });
       }
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) {
+        return res.status(404).json({ error: "Grupo no encontrado" });
+      }
+      const activeAssigned = (group.reservations || []).filter(
+        (r: any) => r.status !== "cancelled" && r.status !== "checked_out"
+      ).length;
+      if (activeAssigned >= group.totalRooms) {
+        return res.status(400).json({ 
+          error: `El grupo ya tiene todas sus habitaciones asignadas (${group.totalRooms}). Para agregar más, primero agregue un bloque adicional.` 
+        });
+      }
       const reservation = await storage.assignRoomToGroup(
         req.params.groupId,
         roomId,

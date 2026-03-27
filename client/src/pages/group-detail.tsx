@@ -363,6 +363,7 @@ function AssignBlockDialog({
     let successCount = 0;
     let failCount = 0;
 
+    const errors: string[] = [];
     for (const row of validRows) {
       try {
         await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
@@ -372,8 +373,12 @@ function AssignBlockDialog({
           ratePlanId: block.ratePlanId,
         });
         successCount++;
-      } catch {
+      } catch (err: any) {
         failCount++;
+        try {
+          const body = JSON.parse(err.message.replace(/^\d+:\s*/, ""));
+          if (body.error) errors.push(body.error);
+        } catch {}
       }
     }
 
@@ -389,8 +394,10 @@ function AssignBlockDialog({
       onSuccess();
       onOpenChange(false);
     } else {
+      const uniqueErrors = [...new Set(errors)];
       toast({
-        title: `${successCount} asignadas, ${failCount} fallaron`,
+        title: `${successCount > 0 ? `${successCount} asignadas, ` : ""}${failCount} no pudo(n) asignarse`,
+        description: uniqueErrors.length > 0 ? uniqueErrors[0] : undefined,
         variant: "destructive",
       });
     }
@@ -489,7 +496,7 @@ function AssignBlockDialog({
                 </div>
               ))}
 
-              {rows.length < availableRooms.length && (
+              {rows.length < availableRooms.length && rows.length < pending && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1075,9 +1082,17 @@ export default function GroupDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold">{group.assignedRooms}</span>
+              <span className={`text-3xl font-bold ${group.assignedRooms > group.totalRooms ? "text-destructive" : ""}`}>
+                {group.assignedRooms}
+              </span>
               <span className="text-muted-foreground">/ {group.totalRooms} asignadas</span>
             </div>
+            {group.assignedRooms > group.totalRooms && (
+              <div className="mt-1 flex items-center gap-1 text-sm text-destructive font-medium">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>Excede el bloque en {group.assignedRooms - group.totalRooms} habitación(es). Agregue un bloque adicional.</span>
+              </div>
+            )}
             {group.totalRooms > group.assignedRooms && (
               <div className="mt-1 flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="h-3.5 w-3.5" />
@@ -1086,8 +1101,8 @@ export default function GroupDetailPage() {
             )}
             <div className="mt-2 h-2 w-full rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full bg-primary transition-all"
-                style={{ width: `${group.totalRooms > 0 ? (group.assignedRooms / group.totalRooms) * 100 : 0}%` }}
+                className={`h-full transition-all ${group.assignedRooms > group.totalRooms ? "bg-destructive" : "bg-primary"}`}
+                style={{ width: `${group.totalRooms > 0 ? Math.min(100, (group.assignedRooms / group.totalRooms) * 100) : 0}%` }}
               />
             </div>
           </CardContent>
