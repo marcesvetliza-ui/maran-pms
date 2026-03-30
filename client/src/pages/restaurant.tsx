@@ -52,6 +52,7 @@ import {
   ClipboardList,
   ChevronLeft,
   CheckCircle2,
+  Printer,
 } from "lucide-react";
 
 type RestaurantArea = {
@@ -299,7 +300,8 @@ export default function RestaurantPage() {
   const [editTableCapacity, setEditTableCapacity] = useState(4);
   const [editTableShape, setEditTableShape] = useState("square");
   const [editTableWindow, setEditTableWindow] = useState(false);
-  const [reservationSortBy, setReservationSortBy] = useState<"name" | "time">("name");
+  const [reservationSortBy, setReservationSortBy] = useState<"name" | "time">("time");
+  const [showPastReservations, setShowPastReservations] = useState(false);
   const [isMenuItemDialogOpen, setIsMenuItemDialogOpen] = useState(false);
   const [editingMenuItem, setEditingMenuItem] = useState<MenuItem | null>(null);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
@@ -952,13 +954,16 @@ export default function RestaurantPage() {
     setDraggedTable(null);
   };
 
+  const todayForFilter = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const filteredReservations = reservations
-    .filter(r => r.reservationDate === reservationDate)
     .filter(r => {
-      if (!reservationSearch) return true;
-      return r.guestName.toLowerCase().includes(reservationSearch.toLowerCase());
+      if (!showPastReservations && r.reservationDate < todayForFilter) return false;
+      if (reservationSearch) return r.guestName.toLowerCase().includes(reservationSearch.toLowerCase());
+      return true;
     })
     .sort((a, b) => {
+      const dateCompare = a.reservationDate.localeCompare(b.reservationDate);
+      if (dateCompare !== 0) return dateCompare;
       if (reservationSortBy === "time") return a.reservationTime.localeCompare(b.reservationTime);
       return a.guestName.localeCompare(b.guestName);
     });
@@ -1018,6 +1023,49 @@ export default function RestaurantPage() {
   const recipeCost = currentRecipe?.ingredients.reduce((sum, ing) => {
     return sum + parseFloat(ing.quantity) * parseFloat(ing.unitCost || "0");
   }, 0) || 0;
+
+  const printBillPreview = () => {
+    const order = getUpdatedOrder();
+    if (!order) return;
+    const items = getOrderItems();
+    const win = window.open("", "_blank");
+    if (!win) return;
+    const esc = (s: string) => { const d = win.document.createElement("div"); d.textContent = s; return d.innerHTML; };
+    const rows = items.map(item => `
+      <tr>
+        <td style="padding:4px 8px">${esc(item.menuItem?.name || "Item")}</td>
+        <td style="padding:4px 8px;text-align:center">${item.quantity}</td>
+        <td style="padding:4px 8px;text-align:right">$${parseFloat(item.unitPrice).toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
+        <td style="padding:4px 8px;text-align:right">$${parseFloat(item.subtotal).toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
+      </tr>`).join("");
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cuenta</title>
+    <style>body{font-family:Arial,sans-serif;max-width:500px;margin:30px auto;padding:16px}h2,h3{text-align:center;margin:4px 0}
+    table{width:100%;border-collapse:collapse;margin:12px 0}th{background:#f0f0f0;padding:6px 8px;text-align:left;font-size:12px}
+    td{font-size:12px;border-bottom:1px solid #eee}
+    .total-row{font-weight:bold;font-size:13px;border-top:2px solid #333}
+    .total-row td{padding:6px 8px}
+    hr{border:none;border-top:1px dashed #ccc;margin:10px 0}
+    @media print{body{margin:10px}}</style></head><body>
+    <h2>MARAN SUITES &amp; TOWERS</h2>
+    <h3>Restaurante</h3>
+    <hr>
+    <p style="font-size:12px;margin:4px 0"><b>Mesa/Pedido:</b> ${esc(order.orderLabel || String(order.orderNumber))}</p>
+    <p style="font-size:12px;margin:4px 0"><b>Fecha:</b> ${esc(format(new Date(), "dd/MM/yyyy HH:mm"))}</p>
+    <hr>
+    <table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th style="text-align:right">P.Unit.</th><th style="text-align:right">Total</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <hr>
+    <table><tbody>
+      <tr><td style="padding:4px 8px">Subtotal:</td><td style="padding:4px 8px;text-align:right">$${parseFloat(order.subtotal||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
+      <tr><td style="padding:4px 8px">IVA (21%):</td><td style="padding:4px 8px;text-align:right">$${parseFloat(order.tax||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
+      <tr class="total-row"><td>TOTAL:</td><td style="text-align:right;font-size:15px">$${parseFloat(order.total||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
+    </tbody></table>
+    <hr>
+    <p style="text-align:center;font-size:11px;color:#666">Este no es el comprobante fiscal final.</p>
+    <script>window.onload=function(){window.print()}<\/script>
+    </body></html>`);
+    win.document.close();
+  };
 
   if (areasLoading || tablesLoading) {
     return (
@@ -1585,13 +1633,15 @@ export default function RestaurantPage() {
                   data-testid="input-reservation-search"
                 />
               </div>
-              <Input
-                type="date"
-                value={reservationDate}
-                onChange={(e) => setReservationDate(e.target.value)}
-                className="w-40"
-                data-testid="input-reservation-date-filter"
-              />
+              <Button
+                variant={showPastReservations ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowPastReservations(!showPastReservations)}
+                data-testid="button-toggle-past-reservations"
+              >
+                <CalendarDays className="h-4 w-4 mr-1" />
+                {showPastReservations ? "Ocultar históricas" : "Ver históricas"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -1638,6 +1688,10 @@ export default function RestaurantPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                        <span>{(() => { const [y,m,d] = reservation.reservationDate.split("-").map(Number); return format(new Date(y,m-1,d), "EEEE d/MM/yyyy", { locale: es }); })()}</span>
+                      </div>
                       <div className="flex items-center gap-2 text-sm">
                         <Clock className="h-4 w-4 text-muted-foreground" />
                         <span>{reservation.reservationTime}</span>
@@ -2533,7 +2587,7 @@ export default function RestaurantPage() {
                   data-testid="button-send-order"
                 >
                   <CheckCircle2 className="h-5 w-5 mr-2" />
-                  Enviar comanda
+                  Listo / Cerrar
                 </Button>
               </>
             ) : (
@@ -2574,7 +2628,7 @@ export default function RestaurantPage() {
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setRoomSearchFilter(""); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
@@ -2643,6 +2697,17 @@ export default function RestaurantPage() {
               })()}
             </div>
 
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={printBillPreview}
+              data-testid="button-print-bill-preview"
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Ver / Imprimir cuenta
+            </Button>
+
             {!isSplitMode ? (
               <>
                 {(() => {
@@ -2673,7 +2738,16 @@ export default function RestaurantPage() {
                           </div>
                         ) : (
                           <>
-                            <Select value={effectiveReceiptType} onValueChange={setCloseReceiptType}>
+                            <Select value={effectiveReceiptType} onValueChange={(v) => {
+                              setCloseReceiptType(v);
+                              if (v === "factura_b") {
+                                setCloseBillingName("CONSUMIDOR FINAL");
+                                setCloseBillingCuit("");
+                              } else if (v !== "factura_a") {
+                                setCloseBillingName("");
+                                setCloseBillingCuit("");
+                              }
+                            }}>
                               <SelectTrigger data-testid="select-receipt-type">
                                 <SelectValue />
                               </SelectTrigger>

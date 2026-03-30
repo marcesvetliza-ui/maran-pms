@@ -103,8 +103,16 @@ const PAYMENT_METHOD_MAP: Record<string, string> = {
   transfer: "Transferencia",
   mercadopago: "MercadoPago",
   current_account: "Cuenta Corriente",
+  cuenta_corriente: "Cuenta Corriente",
   room_charge: "Cargo a Habitación",
+  cuenta_habitacion: "Cargo a Habitación",
+  efectivo: "Efectivo",
+  tarjeta_credito: "Crédito",
+  tarjeta_debito: "Débito",
+  transferencia: "Transferencia",
 };
+
+const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente"]);
 
 const AREA_COLORS: Record<string, string> = {
   reception: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
@@ -164,8 +172,11 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
       </TableHeader>
       <TableBody>
         {Object.entries(summary).map(([method, data]) => (
-          <TableRow key={method}>
-            <TableCell>{PAYMENT_METHOD_MAP[method] || method}</TableCell>
+          <TableRow key={method} className={NON_CASH_METHODS.has(method) ? "text-muted-foreground italic" : ""}>
+            <TableCell>
+              {PAYMENT_METHOD_MAP[method] || method}
+              {NON_CASH_METHODS.has(method) && <span className="ml-1 text-xs not-italic">(no efectivo)</span>}
+            </TableCell>
             <TableCell className="text-center">{data.count}</TableCell>
             <TableCell className="text-right">{formatCurrency(data.total)}</TableCell>
           </TableRow>
@@ -336,6 +347,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [closeNotes, setCloseNotes] = useState("");
   const [operadorSiguiente, setOperadorSiguiente] = useState("");
   const [enviarAdmin, setEnviarAdmin] = useState(true);
+  const [billetes20000, setBilletes20000] = useState(0);
+  const [billetes10000, setBilletes10000] = useState(0);
+  const [billetes2000, setBilletes2000] = useState(0);
   const [billetes1000, setBilletes1000] = useState(0);
   const [billetes500, setBilletes500] = useState(0);
   const [billetes200, setBilletes200] = useState(0);
@@ -353,6 +367,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [closingSummaryData, setClosingSummaryData] = useState<{ shift: CashShift; movements: CashMovement[]; turnoNuevo?: CashShift; efectivoContado: number; efectivoSistema: number } | null>(null);
 
   const efectivoContado =
+    billetes20000 * 20000 + billetes10000 * 10000 + billetes2000 * 2000 +
     billetes1000 * 1000 + billetes500 * 500 + billetes200 * 200 +
     billetes100 * 100 + billetes50 * 50 + billetes20 * 20 + billetes10 * 10 +
     monedas + extrasConteo.reduce((s, e) => s + e.amount, 0);
@@ -363,6 +378,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     setCloseNotes("");
     setOperadorSiguiente("");
     setEnviarAdmin(true);
+    setBilletes20000(0); setBilletes10000(0); setBilletes2000(0);
     setBilletes1000(0); setBilletes500(0); setBilletes200(0);
     setBilletes100(0); setBilletes50(0); setBilletes20(0); setBilletes10(0);
     setMonedas(0); setExtrasConteo([]);
@@ -821,14 +837,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               <div className="border rounded-lg p-4 space-y-2 bg-muted/20">
                 <p className="text-sm font-semibold">Conteo de efectivo físico</p>
                 {[
-                  { label: "Billetes $1.000", val: billetes1000, set: setBilletes1000, mult: 1000 },
-                  { label: "Billetes $500",   val: billetes500,  set: setBilletes500,  mult: 500  },
-                  { label: "Billetes $200",   val: billetes200,  set: setBilletes200,  mult: 200  },
-                  { label: "Billetes $100",   val: billetes100,  set: setBilletes100,  mult: 100  },
-                  { label: "Billetes $50",    val: billetes50,   set: setBilletes50,   mult: 50   },
-                  { label: "Billetes $20",    val: billetes20,   set: setBilletes20,   mult: 20   },
-                  { label: "Billetes $10",    val: billetes10,   set: setBilletes10,   mult: 10   },
-                  { label: "Monedas ($)",     val: monedas,      set: setMonedas,      mult: 1    },
+                  { label: "Billetes $20.000", val: billetes20000, set: setBilletes20000, mult: 20000 },
+                  { label: "Billetes $10.000", val: billetes10000, set: setBilletes10000, mult: 10000 },
+                  { label: "Billetes $2.000",  val: billetes2000,  set: setBilletes2000,  mult: 2000  },
+                  { label: "Billetes $1.000",  val: billetes1000,  set: setBilletes1000,  mult: 1000  },
+                  { label: "Billetes $500",    val: billetes500,   set: setBilletes500,   mult: 500   },
+                  { label: "Billetes $200",    val: billetes200,   set: setBilletes200,   mult: 200   },
+                  { label: "Billetes $100",    val: billetes100,   set: setBilletes100,   mult: 100   },
+                  { label: "Billetes $50",     val: billetes50,    set: setBilletes50,    mult: 50    },
+                  { label: "Billetes $20",     val: billetes20,    set: setBilletes20,    mult: 20    },
+                  { label: "Billetes $10",     val: billetes10,    set: setBilletes10,    mult: 10    },
+                  { label: "Monedas ($)",      val: monedas,       set: setMonedas,       mult: 1     },
                 ].map(({ label, val, set, mult }) => (
                   <div key={label} className="flex items-center gap-3">
                     <span className="text-xs w-36 shrink-0">{label}</span>
