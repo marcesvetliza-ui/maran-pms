@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Users,
@@ -88,29 +88,37 @@ function GuestFormDialog({
 
   const { data: companies } = useQuery<Company[]>({ queryKey: ["/api/companies"] });
 
-  const [formData, setFormData] = useState<Partial<InsertGuest>>({
-    firstName: guest?.firstName || "",
-    lastName: guest?.lastName || "",
-    email: guest?.email || "",
-    phone: guest?.phone || "",
-    documentType: guest?.documentType || "dni",
-    documentNumber: guest?.documentNumber || "",
-    nationality: guest?.nationality || "",
-    direccion: guest?.direccion || "",
-    provincia: guest?.provincia || "",
-    localidad: guest?.localidad || "",
-    codigoPostal: guest?.codigoPostal || "",
-    fechaNacimiento: guest?.fechaNacimiento || "",
-    sexo: guest?.sexo || "no_especifica",
-    segment: guest?.segment || "LEISURE",
-    cuilCuit: guest?.cuilCuit || "",
-    companyId: guest?.companyId || null,
-    agencyId: guest?.agencyId || null,
-    vehiculoPatente: guest?.vehiculoPatente || "",
-    vehiculoMarca: guest?.vehiculoMarca || "",
-    vehiculoModelo: guest?.vehiculoModelo || "",
-    vehiculoColor: guest?.vehiculoColor || "",
+  const buildFormData = (g?: Guest): Partial<InsertGuest> => ({
+    firstName: g?.firstName || "",
+    lastName: g?.lastName || "",
+    email: g?.email || "",
+    phone: g?.phone || "",
+    documentType: g?.documentType || "dni",
+    documentNumber: g?.documentNumber || "",
+    nationality: g?.nationality || "",
+    direccion: g?.direccion || "",
+    provincia: g?.provincia || "",
+    localidad: g?.localidad || "",
+    codigoPostal: g?.codigoPostal || "",
+    fechaNacimiento: g?.fechaNacimiento || "",
+    sexo: g?.sexo || "no_especifica",
+    segment: g?.segment || "LEISURE",
+    cuilCuit: g?.cuilCuit || "",
+    companyId: g?.companyId || null,
+    agencyId: g?.agencyId || null,
+    vehiculoPatente: g?.vehiculoPatente || "",
+    vehiculoMarca: g?.vehiculoMarca || "",
+    vehiculoModelo: g?.vehiculoModelo || "",
+    vehiculoColor: g?.vehiculoColor || "",
   });
+
+  const [formData, setFormData] = useState<Partial<InsertGuest>>(() => buildFormData(guest));
+
+  useEffect(() => {
+    if (open) {
+      setFormData(buildFormData(guest));
+    }
+  }, [open, guest?.id]);
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertGuest>) => {
