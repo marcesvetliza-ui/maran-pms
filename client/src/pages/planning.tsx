@@ -1844,6 +1844,17 @@ export default function PlanningPage() {
 
   const dayNotesMap = Object.fromEntries(dayNotes.map((n) => [n.date, n.note]));
 
+  const { data: planningWorkOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/maintenance/work-orders"],
+  });
+
+  const maintenanceAlertRoomIds = new Set(
+    planningWorkOrders
+      .filter((wo) => wo.status === "pending" || wo.status === "in_progress" || wo.status === "assigned")
+      .map((wo) => wo.roomId)
+      .filter(Boolean)
+  );
+
   const saveNoteMutation = useMutation({
     mutationFn: async ({ date, note }: { date: string; note: string }) => {
       const res = await apiRequest("PUT", `/api/planning/day-notes/${date}`, { note });
@@ -2267,6 +2278,9 @@ export default function PlanningPage() {
                                       )}
                                       {room.status === "maintenance" && (
                                         <span title="Mantenimiento"><Wrench className="h-3 w-3 text-red-500" /></span>
+                                      )}
+                                      {room.status !== "maintenance" && maintenanceAlertRoomIds.has(room.id) && (
+                                        <span title="Orden de mantenimiento pendiente"><Wrench className="h-3 w-3 text-orange-400" /></span>
                                       )}
                                     </div>
                                     <span className="text-xs text-muted-foreground">{room.roomType?.name ?? ""}</span>

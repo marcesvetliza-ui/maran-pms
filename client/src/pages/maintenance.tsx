@@ -454,10 +454,14 @@ export default function MaintenancePage() {
   const [isNewStaffDialogOpen, setIsNewStaffDialogOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<MaintenanceStaff | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("active");
-  // Block state (optional room blocking - never auto-blocks)
+  // Block state for new order form
   const [blockRoom, setBlockRoom] = useState(false);
   const [blockFrom, setBlockFrom] = useState("");
   const [blockTo, setBlockTo] = useState("");
+  // Block state for detail/edit dialog
+  const [detailBlockEnabled, setDetailBlockEnabled] = useState(false);
+  const [detailBlockFrom, setDetailBlockFrom] = useState("");
+  const [detailBlockTo, setDetailBlockTo] = useState("");
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -561,6 +565,39 @@ export default function MaintenancePage() {
     },
     onError: () => {
       toast({ title: "Error", description: "No se pudo eliminar la orden", variant: "destructive" });
+    },
+  });
+
+  const addBlockMutation = useMutation({
+    mutationFn: async ({ workOrderId, roomId, blockFrom, blockTo, blockedBy }: {
+      workOrderId: string; roomId: string; blockFrom: string; blockTo: string; blockedBy: string;
+    }) => {
+      return apiRequest("POST", "/api/maintenance/blocks", { workOrderId, roomId, blockFrom, blockTo, blockedBy });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      setDetailBlockEnabled(false);
+      setDetailBlockFrom("");
+      setDetailBlockTo("");
+      toast({ title: "Bloqueo aplicado", description: "La habitación fue bloqueada en el planning." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo crear el bloqueo.", variant: "destructive" });
+    },
+  });
+
+  const removeBlockMutation = useMutation({
+    mutationFn: async (blockId: string) => {
+      return apiRequest("DELETE", `/api/maintenance/blocks/${blockId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      toast({ title: "Bloqueo eliminado", description: "La habitación fue desbloqueada del planning." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo eliminar el bloqueo.", variant: "destructive" });
     },
   });
 
@@ -1130,7 +1167,7 @@ export default function MaintenancePage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
+      <Dialog open={!!selectedOrder} onOpenChange={() => { setSelectedOrder(null); setDetailBlockEnabled(false); setDetailBlockFrom(""); setDetailBlockTo(""); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Orden {selectedOrder?.orderCode}</DialogTitle>
@@ -1170,11 +1207,26 @@ export default function MaintenancePage() {
                   <p>{selectedOrder.description}</p>
                 </div>
               )}
-              {selectedOrder.maintenanceBlock && (
+              {selectedOrder.maintenanceBlock ? (
                 <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Lock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                    <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Habitación bloqueada en el planning</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Lock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                      <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Habitación bloqueada en el planning</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive h-7 px-2 text-xs"
+                      onClick={() => {
+                        if (confirm("¿Eliminar el bloqueo del planning?")) {
+                          removeBlockMutation.mutate(selectedOrder.maintenanceBlock!.id);
+                        }
+                      }}
+                      disabled={removeBlockMutation.isPending}
+                    >
+                      Eliminar bloqueo
+                    </Button>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-sm">
                     <div>
@@ -1191,7 +1243,62 @@ export default function MaintenancePage() {
                     </div>
                   </div>
                 </div>
-              )}
+              ) : selectedOrder.roomId ? (
+                <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Lock className="h-4 w-4 text-muted-foreground" />
+                      <Label className="text-sm font-medium">Bloquear habitación en el planning</Label>
+                    </div>
+                    <Switch
+                      checked={detailBlockEnabled}
+                      onCheckedChange={(v) => { setDetailBlockEnabled(v); setDetailBlockFrom(""); setDetailBlockTo(""); }}
+                    />
+                  </div>
+                  {detailBlockEnabled && (
+                    <div className="space-y-2 pt-1">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">Desde</Label>
+                          <Input
+                            type="date"
+                            value={detailBlockFrom}
+                            onChange={(e) => setDetailBlockFrom(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">Hasta</Label>
+                          <Input
+                            type="date"
+                            value={detailBlockTo}
+                            onChange={(e) => setDetailBlockTo(e.target.value)}
+                            min={detailBlockFrom}
+                          />
+                        </div>
+                      </div>
+                      {detailBlockFrom && detailBlockTo && detailBlockTo < detailBlockFrom && (
+                        <p className="text-xs text-destructive">La fecha de fin debe ser posterior al inicio.</p>
+                      )}
+                      <Button
+                        size="sm"
+                        disabled={!detailBlockFrom || !detailBlockTo || detailBlockTo < detailBlockFrom || addBlockMutation.isPending}
+                        onClick={() => {
+                          addBlockMutation.mutate({
+                            workOrderId: selectedOrder.id,
+                            roomId: selectedOrder.roomId!,
+                            blockFrom: detailBlockFrom,
+                            blockTo: detailBlockTo,
+                            blockedBy: user?.username || "Sistema",
+                          });
+                        }}
+                      >
+                        <Lock className="mr-2 h-3.5 w-3.5" />
+                        {addBlockMutation.isPending ? "Bloqueando..." : "Aplicar bloqueo"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-muted-foreground">Reportada</p>
