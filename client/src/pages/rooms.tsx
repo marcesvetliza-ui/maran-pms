@@ -19,11 +19,13 @@ import {
   BedSingle,
   Users,
   Home,
+  AlertTriangle,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -291,6 +293,8 @@ export default function RoomsPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomWithType | undefined>();
+  const [maintenanceTarget, setMaintenanceTarget] = useState<RoomWithType | null>(null);
+  const [maintenanceDescription, setMaintenanceDescription] = useState("");
 
   const { data: rooms, isLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
@@ -299,6 +303,17 @@ export default function RoomsPage() {
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
   });
+
+  const { data: workOrders } = useQuery<any[]>({
+    queryKey: ["/api/maintenance/work-orders"],
+  });
+
+  const openWorkOrderRoomIds = new Set(
+    (workOrders || [])
+      .filter((wo) => wo.status === "pending" || wo.status === "in_progress")
+      .map((wo) => wo.roomId)
+      .filter(Boolean)
+  );
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: RoomStatus }) => {
@@ -319,6 +334,33 @@ export default function RoomsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       toast({ title: "Habitación eliminada", description: "La habitación ha sido eliminada del sistema." });
+    },
+  });
+
+  const createWorkOrderMutation = useMutation({
+    mutationFn: async ({ roomId, roomNumber, description }: { roomId: string; roomNumber: string; description: string }) => {
+      return apiRequest("POST", "/api/maintenance/work-orders", {
+        title: `Reporte hab. ${roomNumber}`,
+        description: description || null,
+        roomId,
+        category: "general",
+        priority: "medium",
+        status: "pending",
+        reportedBy: "Recepción",
+        reportedAt: new Date().toISOString(),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/work-orders"] });
+      toast({
+        title: "Reporte enviado",
+        description: "Se creó una orden de trabajo en Mantenimiento. La habitación no fue bloqueada.",
+      });
+      setMaintenanceTarget(null);
+      setMaintenanceDescription("");
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo crear la orden de trabajo.", variant: "destructive" });
     },
   });
 
@@ -497,10 +539,10 @@ export default function RoomsPage() {
                           Enviar a Limpieza
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => updateStatusMutation.mutate({ id: room.id, status: "maintenance" })}
+                          onClick={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
                         >
-                          <Wrench className="mr-2 h-4 w-4 text-red-600" />
-                          Enviar a Mantenimiento
+                          <Wrench className="mr-2 h-4 w-4 text-orange-500" />
+                          Reportar a Mantenimiento
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -522,6 +564,17 @@ export default function RoomsPage() {
                       <span className="text-sm text-muted-foreground">
                         {room.roomType?.name || "Sin tipo"}
                       </span>
+                      {openWorkOrderRoomIds.has(room.id) && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-400">
+                              <AlertTriangle className="h-3 w-3" />
+                              Mant. pendiente
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Tiene una orden de mantenimiento abierta</TooltipContent>
+                        </Tooltip>
+                      )}
                     </div>
                     <RoomFeatures features={room.features} maxOccupancy={room.maxOccupancy} />
                   </div>
@@ -554,7 +607,20 @@ export default function RoomsPage() {
                       <RoomFeatures features={room.features} />
                     </TableCell>
                     <TableCell>
-                      <RoomStatusBadge status={room.status} />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <RoomStatusBadge status={room.status} />
+                        {openWorkOrderRoomIds.has(room.id) && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-400">
+                                <AlertTriangle className="h-3 w-3" />
+                                Mant.
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Tiene una orden de mantenimiento abierta</TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -582,10 +648,10 @@ export default function RoomsPage() {
                             Enviar a Limpieza
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: room.id, status: "maintenance" })}
+                            onClick={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
                           >
-                            <Wrench className="mr-2 h-4 w-4 text-red-600" />
-                            Enviar a Mantenimiento
+                            <Wrench className="mr-2 h-4 w-4 text-orange-500" />
+                            Reportar a Mantenimiento
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -632,6 +698,51 @@ export default function RoomsPage() {
         onOpenChange={setDialogOpen}
         onSuccess={() => setSelectedRoom(undefined)}
       />
+
+      {/* Maintenance Report Dialog */}
+      <Dialog open={!!maintenanceTarget} onOpenChange={(o) => { if (!o) { setMaintenanceTarget(null); setMaintenanceDescription(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-orange-500" />
+              Reportar problema — Hab. {maintenanceTarget?.roomNumber}
+            </DialogTitle>
+            <DialogDescription>
+              Se creará una orden de trabajo en el módulo de Mantenimiento. La habitación <strong>no será bloqueada</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <label className="text-sm font-medium mb-1.5 block">Descripción del problema (opcional)</label>
+            <Textarea
+              placeholder="Ej: Grifo con pérdida, lámpara quemada, aire acondicionado sin frío..."
+              value={maintenanceDescription}
+              onChange={(e) => setMaintenanceDescription(e.target.value)}
+              rows={3}
+              data-testid="input-maintenance-description"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setMaintenanceTarget(null); setMaintenanceDescription(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (maintenanceTarget) {
+                  createWorkOrderMutation.mutate({
+                    roomId: maintenanceTarget.id,
+                    roomNumber: maintenanceTarget.roomNumber,
+                    description: maintenanceDescription,
+                  });
+                }
+              }}
+              disabled={createWorkOrderMutation.isPending}
+              data-testid="button-submit-maintenance"
+            >
+              {createWorkOrderMutation.isPending ? "Enviando..." : "Enviar a Mantenimiento"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
