@@ -352,6 +352,7 @@ export default function RestaurantPage() {
   const [splitReceiptTypes, setSplitReceiptTypes] = useState<Record<string, string>>({});
   const [splitRoomIds, setSplitRoomIds] = useState<Record<string, string>>({});
   const [splitRoomSearchFilters, setSplitRoomSearchFilters] = useState<Record<string, string>>({});
+  const [splitEditAmounts, setSplitEditAmounts] = useState<Record<string, string>>({});
   const [menuSearch, setMenuSearch] = useState("");
   const menuSearchRef = useRef<HTMLInputElement>(null);
   const [showItemNotes, setShowItemNotes] = useState(false);
@@ -639,6 +640,19 @@ export default function RestaurantPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       setIsSplitMode(false);
       toast({ title: "División cancelada" });
+    },
+  });
+
+  const updateSplitAmountMutation = useMutation({
+    mutationFn: async ({ orderId, splitId, amount }: { orderId: string; splitId: string; amount: string }) => {
+      const res = await apiRequest("PATCH", `/api/restaurant/orders/${orderId}/split/${splitId}`, { amount });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar monto", variant: "destructive" });
     },
   });
 
@@ -1037,7 +1051,6 @@ export default function RestaurantPage() {
       <tr>
         <td style="padding:4px 8px">${esc(item.menuItem?.name || "Item")}</td>
         <td style="padding:4px 8px;text-align:center">${item.quantity}</td>
-        <td style="padding:4px 8px;text-align:right">$${parseFloat(item.unitPrice).toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
         <td style="padding:4px 8px;text-align:right">$${parseFloat(item.subtotal).toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
       </tr>`).join("");
     win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cuenta</title>
@@ -1054,12 +1067,10 @@ export default function RestaurantPage() {
     <p style="font-size:12px;margin:4px 0"><b>Mesa/Pedido:</b> ${esc(order.orderLabel || String(order.orderNumber))}</p>
     <p style="font-size:12px;margin:4px 0"><b>Fecha:</b> ${esc(format(new Date(), "dd/MM/yyyy HH:mm"))}</p>
     <hr>
-    <table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th style="text-align:right">P.Unit.</th><th style="text-align:right">Total</th></tr></thead>
+    <table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th style="text-align:right">Total</th></tr></thead>
     <tbody>${rows}</tbody></table>
     <hr>
     <table><tbody>
-      <tr><td style="padding:4px 8px">Subtotal:</td><td style="padding:4px 8px;text-align:right">$${parseFloat(order.subtotal||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
-      <tr><td style="padding:4px 8px">IVA (21%):</td><td style="padding:4px 8px;text-align:right">$${parseFloat(order.tax||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
       <tr class="total-row"><td>TOTAL:</td><td style="text-align:right;font-size:15px">$${parseFloat(order.total||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
     </tbody></table>
     <hr>
@@ -2955,7 +2966,27 @@ export default function RestaurantPage() {
                         <div key={split.id} className={`p-3 border rounded-md ${split.isPaid === "true" ? "bg-green-500/10 border-green-500/30" : ""}`}>
                           <div className="flex items-center justify-between mb-2">
                             <span className="font-medium">Parte {split.splitNumber}</span>
-                            <span className="font-bold">${parseFloat(split.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                            {split.isPaid === "true" ? (
+                              <span className="font-bold">${parseFloat(split.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <span className="text-sm text-muted-foreground">$</span>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  className="h-7 w-28 text-right font-bold"
+                                  value={splitEditAmounts[split.id] ?? split.amount}
+                                  onChange={(e) => setSplitEditAmounts(prev => ({ ...prev, [split.id]: e.target.value }))}
+                                  onBlur={() => {
+                                    const newAmount = splitEditAmounts[split.id];
+                                    if (newAmount !== undefined && newAmount !== split.amount && currentOrder) {
+                                      updateSplitAmountMutation.mutate({ orderId: currentOrder.id, splitId: split.id, amount: newAmount });
+                                    }
+                                  }}
+                                />
+                              </div>
+                            )}
                           </div>
                           {split.isPaid === "true" ? (
                             <Badge variant="default" className="bg-green-600">Pagado - {paymentMethodLabels[split.method || ""] || split.method}</Badge>

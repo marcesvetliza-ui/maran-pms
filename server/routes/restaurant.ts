@@ -573,7 +573,14 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.patch("/api/restaurant/orders/:id/split/:splitId", async (req, res) => {
     try {
-      const { method, receiptType, roomReservationId } = req.body;
+      const { method, receiptType, roomReservationId, amount } = req.body;
+
+      // Allow updating just the amount (without paying)
+      if (amount !== undefined && !method) {
+        const split = await storage.updateOrderSplit(req.params.splitId, { amount: parseFloat(amount).toFixed(2) });
+        return res.json(split);
+      }
+
       if (!method) return res.status(400).json({ error: "Método de pago requerido" });
 
       const split = await storage.updateOrderSplit(req.params.splitId, {

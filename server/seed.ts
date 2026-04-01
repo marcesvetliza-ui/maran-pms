@@ -793,12 +793,7 @@ export async function refreshRealData() {
       console.log(`Inserted ${missingTables.length} missing tables`);
     }
 
-    const realTableIds = realTables.map(t => t.id);
-    for (const extraId of existingTableIds.filter(id => !realTableIds.includes(id))) {
-      try {
-        await db.delete(restaurantTables).where(eq(restaurantTables.id, extraId));
-      } catch (e) {}
-    }
+    // Do NOT delete user-created tables (those with non-seed IDs); only insert missing seed tables
 
     const realEventRooms = [
       { id: "er1", name: "Salón Mitre", capacity: 100, status: "available" as const, description: "Salón principal para eventos grandes", isActive: "true" as const },
