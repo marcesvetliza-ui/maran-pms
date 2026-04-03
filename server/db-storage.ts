@@ -360,25 +360,91 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
+  // Single reservation enrichment — uses Promise.all to parallelize all sub-queries
   private async enrichReservation(reservation: Reservation): Promise<ReservationWithDetails> {
-    const [guest] = await db.select().from(guests).where(eq(guests.id, reservation.guestId));
-    const [room] = await db.select().from(rooms).where(eq(rooms.id, reservation.roomId));
-    const roomType = room ? (await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId)))[0] : undefined;
-    const ratePlan = reservation.ratePlanId ? (await db.select().from(ratePlans).where(eq(ratePlans.id, reservation.ratePlanId)))[0] : undefined;
-    const chargesList = await db.select().from(charges).where(eq(charges.reservationId, reservation.id));
-    const paymentsList = await db.select().from(payments).where(eq(payments.reservationId, reservation.id));
-    const company = reservation.companyId ? (await db.select().from(companies).where(eq(companies.id, reservation.companyId)))[0] : undefined;
-    const agency = reservation.agencyId ? (await db.select().from(agencies).where(eq(agencies.id, reservation.agencyId)))[0] : undefined;
+    const [
+      [guest],
+      [room],
+      chargesList,
+      paymentsList,
+      ratePlanResult,
+      companyResult,
+      agencyResult,
+    ] = await Promise.all([
+      db.select().from(guests).where(eq(guests.id, reservation.guestId)),
+      db.select().from(rooms).where(eq(rooms.id, reservation.roomId)),
+      db.select().from(charges).where(eq(charges.reservationId, reservation.id)),
+      db.select().from(payments).where(eq(payments.reservationId, reservation.id)),
+      reservation.ratePlanId ? db.select().from(ratePlans).where(eq(ratePlans.id, reservation.ratePlanId)) : Promise.resolve([]),
+      reservation.companyId ? db.select().from(companies).where(eq(companies.id, reservation.companyId)) : Promise.resolve([]),
+      reservation.agencyId ? db.select().from(agencies).where(eq(agencies.id, reservation.agencyId)) : Promise.resolve([]),
+    ]);
+    const [roomType] = room ? await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId)) : [undefined];
     return {
       ...reservation,
       guest: guest!,
-      company,
-      agency,
+      company: companyResult[0],
+      agency: agencyResult[0],
       room: room ? { ...room, roomType } : undefined as any,
-      ratePlan,
+      ratePlan: ratePlanResult[0],
       charges: chargesList,
       payments: paymentsList,
     };
+  }
+
+  // Bulk enrichment — loads all related data in 8 parallel queries for the entire list (no N+1)
+  private async enrichReservations(reservationList: Reservation[]): Promise<ReservationWithDetails[]> {
+    if (reservationList.length === 0) return [];
+
+    const reservationIds = reservationList.map(r => r.id);
+    const guestIds = [...new Set(reservationList.map(r => r.guestId).filter(Boolean))] as string[];
+    const roomIds = [...new Set(reservationList.map(r => r.roomId).filter(Boolean))] as string[];
+    const ratePlanIds = [...new Set(reservationList.map(r => r.ratePlanId).filter(Boolean))] as string[];
+    const companyIds = [...new Set(reservationList.map(r => r.companyId).filter(Boolean))] as string[];
+    const agencyIds = [...new Set(reservationList.map(r => r.agencyId).filter(Boolean))] as string[];
+
+    const [guestList, roomList, allRoomTypes, ratePlanList, chargesList, paymentsList, companyList, agencyList] = await Promise.all([
+      guestIds.length ? db.select().from(guests).where(inArray(guests.id, guestIds)) : Promise.resolve([]),
+      roomIds.length ? db.select().from(rooms).where(inArray(rooms.id, roomIds)) : Promise.resolve([]),
+      db.select().from(roomTypes),
+      ratePlanIds.length ? db.select().from(ratePlans).where(inArray(ratePlans.id, ratePlanIds)) : Promise.resolve([]),
+      db.select().from(charges).where(inArray(charges.reservationId, reservationIds)),
+      db.select().from(payments).where(inArray(payments.reservationId, reservationIds)),
+      companyIds.length ? db.select().from(companies).where(inArray(companies.id, companyIds)) : Promise.resolve([]),
+      agencyIds.length ? db.select().from(agencies).where(inArray(agencies.id, agencyIds)) : Promise.resolve([]),
+    ]);
+
+    const guestMap = new Map(guestList.map((g: any) => [g.id, g]));
+    const roomMap = new Map(roomList.map((r: any) => [r.id, r]));
+    const roomTypeMap = new Map(allRoomTypes.map((t: any) => [t.id, t]));
+    const ratePlanMap = new Map(ratePlanList.map((p: any) => [p.id, p]));
+    const chargesMap = new Map<string, any[]>();
+    for (const c of chargesList as any[]) {
+      if (!chargesMap.has(c.reservationId)) chargesMap.set(c.reservationId, []);
+      chargesMap.get(c.reservationId)!.push(c);
+    }
+    const paymentsMap = new Map<string, any[]>();
+    for (const p of paymentsList as any[]) {
+      if (!paymentsMap.has(p.reservationId)) paymentsMap.set(p.reservationId, []);
+      paymentsMap.get(p.reservationId)!.push(p);
+    }
+    const companyMap = new Map(companyList.map((c: any) => [c.id, c]));
+    const agencyMap = new Map(agencyList.map((a: any) => [a.id, a]));
+
+    return reservationList.map(reservation => {
+      const room: any = roomMap.get(reservation.roomId);
+      const roomType = room ? roomTypeMap.get(room.roomTypeId) : undefined;
+      return {
+        ...reservation,
+        guest: guestMap.get(reservation.guestId) as any,
+        company: reservation.companyId ? companyMap.get(reservation.companyId) : undefined,
+        agency: reservation.agencyId ? agencyMap.get(reservation.agencyId) : undefined,
+        room: room ? { ...room, roomType } : undefined as any,
+        ratePlan: reservation.ratePlanId ? ratePlanMap.get(reservation.ratePlanId) : undefined,
+        charges: chargesMap.get(reservation.id) || [],
+        payments: paymentsMap.get(reservation.id) || [],
+      };
+    });
   }
 
   async getReservations(options?: {
@@ -423,11 +489,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const allRes = await (query.orderBy(asc(reservations.checkInDate)) as any);
-    const results: ReservationWithDetails[] = [];
-    for (const r of allRes) {
-      results.push(await this.enrichReservation(r));
-    }
-    return results;
+    return this.enrichReservations(allRes);
   }
 
   async getReservation(id: string): Promise<ReservationWithDetails | undefined> {
@@ -444,11 +506,7 @@ export class DatabaseStorage implements IStorage {
 
   async getRecentReservations(limit: number): Promise<ReservationWithDetails[]> {
     const allRes = await db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(limit);
-    const results: ReservationWithDetails[] = [];
-    for (const r of allRes) {
-      results.push(await this.enrichReservation(r));
-    }
-    return results;
+    return this.enrichReservations(allRes);
   }
 
   async getReservationsForCheckIn(): Promise<ReservationWithDetails[]> {
@@ -459,40 +517,24 @@ export class DatabaseStorage implements IStorage {
         eq(reservations.checkInDate, todayStr)
       )
     );
-    const results: ReservationWithDetails[] = [];
-    for (const r of allRes) {
-      results.push(await this.enrichReservation(r));
-    }
-    return results;
+    return this.enrichReservations(allRes);
   }
 
   async getReservationsForCheckOut(): Promise<ReservationWithDetails[]> {
     const allRes = await db.select().from(reservations).where(eq(reservations.status, "checked_in"));
-    const results: ReservationWithDetails[] = [];
-    for (const r of allRes) {
-      results.push(await this.enrichReservation(r));
-    }
-    return results;
+    return this.enrichReservations(allRes);
   }
 
   async getCheckInsByDate(date: string): Promise<ReservationWithDetails[]> {
     const allRes = await db.select().from(reservations).where(
       and(eq(reservations.checkInDate, date), eq(reservations.status, "checked_in"))
     );
-    const results: ReservationWithDetails[] = [];
-    for (const r of allRes) {
-      results.push(await this.enrichReservation(r));
-    }
-    return results;
+    return this.enrichReservations(allRes);
   }
 
   async getReservationsByGuest(guestId: string): Promise<ReservationWithDetails[]> {
     const allRes = await db.select().from(reservations).where(eq(reservations.guestId, guestId));
-    const results: ReservationWithDetails[] = [];
-    for (const r of allRes) {
-      results.push(await this.enrichReservation(r));
-    }
-    return results;
+    return this.enrichReservations(allRes);
   }
 
   async createReservation(reservation: InsertReservation): Promise<Reservation> {
@@ -3464,7 +3506,7 @@ export class DatabaseStorage implements IStorage {
       const [room] = await db.select().from(rooms)
         .where(eq(rooms.id, reservation.roomId));
 
-      if (!room || room.status !== "available") {
+      if (!room || !["available", "inspected"].includes(room.status)) {
         skipped++;
         if (room) skippedRooms.push(room.roomNumber);
         continue;
