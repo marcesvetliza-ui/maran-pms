@@ -1084,22 +1084,85 @@ export default function CheckInPage() {
       </Dialog>
 
       <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar Check-in</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div>
                 {selectedReservation && (
                   <>
-                    <p className="mb-2">
-                      Vas a registrar la llegada de{" "}
-                      <strong>
-                        {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName}
-                      </strong>{" "}
-                      a la habitacion <strong>{selectedReservation.room?.roomNumber}</strong>.
+                    <p className="mb-3">
+                      Verificá los datos con el huésped antes de confirmar.
                     </p>
-                    <p className="mb-4 text-muted-foreground">Esto marcara la habitacion como ocupada.</p>
-                    
+
+                    {/* Reservation summary card */}
+                    <div className="mb-3 rounded-lg border bg-muted/30 divide-y text-sm">
+                      <div className="flex items-center gap-3 p-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-base shrink-0">
+                          {selectedReservation.guest?.firstName?.[0]}{selectedReservation.guest?.lastName?.[0]}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground">
+                            {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName}
+                          </p>
+                          {selectedReservation.guest?.email && (
+                            <p className="text-xs text-muted-foreground">{selectedReservation.guest?.email}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-0 divide-y sm:divide-y-0 sm:divide-x">
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Habitación</p>
+                          <p className="font-medium text-foreground">{selectedReservation.room?.roomNumber} — {(selectedReservation.room as any)?.roomType?.name || ""}</p>
+                        </div>
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Huéspedes</p>
+                          <p className="font-medium text-foreground">{selectedReservation.numberOfGuests} persona(s)</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-0 divide-y sm:divide-y-0 sm:divide-x">
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Check-in</p>
+                          <p className="font-medium text-foreground">{(() => { const [y,m,d] = selectedReservation.checkInDate.split("-"); return `${d}/${m}/${y}`; })()}</p>
+                        </div>
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Check-out</p>
+                          <p className="font-medium text-foreground">{(() => { const [y,m,d] = selectedReservation.checkOutDate.split("-"); return `${d}/${m}/${y}`; })()} ({selectedReservation.nights} noche{selectedReservation.nights !== 1 ? "s" : ""})</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-0 divide-y sm:divide-y-0 sm:divide-x">
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Tarifa por noche</p>
+                          <p className="font-medium text-foreground">${Number(selectedReservation.finalRatePerNight || 0).toLocaleString("es-AR")}</p>
+                        </div>
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Total alojamiento</p>
+                          <p className="font-semibold text-foreground">${Number(selectedReservation.totalRoomAmount || 0).toLocaleString("es-AR")}</p>
+                        </div>
+                      </div>
+                      {((selectedReservation as any).bedType?.name || selectedReservation.bedTypeNotes) && (
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Tipo de cama</p>
+                          <p className="font-medium text-foreground">
+                            {(selectedReservation as any).bedType?.name || ""}
+                            {selectedReservation.bedTypeNotes ? ` — ${selectedReservation.bedTypeNotes}` : ""}
+                          </p>
+                        </div>
+                      )}
+                      {selectedReservation.source && selectedReservation.source !== "directo" && (
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Canal / Origen</p>
+                          <p className="font-medium text-foreground capitalize">{selectedReservation.source}</p>
+                        </div>
+                      )}
+                      {selectedReservation.notes && (
+                        <div className="p-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Pedidos / Notas</p>
+                          <p className="text-foreground">{selectedReservation.notes}</p>
+                        </div>
+                      )}
+                    </div>
+
                     {activePrefs.length > 0 && (
                       <div className={`mb-4 p-3 rounded-lg border ${criticalPrefs.length > 0 ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30" : "border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30"}`} data-testid="checkin-preference-alert">
                         <div className="flex items-center gap-2 mb-2">

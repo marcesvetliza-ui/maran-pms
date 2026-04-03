@@ -99,7 +99,7 @@ function getSourceColor(source: ReservationSource): string {
     return "bg-gray-200 dark:bg-gray-700/60 border-gray-300 dark:border-gray-600";
   }
   if (["empresa", "agencia"].includes(source)) {
-    return "bg-emerald-200 dark:bg-emerald-800/60 border-emerald-300 dark:border-emerald-700";
+    return "bg-sky-200 dark:bg-sky-800/60 border-sky-300 dark:border-sky-700";
   }
   return "bg-gray-200 dark:bg-gray-700/60 border-gray-300 dark:border-gray-600";
 }
@@ -112,7 +112,7 @@ function getSourceBg(source: ReservationSource): string {
     return "bg-gray-200 dark:bg-gray-700/60";
   }
   if (["empresa", "agencia"].includes(source)) {
-    return "bg-emerald-200 dark:bg-emerald-800/60";
+    return "bg-sky-200 dark:bg-sky-800/60";
   }
   return "bg-gray-200 dark:bg-gray-700/60";
 }

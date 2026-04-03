@@ -317,10 +317,16 @@ function AssignBlockDialog({
 }) {
   const { toast } = useToast();
 
-  const assignedCount = group.reservations.filter(r =>
-    r.room?.roomTypeId === block.roomTypeId
-  ).length;
-  const pending = Math.max(0, block.quantity - assignedCount);
+  // Count per-block assignments: distribute total same-type reservations across blocks of same type sequentially
+  const sameTypeBlocks = [...group.blocks].filter(b => b.roomTypeId === block.roomTypeId).sort((a, b) => a.id.localeCompare(b.id));
+  const totalAssignedOfType = group.reservations.filter(r => r.room?.roomTypeId === block.roomTypeId).length;
+  const blockIndex = sameTypeBlocks.findIndex(b => b.id === block.id);
+  let filledInPreviousBlocks = 0;
+  for (let i = 0; i < blockIndex; i++) {
+    filledInPreviousBlocks += sameTypeBlocks[i].quantity;
+  }
+  const assignedToThisBlock = Math.max(0, Math.min(block.quantity, totalAssignedOfType - filledInPreviousBlocks));
+  const pending = Math.max(0, block.quantity - assignedToThisBlock);
 
   const defaultCheckIn = block.blockCheckInDate || group.checkInDate;
   const defaultCheckOut = block.blockCheckOutDate || group.checkOutDate;
@@ -411,7 +417,7 @@ function AssignBlockDialog({
             Asignar Habitaciones — {block.roomType?.name}
           </DialogTitle>
           <DialogDescription>
-            Bloque de {block.quantity} habitaciones. {assignedCount} ya asignadas, {pending} pendientes.
+            Bloque de {block.quantity} habitaciones. {assignedToThisBlock} ya asignadas, {pending} pendientes.
             {defaultCheckIn && (() => {
               const fmt = (d: string) => { const [y,m,dd] = d.split("-").map(Number); return new Date(y, m-1, dd).toLocaleDateString("es-AR"); };
               return ` Check-in: ${fmt(defaultCheckIn)} | Check-out: ${fmt(defaultCheckOut)}`;
@@ -1504,6 +1510,7 @@ export default function GroupDetailPage() {
 
       {assigningBlock && (
         <AssignBlockDialog
+          key={assigningBlock.id}
           group={group}
           block={assigningBlock}
           open={!!assigningBlock}

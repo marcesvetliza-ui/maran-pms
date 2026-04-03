@@ -49,6 +49,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -883,19 +893,27 @@ export function ReservationFormDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="status">Estado</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value) => setFormData({ ...formData, status: value as ReservationStatus })}
-                >
-                  <SelectTrigger data-testid="select-reservation-status">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pending">Pendiente</SelectItem>
-                    <SelectItem value="confirmed">Confirmada</SelectItem>
-                    <SelectItem value="cancelled">Cancelada</SelectItem>
-                  </SelectContent>
-                </Select>
+                {isEditing && (formData.status === "checked_in" || formData.status === "checked_out") ? (
+                  <div className="flex items-center gap-2 h-9 px-3 rounded-md border bg-muted text-muted-foreground text-sm" data-testid="select-reservation-status">
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>{formData.status === "checked_in" ? "Reserva en casa (check-in hecho)" : "Check-out realizado"}</span>
+                  </div>
+                ) : (
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) => setFormData({ ...formData, status: value as ReservationStatus })}
+                  >
+                    <SelectTrigger data-testid="select-reservation-status">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tentative">Tentativa</SelectItem>
+                      <SelectItem value="pending">Pendiente</SelectItem>
+                      <SelectItem value="confirmed">Confirmada</SelectItem>
+                      <SelectItem value="cancelled">Cancelada</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
 
@@ -1248,6 +1266,25 @@ function ReservationDetailDialog({
   const { toast } = useToast();
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
   const [showAddCharge, setShowAddCharge] = useState(false);
+  const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
+
+  const earlyCheckoutMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("PATCH", `/api/reservations/${reservation.id}`, { status: "checked_out" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      setEarlyCheckoutDialogOpen(false);
+      onOpenChange(false);
+      toast({ title: "Check-out anticipado realizado", description: "La habitación fue liberada." });
+    },
+    onError: () => {
+      toast({ title: "Error al realizar check-out", variant: "destructive" });
+    },
+  });
 
   const printConfirmation = () => {
     const guest = reservation.guest;
@@ -2338,6 +2375,17 @@ function ReservationDetailDialog({
                 Editar Reserva
               </Button>
             )}
+            {reservation.status === "checked_in" && (
+              <Button
+                variant="outline"
+                className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
+                onClick={() => setEarlyCheckoutDialogOpen(true)}
+                data-testid="button-early-checkout"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Check-out anticipado
+              </Button>
+            )}
             {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
               <Button 
                 variant="destructive" 
@@ -2357,6 +2405,41 @@ function ReservationDetailDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* Early Checkout Confirmation Dialog */}
+      <AlertDialog open={earlyCheckoutDialogOpen} onOpenChange={setEarlyCheckoutDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <LogOut className="h-5 w-5 text-orange-500" />
+              Confirmar Check-out Anticipado
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  El huésped <strong>{reservation.guest?.firstName} {reservation.guest?.lastName}</strong> tiene reserva 
+                  hasta el <strong>{(() => { const [y,m,d] = reservation.checkOutDate.split("-"); return `${d}/${m}/${y}`; })()}</strong>.
+                </p>
+                <p>Al confirmar el check-out anticipado, la habitación <strong>{reservation.room?.roomNumber}</strong> quedará libre inmediatamente.</p>
+                <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded p-2">
+                  Verificá que el folio esté saldado antes de liberar la habitación.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => earlyCheckoutMutation.mutate()}
+              disabled={earlyCheckoutMutation.isPending}
+              className="bg-orange-600 hover:bg-orange-700"
+              data-testid="button-confirm-early-checkout"
+            >
+              {earlyCheckoutMutation.isPending ? "Procesando..." : "Confirmar Check-out anticipado"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Transfer Charge Dialog */}
       <Dialog open={transferringChargeId !== null} onOpenChange={(open) => {
