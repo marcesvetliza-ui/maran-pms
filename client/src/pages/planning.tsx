@@ -45,7 +45,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package } from "@shared/schema";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package, BedType } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
 import { getLocalToday, toArgentinaDateStr } from "@/lib/utils";
@@ -251,6 +251,7 @@ function QuickReservationDialog({
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [checkOutDate, setCheckOutDate] = useState("");
   const [bedConfig, setBedConfig] = useState("");
+  const [bedTypeId, setBedTypeId] = useState<string | null>(null);
   const [ratePlanId, setRatePlanId] = useState("");
   const [source, setSource] = useState<string>("directo");
   const [manualRate, setManualRate] = useState("");
@@ -287,6 +288,7 @@ function QuickReservationDialog({
 
   const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
   const { data: activePackages } = useQuery<Package[]>({ queryKey: ["/api/packages/active"] });
+  const { data: bedTypes } = useQuery<BedType[]>({ queryKey: ["/api/bed-types"] });
 
   useEffect(() => {
     if (reservationData) {
@@ -362,6 +364,7 @@ function QuickReservationDialog({
     setCheckOutDate("");
     setNumberOfGuests(1);
     setBedConfig("");
+    setBedTypeId(null);
     setRatePlanId("");
     setSource("directo");
     setManualRate("");
@@ -457,6 +460,7 @@ function QuickReservationDialog({
         ratePlanId: ratePlanId || null,
         companyId: companyId || null,
         agencyId: agencyId || null,
+        bedTypeId: bedTypeId || null,
         bedTypeNotes: bedConfig || null,
         baseRatePerNight: effectiveRate,
         finalRatePerNight: effectiveRate,
@@ -486,14 +490,7 @@ function QuickReservationDialog({
 
   if (!reservationData) return null;
 
-  const bedConfigOptions = [
-    { value: "MAT", label: "Matrimonial" },
-    { value: "TWIN", label: "Twin (2 camas)" },
-    { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
-    { value: "TWIN_CC", label: "Twin + Cama cuna" },
-    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
-    { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
-  ];
+  const activeBedTypes = bedTypes?.filter(bt => bt.isActive).sort((a, b) => a.displayOrder - b.displayOrder) || [];
 
   const sourceOptions = [
     { value: "directo", label: "Directo" },
@@ -635,13 +632,31 @@ function QuickReservationDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1">
               <Label>Tipo de camaje</Label>
-              <Select value={bedConfig} onValueChange={setBedConfig}>
+              <Select
+                value={bedTypeId || "none"}
+                onValueChange={(val) => {
+                  if (val === "none") {
+                    setBedTypeId(null);
+                    setBedConfig("");
+                  } else {
+                    setBedTypeId(val);
+                    const bt = activeBedTypes.find(b => b.id === val);
+                    setBedConfig(bt?.name || "");
+                  }
+                }}
+              >
                 <SelectTrigger data-testid="select-bed-config">
-                  <SelectValue placeholder="Seleccionar" />
+                  <SelectValue placeholder="Sin preferencia" />
                 </SelectTrigger>
                 <SelectContent>
-                  {bedConfigOptions.map(opt => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  <SelectItem value="none">Sin preferencia</SelectItem>
+                  {activeBedTypes.map(bt => (
+                    <SelectItem key={bt.id} value={bt.id}>
+                      <div className="flex flex-col gap-0">
+                        <span>{bt.name}</span>
+                        {bt.description && <span className="text-xs text-muted-foreground">{bt.description}</span>}
+                      </div>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

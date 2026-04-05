@@ -190,16 +190,6 @@ export function ReservationFormDialog({
   const [resChargeCategory, setResChargeCategory] = useState("otros");
   const [hasVoucher, setHasVoucher] = useState(!!(reservation?.voucherCode || reservation?.voucherNotes));
 
-  // Opciones de camaje fijas
-  const bedConfigOptions = [
-    { value: "MAT", label: "Matrimonial" },
-    { value: "TWIN", label: "Twin (2 camas)" },
-    { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
-    { value: "TWIN_CC", label: "Twin + Cama cuna" },
-    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
-    { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
-  ];
-
   const [formData, setFormData] = useState<Partial<InsertReservation>>({
     reservationCode: reservation?.reservationCode || "",
     guestId: reservation?.guestId || "",
@@ -1003,18 +993,28 @@ export function ReservationFormDialog({
             <div className="grid gap-2">
               <Label htmlFor="bedConfig">Tipo de camaje</Label>
               <Select
-                value={formData.bedTypeNotes || "none"}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, bedTypeNotes: value === "none" ? "" : value })
-                }
+                value={formData.bedTypeId || "none"}
+                onValueChange={(value) => {
+                  if (value === "none") {
+                    setFormData({ ...formData, bedTypeId: null, bedTypeNotes: "" });
+                  } else {
+                    const bt = bedTypes?.find(b => b.id === value);
+                    setFormData({ ...formData, bedTypeId: value, bedTypeNotes: bt?.name || "" });
+                  }
+                }}
               >
                 <SelectTrigger data-testid="select-bed-config-form">
                   <SelectValue placeholder="Sin preferencia" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sin preferencia</SelectItem>
-                  {bedConfigOptions.map(opt => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  {bedTypes?.filter(bt => bt.isActive).sort((a, b) => a.displayOrder - b.displayOrder).map(bt => (
+                    <SelectItem key={bt.id} value={bt.id}>
+                      <div className="flex flex-col gap-0">
+                        <span>{bt.name}</span>
+                        {bt.description && <span className="text-xs text-muted-foreground">{bt.description}</span>}
+                      </div>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
