@@ -297,6 +297,19 @@ function QuickReservationDialog({
     }
   }, [reservationData]);
 
+  // Auto-fill manual rate from selected plan + number of guests
+  useEffect(() => {
+    if (!ratePlanId || !ratePlans) return;
+    const plan = ratePlans.find(rp => rp.id === ratePlanId);
+    if (!plan) return;
+    const paxMap: Record<number, string | null | undefined> = {
+      1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax,
+    };
+    const paxRate = paxMap[numberOfGuests];
+    const rate = paxRate || plan.baseRate;
+    setManualRate(rate || "");
+  }, [ratePlanId, numberOfGuests, ratePlans]);
+
   const filteredGuests = guestSearch.length > 0
     ? guests.filter(g => 
         `${g.firstName} ${g.lastName} ${g.documentNumber || ""}`.toLowerCase().includes(guestSearch.toLowerCase())
@@ -642,16 +655,47 @@ function QuickReservationDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1">
               <Label>Plan tarifario</Label>
-              <Select value={ratePlanId} onValueChange={setRatePlanId}>
+              <Select value={ratePlanId} onValueChange={(val) => { setRatePlanId(val); }}>
                 <SelectTrigger data-testid="select-rate-plan">
-                  <SelectValue placeholder="Seleccionar" />
+                  <SelectValue placeholder="Seleccionar plan" />
                 </SelectTrigger>
                 <SelectContent>
-                  {roomRatePlans.map(rp => (
-                    <SelectItem key={rp.id} value={rp.id}>{rp.name} (${rp.baseRate})</SelectItem>
-                  ))}
+                  {roomRatePlans.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">Sin planes para este tipo</div>
+                  ) : roomRatePlans.map(rp => {
+                    const hasPaxRates = rp.rate2pax || rp.rate3pax || rp.rate4pax;
+                    return (
+                      <SelectItem key={rp.id} value={rp.id}>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium">{rp.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {rp.currency} {Number(rp.baseRate).toLocaleString("es-AR")}
+                            {rp.rate2pax ? ` · 2P: ${Number(rp.rate2pax).toLocaleString("es-AR")}` : ""}
+                            {rp.rate3pax ? ` · 3P: ${Number(rp.rate3pax).toLocaleString("es-AR")}` : ""}
+                            {rp.rate4pax ? ` · 4P: ${Number(rp.rate4pax).toLocaleString("es-AR")}` : ""}
+                            {!hasPaxRates ? " (tarifa fija)" : ""}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
+              {ratePlanId && (() => {
+                const plan = roomRatePlans.find(rp => rp.id === ratePlanId);
+                if (!plan) return null;
+                const paxMap: Record<number, string | null | undefined> = { 1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax };
+                const paxRate = paxMap[numberOfGuests];
+                const effectivePaxRate = paxRate || plan.baseRate;
+                const isPaxSpecific = !!paxRate;
+                return (
+                  <div className="flex items-center gap-1.5 mt-1 px-2 py-1 bg-blue-50 dark:bg-blue-950/40 rounded text-xs text-blue-700 dark:text-blue-300">
+                    <span>Tarifa para {numberOfGuests} huésped{numberOfGuests > 1 ? "es" : ""}:</span>
+                    <span className="font-bold">{plan.currency} {Number(effectivePaxRate).toLocaleString("es-AR")}/noche</span>
+                    {isPaxSpecific && <span className="text-blue-500">(tarifa {numberOfGuests}P)</span>}
+                  </div>
+                );
+              })()}
             </div>
             <div className="grid gap-1">
               <Label>Canal</Label>
@@ -674,10 +718,12 @@ function QuickReservationDialog({
               <Select value={packageId} onValueChange={(val) => {
                 if (val === "__none__") {
                   setPackageId("");
+                  setRatePlanId("");
                   setManualRate("");
                   return;
                 }
                 setPackageId(val);
+                setRatePlanId("");
                 const pkg = activePackages.find(p => p.id === val);
                 if (pkg) {
                   const ratePerNight = (parseFloat(pkg.basePrice) / (pkg.nights || 1)).toFixed(2);
@@ -705,12 +751,15 @@ function QuickReservationDialog({
           )}
 
           <div className="grid gap-1">
-            <Label>Tarifa manual / noche (opcional)</Label>
+            <Label>
+              Tarifa / noche
+              {ratePlanId && <span className="text-xs font-normal text-muted-foreground ml-1">(auto-calculada del plan — editá si necesitás sobrescribir)</span>}
+            </Label>
             <Input
               type="number"
               min={0}
               step="0.01"
-              placeholder={ratePlanId && roomRatePlans.find(rp => rp.id === ratePlanId)?.baseRate ? `Plan: $${roomRatePlans.find(rp => rp.id === ratePlanId)?.baseRate}` : "Usar tarifa del plan"}
+              placeholder="Ingresar tarifa manualmente"
               value={manualRate}
               onChange={(e) => setManualRate(e.target.value)}
               data-testid="input-manual-rate"

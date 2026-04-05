@@ -700,13 +700,41 @@ export function ReservationFormDialog({
                   <SelectValue placeholder="Seleccionar plan tarifario" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ratePlans?.map((plan) => (
-                    <SelectItem key={plan.id} value={plan.id}>
-                      {plan.name} - ${plan.baseRate}/noche
-                    </SelectItem>
-                  ))}
+                  {ratePlans?.map((plan) => {
+                    const hasPaxRates = plan.rate2pax || plan.rate3pax || plan.rate4pax;
+                    return (
+                      <SelectItem key={plan.id} value={plan.id}>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium">{plan.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {plan.currency} {Number(plan.baseRate).toLocaleString("es-AR")}
+                            {plan.rate2pax ? ` · 2P: ${Number(plan.rate2pax).toLocaleString("es-AR")}` : ""}
+                            {plan.rate3pax ? ` · 3P: ${Number(plan.rate3pax).toLocaleString("es-AR")}` : ""}
+                            {plan.rate4pax ? ` · 4P: ${Number(plan.rate4pax).toLocaleString("es-AR")}` : ""}
+                            {!hasPaxRates ? " (tarifa fija)" : ""}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
+              {formData.ratePlanId && (() => {
+                const plan = ratePlans?.find(p => p.id === formData.ratePlanId);
+                if (!plan) return null;
+                const paxMap: Record<number, string | null | undefined> = { 1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax };
+                const numGuests = formData.numberOfGuests || 1;
+                const paxRate = paxMap[numGuests];
+                const effectivePaxRate = paxRate || plan.baseRate;
+                const isPaxSpecific = !!paxRate;
+                return (
+                  <div className="flex items-center gap-1.5 mt-1 px-2 py-1 bg-blue-50 dark:bg-blue-950/40 rounded text-xs text-blue-700 dark:text-blue-300">
+                    <span>Tarifa para {numGuests} huésped{numGuests > 1 ? "es" : ""}:</span>
+                    <span className="font-bold">{plan.currency} {Number(effectivePaxRate).toLocaleString("es-AR")}/noche</span>
+                    {isPaxSpecific && <span className="text-blue-500">(tarifa {numGuests}P)</span>}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Voucher */}
