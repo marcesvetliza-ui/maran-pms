@@ -2011,8 +2011,9 @@ export default function PlanningPage() {
       toast({ title: "Habitación en mantenimiento", description: "No se pueden crear reservas en esta habitación mientras está en mantenimiento.", variant: "destructive" });
       return;
     }
-    if (status === "available") {
-      navigate(`/new-reservation?roomId=${room.id}&roomTypeId=${room.roomTypeId}&date=${day}`);
+    if (status === "available" || status === "dirty" || status === "cleaning" || status === "inspected") {
+      setNewReservationDefaults({ roomId: room.id, roomTypeId: room.roomTypeId, checkInDate: day });
+      setNewReservationOpen(true);
     } else {
       const resolvedId = reservationId || findReservationForRoomAndDay(room.id, day);
       if (resolvedId) {
