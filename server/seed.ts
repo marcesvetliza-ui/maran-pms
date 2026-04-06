@@ -343,6 +343,7 @@ export async function seedDatabase() {
     { id: "er2", name: "Salón Rivadavia", capacity: 60, status: "available", description: "Salón intermedio para eventos medianos", amenities: ["projector", "wifi", "whiteboard"], isActive: "true" },
     { id: "er3", name: "Salón Solárium", capacity: 40, status: "available", description: "Salón con vista panorámica", amenities: ["projector", "audio", "wifi", "videoconference"], isActive: "true" },
     { id: "er4", name: "Salón Rosedal", capacity: 30, status: "available", description: "Salón íntimo para reuniones", amenities: ["projector", "wifi"], isActive: "true" },
+    { id: "er5", name: "Salón Justo", capacity: 50, status: "available", description: "Salón Justo", amenities: [], isActive: "true" },
   ]);
 
   console.log("Seeding event charge types...");
@@ -800,6 +801,7 @@ export async function refreshRealData() {
       { id: "er2", name: "Salón Rivadavia", capacity: 60, status: "available" as const, description: "Salón intermedio para eventos medianos", isActive: "true" as const },
       { id: "er3", name: "Salón Solárium", capacity: 40, status: "available" as const, description: "Salón con vista panorámica", isActive: "true" as const },
       { id: "er4", name: "Salón Rosedal", capacity: 30, status: "available" as const, description: "Salón íntimo para reuniones", isActive: "true" as const },
+      { id: "er5", name: "Salón Justo", capacity: 50, status: "available" as const, description: "Salón Justo", isActive: "true" as const },
     ];
 
     const existingEventRooms = await db.select({ id: eventRooms.id }).from(eventRooms);
