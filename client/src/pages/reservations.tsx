@@ -555,7 +555,7 @@ export function ReservationFormDialog({
   };
 
   const availableRooms = rooms.filter((r) => {
-    const sameRoom = r.id === reservation?.roomId;
+    const sameRoom = r.id === reservation?.roomId || r.id === defaultValues?.roomId;
     const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
     return (isUsable || sameRoom) && r.roomTypeId === selectedRoomTypeId;
   });
