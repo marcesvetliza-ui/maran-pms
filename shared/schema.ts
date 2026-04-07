@@ -2124,6 +2124,61 @@ export const insertSystemIncidentSchema = createInsertSchema(systemIncidents).om
 export type InsertSystemIncident = z.infer<typeof insertSystemIncidentSchema>;
 export type SystemIncident = typeof systemIncidents.$inferSelect;
 
+// ==================== MOTOR FINANCIERO — FOLIOS ====================
+export type FolioEntityType =
+  | "reservation" | "restaurant_order" | "spa_account"
+  | "group" | "event" | "company" | "agency";
+
+export type FolioStatus = "open" | "closed" | "invoiced";
+
+export type FolioMovementType =
+  | "charge" | "payment" | "advance" | "discount"
+  | "adjustment" | "transfer_in" | "transfer_out" | "void";
+
+export const folios = pgTable("folios", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  codigo: text("codigo").notNull().unique(),
+  entityType: text("entity_type").$type<FolioEntityType>().notNull(),
+  entityId: varchar("entity_id").notNull(),
+  status: text("status").$type<FolioStatus>().notNull().default("open"),
+  totalCharges: decimal("total_charges", { precision: 12, scale: 2 }).default("0"),
+  totalPayments: decimal("total_payments", { precision: 12, scale: 2 }).default("0"),
+  balance: decimal("balance", { precision: 12, scale: 2 }).default("0"),
+  openedAt: timestamp("opened_at").defaultNow(),
+  closedAt: timestamp("closed_at"),
+  closedBy: text("closed_by"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertFolioSchema = createInsertSchema(folios).omit({ id: true, createdAt: true });
+export type InsertFolio = z.infer<typeof insertFolioSchema>;
+export type Folio = typeof folios.$inferSelect;
+
+export const folioMovements = pgTable("folio_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  folioId: varchar("folio_id").notNull().references(() => folios.id),
+  type: text("type").$type<FolioMovementType>().notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  description: text("description").notNull(),
+  sourceType: text("source_type"),
+  sourceId: varchar("source_id"),
+  paymentMethod: text("payment_method"),
+  cashMovementId: varchar("cash_movement_id"),
+  relatedFolioId: varchar("related_folio_id"),
+  voidedMovementId: varchar("voided_movement_id"),
+  voidReason: text("void_reason"),
+  registeredBy: text("registered_by"),
+  receiptType: text("receipt_type"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertFolioMovementSchema = createInsertSchema(folioMovements).omit({ id: true, createdAt: true });
+export type InsertFolioMovement = z.infer<typeof insertFolioMovementSchema>;
+export type FolioMovement = typeof folioMovements.$inferSelect;
+
+export type FolioWithMovements = Folio & { movements: FolioMovement[] };
+
 // ==================== NIGHT AUDIT ====================
 export type NightAuditStatus = "success" | "partial" | "failed";
 

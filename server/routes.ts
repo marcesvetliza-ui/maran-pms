@@ -35,6 +35,7 @@ import { registerInventoryRoutes } from "./routes/inventory";
 import { registerSpaRoutes } from "./routes/spa";
 import { registerEventsRoutes } from "./routes/events";
 import { registerMaintenanceRoutes } from "./routes/maintenance";
+import { registerFolioRoutes } from "./routes/folios";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -2128,6 +2129,7 @@ export async function registerRoutes(
   });
 
   registerMaintenanceRoutes(app);
+  registerFolioRoutes(app);
   registerGuestsRoutes(app);
   registerReservationsRoutes(app);
   registerGroupsRoutes(app);

@@ -792,6 +792,18 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
       const charge = await storage.createCharge(req.body);
+      // Motor financiero: escribir al folio de la reserva
+      if (charge.reservationId) {
+        storage.addFolioCharge(
+          "reservation",
+          charge.reservationId,
+          parseFloat(charge.amount),
+          charge.description || charge.category || "Cargo",
+          "charge",
+          charge.id,
+          (req as any).user?.username,
+        ).catch(e => console.error("[Folio] Error escribiendo cargo:", e));
+      }
       res.status(201).json(charge);
     } catch (error) {
       res.status(500).json({ error: "Error creating charge" });
@@ -1126,6 +1138,22 @@ export function registerReservationsRoutes(app: Express) {
         console.error("Error registrando movimiento de caja:", e);
       }
 
+      // Motor financiero: escribir al folio de la reserva
+      if (payment.reservationId) {
+        const rawMethod = req.body.method || "cash";
+        storage.addFolioPayment(
+          "reservation",
+          payment.reservationId,
+          parseFloat(payment.amount),
+          payment.description || `Pago — ${rawMethod}`,
+          rawMethod,
+          "payment",
+          payment.id,
+          undefined,
+          (req as any).user?.username,
+          req.body.receiptType,
+        ).catch(e => console.error("[Folio] Error escribiendo pago:", e));
+      }
       await audit(req, "create", "payments",
         `Pago registrado: $${req.body.amount} (${req.body.method}) — Reserva ${req.body.reservationId || "N/A"}`,
         { entityType: "payment", entityId: payment.id }

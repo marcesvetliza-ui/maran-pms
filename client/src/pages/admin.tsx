@@ -12,6 +12,7 @@ import {
   Landmark,
   BarChart2,
   Users2,
+  ReceiptText,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -129,6 +130,16 @@ export default function AdminPage() {
       status: "available" as const,
       color: "text-purple-600",
       bg: "bg-purple-50 dark:bg-purple-950/30",
+      extra: null,
+    },
+    {
+      title: "Motor Financiero — Folios",
+      description: "Vista consolidada de todos los folios del sistema: reservas, restaurant, SPA, grupos y eventos. Saldos en tiempo real.",
+      icon: ReceiptText,
+      href: "/admin/folios",
+      status: "available" as const,
+      color: "text-indigo-600",
+      bg: "bg-indigo-50 dark:bg-indigo-950/30",
       extra: null,
     },
   ];

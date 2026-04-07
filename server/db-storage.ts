@@ -85,6 +85,8 @@ import {
   type AccountMovement, type InsertAccountMovement, type AccountEntityType,
   type OrderStatus,
   type SpaPaymentMethod,
+  type Folio, type InsertFolio, type FolioStatus, type FolioEntityType,
+  type FolioMovement, type InsertFolioMovement, type FolioMovementType, type FolioWithMovements,
   users, rooms, roomTypes, ratePlans, companies, agencies, guests, bedTypes,
   reservations, charges, payments, cancelledReservationLogs,
   otaChannels, otaReservationLogs,
@@ -106,6 +108,7 @@ import {
   guestPreferences, stayNotes, hospitalityAlerts,
   cashRegisterConfigs, cashShifts, cashMovements, cashClosingSummaries,
   accountMovements,
+  folios, folioMovements,
 } from "@shared/schema";
 
 export class DatabaseStorage implements IStorage {
@@ -3965,6 +3968,185 @@ export class DatabaseStorage implements IStorage {
         }))
         .filter(g => g.balance !== 0),
     };
+  }
+
+  // ==================== MOTOR FINANCIERO — FOLIOS ====================
+
+  private async generateFolioCodigo(entityType: FolioEntityType): Promise<string> {
+    const prefixes: Record<FolioEntityType, string> = {
+      reservation: "RS",
+      restaurant_order: "OR",
+      spa_account: "SP",
+      group: "GR",
+      event: "EV",
+      company: "CO",
+      agency: "AG",
+    };
+    const prefix = prefixes[entityType] ?? "FL";
+    const [row] = await db.select({ cnt: sql<number>`count(*)` }).from(folios)
+      .where(eq(folios.entityType, entityType));
+    const seq = (Number(row?.cnt ?? 0) + 1).toString().padStart(6, "0");
+    return `${prefix}-${seq}`;
+  }
+
+  async getOrCreateFolio(entityType: FolioEntityType, entityId: string): Promise<Folio> {
+    const [existing] = await db.select().from(folios)
+      .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
+    if (existing) return existing;
+    const codigo = await this.generateFolioCodigo(entityType);
+    const [created] = await db.insert(folios).values({
+      codigo,
+      entityType,
+      entityId,
+      status: "open",
+      totalCharges: "0",
+      totalPayments: "0",
+      balance: "0",
+    }).returning();
+    return created;
+  }
+
+  async getFolioByEntity(entityType: FolioEntityType, entityId: string): Promise<Folio | null> {
+    const [row] = await db.select().from(folios)
+      .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
+    return row ?? null;
+  }
+
+  async getFolioById(id: string): Promise<Folio | null> {
+    const [row] = await db.select().from(folios).where(eq(folios.id, id));
+    return row ?? null;
+  }
+
+  async getFolioWithMovements(folioId: string): Promise<FolioWithMovements | null> {
+    const folio = await this.getFolioById(folioId);
+    if (!folio) return null;
+    const movements = await db.select().from(folioMovements)
+      .where(eq(folioMovements.folioId, folioId))
+      .orderBy(asc(folioMovements.createdAt));
+    return { ...folio, movements };
+  }
+
+  async getFolioWithMovementsByEntity(entityType: FolioEntityType, entityId: string): Promise<FolioWithMovements | null> {
+    const folio = await this.getFolioByEntity(entityType, entityId);
+    if (!folio) return null;
+    return this.getFolioWithMovements(folio.id);
+  }
+
+  async recalcFolioBalance(folioId: string): Promise<Folio> {
+    const chargeTypes: FolioMovementType[] = ["charge", "transfer_in"];
+    const paymentTypes: FolioMovementType[] = ["payment", "advance", "discount", "transfer_out", "void"];
+    const [chargesRow] = await db.select({ total: sql<string>`COALESCE(SUM(amount::numeric), 0)` })
+      .from(folioMovements).where(and(
+        eq(folioMovements.folioId, folioId),
+        inArray(folioMovements.type, chargeTypes as string[]),
+      ));
+    const [paymentsRow] = await db.select({ total: sql<string>`COALESCE(SUM(amount::numeric), 0)` })
+      .from(folioMovements).where(and(
+        eq(folioMovements.folioId, folioId),
+        inArray(folioMovements.type, paymentTypes as string[]),
+      ));
+    const totalCharges = parseFloat(chargesRow?.total ?? "0");
+    const totalPayments = parseFloat(paymentsRow?.total ?? "0");
+    const balance = totalCharges - totalPayments;
+    const [updated] = await db.update(folios).set({
+      totalCharges: totalCharges.toFixed(2),
+      totalPayments: totalPayments.toFixed(2),
+      balance: balance.toFixed(2),
+    }).where(eq(folios.id, folioId)).returning();
+    return updated;
+  }
+
+  async addFolioCharge(
+    entityType: FolioEntityType,
+    entityId: string,
+    amount: number,
+    description: string,
+    sourceType?: string,
+    sourceId?: string,
+    registeredBy?: string,
+  ): Promise<FolioMovement> {
+    const folio = await this.getOrCreateFolio(entityType, entityId);
+    const [movement] = await db.insert(folioMovements).values({
+      folioId: folio.id,
+      type: "charge",
+      amount: amount.toFixed(2),
+      description,
+      sourceType: sourceType ?? null,
+      sourceId: sourceId ?? null,
+      registeredBy: registeredBy ?? null,
+    }).returning();
+    await this.recalcFolioBalance(folio.id);
+    return movement;
+  }
+
+  async addFolioPayment(
+    entityType: FolioEntityType,
+    entityId: string,
+    amount: number,
+    description: string,
+    paymentMethod: string,
+    sourceType?: string,
+    sourceId?: string,
+    cashMovementId?: string,
+    registeredBy?: string,
+    receiptType?: string,
+  ): Promise<FolioMovement> {
+    const folio = await this.getOrCreateFolio(entityType, entityId);
+    const [movement] = await db.insert(folioMovements).values({
+      folioId: folio.id,
+      type: "payment",
+      amount: amount.toFixed(2),
+      description,
+      paymentMethod,
+      sourceType: sourceType ?? null,
+      sourceId: sourceId ?? null,
+      cashMovementId: cashMovementId ?? null,
+      registeredBy: registeredBy ?? null,
+      receiptType: receiptType ?? null,
+    }).returning();
+    await this.recalcFolioBalance(folio.id);
+    return movement;
+  }
+
+  async addFolioAdjustment(
+    folioId: string,
+    type: FolioMovementType,
+    amount: number,
+    description: string,
+    registeredBy?: string,
+    voidedMovementId?: string,
+    voidReason?: string,
+  ): Promise<FolioMovement> {
+    const [movement] = await db.insert(folioMovements).values({
+      folioId,
+      type,
+      amount: amount.toFixed(2),
+      description,
+      registeredBy: registeredBy ?? null,
+      voidedMovementId: voidedMovementId ?? null,
+      voidReason: voidReason ?? null,
+    }).returning();
+    await this.recalcFolioBalance(folioId);
+    return movement;
+  }
+
+  async closeFolio(folioId: string, closedBy: string): Promise<Folio> {
+    const updated = await this.recalcFolioBalance(folioId);
+    const [closed] = await db.update(folios).set({
+      status: "closed",
+      closedAt: new Date(),
+      closedBy,
+    }).where(eq(folios.id, folioId)).returning();
+    return closed;
+  }
+
+  async listFolios(entityType?: FolioEntityType, status?: FolioStatus): Promise<Folio[]> {
+    const conditions: any[] = [];
+    if (entityType) conditions.push(eq(folios.entityType, entityType));
+    if (status) conditions.push(eq(folios.status, status));
+    return db.select().from(folios)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(folios.openedAt));
   }
 }
 
