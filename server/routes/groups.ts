@@ -197,8 +197,9 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: "Could not assign room to group" });
       }
       res.status(201).json(reservation);
-    } catch (error) {
-      res.status(500).json({ error: "Error assigning room to group" });
+    } catch (error: any) {
+      const msg = error?.message || "Error assigning room to group";
+      res.status(400).json({ error: msg });
     }
   });
 

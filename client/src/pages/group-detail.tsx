@@ -377,6 +377,9 @@ function AssignBlockDialog({
           guestFirstName: row.firstName || "Sin Asignar",
           guestLastName: row.lastName || "",
           ratePlanId: block.ratePlanId,
+          checkInDate: defaultCheckIn,
+          checkOutDate: defaultCheckOut,
+          agreedRate: block.agreedRate,
         });
         successCount++;
       } catch (err: any) {
