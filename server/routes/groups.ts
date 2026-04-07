@@ -524,8 +524,25 @@ export function registerGroupsRoutes(app: Express) {
         notes: notes || null,
       });
 
+      // Validate: the sum of distributed amounts must not exceed the total payment.
+      // This prevents duplication in case of floating-point rounding drift.
+      const distributedSum = Object.values(detail).reduce((s, v) => s + (v as number), 0);
+      if (distributedSum > totalAmount + 0.01) {
+        return res.status(400).json({
+          error: `Inconsistencia en la distribución: la suma de partes (${distributedSum.toFixed(2)}) supera el total (${totalAmount.toFixed(2)}). Revise los montos.`,
+        });
+      }
+
+      // Apply a rounding correction to the last reservation so the sum is exact.
+      const resIds = Object.keys(detail).filter(id => (detail[id] as number) > 0);
+      if (resIds.length > 1) {
+        const sumWithoutLast = resIds.slice(0, -1).reduce((s, id) => s + parseFloat((detail[id] as number).toFixed(2)), 0);
+        const lastId = resIds[resIds.length - 1];
+        (detail as any)[lastId] = Math.max(0, totalAmount - sumWithoutLast);
+      }
+
       for (const [reservationId, amt] of Object.entries(detail)) {
-        if (amt > 0) {
+        if ((amt as number) > 0.005) {
           await storage.createPayment({
             reservationId,
             amount: (amt as number).toFixed(2),

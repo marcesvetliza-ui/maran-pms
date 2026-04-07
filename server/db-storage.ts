@@ -1333,7 +1333,10 @@ export class DatabaseStorage implements IStorage {
       };
     }));
 
-    const totalPayments = indivPaymentsTotal + groupPaymentsTotal;
+    // IMPORTANT: individual payments already carry the distributed amounts per room.
+    // groupPaymentsTotal is an audit record of the received total and must NOT be added
+    // again — doing so would duplicate the full payment amount.
+    const totalPayments = indivPaymentsTotal;
     const balance = accommodationTotal + extrasTotal + groupChargesTotal - totalPayments;
 
     return {
