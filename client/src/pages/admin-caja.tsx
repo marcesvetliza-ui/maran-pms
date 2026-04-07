@@ -79,7 +79,11 @@ export default function AdminCajaPage() {
     refetchInterval: 30000,
   });
 
-  const { data: resumenDia } = useQuery<{ hoyIngresos: number; hoyEgresos: number }>({
+  const { data: resumenDia } = useQuery<{
+    hoyIngresos: number;
+    hoyEgresos: number;
+    porModulo?: { hotel: number; restaurant: number; spa: number; otros: number };
+  }>({
     queryKey: ["/api/admin-cash/resumen-dia", today()],
     queryFn: () => fetch(`/api/admin-cash/resumen-dia?fecha=${today()}`, { credentials: "include" }).then(r => r.json()),
     refetchInterval: 30000,
@@ -165,6 +169,22 @@ export default function AdminCajaPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-blue-600">${fPeso(resumenDia?.hoyIngresos)}</div>
+              {resumenDia?.porModulo && resumenDia.hoyIngresos > 0 && (
+                <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                  {resumenDia.porModulo.hotel > 0 && (
+                    <div className="flex justify-between"><span>Hotel</span><span className="font-medium">${fPeso(resumenDia.porModulo.hotel)}</span></div>
+                  )}
+                  {resumenDia.porModulo.restaurant > 0 && (
+                    <div className="flex justify-between"><span>Restaurante</span><span className="font-medium">${fPeso(resumenDia.porModulo.restaurant)}</span></div>
+                  )}
+                  {resumenDia.porModulo.spa > 0 && (
+                    <div className="flex justify-between"><span>SPA</span><span className="font-medium">${fPeso(resumenDia.porModulo.spa)}</span></div>
+                  )}
+                  {resumenDia.porModulo.otros > 0 && (
+                    <div className="flex justify-between"><span>Otros</span><span className="font-medium">${fPeso(resumenDia.porModulo.otros)}</span></div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>

@@ -25,6 +25,9 @@ import {
   ExternalLink,
   X,
   Loader2,
+  FileDown,
+  Receipt,
+  Wallet,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1288,46 +1291,83 @@ export default function GroupDetailPage() {
           ) : folio ? (
             <div className="space-y-4">
 
-              {/* Resumen financiero */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Resumen Financiero del Grupo</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Alojamiento</p>
-                      <p className="font-semibold text-lg" data-testid="folio-accommodation">
-                        ${folio.totals.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </p>
+              {/* Resumen financiero — tarjetas de colores */}
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Resumen Financiero del Grupo</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const a = document.createElement("a");
+                    a.href = `/api/folios/group/${groupId}/pdf`;
+                    a.download = `folio-grupo-${group?.name || groupId}.pdf`;
+                    a.click();
+                  }}
+                  data-testid="button-folio-pdf"
+                >
+                  <FileDown className="h-4 w-4 mr-1" />
+                  PDF Folio
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <Card className="border-blue-200 dark:border-blue-900">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Hotel className="h-4 w-4 text-blue-500" />
+                      <span className="text-xs text-muted-foreground">Alojamiento</span>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">Cargos extras</p>
-                      <p className="font-semibold text-lg" data-testid="folio-extras">
-                        ${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </p>
+                    <p className="text-xl font-bold text-blue-600" data-testid="folio-accommodation">
+                      ${folio.totals.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-purple-200 dark:border-purple-900">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Receipt className="h-4 w-4 text-purple-500" />
+                      <span className="text-xs text-muted-foreground">Cargos extras</span>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">Cargos grupales</p>
-                      <p className="font-semibold text-lg" data-testid="folio-group-charges">
-                        ${folio.totals.groupCharges.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </p>
+                    <p className="text-xl font-bold text-purple-600" data-testid="folio-extras">
+                      ${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-orange-200 dark:border-orange-900">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <DollarSign className="h-4 w-4 text-orange-500" />
+                      <span className="text-xs text-muted-foreground">Cargos grupales</span>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">Pagos recibidos</p>
-                      <p className="font-semibold text-lg text-green-600" data-testid="folio-payments">
-                        ${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </p>
+                    <p className="text-xl font-bold text-orange-600" data-testid="folio-group-charges">
+                      ${folio.totals.groupCharges.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-green-200 dark:border-green-900">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Wallet className="h-4 w-4 text-green-500" />
+                      <span className="text-xs text-muted-foreground">Pagos recibidos</span>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">Saldo</p>
-                      <p className={`font-semibold text-lg ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`} data-testid="folio-balance">
-                        ${folio.totals.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </p>
+                    <p className="text-xl font-bold text-green-600" data-testid="folio-payments">
+                      ${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className={`${folio.totals.balance > 0.01 ? "border-red-200 dark:border-red-900 bg-red-50/40 dark:bg-red-950/20" : "border-green-200 dark:border-green-900 bg-green-50/40 dark:bg-green-950/20"}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      {folio.totals.balance > 0.01
+                        ? <AlertTriangle className="h-4 w-4 text-red-500" />
+                        : <CheckCircle className="h-4 w-4 text-green-500" />}
+                      <span className="text-xs text-muted-foreground">Saldo pendiente</span>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                    <p className={`text-xl font-bold ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`} data-testid="folio-balance">
+                      ${folio.totals.balance.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
 
               {/* Cargos del grupo */}
               <Card>

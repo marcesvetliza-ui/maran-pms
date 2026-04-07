@@ -1039,6 +1039,86 @@ export async function registerRoutes(
     }
   });
 
+  // Deuda consolidada por huésped — alojamiento + extras de reservas activas
+  app.get("/api/reports/guest-debt", requireAuth, async (req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT
+          g.id AS guest_id,
+          g.first_name || ' ' || g.last_name AS guest_name,
+          g.document_number,
+          g.document_type,
+          r.id AS reservation_id,
+          r.reservation_code,
+          r.check_in_date,
+          r.check_out_date,
+          r.status,
+          rm.room_number,
+          COALESCE(r.total_amount, 0)::numeric AS alojamiento,
+          COALESCE(
+            (SELECT SUM(ch.amount::numeric) FROM charges ch WHERE ch.reservation_id = r.id AND ch.category != 'adjustment'), 0
+          ) AS extras,
+          COALESCE(
+            (SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id), 0
+          ) AS pagado
+        FROM reservations r
+        JOIN guests g ON g.id = r.guest_id
+        LEFT JOIN rooms rm ON rm.id = r.room_id
+        WHERE r.status IN ('confirmed', 'checked_in')
+          AND (
+            COALESCE(r.total_amount, 0)::numeric +
+            COALESCE((SELECT SUM(ch.amount::numeric) FROM charges ch WHERE ch.reservation_id = r.id AND ch.category != 'adjustment'), 0) -
+            COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id), 0)
+          ) > 0.01
+        ORDER BY g.last_name, g.first_name, r.check_in_date
+      `)).rows as any[];
+
+      // Group by guest
+      const byGuest: Record<string, any> = {};
+      for (const row of rows) {
+        const gid = row.guest_id;
+        if (!byGuest[gid]) {
+          byGuest[gid] = {
+            guestId: gid,
+            guestName: row.guest_name,
+            documentNumber: row.document_number,
+            documentType: row.document_type,
+            reservations: [],
+            totalAlojamiento: 0,
+            totalExtras: 0,
+            totalPagado: 0,
+            totalDeuda: 0,
+          };
+        }
+        const aloj = parseFloat(row.alojamiento) || 0;
+        const extr = parseFloat(row.extras) || 0;
+        const pag  = parseFloat(row.pagado) || 0;
+        const saldo = aloj + extr - pag;
+        byGuest[gid].reservations.push({
+          reservationId: row.reservation_id,
+          reservationCode: row.reservation_code,
+          roomNumber: row.room_number,
+          checkInDate: row.check_in_date,
+          checkOutDate: row.check_out_date,
+          status: row.status,
+          alojamiento: aloj,
+          extras: extr,
+          pagado: pag,
+          saldo,
+        });
+        byGuest[gid].totalAlojamiento += aloj;
+        byGuest[gid].totalExtras += extr;
+        byGuest[gid].totalPagado += pag;
+        byGuest[gid].totalDeuda += saldo;
+      }
+
+      res.json(Object.values(byGuest));
+    } catch (error) {
+      console.error("Error fetching guest debt report:", error);
+      res.status(500).json({ error: "Error al obtener deuda por huésped" });
+    }
+  });
+
   app.get("/api/reports/restaurant", requireAuth, async (req, res) => {
     try {
       const { from, to } = req.query as { from: string; to: string };

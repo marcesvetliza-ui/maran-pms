@@ -212,6 +212,15 @@ export default function AdminCuentasPage() {
 
         <Button
           variant="outline"
+          onClick={() => navigate("/admin/deuda-huespedes")}
+          data-testid="button-deuda-huespedes"
+        >
+          <AlertCircle className="h-4 w-4 mr-2" />
+          Deuda por Huésped
+        </Button>
+
+        <Button
+          variant="outline"
           onClick={() => navigate("/agencies?tab=comisiones")}
           data-testid="button-cc-comisiones"
         >

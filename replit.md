@@ -73,6 +73,9 @@ Preferred communication style: Simple, everyday language.
 - **Motor Financiero — Breakdown by Entity**: `GET /api/folios/stats/by-entity-type` returns pending balances grouped by entity type. Admin-folios page shows a "Saldos Pendientes por Módulo" bar chart section with clickable filter shortcuts.
 - **Grupos — Acciones Masivas**: Group detail page has mass check-in, check-out (with confirmation dialogs), group invoice/factura, group payment, and printable rooming list — all fully wired to backend endpoints.
 - **Paquetes Turísticos**: Full CRUD module at `/packages` — create/edit packages with nights, price, discount %, validity dates, room type, and included service items (items with type + description + qty). Duplicate, toggle status, and delete operations. Accessible from sidebar.
+- **Vista Deuda por Huésped**: New page at `/admin/deuda-huespedes` — consolidated view of pending balances for active reservations (confirmed/checked_in). Shows alojamiento + extras breakdown per guest, grouped per guest with expandable rows for multiple reservations, summary KPI cards, search filter, and totals row. Backend endpoint at `GET /api/reports/guest-debt`. Accessible from the Cuentas module via "Deuda por Huésped" button.
+- **Caja de Admin — Desglose por Módulo**: The "Hoy Ingresó" summary card in admin-caja now shows a Hotel / Restaurante / SPA / Otros breakdown derived from the `porModulo` data returned by the `resumen-dia` endpoint.
+- **Folio Grupal — Mejora de Interfaz**: Group detail Folio tab now shows 5 colored summary cards (Alojamiento=blue, Extras=purple, Cargos grupales=orange, Pagos=green, Saldo=red/green) instead of a plain grid. Added a "PDF Folio" download button that fetches `/api/folios/group/:id/pdf`.
 
 ## External Dependencies
 

@@ -362,8 +362,35 @@ export function registerAdminCashRoutes(app: Express) {
           .text(`$ ${fPeso(saldoInicial)}`, x0 + 300, y, { align: "right", width: 215 });
         y += 18;
 
+        // ─── RESUMEN POR MÓDULO ─────────────────────────────────────
+        const moduloMap: Record<string, string> = {
+          ingreso_recepcion: "Hotel / Recepción",
+          ingreso_restaurant: "Restaurante",
+          ingreso_spa: "SPA",
+          ingreso_manual: "Otros ingresos",
+        };
+        const moduloTotals: Record<string, number> = {};
+        for (const m of ingresos) {
+          const k = m.tipo in moduloMap ? m.tipo : "ingreso_manual";
+          moduloTotals[k] = (moduloTotals[k] || 0) + $n(m.importe);
+        }
+        if (Object.keys(moduloTotals).length > 0) {
+          doc.font("Helvetica-Bold").fontSize(9).text("RESUMEN DE INGRESOS POR MÓDULO", x0, y);
+          y += 14;
+          doc.moveTo(x0, y).lineTo(555, y).strokeColor("#999").lineWidth(0.5).stroke();
+          y += 4;
+          for (const [tipo, total] of Object.entries(moduloTotals)) {
+            doc.font("Helvetica").fontSize(8.5);
+            doc.text(moduloMap[tipo] ?? tipo, x0 + 10, y, { width: 280 });
+            doc.text(`$ ${fPeso(total)}`, x0 + 310, y, { align: "right", width: 205 });
+            y += 11;
+          }
+          doc.moveTo(x0, y).lineTo(555, y).strokeColor("#999").stroke();
+          y += 18;
+        }
+
         // INGRESOS
-        doc.font("Helvetica-Bold").fontSize(9).text("INGRESOS", x0, y).moveDown(0);
+        doc.font("Helvetica-Bold").fontSize(9).text("DETALLE DE INGRESOS", x0, y).moveDown(0);
         y += 14;
         doc.moveTo(x0, y).lineTo(555, y).strokeColor("#999").lineWidth(0.5).stroke();
         y += 4;
@@ -631,7 +658,11 @@ export function registerAdminCashRoutes(app: Express) {
       const result = (await db.execute(sql`
         SELECT
           COALESCE(SUM(CASE WHEN signo = '+' AND anulado = false THEN importe::numeric ELSE 0 END), 0) AS hoy_ingresos,
-          COALESCE(SUM(CASE WHEN signo = '-' AND anulado = false THEN importe::numeric ELSE 0 END), 0) AS hoy_egresos
+          COALESCE(SUM(CASE WHEN signo = '-' AND anulado = false THEN importe::numeric ELSE 0 END), 0) AS hoy_egresos,
+          COALESCE(SUM(CASE WHEN signo = '+' AND anulado = false AND tipo = 'ingreso_recepcion' THEN importe::numeric ELSE 0 END), 0) AS ingreso_hotel,
+          COALESCE(SUM(CASE WHEN signo = '+' AND anulado = false AND tipo = 'ingreso_restaurant' THEN importe::numeric ELSE 0 END), 0) AS ingreso_restaurant,
+          COALESCE(SUM(CASE WHEN signo = '+' AND anulado = false AND tipo = 'ingreso_spa' THEN importe::numeric ELSE 0 END), 0) AS ingreso_spa,
+          COALESCE(SUM(CASE WHEN signo = '+' AND anulado = false AND tipo NOT IN ('ingreso_recepcion','ingreso_restaurant','ingreso_spa') THEN importe::numeric ELSE 0 END), 0) AS ingreso_otros
         FROM admin_cash_movements
         WHERE fecha = ${dia}
       `)).rows[0] as any;
@@ -639,6 +670,12 @@ export function registerAdminCashRoutes(app: Express) {
       res.json({
         hoyIngresos: $n(result?.hoy_ingresos),
         hoyEgresos: $n(result?.hoy_egresos),
+        porModulo: {
+          hotel: $n(result?.ingreso_hotel),
+          restaurant: $n(result?.ingreso_restaurant),
+          spa: $n(result?.ingreso_spa),
+          otros: $n(result?.ingreso_otros),
+        },
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
