@@ -503,6 +503,15 @@ export function registerSpaRoutes(app: Express) {
         console.error("Error registrando movimiento de caja:", e);
       }
 
+      // Motor financiero: escribir al folio de la cuenta SPA
+      storage.addFolioPayment(
+        "spa_account", req.params.id,
+        parseFloat(String(amount)),
+        `SPA - Pago${isAdvance ? " (Seña)" : ""}`,
+        method, "spa_payment", payment.id,
+        undefined, (req as any).user?.username,
+      ).catch(e => console.error("[Folio] Error SPA pago:", e));
+
       res.status(201).json(payment);
     } catch (error) {
       res.status(500).json({ error: "Error creating payment" });
@@ -569,6 +578,16 @@ export function registerSpaRoutes(app: Express) {
         notes: notes || null,
         createdAt: new Date(),
       });
+
+      // Motor financiero: escribir cargo al folio de la cuenta SPA
+      storage.addFolioCharge(
+        "spa_account", req.params.accountId,
+        parseFloat(subtotal),
+        description,
+        "spa_item", item.id,
+        (req as any).user?.username,
+      ).catch(e => console.error("[Folio] Error SPA cargo:", e));
+
       res.status(201).json(item);
     } catch (error) {
       res.status(500).json({ error: "Error creating account item" });

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -11,6 +12,7 @@ import {
   FileX,
   ChevronsUpDown,
   Landmark,
+  Download,
 } from "lucide-react";
 
 interface FolioMovement {
@@ -146,11 +148,23 @@ export default function FolioViewer({ entityType, entityId }: Props) {
             {folio.status === "open" ? "Abierto" : folio.status === "closed" ? "Cerrado" : "Facturado"}
           </Badge>
         </div>
-        {folio.openedAt && (
-          <span className="text-xs text-muted-foreground">
-            Abierto {formatDate(folio.openedAt)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {folio.openedAt && (
+            <span className="text-xs text-muted-foreground">
+              Abierto {formatDate(folio.openedAt)}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            data-testid="button-download-folio-pdf"
+            onClick={() => window.open(`/api/folios/${entityType}/${entityId}/pdf`, "_blank")}
+          >
+            <Download className="h-3 w-3" />
+            PDF
+          </Button>
+        </div>
       </div>
 
       {/* Totals */}

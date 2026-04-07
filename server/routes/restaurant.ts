@@ -276,6 +276,26 @@ export function registerRestaurantRoutes(app: Express) {
         console.error("Error registrando movimiento de caja:", e);
       }
 
+      // Motor financiero: escribir al folio del pedido
+      {
+        const ordLabel = `Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
+        const method = paymentMethod || (chargeToRoom ? "room_charge" : "cash");
+        // Primero cargo (el total del pedido) luego pago
+        storage.addFolioCharge(
+          "restaurant_order", req.params.id,
+          parseFloat(order.total || "0"),
+          ordLabel,
+          "restaurant_order", req.params.id,
+          (req as any).user?.username,
+        ).then(() => storage.addFolioPayment(
+          "restaurant_order", req.params.id,
+          finalTotal,
+          `Cobro — ${method}`,
+          method, "restaurant_payment", req.params.id,
+          undefined, (req as any).user?.username, receiptType,
+        )).catch(e => console.error("[Folio] Error restaurant:", e));
+      }
+
       // Si es cuenta corriente y hay entidad especificada, crear movimiento CC
       if (paymentMethod === "cuenta_corriente" && ccEntityType && ccEntityId) {
         try {

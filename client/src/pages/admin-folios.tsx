@@ -5,7 +5,8 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   ArrowLeft, ReceiptText, RefreshCw, Search,
-  TrendingDown, TrendingUp, Wallet, AlertCircle
+  TrendingDown, TrendingUp, Wallet, AlertCircle,
+  Download, BarChart3, Hotel, Utensils, Sparkles, Users, CalendarDays, Building2
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,25 @@ interface FolioStats {
   totalCharges: number;
   totalPayments: number;
 }
+
+interface EntityTypeBreakdown {
+  entity_type: string;
+  total_folios: string;
+  open_folios: string;
+  pending_balance: string;
+  total_charges: string;
+  total_payments: string;
+}
+
+const ENTITY_TYPE_ICONS: Record<string, any> = {
+  reservation: Hotel,
+  restaurant_order: Utensils,
+  spa_account: Sparkles,
+  group: Users,
+  event: CalendarDays,
+  company: Building2,
+  agency: Building2,
+};
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   reservation: "Reserva",
@@ -82,7 +102,16 @@ export default function AdminFoliosPage() {
   const { data: stats, isLoading: statsLoading } = useQuery<FolioStats>({
     queryKey: ["/api/folios/stats/summary"],
     queryFn: async () => {
-      const res = await fetch("/api/folios/stats/summary");
+      const res = await fetch("/api/folios/stats/summary", { credentials: "include" });
+      if (!res.ok) throw new Error("Error");
+      return res.json();
+    },
+  });
+
+  const { data: breakdown = [] } = useQuery<EntityTypeBreakdown[]>({
+    queryKey: ["/api/folios/stats/by-entity-type"],
+    queryFn: async () => {
+      const res = await fetch("/api/folios/stats/by-entity-type", { credentials: "include" });
       if (!res.ok) throw new Error("Error");
       return res.json();
     },
@@ -181,6 +210,63 @@ export default function AdminFoliosPage() {
           </>
         ) : null}
       </div>
+
+      {/* Pending Balance Breakdown */}
+      {breakdown.length > 0 && breakdown.some(b => Number(b.pending_balance) > 0) && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+              <BarChart3 className="h-4 w-4 text-orange-500" />
+              Saldos Pendientes por Módulo
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {breakdown
+                .filter(b => Number(b.pending_balance) > 0)
+                .map(b => {
+                  const Icon = ENTITY_TYPE_ICONS[b.entity_type] ?? ReceiptText;
+                  const total = breakdown.reduce((sum, x) => sum + Number(x.pending_balance), 0);
+                  const pct = total > 0 ? (Number(b.pending_balance) / total) * 100 : 0;
+                  return (
+                    <div key={b.entity_type} className="flex items-center gap-3">
+                      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium">
+                            {ENTITY_TYPE_LABELS[b.entity_type] ?? b.entity_type}
+                          </span>
+                          <span className="text-sm font-bold text-orange-600">
+                            {formatCurrency(b.pending_balance)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-orange-400 rounded-full transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-xs text-muted-foreground w-10 text-right shrink-0">
+                        {Number(b.open_folios)} ab.
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 shrink-0"
+                        title="Filtrar por este tipo"
+                        data-testid={`button-filter-breakdown-${b.entity_type}`}
+                        onClick={() => setEntityTypeFilter(b.entity_type)}
+                      >
+                        <Search className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  );
+                })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Content */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

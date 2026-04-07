@@ -239,6 +239,16 @@ export function registerEventsRoutes(app: Express) {
         notes: notes || null,
         createdAt: new Date(),
       });
+
+      // Motor financiero: escribir cargo al folio del evento
+      storage.addFolioCharge(
+        "event", req.params.eventId,
+        parseFloat(total),
+        description,
+        "event_charge", charge.id,
+        (req as any).user?.username,
+      ).catch(e => console.error("[Folio] Error evento cargo:", e));
+
       res.status(201).json(charge);
     } catch (error) {
       res.status(500).json({ error: "Error creating event charge" });
@@ -314,6 +324,15 @@ export function registerEventsRoutes(app: Express) {
       } catch (e) {
         console.error("Error registrando movimiento de caja:", e);
       }
+
+      // Motor financiero: escribir al folio del evento
+      storage.addFolioPayment(
+        "event", req.params.eventId,
+        parseFloat(String(amount)),
+        `Pago Evento${isAdvance ? " (Seña)" : ""}`,
+        method, "event_payment", payment.id,
+        undefined, (req as any).user?.username,
+      ).catch(e => console.error("[Folio] Error evento pago:", e));
 
       // Si es cuenta corriente, crear movimiento en CC
       if (method === "cuenta_corriente") {
