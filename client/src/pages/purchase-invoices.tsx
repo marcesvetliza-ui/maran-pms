@@ -196,7 +196,9 @@ const emptyForm = () => ({
 // ─── Subcomponent: New Invoice Dialog ────────────────────────────────────────
 
 interface InvItemRow {
+  mode: "new" | "existing";
   name: string;
+  existingItemId: string;
   categoryId: string;
   quantity: string;
   unit: string;
@@ -228,10 +230,17 @@ function InvoiceDialog({
     enabled: open,
   });
 
-  const addInvRow = () => setInvItems((p) => [...p, { name: "", categoryId: "", quantity: "1", unit: "unidad", costPrice: "0" }]);
+  const addInvRow = () => setInvItems((p) => [...p, { mode: "new", name: "", existingItemId: "", categoryId: "", quantity: "1", unit: "unidad", costPrice: "0" }]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
+  const toggleInvRowMode = (i: number, mode: "new" | "existing") =>
+    setInvItems((p) => p.map((r, j) => j === i ? { ...r, mode, name: "", existingItemId: "" } : r));
+
+  const { data: existingInvItems = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/items"],
+    enabled: open && step === 4,
+  });
 
   const handleSupplierChange = (id: string) => {
     const s = suppliers.find((x) => String(x.id) === id);
@@ -263,10 +272,14 @@ function InvoiceDialog({
       return res.json();
     },
     onSuccess: async (invoice: any) => {
-      // Create inventory items if any were added in step 4
       let inventoryCount = 0;
-      const validItems = invItems.filter((r) => r.name.trim());
-      for (const row of validItems) {
+      const invoiceRef = `Comprobante ${invoice.numero_comprobante_ext || invoice.numero_comprobante || invoice.id} — ${form.proveedorNombre}`;
+
+      const validNew = invItems.filter((r) => r.mode === "new" && r.name.trim());
+      const validExisting = invItems.filter((r) => r.mode === "existing" && r.existingItemId);
+
+      // Create new inventory items
+      for (const row of validNew) {
         try {
           const itemRes = await apiRequest("POST", "/api/inventory/items", {
             name: row.name.trim(),
@@ -278,12 +291,11 @@ function InvoiceDialog({
             minStock: 0,
           });
           const item = await itemRes.json();
-          // Link movement to invoice
           await apiRequest("POST", "/api/inventory/movements", {
             itemId: item.id,
             type: "entrada",
             quantity: row.quantity,
-            reason: `Comprobante ${invoice.numero_comprobante_ext || invoice.numero_comprobante || invoice.id} — ${form.proveedorNombre}`,
+            reason: invoiceRef,
             sourceType: "purchase_invoice",
             sourceId: String(invoice.id),
           });
@@ -292,8 +304,33 @@ function InvoiceDialog({
           console.warn("Error creating inventory item:", e);
         }
       }
+
+      // Add stock to existing inventory items
+      for (const row of validExisting) {
+        try {
+          await apiRequest("POST", "/api/inventory/movements", {
+            itemId: row.existingItemId,
+            type: "entrada",
+            quantity: row.quantity,
+            reason: invoiceRef,
+            sourceType: "purchase_invoice",
+            sourceId: String(invoice.id),
+          });
+          // Update cost price on the item if provided
+          if (parseFloat(row.costPrice) > 0) {
+            await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, {
+              costPrice: row.costPrice,
+            });
+          }
+          inventoryCount++;
+        } catch (e) {
+          console.warn("Error updating existing inventory item:", e);
+        }
+      }
+
       if (inventoryCount > 0) {
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
@@ -531,31 +568,67 @@ function InvoiceDialog({
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
                 <Package className="h-4 w-4 shrink-0" />
-                <span>Opcional — Cargá los productos o insumos que recibiste con esta factura. Se crearán en inventario con su SKU automático y el stock inicial indicado.</span>
+                <span>Opcional — Agregá los productos recibidos. Podés sumar stock a artículos existentes o crear artículos nuevos.</span>
               </div>
 
               {invItems.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/40">
-                        <TableHead className="text-xs">Nombre</TableHead>
-                        <TableHead className="text-xs">Categoría</TableHead>
-                        <TableHead className="text-xs w-20">Cant.</TableHead>
-                        <TableHead className="text-xs w-24">Unidad</TableHead>
-                        <TableHead className="text-xs w-24">Costo unit.</TableHead>
-                        <TableHead className="text-xs w-8"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {invItems.map((row, i) => (
-                        <TableRow key={i} data-testid={`row-inv-item-${i}`}>
-                          <TableCell className="py-1">
-                            <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Nombre del artículo" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
-                          </TableCell>
-                          <TableCell className="py-1">
+                <div className="space-y-3">
+                  {invItems.map((row, i) => (
+                    <div key={i} data-testid={`row-inv-item-${i}`} className="border rounded-lg p-3 space-y-3 bg-muted/20">
+                      {/* Mode toggle */}
+                      <div className="flex items-center gap-2">
+                        <div className="flex rounded-md border overflow-hidden text-xs">
+                          <button
+                            type="button"
+                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "existing" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                            onClick={() => toggleInvRowMode(i, "existing")}
+                            data-testid={`btn-mode-existing-${i}`}
+                          >
+                            Artículo existente
+                          </button>
+                          <button
+                            type="button"
+                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "new" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                            onClick={() => toggleInvRowMode(i, "new")}
+                            data-testid={`btn-mode-new-${i}`}
+                          >
+                            Artículo nuevo
+                          </button>
+                        </div>
+                        <div className="flex-1" />
+                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+
+                      {/* Article selector / name */}
+                      {row.mode === "existing" ? (
+                        <div>
+                          <Label className="text-xs mb-1 block">Artículo del inventario</Label>
+                          <Select value={row.existingItemId || "__none__"} onValueChange={(v) => updateInvRow(i, "existingItemId", v === "__none__" ? "" : v)}>
+                            <SelectTrigger className="h-8 text-sm" data-testid={`select-existing-item-${i}`}>
+                              <SelectValue placeholder="Seleccionar artículo..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">— Seleccionar —</SelectItem>
+                              {existingInvItems.map((item: any) => (
+                                <SelectItem key={item.id} value={String(item.id)}>
+                                  {item.name} — Stock actual: {item.currentStock} {item.unit}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs mb-1 block">Nombre del artículo</Label>
+                            <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Ej: Aceite de Oliva 1L" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
+                          </div>
+                          <div>
+                            <Label className="text-xs mb-1 block">Categoría</Label>
                             <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Categoría..." /></SelectTrigger>
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="__none__">— Sin categoría —</SelectItem>
                                 {itemCategories.map((cat: any) => (
@@ -563,30 +636,32 @@ function InvoiceDialog({
                                 ))}
                               </SelectContent>
                             </Select>
-                          </TableCell>
-                          <TableCell className="py-1">
-                            <Input type="number" min="0" step="0.001" value={row.quantity} onChange={(e) => updateInvRow(i, "quantity", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-qty-${i}`} />
-                          </TableCell>
-                          <TableCell className="py-1">
-                            <Select value={row.unit} onValueChange={(v) => updateInvRow(i, "unit", v)}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell className="py-1">
-                            <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
-                          </TableCell>
-                          <TableCell className="py-1">
-                            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Quantity, unit, cost */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-xs mb-1 block">Cantidad</Label>
+                          <Input type="number" min="0" step="0.001" value={row.quantity} onChange={(e) => updateInvRow(i, "quantity", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-qty-${i}`} />
+                        </div>
+                        <div>
+                          <Label className="text-xs mb-1 block">Unidad</Label>
+                          <Select value={row.unit} onValueChange={(v) => updateInvRow(i, "unit", v)}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs mb-1 block">Costo unit. ($)</Label>
+                          <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -596,7 +671,7 @@ function InvoiceDialog({
 
               {invItems.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-2">
-                  Sin artículos — el comprobante se registrará sin ingresar nada al inventario.
+                  Sin artículos — el comprobante se registrará sin modificar el inventario.
                 </p>
               )}
             </div>
@@ -615,7 +690,7 @@ function InvoiceDialog({
             ) : (
               <Button onClick={handleSubmit} disabled={createMut.isPending} data-testid="btn-submit-invoice">
                 {createMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-                {invItems.filter(r => r.name.trim()).length > 0 ? `Registrar + ${invItems.filter(r => r.name.trim()).length} artículo(s)` : "Registrar comprobante"}
+                {(() => { const count = invItems.filter(r => (r.mode === "new" && r.name.trim()) || (r.mode === "existing" && r.existingItemId)).length; return count > 0 ? `Registrar + ${count} artículo(s)` : "Registrar comprobante"; })()}
               </Button>
             )}
           </div>

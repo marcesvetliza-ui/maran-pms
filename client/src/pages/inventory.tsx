@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +33,7 @@ import {
   Tag,
   Pencil,
   Trash2,
+  FileText,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -317,10 +319,18 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Inventario</h1>
           <p className="text-muted-foreground">Gestiona stock, proveedores y movimientos</p>
         </div>
-        <Button onClick={() => setIsNewItemDialogOpen(true)} data-testid="button-add-item">
-          <Plus className="h-4 w-4 mr-2" />
-          Nuevo Articulo
-        </Button>
+        <div className="flex gap-2">
+          <Link href="/purchase-invoices">
+            <Button variant="outline" data-testid="button-goto-purchase-invoices">
+              <FileText className="h-4 w-4 mr-2" />
+              Factura de Compra
+            </Button>
+          </Link>
+          <Button onClick={() => setIsNewItemDialogOpen(true)} data-testid="button-add-item">
+            <Plus className="h-4 w-4 mr-2" />
+            Nuevo Artículo
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
