@@ -1,0 +1,39 @@
+Cómo funciona un motor de reservas propio
+En esencia es un flujo público de 4 pasos (sin login requerido):
+
+El huésped elige fechas → el sistema consulta disponibilidad real en tiempo real
+Elige habitación → ve fotos, descripción, precio por noche
+Ingresa sus datos → nombre, email, teléfono, documento
+Paga → con MercadoPago, tarjeta, etc.
+Al completar el pago, la reserva se crea automáticamente en el PMS con estado "Confirmada", el huésped recibe un email de confirmación, y recepción lo ve al instante en el planning.
+
+¿Se puede meter en www.maran.com.ar?
+Sí, de dos maneras:
+
+Opción A — Subdirectorio o botón que redirige a nuestro sistema
+Desde maran.com.ar el botón "Reservar" apuntaría a algo como reservas.maran.com.ar o directamente a la URL de nuestro sistema desplegado. El huésped ve una página de reservas con el branding del hotel pero que corre en nuestro servidor. Es la opción más rápida.
+
+Opción B — Iframe embebido en maran.com.ar
+Se inserta un iframe en la web del hotel que carga nuestro motor de reservas. Visualmente queda "dentro" de la página, aunque técnicamente es nuestro sistema corriendo adentro. Funciona bien para páginas simples.
+
+Opción C — Integración vía API (la más limpia)
+El sitio de maran.com.ar consume nuestra API directamente: consulta disponibilidad, crea la reserva. Requiere que quien maneja maran.com.ar (¿WordPress, Wix, custom?) lo implemente. Más trabajo pero el resultado es seamless.
+
+Qué habría que construir
+Dentro de nuestro sistema actual:
+
+Componente	Descripción
+Página pública /reservar	Sin login, mobile-first, paso a paso
+API de disponibilidad pública	Devuelve habitaciones libres para el rango de fechas
+Creación automática de reserva	Crea reserva + huésped en el PMS al confirmar el pago
+Integración MercadoPago	Cobro online con tarjeta o QR
+Email de confirmación	Se manda al huésped y a recepción
+Bloqueo de disponibilidad	Mientras el huésped está pagando, la habitación se reserva temporalmente
+Lo que necesito saber para arrancarlo
+Algunas preguntas concretas antes de empezar:
+
+¿Tienen cuenta de MercadoPago? Necesitamos las credenciales de la cuenta del hotel para procesar cobros reales.
+¿Cómo está hecha maran.com.ar? (WordPress, Wix, HTML custom, etc.) — esto determina qué tan fácil es meter el iframe o el link.
+¿Quieren cobrar el total online, una seña, o solo "reservar sin cobro" y pagar en el hotel? Las tres son posibles pero implican flujos distintos.
+¿Qué habitaciones mostrarían al público? ¿Todas las categorías o solo algunas?
+El motor de reservas en sí (la parte dentro de nuestro sistema) lo puedo construir. La conexión con maran.com.ar depende de cómo esté hecho ese sitio.

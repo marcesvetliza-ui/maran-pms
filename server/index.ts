@@ -9,9 +9,20 @@ import rateLimit from "express-rate-limit";
 const app = express();
 app.set("trust proxy", 1);
 
+// Allow embedding /reservar in an iframe from the hotel website
+app.use((req, res, next) => {
+  const isPublic = req.path === "/reservar" || req.path.startsWith("/api/public/booking");
+  if (isPublic) {
+    res.setHeader("X-Frame-Options", "ALLOWALL");
+    res.setHeader("Content-Security-Policy", "frame-ancestors *");
+  }
+  next();
+});
+
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
+  frameguard: false, // Managed per-route above
 }));
 
 const apiLimiter = rateLimit({

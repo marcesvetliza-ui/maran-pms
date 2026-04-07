@@ -36,6 +36,7 @@ import { registerSpaRoutes } from "./routes/spa";
 import { registerEventsRoutes } from "./routes/events";
 import { registerMaintenanceRoutes } from "./routes/maintenance";
 import { registerFolioRoutes } from "./routes/folios";
+import { registerPublicBookingRoutes } from "./routes/publicBooking";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -139,7 +140,7 @@ export async function registerRoutes(
       return next();
     }
     
-    if (req.path.startsWith("/api/public/")) {
+    if (req.path.startsWith("/public/")) {
       return next();
     }
     
@@ -2210,6 +2211,7 @@ export async function registerRoutes(
 
   registerMaintenanceRoutes(app);
   registerFolioRoutes(app);
+  registerPublicBookingRoutes(app);
   registerGuestsRoutes(app);
   registerReservationsRoutes(app);
   registerGroupsRoutes(app);

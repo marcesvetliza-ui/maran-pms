@@ -51,6 +51,8 @@ import AdminReportesPage from "@/pages/admin-reportes";
 import AdminCuentasPage from "@/pages/admin-cuentas";
 import CcHuespedesPage from "@/pages/cc-huespedes";
 import AdminDeudaHuespedesPage from "@/pages/admin-deuda-huespedes";
+import ReservarPage from "@/pages/reservar";
+import AdminBookingPage from "@/pages/admin-booking-engine";
 import AdminFoliosPage from "@/pages/admin-folios";
 import LoginPage from "@/pages/login";
 import HelpChat from "@/components/help-chat";
@@ -123,6 +125,7 @@ function Router() {
       <Route path="/admin/cc-huespedes" component={CcHuespedesPage} />
       <Route path="/admin/deuda-huespedes" component={AdminDeudaHuespedesPage} />
       <Route path="/admin/folios" component={AdminFoliosPage} />
+      <Route path="/admin/booking-engine" component={AdminBookingPage} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -232,6 +235,7 @@ function AuthenticatedApp() {
 
 function App() {
   const [isWebCheckin] = useRoute("/web-checkin/:token");
+  const [isReservar] = useRoute("/reservar");
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -239,6 +243,8 @@ function App() {
         <TooltipProvider>
           {isWebCheckin ? (
             <WebCheckinPublicPage />
+          ) : isReservar ? (
+            <ReservarPage />
           ) : (
             <AuthenticatedApp />
           )}

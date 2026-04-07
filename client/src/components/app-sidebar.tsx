@@ -87,6 +87,7 @@ const menuSections = [
       { label: "Tarifas",         icon: Tag,          href: "/rate-plans"       },
       { label: "Paquetes",        icon: Package,      href: "/packages"         },
       { label: "Canales OTAs",    icon: Globe,        href: "/ota-channels"     },
+      { label: "Motor de Reservas", icon: Globe,      href: "/admin/booking-engine" },
       { label: "Grupos",          icon: Users,        href: "/groups"           },
       { label: "Reseñas",         icon: Star,         href: "/reviews"          },
     ],

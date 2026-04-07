@@ -1,0 +1,300 @@
+import type { Express } from "express";
+import { db } from "../db";
+import { storage } from "../db-storage";
+import {
+  rooms, roomTypes, ratePlans, reservations, guests,
+} from "../../shared/schema";
+import { and, eq, not, inArray, sql } from "drizzle-orm";
+import { randomUUID } from "crypto";
+import { z } from "zod";
+
+function dateOnly(d: string) {
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(y, m - 1, day);
+}
+
+function nightsBetween(checkIn: string, checkOut: string): number {
+  const diff = dateOnly(checkOut).getTime() - dateOnly(checkIn).getTime();
+  return Math.max(1, Math.round(diff / 86400000));
+}
+
+// Returns the best (cheapest) rate for a room type given pax count
+function pickRate(plan: any, adults: number): number {
+  if (adults === 1 && plan.rate1pax) return parseFloat(plan.rate1pax);
+  if (adults === 2 && plan.rate2pax) return parseFloat(plan.rate2pax);
+  if (adults === 3 && plan.rate3pax) return parseFloat(plan.rate3pax);
+  if (adults >= 4 && plan.rate4pax) return parseFloat(plan.rate4pax);
+  return parseFloat(plan.baseRate);
+}
+
+export function registerPublicBookingRoutes(app: Express) {
+
+  // ──────────────────────────────────────────────────────────────────────
+  // GET /api/public/booking/availability
+  // Returns available room types with pricing for a date range
+  // ──────────────────────────────────────────────────────────────────────
+  app.get("/api/public/booking/availability", async (req, res) => {
+    try {
+      const { checkIn, checkOut, adults: adultsStr } = req.query as Record<string, string>;
+      if (!checkIn || !checkOut) {
+        return res.status(400).json({ error: "checkIn y checkOut son requeridos (YYYY-MM-DD)" });
+      }
+      const adults = parseInt(adultsStr || "2") || 2;
+      const nights = nightsBetween(checkIn, checkOut);
+      if (nights < 1) return res.status(400).json({ error: "La fecha de salida debe ser posterior a la de entrada" });
+
+      // Get all room types that are visible in booking engine
+      const allRoomTypes = await db.select().from(roomTypes)
+        .where(eq(roomTypes.showInBooking, true))
+        .orderBy(roomTypes.sortOrder, roomTypes.name);
+
+      // Find rooms that are OCCUPIED during the requested dates
+      // A room is occupied if it has a non-cancelled reservation where:
+      //   existingCheckIn < requestedCheckOut AND existingCheckOut > requestedCheckIn
+      const occupiedResult = await db.execute(sql`
+        SELECT DISTINCT r.room_id
+        FROM reservations r
+        WHERE r.status NOT IN ('cancelled', 'checked_out')
+          AND r.check_in_date < ${checkOut}::date
+          AND r.check_out_date > ${checkIn}::date
+      `);
+      const occupiedRoomIds = new Set((occupiedResult.rows as any[]).map(r => r.room_id));
+
+      // Also exclude maintenance/OOS rooms
+      const unavailableRooms = await db.execute(sql`
+        SELECT id FROM rooms WHERE status IN ('maintenance', 'oos')
+      `);
+      const unavailableIds = new Set((unavailableRooms.rows as any[]).map(r => r.id));
+
+      // Count available rooms per room type
+      const allRooms = await db.select().from(rooms);
+      const availableByType: Record<string, number> = {};
+      for (const room of allRooms) {
+        if (!occupiedRoomIds.has(room.id) && !unavailableIds.has(room.id)) {
+          availableByType[room.roomTypeId] = (availableByType[room.roomTypeId] || 0) + 1;
+        }
+      }
+
+      // Get all rate plans
+      const allRatePlans = await db.select().from(ratePlans);
+
+      // Build response
+      const results = [];
+      for (const rt of allRoomTypes) {
+        const available = availableByType[rt.id] || 0;
+        if (available === 0) continue; // skip unavailable types
+
+        // Check occupancy
+        if (adults > rt.maxOccupancy) continue;
+
+        // Find best rate plan
+        const plans = allRatePlans.filter(p => p.roomTypeId === rt.id);
+        if (plans.length === 0) continue;
+
+        // Pick the cheapest applicable plan
+        let bestPlan = plans[0];
+        let bestRate = pickRate(bestPlan, adults);
+        for (const plan of plans.slice(1)) {
+          const r = pickRate(plan, adults);
+          if (r < bestRate) { bestRate = r; bestPlan = plan; }
+        }
+
+        const totalPrice = bestRate * nights;
+
+        results.push({
+          roomTypeId: rt.id,
+          code: rt.code,
+          name: rt.name,
+          description: rt.description,
+          publicDescription: rt.publicDescription,
+          baseOccupancy: rt.baseOccupancy,
+          maxOccupancy: rt.maxOccupancy,
+          amenities: rt.amenities || [],
+          photos: rt.photos || [],
+          availableRooms: available,
+          ratePlanId: bestPlan.id,
+          ratePlanName: bestPlan.name,
+          pricePerNight: bestRate,
+          totalPrice,
+          nights,
+          currency: bestPlan.currency || "ARS",
+          cancellationPolicy: bestPlan.cancellationPolicy,
+        });
+      }
+
+      // Sort by price ascending
+      results.sort((a, b) => a.pricePerNight - b.pricePerNight);
+
+      res.json({ checkIn, checkOut, adults, nights, results });
+    } catch (error) {
+      console.error("Public availability error:", error);
+      res.status(500).json({ error: "Error al consultar disponibilidad" });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // GET /api/public/booking/hotel-info
+  // Returns hotel name, contact, photos for the booking page header
+  // ──────────────────────────────────────────────────────────────────────
+  app.get("/api/public/booking/hotel-info", async (req, res) => {
+    try {
+      const settings = await storage.getSystemSettings();
+      const settingsMap = Object.fromEntries(
+        settings.map((s: any) => [s.key, s.value])
+      );
+      res.json({
+        name: settingsMap["hotel_name"] || "Maran Suites & Towers",
+        tagline: settingsMap["booking_tagline"] || "Tu estadía perfecta en el centro",
+        phone: settingsMap["hotel_phone"] || "",
+        email: settingsMap["hotel_email"] || "",
+        address: settingsMap["hotel_address"] || "",
+        checkInTime: settingsMap["check_in_time"] || "14:00",
+        checkOutTime: settingsMap["check_out_time"] || "11:00",
+        currency: settingsMap["currency"] || "ARS",
+        logoUrl: settingsMap["booking_logo_url"] || "",
+        heroImageUrl: settingsMap["booking_hero_url"] || "",
+        primaryColor: settingsMap["booking_primary_color"] || "#1e40af",
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Error al obtener información del hotel" });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // POST /api/public/booking/confirm
+  // Creates a guest + reservation in the PMS
+  // ──────────────────────────────────────────────────────────────────────
+  const confirmSchema = z.object({
+    checkIn: z.string(),
+    checkOut: z.string(),
+    adults: z.number().int().min(1).max(6),
+    roomTypeId: z.string(),
+    ratePlanId: z.string(),
+    firstName: z.string().min(1),
+    lastName: z.string().min(1),
+    email: z.string().email(),
+    phone: z.string().optional(),
+    documentType: z.string().optional(),
+    documentNumber: z.string().optional(),
+    nationality: z.string().optional(),
+    notes: z.string().optional(),
+    paymentMethod: z.string().default("hotel"), // "hotel" = pay at hotel
+  });
+
+  app.post("/api/public/booking/confirm", async (req, res) => {
+    try {
+      const data = confirmSchema.parse(req.body);
+      const nights = nightsBetween(data.checkIn, data.checkOut);
+
+      // 1) Find an available room of the requested type
+      const occupiedResult = await db.execute(sql`
+        SELECT DISTINCT r.room_id
+        FROM reservations r
+        WHERE r.status NOT IN ('cancelled', 'checked_out')
+          AND r.check_in_date < ${data.checkOut}::date
+          AND r.check_out_date > ${data.checkIn}::date
+      `);
+      const occupiedRoomIds = new Set((occupiedResult.rows as any[]).map(r => r.room_id));
+
+      const candidateRooms = await db.select().from(rooms).where(
+        and(
+          eq(rooms.roomTypeId, data.roomTypeId),
+          not(inArray(rooms.status, ["maintenance", "oos"]))
+        )
+      );
+      const freeRoom = candidateRooms.find(r => !occupiedRoomIds.has(r.id));
+      if (!freeRoom) {
+        return res.status(409).json({ error: "Lo sentimos, no quedan habitaciones disponibles para esas fechas. Intentá con otras fechas." });
+      }
+
+      // 2) Get rate plan
+      const [ratePlan] = await db.select().from(ratePlans).where(eq(ratePlans.id, data.ratePlanId));
+      if (!ratePlan) return res.status(400).json({ error: "Plan de tarifas no encontrado" });
+
+      const pricePerNight = pickRate(ratePlan, data.adults);
+      const totalAmount = pricePerNight * nights;
+
+      // 3) Create or find guest by email
+      let guest: any;
+      const [existingGuest] = await db.select().from(guests).where(eq(guests.email, data.email));
+      if (existingGuest) {
+        guest = existingGuest;
+      } else {
+        const [newGuest] = await db.insert(guests).values({
+          id: randomUUID(),
+          firstName: data.firstName,
+          lastName: data.lastName,
+          email: data.email,
+          phone: data.phone || null,
+          documentType: (data.documentType as any) || "DNI",
+          documentNumber: data.documentNumber || null,
+          nationality: data.nationality || "AR",
+        }).returning();
+        guest = newGuest;
+      }
+
+      // 4) Generate reservation code
+      const codeResult = await db.execute(sql`
+        SELECT 'RES-' || TO_CHAR(NOW(), 'YYMM') || '-' || LPAD(NEXTVAL('reservation_code_seq')::text, 4, '0') AS code
+      `).catch(async () => {
+        // Fallback if seq doesn't exist
+        return { rows: [{ code: `RES-${Date.now().toString(36).toUpperCase()}` }] };
+      });
+      const reservationCode = (codeResult.rows[0] as any).code || `WEB-${Date.now().toString(36).toUpperCase()}`;
+
+      // 5) Create reservation
+      const [newReservation] = await db.insert(reservations).values({
+        id: randomUUID(),
+        reservationCode,
+        guestId: guest.id,
+        roomId: freeRoom.id,
+        ratePlanId: data.ratePlanId,
+        checkInDate: data.checkIn,
+        checkOutDate: data.checkOut,
+        adults: data.adults,
+        status: "confirmed",
+        source: "web_booking" as any,
+        totalAmount: totalAmount.toFixed(2),
+        totalRoomAmount: totalAmount.toFixed(2),
+        notes: data.notes || null,
+        createdAt: new Date(),
+      } as any).returning();
+
+      res.json({
+        success: true,
+        reservationCode: newReservation.reservationCode,
+        guestName: `${data.firstName} ${data.lastName}`,
+        roomTypeName: freeRoom.roomTypeId,
+        checkIn: data.checkIn,
+        checkOut: data.checkOut,
+        nights,
+        totalAmount,
+        message: "¡Tu reserva fue confirmada! Recibirás la confirmación a tu email. El pago se realiza al momento del check-in.",
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Datos incompletos", details: error.errors });
+      }
+      console.error("Public booking confirm error:", error);
+      res.status(500).json({ error: "Error al confirmar la reserva. Intentá nuevamente." });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Admin: PATCH /api/admin/room-types/:id/booking-config
+  // Update photos, amenities, publicDescription for a room type
+  // ──────────────────────────────────────────────────────────────────────
+  app.patch("/api/admin/room-types/:id/booking-config", async (req, res) => {
+    try {
+      const { publicDescription, amenities, photos, sortOrder, showInBooking } = req.body;
+      const [updated] = await db.update(roomTypes)
+        .set({ publicDescription, amenities, photos, sortOrder, showInBooking })
+        .where(eq(roomTypes.id, req.params.id))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Tipo no encontrado" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error al guardar configuración" });
+    }
+  });
+}

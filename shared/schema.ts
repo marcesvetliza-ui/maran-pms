@@ -11,6 +11,12 @@ export const roomTypes = pgTable("room_types", {
   description: text("description"),
   baseOccupancy: integer("base_occupancy").notNull().default(2),
   maxOccupancy: integer("max_occupancy").notNull().default(4),
+  // Public booking engine fields
+  publicDescription: text("public_description"),
+  amenities: text("amenities").array(),
+  photos: text("photos").array(),
+  sortOrder: integer("sort_order").default(0),
+  showInBooking: boolean("show_in_booking").default(true),
 });
 
 export const insertRoomTypeSchema = createInsertSchema(roomTypes).omit({ id: true });
