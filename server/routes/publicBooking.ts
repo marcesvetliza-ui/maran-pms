@@ -215,10 +215,23 @@ export function registerPublicBookingRoutes(app: Express) {
       const totalAmount = pricePerNight * nights;
 
       // 3) Create or find guest by email
+      // If email already exists, update name/phone/doc with what the guest just filled in
+      // (they are the one booking, so their data is authoritative)
       let guest: any;
       const [existingGuest] = await db.select().from(guests).where(eq(guests.email, data.email));
       if (existingGuest) {
-        guest = existingGuest;
+        const [updated] = await db.update(guests)
+          .set({
+            firstName: data.firstName,
+            lastName: data.lastName,
+            phone: data.phone || existingGuest.phone,
+            documentType: (data.documentType as any) || existingGuest.documentType,
+            documentNumber: data.documentNumber || existingGuest.documentNumber,
+            nationality: data.nationality || existingGuest.nationality,
+          })
+          .where(eq(guests.id, existingGuest.id))
+          .returning();
+        guest = updated;
       } else {
         const [newGuest] = await db.insert(guests).values({
           id: randomUUID(),
