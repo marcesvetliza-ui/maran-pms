@@ -248,28 +248,35 @@ export function registerPublicBookingRoutes(app: Express) {
         reservationCode,
         guestId: guest.id,
         roomId: freeRoom.id,
+        roomTypeId: freeRoom.roomTypeId,
         ratePlanId: data.ratePlanId,
         checkInDate: data.checkIn,
         checkOutDate: data.checkOut,
-        adults: data.adults,
+        nights,
+        numberOfGuests: data.adults,
         status: "confirmed",
-        source: "web_booking" as any,
+        source: "web" as any,
         totalAmount: totalAmount.toFixed(2),
         totalRoomAmount: totalAmount.toFixed(2),
+        baseRatePerNight: pricePerNight.toFixed(2),
+        finalRatePerNight: pricePerNight.toFixed(2),
         notes: data.notes || null,
         createdAt: new Date(),
       } as any).returning();
+
+      // Get room type name for response
+      const [rt] = await db.select().from(roomTypes).where(eq(roomTypes.id, freeRoom.roomTypeId));
 
       res.json({
         success: true,
         reservationCode: newReservation.reservationCode,
         guestName: `${data.firstName} ${data.lastName}`,
-        roomTypeName: freeRoom.roomTypeId,
+        roomTypeName: rt?.name || freeRoom.roomTypeId,
         checkIn: data.checkIn,
         checkOut: data.checkOut,
         nights,
         totalAmount,
-        message: "¡Tu reserva fue confirmada! Recibirás la confirmación a tu email. El pago se realiza al momento del check-in.",
+        message: "¡Tu reserva fue confirmada! El pago se realiza al momento del check-in.",
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
