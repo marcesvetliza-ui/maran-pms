@@ -34,6 +34,12 @@ import {
   Pencil,
   Trash2,
   FileText,
+  Warehouse,
+  ArrowLeftRight,
+  DollarSign,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -91,6 +97,48 @@ type StockMovement = {
   item?: InventoryItem;
 };
 
+type InventoryWarehouse = {
+  id: string;
+  name: string;
+  description: string | null;
+  area: string;
+  is_active: string | null;
+  created_at: string;
+};
+
+type WarehouseStockRow = {
+  id: string;
+  warehouse_id: string;
+  item_id: string;
+  current_stock: string;
+  updated_at: string;
+  item_name: string;
+  sku: string | null;
+  unit: string;
+  cost_price: string;
+  min_stock: string;
+  category_name: string | null;
+};
+
+type WarehouseSummary = {
+  warehouse_id: string;
+  warehouse_name: string;
+  area: string;
+  item_count: string;
+  total_value: string;
+  low_stock_count: string;
+  zero_stock_count: string;
+};
+
+type PriceHistory = {
+  id: string;
+  item_id: string;
+  price: string;
+  recorded_at: string;
+  source: string;
+  notes: string | null;
+};
+
 const unitLabels: Record<string, string> = {
   unidad: "Unidades",
   kg: "Kilogramos",
@@ -128,6 +176,21 @@ export default function InventoryPage() {
   const [catArea, setCatArea] = useState("general");
   const [catDescription, setCatDescription] = useState("");
 
+  // Warehouses state
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | null>(null);
+  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
+  const [isWarehouseMovementDialogOpen, setIsWarehouseMovementDialogOpen] = useState(false);
+  const [warehouseMovementType, setWarehouseMovementType] = useState<"entrada" | "salida">("entrada");
+  const [selectedWarehouseItem, setSelectedWarehouseItem] = useState<WarehouseStockRow | null>(null);
+  const [isPriceHistoryOpen, setIsPriceHistoryOpen] = useState(false);
+  const [priceHistoryItemId, setPriceHistoryItemId] = useState<string | null>(null);
+  const [priceHistoryItemName, setPriceHistoryItemName] = useState<string>("");
+  const [isWarehouseFormOpen, setIsWarehouseFormOpen] = useState(false);
+  const [editingWarehouse, setEditingWarehouse] = useState<InventoryWarehouse | null>(null);
+  const [whName, setWhName] = useState("");
+  const [whDescription, setWhDescription] = useState("");
+  const [whArea, setWhArea] = useState("general");
+
   const { data: categories = [] } = useQuery<ItemCategory[]>({
     queryKey: ["/api/inventory/categories"],
   });
@@ -156,6 +219,27 @@ export default function InventoryPage() {
     queryKey: ["/api/inventory/consumo-report", consumoFrom, consumoTo],
     queryFn: () => fetch(`/api/inventory/consumo-report?from=${consumoFrom}&to=${consumoTo}`, { credentials: "include" }).then(r => r.json()),
     enabled: activeTab === "consumos",
+  });
+
+  const { data: warehouses = [], refetch: refetchWarehouses } = useQuery<InventoryWarehouse[]>({
+    queryKey: ["/api/inventory/warehouses"],
+  });
+
+  const { data: warehousesSummary = [] } = useQuery<WarehouseSummary[]>({
+    queryKey: ["/api/inventory/warehouses-summary"],
+    enabled: activeTab === "depositos",
+  });
+
+  const { data: warehouseStock = [], isLoading: warehouseStockLoading } = useQuery<WarehouseStockRow[]>({
+    queryKey: ["/api/inventory/warehouses", selectedWarehouseId, "stock"],
+    queryFn: () => fetch(`/api/inventory/warehouses/${selectedWarehouseId}/stock`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!selectedWarehouseId,
+  });
+
+  const { data: priceHistory = [] } = useQuery<PriceHistory[]>({
+    queryKey: ["/api/inventory/items", priceHistoryItemId, "price-history"],
+    queryFn: () => fetch(`/api/inventory/items/${priceHistoryItemId}/price-history`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!priceHistoryItemId && isPriceHistoryOpen,
   });
 
   const createItemMutation = useMutation({
@@ -195,12 +279,84 @@ export default function InventoryPage() {
     },
   });
 
+  const saveWarehouseMutation = useMutation({
+    mutationFn: async (data: { name: string; description: string; area: string }) => {
+      const res = editingWarehouse
+        ? await apiRequest("PATCH", `/api/inventory/warehouses/${editingWarehouse.id}`, data)
+        : await apiRequest("POST", "/api/inventory/warehouses", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses-summary"] });
+      setIsWarehouseFormOpen(false);
+      setEditingWarehouse(null);
+      toast({ title: editingWarehouse ? "Depósito actualizado" : "Depósito creado" });
+    },
+    onError: () => toast({ title: "Error al guardar depósito", variant: "destructive" }),
+  });
+
+  const deleteWarehouseMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/inventory/warehouses/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses-summary"] });
+      if (selectedWarehouseId) setSelectedWarehouseId(null);
+      toast({ title: "Depósito eliminado" });
+    },
+    onError: () => toast({ title: "No se pudo eliminar el depósito", variant: "destructive" }),
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: async (data: { itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; notes?: string }) => {
+      const res = await apiRequest("POST", "/api/inventory/transfer", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses-summary"] });
+      if (selectedWarehouseId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses", selectedWarehouseId, "stock"] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      setIsTransferDialogOpen(false);
+      toast({ title: "Transferencia registrada correctamente" });
+    },
+    onError: (e: any) => toast({ title: "Error en transferencia", description: e?.message, variant: "destructive" }),
+  });
+
+  const warehouseMovementMutation = useMutation({
+    mutationFn: async (data: { itemId: string; movementType: string; quantity: number; notes?: string; unitCost?: number }) => {
+      const res = await apiRequest("POST", `/api/inventory/warehouses/${selectedWarehouseId}/movements`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses", selectedWarehouseId, "stock"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      setIsWarehouseMovementDialogOpen(false);
+      setSelectedWarehouseItem(null);
+      toast({ title: "Movimiento registrado" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e?.message, variant: "destructive" }),
+  });
+
   const openCategoryDialog = (cat?: ItemCategory) => {
     setEditingCategory(cat || null);
     setCatName(cat?.name || "");
     setCatArea(cat?.area || "general");
     setCatDescription(cat?.description || "");
     setIsCategoryDialogOpen(true);
+  };
+
+  const openWarehouseForm = (wh?: InventoryWarehouse) => {
+    setEditingWarehouse(wh || null);
+    setWhName(wh?.name || "");
+    setWhDescription(wh?.description || "");
+    setWhArea(wh?.area || "general");
+    setIsWarehouseFormOpen(true);
   };
 
   const saveCategoryMutation = useMutation({
@@ -399,6 +555,10 @@ export default function InventoryPage() {
           <TabsTrigger value="consumos" data-testid="tab-consumos">
             <BarChart3 className="h-4 w-4 mr-2" />
             Consumos
+          </TabsTrigger>
+          <TabsTrigger value="depositos" data-testid="tab-depositos">
+            <Warehouse className="h-4 w-4 mr-2" />
+            Depósitos
           </TabsTrigger>
         </TabsList>
 
@@ -823,7 +983,319 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ==================== DEPÓSITOS TAB ==================== */}
+        <TabsContent value="depositos" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold flex items-center gap-2">
+              <Warehouse className="h-4 w-4" />
+              Gestión de Depósitos
+            </h3>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setIsTransferDialogOpen(true)} data-testid="btn-transfer">
+                <ArrowLeftRight className="h-4 w-4 mr-2" />
+                Transferir
+              </Button>
+              <Button size="sm" onClick={() => openWarehouseForm()} data-testid="btn-new-warehouse">
+                <Plus className="h-4 w-4 mr-2" />
+                Nuevo Depósito
+              </Button>
+            </div>
+          </div>
+
+          {/* Summary cards per warehouse */}
+          <div className="grid gap-4 md:grid-cols-3">
+            {warehousesSummary.map((ws) => {
+              const areaColors: Record<string, string> = { general: "bg-blue-50 border-blue-200 dark:bg-blue-950/30", restaurant: "bg-orange-50 border-orange-200 dark:bg-orange-950/30", spa: "bg-purple-50 border-purple-200 dark:bg-purple-950/30" };
+              const isSelected = selectedWarehouseId === ws.warehouse_id;
+              return (
+                <Card
+                  key={ws.warehouse_id}
+                  data-testid={`card-warehouse-${ws.warehouse_id}`}
+                  className={`cursor-pointer border-2 transition-all ${isSelected ? "border-primary ring-2 ring-primary/20" : (areaColors[ws.area] || "border-border")} hover:shadow-md`}
+                  onClick={() => setSelectedWarehouseId(isSelected ? null : ws.warehouse_id)}
+                >
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-base">{ws.warehouse_name}</CardTitle>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); const wh = warehouses.find(w => w.id === ws.warehouse_id); if (wh) openWarehouseForm(wh); }} data-testid={`btn-edit-wh-${ws.warehouse_id}`}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={(e) => { e.stopPropagation(); if (confirm(`¿Desactivar el depósito "${ws.warehouse_name}"?`)) deleteWarehouseMutation.mutate(ws.warehouse_id); }} data-testid={`btn-del-wh-${ws.warehouse_id}`}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="w-fit text-xs">{ws.area === "restaurant" ? "Restaurante" : ws.area === "spa" ? "SPA" : "General"}</Badge>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <div className="text-xl font-bold">{ws.item_count}</div>
+                        <div className="text-xs text-muted-foreground">Artículos</div>
+                      </div>
+                      <div>
+                        <div className="text-xl font-bold text-yellow-600">{ws.low_stock_count}</div>
+                        <div className="text-xs text-muted-foreground">Stock bajo</div>
+                      </div>
+                      <div>
+                        <div className="text-xl font-bold text-red-600">{ws.zero_stock_count}</div>
+                        <div className="text-xs text-muted-foreground">Sin stock</div>
+                      </div>
+                    </div>
+                    <div className="text-sm text-center text-muted-foreground border-t pt-2">
+                      Valor: <span className="font-semibold text-foreground">${parseFloat(ws.total_value || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="text-xs text-center text-primary font-medium">
+                      {isSelected ? "▲ Ver menos" : "▼ Ver stock de este depósito"}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+            {warehouses.length === 0 && (
+              <div className="col-span-3 text-center py-12 text-muted-foreground">
+                <Warehouse className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                <p>No hay depósitos creados todavía.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Stock detail of selected warehouse */}
+          {selectedWarehouseId && (
+            <Card data-testid="card-warehouse-stock">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Stock — {warehouses.find(w => w.id === selectedWarehouseId)?.name}
+                  </CardTitle>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => {
+                      setWarehouseMovementType("salida");
+                      setSelectedWarehouseItem(null);
+                      setIsWarehouseMovementDialogOpen(true);
+                    }} data-testid="btn-wh-salida">
+                      <ArrowUpCircle className="h-4 w-4 mr-1 text-red-500" />
+                      Salida
+                    </Button>
+                    <Button size="sm" onClick={() => {
+                      setWarehouseMovementType("entrada");
+                      setSelectedWarehouseItem(null);
+                      setIsWarehouseMovementDialogOpen(true);
+                    }} data-testid="btn-wh-entrada">
+                      <ArrowDownCircle className="h-4 w-4 mr-1 text-green-500" />
+                      Entrada
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {warehouseStockLoading ? (
+                  <div className="space-y-2">{[...Array(4)].map((_,i) => <Skeleton key={i} className="h-10" />)}</div>
+                ) : warehouseStock.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                    <p>No hay artículos en este depósito todavía.</p>
+                    <p className="text-xs mt-1">Registrá una entrada o transferí desde otro depósito.</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Artículo</TableHead>
+                        <TableHead>Categoría</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead className="text-right">Stock</TableHead>
+                        <TableHead>Unidad</TableHead>
+                        <TableHead className="text-right">Costo Unit.</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {warehouseStock.map((row) => {
+                        const stock = parseFloat(row.current_stock);
+                        const minStock = parseFloat(row.min_stock || "0");
+                        const cost = parseFloat(row.cost_price || "0");
+                        const isLow = stock <= minStock && stock > 0;
+                        const isZero = stock === 0;
+                        return (
+                          <TableRow key={row.id} data-testid={`wh-stock-row-${row.item_id}`} className={isZero ? "bg-red-50 dark:bg-red-950/20" : isLow ? "bg-yellow-50 dark:bg-yellow-950/20" : ""}>
+                            <TableCell className="font-medium">
+                              {row.item_name}
+                              {isLow && <AlertTriangle className="h-3 w-3 inline ml-1 text-yellow-500" />}
+                              {isZero && <AlertTriangle className="h-3 w-3 inline ml-1 text-red-500" />}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{row.category_name || "—"}</TableCell>
+                            <TableCell className="font-mono text-xs">{row.sku || "—"}</TableCell>
+                            <TableCell className={`text-right font-bold ${isZero ? "text-red-600" : isLow ? "text-yellow-600" : ""}`}>
+                              {stock.toLocaleString("es-AR", { minimumFractionDigits: 3 })}
+                            </TableCell>
+                            <TableCell className="text-sm">{row.unit}</TableCell>
+                            <TableCell className="text-right">${cost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell className="text-right font-semibold">${(stock * cost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-1">
+                                <Button variant="ghost" size="icon" className="h-7 w-7" title="Historial de precios" onClick={() => { setPriceHistoryItemId(row.item_id); setPriceHistoryItemName(row.item_name); setIsPriceHistoryOpen(true); }} data-testid={`btn-price-history-${row.item_id}`}>
+                                  <DollarSign className="h-3 w-3" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-7 w-7" title="Transferir" onClick={() => { setSelectedWarehouseItem(row); setIsTransferDialogOpen(true); }} data-testid={`btn-transfer-item-${row.item_id}`}>
+                                  <ArrowLeftRight className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
       </Tabs>
+
+      {/* ==================== WAREHOUSE DIALOGS ==================== */}
+
+      {/* New/Edit Warehouse Dialog */}
+      <Dialog open={isWarehouseFormOpen} onOpenChange={setIsWarehouseFormOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingWarehouse ? "Editar Depósito" : "Nuevo Depósito"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Nombre *</Label>
+              <Input value={whName} onChange={e => setWhName(e.target.value)} placeholder="Ej: Depósito General" data-testid="input-wh-name" />
+            </div>
+            <div className="space-y-1">
+              <Label>Área</Label>
+              <Select value={whArea} onValueChange={setWhArea}>
+                <SelectTrigger data-testid="select-wh-area"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="restaurant">Restaurante</SelectItem>
+                  <SelectItem value="spa">SPA</SelectItem>
+                  <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Descripción (opcional)</Label>
+              <Input value={whDescription} onChange={e => setWhDescription(e.target.value)} placeholder="Descripción breve..." data-testid="input-wh-description" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsWarehouseFormOpen(false)}>Cancelar</Button>
+            <Button onClick={() => saveWarehouseMutation.mutate({ name: whName.trim(), description: whDescription.trim(), area: whArea })} disabled={saveWarehouseMutation.isPending || !whName.trim()} data-testid="btn-save-warehouse">
+              {saveWarehouseMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Dialog */}
+      <Dialog open={isTransferDialogOpen} onOpenChange={(open) => { setIsTransferDialogOpen(open); if (!open) setSelectedWarehouseItem(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowLeftRight className="h-5 w-5" />
+              Transferir Stock entre Depósitos
+            </DialogTitle>
+          </DialogHeader>
+          <TransferForm
+            warehouses={warehouses}
+            items={items}
+            preselectedItem={selectedWarehouseItem}
+            preselectedFromWarehouse={selectedWarehouseId}
+            onSubmit={(data) => transferMutation.mutate(data)}
+            isPending={transferMutation.isPending}
+            onCancel={() => { setIsTransferDialogOpen(false); setSelectedWarehouseItem(null); }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Warehouse Movement Dialog (Entrada/Salida) */}
+      <Dialog open={isWarehouseMovementDialogOpen} onOpenChange={(open) => { setIsWarehouseMovementDialogOpen(open); if (!open) setSelectedWarehouseItem(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Registrar {warehouseMovementType === "entrada" ? "Entrada" : "Salida"} — {warehouses.find(w => w.id === selectedWarehouseId)?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <WarehouseMovementForm
+            items={items}
+            movementType={warehouseMovementType}
+            preselectedItem={selectedWarehouseItem}
+            onSubmit={(data) => warehouseMovementMutation.mutate(data)}
+            isPending={warehouseMovementMutation.isPending}
+            onCancel={() => { setIsWarehouseMovementDialogOpen(false); setSelectedWarehouseItem(null); }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Price History Dialog */}
+      <Dialog open={isPriceHistoryOpen} onOpenChange={setIsPriceHistoryOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="h-4 w-4" />
+              Historial de Precios — {priceHistoryItemName}
+            </DialogTitle>
+          </DialogHeader>
+          {priceHistory.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <TrendingUp className="h-8 w-8 mx-auto mb-2 opacity-40" />
+              <p>Sin historial de variaciones de precio.</p>
+              <p className="text-xs mt-1">Los precios se registran automáticamente al recibir mercadería.</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead className="text-right">Precio</TableHead>
+                  <TableHead>Variación</TableHead>
+                  <TableHead>Origen</TableHead>
+                  <TableHead>Notas</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {priceHistory.map((ph, i) => {
+                  const price = parseFloat(ph.price);
+                  const prevPrice = i < priceHistory.length - 1 ? parseFloat(priceHistory[i + 1].price) : price;
+                  const diff = price - prevPrice;
+                  const pct = prevPrice !== 0 ? ((diff / prevPrice) * 100) : 0;
+                  return (
+                    <TableRow key={ph.id} data-testid={`price-history-${ph.id}`}>
+                      <TableCell className="text-sm">{new Date(ph.recorded_at).toLocaleDateString("es-AR")}</TableCell>
+                      <TableCell className="text-right font-semibold">${price.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                      <TableCell>
+                        {i < priceHistory.length - 1 ? (
+                          <span className={`flex items-center gap-1 text-sm font-medium ${diff > 0 ? "text-red-600" : diff < 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                            {diff > 0 ? <TrendingUp className="h-3 w-3" /> : diff < 0 ? <TrendingDown className="h-3 w-3" /> : null}
+                            {diff !== 0 ? `${diff > 0 ? "+" : ""}${pct.toFixed(1)}%` : "—"}
+                          </span>
+                        ) : <span className="text-xs text-muted-foreground">Inicial</span>}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{ph.source === "entrada" ? "Entrada" : ph.source === "purchase_invoice" ? "Factura" : "Manual"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{ph.notes || "—"}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPriceHistoryOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isNewItemDialogOpen} onOpenChange={setIsNewItemDialogOpen}>
         <DialogContent>
@@ -1043,6 +1515,163 @@ function NewItemForm({
         >
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           Guardar
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+function TransferForm({
+  warehouses,
+  items,
+  preselectedItem,
+  preselectedFromWarehouse,
+  onSubmit,
+  isPending,
+  onCancel,
+}: {
+  warehouses: InventoryWarehouse[];
+  items: InventoryItem[];
+  preselectedItem: WarehouseStockRow | null;
+  preselectedFromWarehouse: string | null;
+  onSubmit: (data: { itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; notes?: string }) => void;
+  isPending: boolean;
+  onCancel: () => void;
+}) {
+  const [itemId, setItemId] = useState(preselectedItem?.item_id || "");
+  const [fromWarehouseId, setFromWarehouseId] = useState(preselectedFromWarehouse || "");
+  const [toWarehouseId, setToWarehouseId] = useState("");
+  const [quantity, setQuantity] = useState<number>(1);
+  const [notes, setNotes] = useState("");
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <Label>Artículo *</Label>
+        <Select value={itemId} onValueChange={setItemId}>
+          <SelectTrigger data-testid="select-transfer-item"><SelectValue placeholder="Seleccionar artículo..." /></SelectTrigger>
+          <SelectContent>
+            {items.filter(i => i.isActive !== "false").map(i => (
+              <SelectItem key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ""}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label>Desde *</Label>
+          <Select value={fromWarehouseId} onValueChange={setFromWarehouseId}>
+            <SelectTrigger data-testid="select-from-warehouse"><SelectValue placeholder="Depósito origen..." /></SelectTrigger>
+            <SelectContent>
+              {warehouses.map(w => (
+                <SelectItem key={w.id} value={w.id} disabled={w.id === toWarehouseId}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Hacia *</Label>
+          <Select value={toWarehouseId} onValueChange={setToWarehouseId}>
+            <SelectTrigger data-testid="select-to-warehouse"><SelectValue placeholder="Depósito destino..." /></SelectTrigger>
+            <SelectContent>
+              {warehouses.map(w => (
+                <SelectItem key={w.id} value={w.id} disabled={w.id === fromWarehouseId}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Cantidad *</Label>
+        <Input type="number" min={0.001} step="0.001" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} data-testid="input-transfer-qty" />
+      </div>
+      <div className="space-y-1">
+        <Label>Notas (opcional)</Label>
+        <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Motivo de la transferencia..." data-testid="input-transfer-notes" />
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
+        <Button
+          onClick={() => onSubmit({ itemId, fromWarehouseId, toWarehouseId, quantity, notes: notes || undefined })}
+          disabled={isPending || !itemId || !fromWarehouseId || !toWarehouseId || quantity <= 0}
+          data-testid="btn-confirm-transfer"
+        >
+          {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+          <ArrowLeftRight className="h-4 w-4 mr-2" />
+          Confirmar Transferencia
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+function WarehouseMovementForm({
+  items,
+  movementType,
+  preselectedItem,
+  onSubmit,
+  isPending,
+  onCancel,
+}: {
+  items: InventoryItem[];
+  movementType: "entrada" | "salida";
+  preselectedItem: WarehouseStockRow | null;
+  onSubmit: (data: { itemId: string; movementType: string; quantity: number; notes?: string; unitCost?: number }) => void;
+  isPending: boolean;
+  onCancel: () => void;
+}) {
+  const [itemId, setItemId] = useState(preselectedItem?.item_id || "");
+  const [quantity, setQuantity] = useState<number>(1);
+  const [unitCost, setUnitCost] = useState<number>(0);
+  const [notes, setNotes] = useState("");
+
+  const selectedItem = items.find(i => i.id === itemId);
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <Label>Artículo *</Label>
+        <Select value={itemId} onValueChange={(v) => { setItemId(v); const it = items.find(i => i.id === v); if (it) setUnitCost(parseFloat(it.costPrice || "0")); }}>
+          <SelectTrigger data-testid="select-wh-mov-item"><SelectValue placeholder="Seleccionar artículo..." /></SelectTrigger>
+          <SelectContent>
+            {items.filter(i => i.isActive !== "false").map(i => (
+              <SelectItem key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ""}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {selectedItem && (
+        <div className="p-2 bg-muted rounded text-sm text-muted-foreground">
+          Stock global actual: <span className="font-semibold text-foreground">{selectedItem.currentStock} {selectedItem.unit}</span>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label>Cantidad *</Label>
+          <Input type="number" min={0.001} step="0.001" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} data-testid="input-wh-mov-qty" />
+        </div>
+        {movementType === "entrada" && (
+          <div className="space-y-1">
+            <Label>Costo Unitario</Label>
+            <Input type="number" min={0} step="0.01" value={unitCost} onChange={e => setUnitCost(parseFloat(e.target.value) || 0)} data-testid="input-wh-mov-cost" />
+            <p className="text-xs text-muted-foreground">Si cambió, se actualiza el precio del artículo.</p>
+          </div>
+        )}
+      </div>
+      <div className="space-y-1">
+        <Label>Notas (opcional)</Label>
+        <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Observaciones..." data-testid="input-wh-mov-notes" />
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
+        <Button
+          onClick={() => onSubmit({ itemId, movementType, quantity, notes: notes || undefined, unitCost: movementType === "entrada" ? unitCost : undefined })}
+          disabled={isPending || !itemId || quantity <= 0}
+          data-testid="btn-confirm-wh-movement"
+        >
+          {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+          {movementType === "entrada" ? <ArrowDownCircle className="h-4 w-4 mr-2 text-green-500" /> : <ArrowUpCircle className="h-4 w-4 mr-2 text-red-500" />}
+          Registrar {movementType === "entrada" ? "Entrada" : "Salida"}
         </Button>
       </DialogFooter>
     </div>

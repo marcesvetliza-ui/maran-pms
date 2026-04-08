@@ -1039,6 +1039,7 @@ export const recipeIngredients = pgTable("recipe_ingredients", {
   quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
   unit: text("unit").notNull(),
   unitCost: decimal("unit_cost", { precision: 10, scale: 2 }).default("0"),
+  warehouseId: varchar("warehouse_id"),
 });
 
 export const insertRecipeIngredientSchema = createInsertSchema(recipeIngredients).omit({ id: true });
@@ -1131,6 +1132,8 @@ export const stockMovements = pgTable("stock_movements", {
   sourceId: varchar("source_id"),
   createdAt: timestamp("created_at").notNull(),
   createdBy: text("created_by"),
+  warehouseId: varchar("warehouse_id"),
+  toWarehouseId: varchar("to_warehouse_id"),
 });
 
 export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({ id: true });
@@ -1140,6 +1143,53 @@ export type StockMovement = typeof stockMovements.$inferSelect;
 export type StockMovementWithItem = StockMovement & {
   item: InventoryItem;
 };
+
+// ==================== WAREHOUSES (Depósitos) ====================
+
+export const inventoryWarehouses = pgTable("inventory_warehouses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  area: text("area").$type<InventoryArea>().notNull().default("general"),
+  isActive: text("is_active").default("true"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertInventoryWarehouseSchema = createInsertSchema(inventoryWarehouses).omit({ id: true, createdAt: true });
+export type InsertInventoryWarehouse = z.infer<typeof insertInventoryWarehouseSchema>;
+export type InventoryWarehouse = typeof inventoryWarehouses.$inferSelect;
+
+// Stock per Warehouse (Stock por depósito)
+export const warehouseStock = pgTable("warehouse_stock", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  warehouseId: varchar("warehouse_id").notNull(),
+  itemId: varchar("item_id").notNull(),
+  currentStock: decimal("current_stock", { precision: 10, scale: 3 }).default("0"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertWarehouseStockSchema = createInsertSchema(warehouseStock).omit({ id: true, updatedAt: true });
+export type InsertWarehouseStock = z.infer<typeof insertWarehouseStockSchema>;
+export type WarehouseStock = typeof warehouseStock.$inferSelect;
+
+export type WarehouseStockWithDetails = WarehouseStock & {
+  warehouse: InventoryWarehouse;
+  item: InventoryItem;
+};
+
+// Item Price History (Historial de precios)
+export const itemPriceHistory = pgTable("item_price_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  itemId: varchar("item_id").notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow(),
+  source: text("source").default("manual"),
+  notes: text("notes"),
+});
+
+export const insertItemPriceHistorySchema = createInsertSchema(itemPriceHistory).omit({ id: true, recordedAt: true });
+export type InsertItemPriceHistory = z.infer<typeof insertItemPriceHistorySchema>;
+export type ItemPriceHistory = typeof itemPriceHistory.$inferSelect;
 
 // Purchase Orders (Ordenes de Compra)
 export type PurchaseOrderStatus = "draft" | "sent" | "partial" | "received" | "cancelled";
