@@ -83,7 +83,6 @@ export default function CheckOutPage() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [showOverdueDialog, setShowOverdueDialog] = useState(false);
-  const [massCheckoutPending, setMassCheckoutPending] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [wizardStep, setWizardStep] = useState(0);
   const [addChargeOpen, setAddChargeOpen] = useState(false);
@@ -887,36 +886,8 @@ export default function CheckOutPage() {
               })
             )}
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter>
             <Button variant="outline" onClick={() => setShowOverdueDialog(false)}>Cerrar</Button>
-            <Button
-              variant="destructive"
-              disabled={overdueReservations.length === 0 || massCheckoutPending}
-              onClick={async () => {
-                if (!confirm(`¿Cerrar automáticamente las ${overdueReservations.length} habitaciones no procesadas? Se marcarán como "Check-out realizado" y las habitaciones quedarán en estado "Sucia".`)) return;
-                setMassCheckoutPending(true);
-                try {
-                  const res = await apiRequest("POST", "/api/reservations/checkout-overdue-all", {});
-                  const data = await res.json();
-                  queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
-                  queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-                  queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-                  toast({ title: "Listo", description: data.message });
-                  setShowOverdueDialog(false);
-                } catch (e: any) {
-                  toast({ title: "Error", description: e?.message || "No se pudo completar", variant: "destructive" });
-                } finally {
-                  setMassCheckoutPending(false);
-                }
-              }}
-              data-testid="button-mass-checkout-all"
-            >
-              {massCheckoutPending ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cerrando...</>
-              ) : (
-                <><LogOut className="h-4 w-4 mr-2" />Cerrar todas ({overdueReservations.length})</>
-              )}
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
