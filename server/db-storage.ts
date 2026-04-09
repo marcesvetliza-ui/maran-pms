@@ -1113,7 +1113,7 @@ export class DatabaseStorage implements IStorage {
       if (res) reservationsList.push(res);
     }
     const totalRooms = blocks.reduce((sum, b) => sum + b.quantity, 0);
-    const assignedRooms = reservationsList.length;
+    const assignedRooms = reservationsList.filter(r => r.status !== "cancelled" && r.status !== "checked_out").length;
     return { ...group, blocks, reservations: reservationsList, totalRooms, assignedRooms };
   }
 

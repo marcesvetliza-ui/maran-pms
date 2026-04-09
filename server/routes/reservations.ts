@@ -1224,44 +1224,4 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  // Mass close overdue checked-in reservations (checkout date already passed)
-  app.post("/api/reservations/checkout-overdue-all", requireAuth, async (req, res) => {
-    try {
-      const today = new Date().toISOString().split("T")[0];
-
-      // Find all overdue checked-in reservations
-      const overdueRows = await db.execute(sql`
-        SELECT id, room_id FROM reservations
-        WHERE status = 'checked_in' AND check_out_date < ${today}
-      `);
-      const overdue = overdueRows.rows as Array<{ id: string; room_id: string | null }>;
-
-      if (overdue.length === 0) {
-        return res.json({ closed: 0, message: "No hay habitaciones pendientes de cierre." });
-      }
-
-      const reservationIds = overdue.map(r => r.id);
-      const roomIds = overdue.map(r => r.room_id).filter(Boolean) as string[];
-
-      // Close all reservations
-      await db.execute(sql`
-        UPDATE reservations SET status = 'checked_out'
-        WHERE status = 'checked_in' AND check_out_date < ${today}
-      `);
-
-      // Set rooms to dirty (one by one to avoid array casting issues)
-      for (const roomId of roomIds) {
-        await db.execute(sql`UPDATE rooms SET status = 'dirty' WHERE id = ${roomId}`);
-      }
-
-      audit(req, "checkout_overdue_mass", "reservation", "all", {
-        count: overdue.length,
-        reservationIds,
-      });
-
-      res.json({ closed: overdue.length, message: `${overdue.length} reserva(s) cerrada(s) correctamente.` });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Error al cerrar reservas vencidas" });
-    }
-  });
 }
