@@ -1249,12 +1249,9 @@ export function registerReservationsRoutes(app: Express) {
         WHERE status = 'checked_in' AND check_out_date < ${today}
       `);
 
-      // Set rooms to dirty
-      if (roomIds.length > 0) {
-        await db.execute(sql`
-          UPDATE rooms SET status = 'dirty'
-          WHERE id = ANY(${roomIds}::varchar[])
-        `);
+      // Set rooms to dirty (one by one to avoid array casting issues)
+      for (const roomId of roomIds) {
+        await db.execute(sql`UPDATE rooms SET status = 'dirty' WHERE id = ${roomId}`);
       }
 
       audit(req, "checkout_overdue_mass", "reservation", "all", {
