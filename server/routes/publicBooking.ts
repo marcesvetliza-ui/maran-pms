@@ -377,6 +377,23 @@ export function registerPublicBookingRoutes(app: Express) {
   });
 
   // ──────────────────────────────────────────────────────────────────────
+  // Admin: POST /api/admin/booking-engine/reservations/:id/reject
+  // Reject (cancel) a pending web reservation
+  // ──────────────────────────────────────────────────────────────────────
+  app.post("/api/admin/booking-engine/reservations/:id/reject", async (req, res) => {
+    try {
+      const [updated] = await db.update(reservations)
+        .set({ status: "cancelled" } as any)
+        .where(eq(reservations.id, req.params.id))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Reserva no encontrada" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error al rechazar reserva" });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
   // Admin: GET /api/admin/booking-engine/available-rooms
   // Returns rooms available for a given date range (for assignment dialog)
   // ──────────────────────────────────────────────────────────────────────

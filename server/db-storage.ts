@@ -726,6 +726,7 @@ export class DatabaseStorage implements IStorage {
       and(
         ne(reservations.status, "cancelled"),
         ne(reservations.status, "checked_out"),
+        ne(reservations.status, "pending"),
         sql`${reservations.checkInDate} <= ${endDate}`,
         sql`${reservations.checkOutDate} >= ${startDate}`
       )

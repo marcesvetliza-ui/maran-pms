@@ -34,6 +34,10 @@ import {
   Ticket,
   Gift,
   PlusCircle,
+  Globe,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -2928,6 +2932,73 @@ export default function ReservationsPage() {
   const [createdFrom, setCreatedFrom] = useState(todayStr);
   const [createdTo, setCreatedTo] = useState(todayStr);
 
+  // Motor de Reservas (web pending)
+  const [webSectionExpanded, setWebSectionExpanded] = useState(true);
+  const [confirmingReservation, setConfirmingReservation] = useState<any | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState("");
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+
+  const { data: webPendingReservations = [], refetch: refetchWeb } = useQuery<any[]>({
+    queryKey: ["/api/admin/booking-engine/reservations"],
+    refetchInterval: 60_000,
+  });
+
+  const { data: availableRoomsForAssign = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/booking-engine/available-rooms", confirmingReservation?.id],
+    queryFn: async () => {
+      if (!confirmingReservation) return [];
+      const params = new URLSearchParams({
+        checkIn: confirmingReservation.check_in_date,
+        checkOut: confirmingReservation.check_out_date,
+        roomTypeId: confirmingReservation.room_type_id || "",
+        excludeReservationId: confirmingReservation.id,
+      });
+      const res = await fetch(`/api/admin/booking-engine/available-rooms?${params}`);
+      return res.json();
+    },
+    enabled: !!confirmingReservation,
+  });
+
+  const confirmWebMutation = useMutation({
+    mutationFn: async ({ id, roomId }: { id: string; roomId: string }) => {
+      const res = await fetch(`/api/admin/booking-engine/reservations/${id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ roomId }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Error"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Reserva confirmada", description: "La reserva fue confirmada y aparece en el planning." });
+      setConfirmingReservation(null);
+      setSelectedRoomId("");
+      refetchWeb();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+    },
+    onError: (e: any) => toast({ title: "Error al confirmar", description: e.message, variant: "destructive" }),
+  });
+
+  const rejectWebMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admin/booking-engine/reservations/${id}/reject`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Error al rechazar");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Reserva rechazada" });
+      setRejectingId(null);
+      refetchWeb();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+    },
+    onError: () => toast({ title: "Error al rechazar", variant: "destructive" }),
+  });
+
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations", dateMode, dateFrom, dateTo, createdFrom, createdTo],
     queryFn: async () => {
@@ -3079,6 +3150,176 @@ export default function ReservationsPage() {
           Nueva Reserva
         </Button>
       </div>
+
+      {/* Motor de Reservas - Pending Web Reservations */}
+      {webPendingReservations.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+          <button
+            className="w-full flex items-center justify-between p-4 text-left"
+            onClick={() => setWebSectionExpanded(v => !v)}
+            data-testid="button-toggle-web-reservations"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center h-9 w-9 rounded-full bg-amber-100 dark:bg-amber-900/50">
+                <Globe className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-amber-900 dark:text-amber-200">Motor de Reservas Web</p>
+                <p className="text-sm text-amber-700 dark:text-amber-400">
+                  {webPendingReservations.length} solicitud{webPendingReservations.length !== 1 ? "es" : ""} pendiente{webPendingReservations.length !== 1 ? "s" : ""} de confirmación
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge className="bg-amber-500 text-white hover:bg-amber-500">{webPendingReservations.length}</Badge>
+              {webSectionExpanded ? <ChevronUp className="h-4 w-4 text-amber-600" /> : <ChevronDown className="h-4 w-4 text-amber-600" />}
+            </div>
+          </button>
+
+          {webSectionExpanded && (
+            <div className="border-t border-amber-200 dark:border-amber-800 divide-y divide-amber-100 dark:divide-amber-900">
+              {webPendingReservations.map((wr: any) => (
+                <div key={wr.id} className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" data-testid={`row-web-reservation-${wr.id}`}>
+                  <div className="flex flex-col sm:flex-row gap-4 flex-1 min-w-0">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{`${wr.first_name || ""} ${wr.last_name || ""}`.trim() || "-"}</p>
+                      <p className="text-xs text-muted-foreground truncate">{wr.email || "-"}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Entrada</span>
+                        <span className="font-medium">{wr.check_in_date ? formatDateAR(wr.check_in_date) : "-"}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Salida</span>
+                        <span className="font-medium">{wr.check_out_date ? formatDateAR(wr.check_out_date) : "-"}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Tipo</span>
+                        <span className="font-medium">{wr.room_type_name || wr.room_type_id || "-"}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Hab.</span>
+                        <span className="font-medium">{wr.room_number || "-"}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Total</span>
+                        <span className="font-medium">${Number(wr.total_amount || 0).toLocaleString("es-AR")}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {rejectingId === wr.id ? (
+                      <>
+                        <span className="text-sm text-red-600 font-medium">¿Rechazar?</span>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => rejectWebMutation.mutate(wr.id)}
+                          disabled={rejectWebMutation.isPending}
+                          data-testid={`button-reject-confirm-${wr.id}`}
+                        >
+                          Sí, rechazar
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setRejectingId(null)} data-testid={`button-reject-cancel-${wr.id}`}>
+                          Cancelar
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => { setConfirmingReservation(wr); setSelectedRoomId(wr.room_id || ""); }}
+                          data-testid={`button-confirm-web-${wr.id}`}
+                        >
+                          <CheckCircle2 className="h-4 w-4 mr-1" />
+                          Confirmar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-red-300 text-red-600 hover:bg-red-50"
+                          onClick={() => setRejectingId(wr.id)}
+                          data-testid={`button-reject-web-${wr.id}`}
+                        >
+                          <XCircle className="h-4 w-4 mr-1" />
+                          Rechazar
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirm Web Reservation Dialog */}
+      <Dialog open={!!confirmingReservation} onOpenChange={open => { if (!open) { setConfirmingReservation(null); setSelectedRoomId(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5 text-amber-500" />
+              Confirmar Reserva Web
+            </DialogTitle>
+            <DialogDescription>
+              Asigná una habitación disponible y confirmá la reserva del motor de reservas online.
+            </DialogDescription>
+          </DialogHeader>
+          {confirmingReservation && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg bg-muted p-3 space-y-1 text-sm">
+                <p><span className="text-muted-foreground">Huésped:</span> <strong>{`${confirmingReservation.first_name || ""} ${confirmingReservation.last_name || ""}`.trim() || "-"}</strong></p>
+                <p><span className="text-muted-foreground">Email:</span> {confirmingReservation.email || "-"}</p>
+                <p><span className="text-muted-foreground">Fechas:</span> {formatDateAR(confirmingReservation.check_in_date)} → {formatDateAR(confirmingReservation.check_out_date)}</p>
+                <p><span className="text-muted-foreground">Tipo:</span> {confirmingReservation.room_type_name || confirmingReservation.room_type_id}</p>
+                <p><span className="text-muted-foreground">Total:</span> ${Number(confirmingReservation.total_amount || 0).toLocaleString("es-AR")}</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Habitación a asignar</label>
+                <Select value={selectedRoomId} onValueChange={setSelectedRoomId} data-testid="select-web-room">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccioná una habitación..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableRoomsForAssign.length === 0 ? (
+                      <SelectItem value="_none" disabled>Sin habitaciones disponibles</SelectItem>
+                    ) : (
+                      availableRoomsForAssign.map((r: any) => (
+                        <SelectItem key={r.id} value={r.id}>
+                          Hab. {r.roomNumber} — {r.roomTypeName}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Habitación pre-asignada por el motor: <strong>{confirmingReservation.room_number || "ninguna"}</strong>
+                  {confirmingReservation.room_id && !selectedRoomId && " (se usará si no elegís otra)"}
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setConfirmingReservation(null); setSelectedRoomId(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700 text-white"
+              disabled={confirmWebMutation.isPending || (!selectedRoomId && !confirmingReservation?.room_id)}
+              onClick={() => {
+                const roomId = selectedRoomId || confirmingReservation?.room_id;
+                if (roomId) confirmWebMutation.mutate({ id: confirmingReservation.id, roomId });
+              }}
+              data-testid="button-confirm-web-submit"
+            >
+              {confirmWebMutation.isPending ? "Confirmando..." : "Confirmar reserva"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <Card>
