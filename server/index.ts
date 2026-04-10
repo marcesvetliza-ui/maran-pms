@@ -133,10 +133,11 @@ app.use((req, res, next) => {
     console.error("Critical accounts insert error (non-blocking):", err);
   }
 
-  // Migrate: add SMTP columns to email_config if they don't exist
+  // Migrate: add SMTP columns to email_config + ensure the single config row exists
   try {
     const { db } = await import("./db");
     const { sql } = await import("drizzle-orm");
+    // Add new columns if missing
     await db.execute(sql`
       ALTER TABLE email_config
         ADD COLUMN IF NOT EXISTS smtp_host TEXT DEFAULT 'smtp.gmail.com',
@@ -145,8 +146,28 @@ app.use((req, res, next) => {
         ADD COLUMN IF NOT EXISTS smtp_pass TEXT,
         ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false
     `);
+    // Ensure the single config row (id=1) always exists
+    await db.execute(sql`
+      INSERT INTO email_config (
+        id, global_enabled, provider,
+        from_email, from_name,
+        confirmation_enabled, confirmation_subject, confirmation_body,
+        reminder_enabled, reminder_subject, reminder_body,
+        checkout_enabled, checkout_subject, checkout_body
+      ) VALUES (
+        1, false, 'resend',
+        'reservas@maransuites.com', 'Maran Suites & Towers',
+        true, 'Confirmación de tu reserva — Maran Suites & Towers',
+        'Hola {nombre_huesped},\n\nTu reserva ha sido confirmada. Te esperamos el {fecha_checkin} en la habitación {numero_habitacion}.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\n\n¡Nos vemos pronto!\nMaran Suites & Towers',
+        true, 'Recordatorio de tu llegada — Maran Suites & Towers',
+        'Hola {nombre_huesped}, te recordamos que tu check-in es mañana {fecha_checkin}. ¡Te esperamos!',
+        true, 'Gracias por tu estadía — Maran Suites & Towers',
+        'Hola {nombre_huesped},\n\nGracias por elegirnos. Esperamos que tu estadía haya sido excelente.\n\nNos gustaría conocer tu opinión: {link_encuesta}\n\n¡Hasta pronto!\nMaran Suites & Towers'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
   } catch (err) {
-    console.error("SMTP columns migration error (non-blocking):", err);
+    console.error("Email config migration error (non-blocking):", err);
   }
 
   await registerRoutes(httpServer, app);
