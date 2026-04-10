@@ -765,8 +765,9 @@ export class DatabaseStorage implements IStorage {
     }
 
     for (const res of allReservations) {
-      const guest = guestsMap.get(res.guestId);
-      if (guest) {
+      const guest = res.guestId ? guestsMap.get(res.guestId) : null;
+      // Always add to reservationsMap, even without a guest (use fallback name)
+      {
         const isGroupReservation = groupReservationIds.has(res.id);
         let groupName: string | undefined;
         let groupId: string | undefined;
@@ -793,7 +794,7 @@ export class DatabaseStorage implements IStorage {
 
         reservationsMap[res.id] = {
           id: res.id,
-          guestName: `${guest.firstName} ${guest.lastName}`,
+          guestName: guest ? `${guest.firstName} ${guest.lastName}` : "(Sin huésped)",
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,

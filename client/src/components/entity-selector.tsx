@@ -421,6 +421,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
             </div>
 
             <Button
+              type="button"
               onClick={handleCreateGuest}
               disabled={!newGuest.firstName || !newGuest.lastName}
               className="w-full"
@@ -771,6 +772,7 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
             </div>
 
             <Button
+              type="button"
               onClick={handleCreateCompany}
               disabled={!newCompany.razonSocial || !newCompany.cuilCuit}
               className="w-full"
@@ -1028,6 +1030,7 @@ export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear 
             </div>
 
             <Button
+              type="button"
               onClick={handleCreateAgency}
               disabled={!newAgency.razonSocial || !newAgency.cuilCuit}
               className="w-full"

@@ -550,11 +550,21 @@ export function ReservationFormDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const finalGuestId = formData.guestId || reservation?.guestId || "";
+    if (!finalGuestId) {
+      toast({ title: "Huésped requerido", description: "Seleccioná o creá un huésped antes de guardar.", variant: "destructive" });
+      return;
+    }
+    const finalRoomId = formData.roomId || reservation?.roomId || "";
+    if (!finalRoomId) {
+      toast({ title: "Habitación requerida", description: "Seleccioná un tipo y habitación antes de guardar.", variant: "destructive" });
+      return;
+    }
     mutation.mutate({
       ...formData,
-      roomId: formData.roomId || reservation?.roomId || "",
+      roomId: finalRoomId,
       roomTypeId: formData.roomTypeId || reservation?.roomTypeId || "",
-      guestId: formData.guestId || reservation?.guestId || "",
+      guestId: finalGuestId,
       bedTypeId: formData.bedTypeId || null,
       nights: Number(formData.nights),
       numberOfGuests: Number(formData.numberOfGuests),
