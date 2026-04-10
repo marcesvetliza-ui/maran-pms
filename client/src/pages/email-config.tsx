@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -13,8 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Mail, Send, CheckCircle2, XCircle, Clock, Star, MessageSquare, Eye,
-  RefreshCw, Settings2, BarChart3, AlertTriangle, Zap,
+  RefreshCw, Settings2, BarChart3, AlertTriangle, Zap, Server,
 } from "lucide-react";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Star rating display
@@ -55,6 +58,9 @@ export default function EmailConfigPage() {
   const [testEmail, setTestEmail] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  const [smtpPassInput, setSmtpPassInput] = useState("");
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [localProvider, setLocalProvider] = useState<string>("resend");
 
   const { data: cfg, isLoading } = useQuery<any>({
     queryKey: ["/api/email/config"],
@@ -95,11 +101,17 @@ export default function EmailConfigPage() {
     onError: () => toast({ title: "Error al ejecutar", variant: "destructive" }),
   });
 
+  useEffect(() => {
+    if (cfg?.provider) setLocalProvider(cfg.provider);
+  }, [cfg?.provider]);
+
   const save = (fields: Record<string, any>) => {
     const payload: any = { ...fields };
     if (apiKeyInput.trim()) payload.apiKey = apiKeyInput.trim();
+    if (smtpPassInput.trim()) payload.smtpPass = smtpPassInput.trim();
     saveMutation.mutate(payload);
     if (apiKeyInput.trim()) setApiKeyInput("");
+    if (smtpPassInput.trim()) setSmtpPassInput("");
   };
 
   const toggle = (field: string, value: boolean) => save({ [field]: value });
@@ -223,10 +235,11 @@ export default function EmailConfigPage() {
 
         {/* ─── CONFIGURACIÓN ─── */}
         <TabsContent value="config" className="space-y-4 mt-4">
+          {/* Remitente */}
           <Card>
             <CardHeader>
-              <CardTitle>Configuración del proveedor</CardTitle>
-              <CardDescription>Configurá el servicio de email que usarás para enviar las comunicaciones</CardDescription>
+              <CardTitle>Datos del remitente</CardTitle>
+              <CardDescription>Nombre y email que verá el huésped en la bandeja de entrada</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -249,34 +262,6 @@ export default function EmailConfigPage() {
                   />
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <Label>API Key (Resend / SendGrid)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    type={showApiKey ? "text" : "password"}
-                    value={apiKeyInput}
-                    onChange={e => setApiKeyInput(e.target.value)}
-                    placeholder={cfg?.apiKeySet ? "••••••••••••••• (clave guardada — escribí para cambiar)" : "re_xxxxxxxxxxxxxxxx"}
-                    data-testid="input-api-key"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => setShowApiKey(v => !v)}>
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    onClick={() => { if (apiKeyInput.trim()) save({}); }}
-                    disabled={!apiKeyInput.trim() || saveMutation.isPending}
-                    data-testid="button-save-api-key"
-                  >
-                    Guardar
-                  </Button>
-                </div>
-                {cfg?.apiKeySet
-                  ? <p className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> API key configurada</p>
-                  : <p className="text-xs text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Sin API key — los emails no se enviarán</p>
-                }
-              </div>
-
               <div className="space-y-2">
                 <Label>Link de Google Maps (para el email post estadía)</Label>
                 <Input
@@ -286,7 +271,142 @@ export default function EmailConfigPage() {
                   data-testid="input-google-maps-url"
                 />
               </div>
+            </CardContent>
+          </Card>
 
+          {/* Proveedor */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Server className="h-5 w-5" />Proveedor de envío</CardTitle>
+              <CardDescription>Elegí cómo se enviarán los emails: vía Resend (API) o via Gmail / SMTP</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* Provider selector */}
+              <div className="space-y-2">
+                <Label>Proveedor</Label>
+                <Select
+                  value={localProvider}
+                  onValueChange={v => {
+                    setLocalProvider(v);
+                    save({ provider: v });
+                  }}
+                >
+                  <SelectTrigger data-testid="select-provider">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="resend">Resend (API key)</SelectItem>
+                    <SelectItem value="smtp">Gmail / SMTP</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Resend fields */}
+              {localProvider === "resend" && (
+                <div className="space-y-3 rounded-lg border p-4">
+                  <p className="text-sm font-medium">Configuración Resend</p>
+                  <div className="space-y-2">
+                    <Label>API Key</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        type={showApiKey ? "text" : "password"}
+                        value={apiKeyInput}
+                        onChange={e => setApiKeyInput(e.target.value)}
+                        placeholder={cfg?.apiKeySet ? "••••••••• (guardada — escribí para cambiar)" : "re_xxxxxxxxxxxxxxxx"}
+                        data-testid="input-api-key"
+                      />
+                      <Button variant="outline" size="icon" onClick={() => setShowApiKey(v => !v)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        onClick={() => { if (apiKeyInput.trim()) save({}); }}
+                        disabled={!apiKeyInput.trim() || saveMutation.isPending}
+                        data-testid="button-save-api-key"
+                      >
+                        Guardar
+                      </Button>
+                    </div>
+                    {cfg?.apiKeySet
+                      ? <p className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> API key configurada</p>
+                      : <p className="text-xs text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Sin API key — los emails no se enviarán</p>
+                    }
+                  </div>
+                </div>
+              )}
+
+              {/* SMTP / Gmail fields */}
+              {localProvider === "smtp" && (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <div className="flex items-start gap-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
+                    <AlertTriangle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-blue-700 dark:text-blue-300">
+                      <p className="font-medium mb-1">Para usar Gmail necesitás una Contraseña de Aplicación</p>
+                      <p>En tu cuenta Google: <strong>Seguridad → Verificación en 2 pasos → Contraseñas de aplicación</strong>. Creá una nueva y pegá los 16 caracteres aquí.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="sm:col-span-2 space-y-2">
+                      <Label>Servidor SMTP</Label>
+                      <Input
+                        defaultValue={cfg?.smtpHost ?? "smtp.gmail.com"}
+                        onBlur={e => save({ smtpHost: e.target.value })}
+                        placeholder="smtp.gmail.com"
+                        data-testid="input-smtp-host"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Puerto</Label>
+                      <Input
+                        type="number"
+                        defaultValue={cfg?.smtpPort ?? 587}
+                        onBlur={e => save({ smtpPort: parseInt(e.target.value) || 587 })}
+                        placeholder="587"
+                        data-testid="input-smtp-port"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Usuario (tu email de Gmail)</Label>
+                    <Input
+                      defaultValue={cfg?.smtpUser ?? ""}
+                      onBlur={e => save({ smtpUser: e.target.value })}
+                      placeholder="hotel@gmail.com"
+                      data-testid="input-smtp-user"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Contraseña de aplicación (App Password)</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        type={showSmtpPass ? "text" : "password"}
+                        value={smtpPassInput}
+                        onChange={e => setSmtpPassInput(e.target.value)}
+                        placeholder={cfg?.smtpPassSet ? "•••••••••••••••• (guardada — escribí para cambiar)" : "xxxx xxxx xxxx xxxx"}
+                        data-testid="input-smtp-pass"
+                      />
+                      <Button variant="outline" size="icon" onClick={() => setShowSmtpPass(v => !v)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        onClick={() => { if (smtpPassInput.trim()) save({}); }}
+                        disabled={!smtpPassInput.trim() || saveMutation.isPending}
+                        data-testid="button-save-smtp-pass"
+                      >
+                        Guardar
+                      </Button>
+                    </div>
+                    {cfg?.smtpPassSet
+                      ? <p className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Contraseña configurada</p>
+                      : <p className="text-xs text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Sin contraseña — los emails no se enviarán</p>
+                    }
+                  </div>
+                </div>
+              )}
+
+              {/* Test email */}
               <div className="border-t pt-4 space-y-2">
                 <Label>Enviar email de prueba</Label>
                 <div className="flex gap-2">
@@ -306,7 +426,7 @@ export default function EmailConfigPage() {
                     {testMutation.isPending ? "Enviando..." : "Enviar prueba"}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">Verificá que la API key y el remitente estén bien configurados</p>
+                <p className="text-xs text-muted-foreground">Verificá que la configuración del proveedor esté correcta</p>
               </div>
             </CardContent>
           </Card>

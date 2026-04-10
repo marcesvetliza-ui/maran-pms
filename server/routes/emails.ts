@@ -15,10 +15,10 @@ export function registerEmailRoutes(app: Express) {
   app.get("/api/email/config", requireAuth, async (_req, res) => {
     try {
       const [cfg] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
-      // Never expose API key value — send a boolean indicating if it's set
+      // Never expose API key or SMTP password — send booleans only
       if (cfg) {
-        const { apiKey, ...safe } = cfg;
-        res.json({ ...safe, apiKeySet: !!apiKey });
+        const { apiKey, smtpPass, ...safe } = cfg;
+        res.json({ ...safe, apiKeySet: !!apiKey, smtpPassSet: !!smtpPass });
       } else {
         res.json(null);
       }
@@ -37,7 +37,7 @@ export function registerEmailRoutes(app: Express) {
         confirmationEnabled, confirmationSubject, confirmationBody,
         reminderEnabled, reminderSubject, reminderBody,
         checkoutEnabled, checkoutSubject, checkoutBody,
-        apiKey,
+        apiKey, smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure,
       } = req.body;
 
       const updateData: Record<string, any> = { updatedAt: new Date() };
@@ -55,15 +55,19 @@ export function registerEmailRoutes(app: Express) {
       if (checkoutEnabled !== undefined) updateData.checkoutEnabled = checkoutEnabled;
       if (checkoutSubject !== undefined) updateData.checkoutSubject = checkoutSubject;
       if (checkoutBody !== undefined) updateData.checkoutBody = checkoutBody;
-      // Only update API key if a non-empty string was provided
-      if (apiKey && typeof apiKey === "string" && apiKey.trim().length > 0) {
-        updateData.apiKey = apiKey.trim();
-      }
+      // SMTP fields
+      if (smtpHost !== undefined) updateData.smtpHost = smtpHost;
+      if (smtpPort !== undefined) updateData.smtpPort = Number(smtpPort);
+      if (smtpUser !== undefined) updateData.smtpUser = smtpUser;
+      if (smtpSecure !== undefined) updateData.smtpSecure = smtpSecure;
+      // Only update secrets if non-empty
+      if (apiKey && typeof apiKey === "string" && apiKey.trim().length > 0) updateData.apiKey = apiKey.trim();
+      if (smtpPass && typeof smtpPass === "string" && smtpPass.trim().length > 0) updateData.smtpPass = smtpPass.trim();
 
       await db.update(emailConfig).set(updateData).where(eq(emailConfig.id, 1));
       const [updated] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
-      const { apiKey: _k, ...safe } = updated;
-      res.json({ ...safe, apiKeySet: !!_k });
+      const { apiKey: _k, smtpPass: _p, ...safe } = updated;
+      res.json({ ...safe, apiKeySet: !!_k, smtpPassSet: !!_p });
     } catch (e) {
       res.status(500).json({ error: "Error al guardar configuración" });
     }
@@ -113,20 +117,33 @@ export function registerEmailRoutes(app: Express) {
       const { to } = req.body;
       if (!to) return res.status(400).json({ error: "Email requerido" });
       const [cfg] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
-      if (!cfg?.apiKey) return res.status(400).json({ error: "API key no configurada" });
-      const r = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from: `${cfg.fromName} <${cfg.fromEmail}>`,
-          to: [to],
-          subject: "Email de prueba — Maran Suites & Towers",
-          text: "Si recibiste este mensaje, el sistema de emails está funcionando correctamente.",
-        }),
-      });
-      if (!r.ok) {
-        const err = await r.text();
-        return res.status(400).json({ error: `Error al enviar: ${err}` });
+      if (!cfg) return res.status(400).json({ error: "Configuración no encontrada" });
+
+      const from = `${cfg.fromName} <${cfg.fromEmail}>`;
+      const subject = "Email de prueba — Maran Suites & Towers";
+      const text = "Si recibiste este mensaje, el sistema de emails está funcionando correctamente.";
+
+      if (cfg.provider === "smtp") {
+        if (!cfg.smtpUser || !cfg.smtpPass) return res.status(400).json({ error: "SMTP: usuario o contraseña no configurados" });
+        const nodemailer = await import("nodemailer");
+        const transporter = nodemailer.default.createTransport({
+          host: cfg.smtpHost || "smtp.gmail.com",
+          port: cfg.smtpPort || 587,
+          secure: cfg.smtpSecure ?? false,
+          auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+        });
+        await transporter.sendMail({ from, to, subject, text });
+      } else {
+        if (!cfg.apiKey) return res.status(400).json({ error: "API key de Resend no configurada" });
+        const r = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ from, to: [to], subject, text }),
+        });
+        if (!r.ok) {
+          const err = await r.text();
+          return res.status(400).json({ error: `Error Resend: ${err}` });
+        }
       }
       res.json({ ok: true });
     } catch (e: any) {

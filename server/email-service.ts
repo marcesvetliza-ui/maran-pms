@@ -1,7 +1,8 @@
 import { db } from "./db";
 import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import crypto from "crypto";
+import nodemailer from "nodemailer";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Template interpolation
@@ -17,7 +18,7 @@ function fmtDate(d: string | null | undefined): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Get config (cached per call)
+// Get config
 // ─────────────────────────────────────────────────────────────────────────────
 async function getConfig() {
   const [cfg] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
@@ -25,7 +26,7 @@ async function getConfig() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Low-level send via Resend REST API (no package needed)
+// Send via Resend REST API
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendViaResend(opts: {
   apiKey: string;
@@ -35,24 +36,51 @@ async function sendViaResend(opts: {
   text: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const body = JSON.stringify({
-      from: opts.from,
-      to: [opts.to],
-      subject: opts.subject,
-      text: opts.text,
-    });
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${opts.apiKey}`,
         "Content-Type": "application/json",
       },
-      body,
+      body: JSON.stringify({ from: opts.from, to: [opts.to], subject: opts.subject, text: opts.text }),
     });
     if (!res.ok) {
       const err = await res.text();
       return { ok: false, error: `Resend error ${res.status}: ${err}` };
     }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Send via SMTP (Gmail / cualquier servidor)
+// ─────────────────────────────────────────────────────────────────────────────
+async function sendViaSmtp(opts: {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const transporter = nodemailer.createTransport({
+      host: opts.host,
+      port: opts.port,
+      secure: opts.secure,
+      auth: { user: opts.user, pass: opts.pass },
+    });
+    await transporter.sendMail({
+      from: opts.from,
+      to: opts.to,
+      subject: opts.subject,
+      text: opts.text,
+    });
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e.message };
@@ -79,7 +107,7 @@ async function logEmail(opts: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core send function (wraps config check + logging)
+// Core send function — routes to Resend or SMTP based on provider config
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendEmail(opts: {
   reservationId: string;
@@ -94,12 +122,36 @@ async function sendEmail(opts: {
     await logEmail({ ...opts, status: "skipped", recipientEmail: opts.to, errorMessage: "Sistema global desactivado" });
     return;
   }
-  if (!cfg.apiKey) {
-    await logEmail({ ...opts, status: "skipped", recipientEmail: opts.to, errorMessage: "API key no configurada" });
-    return;
-  }
+
   const from = `${cfg.fromName} <${cfg.fromEmail}>`;
-  const result = await sendViaResend({ apiKey: cfg.apiKey, from, to: opts.to, subject: opts.subject, text: opts.body });
+  let result: { ok: boolean; error?: string };
+
+  if (cfg.provider === "smtp") {
+    // Gmail SMTP or any SMTP server
+    if (!cfg.smtpUser || !cfg.smtpPass) {
+      await logEmail({ ...opts, status: "skipped", recipientEmail: opts.to, errorMessage: "SMTP: usuario o contraseña no configurados" });
+      return;
+    }
+    result = await sendViaSmtp({
+      host: cfg.smtpHost || "smtp.gmail.com",
+      port: cfg.smtpPort || 587,
+      secure: cfg.smtpSecure ?? false,
+      user: cfg.smtpUser,
+      pass: cfg.smtpPass,
+      from,
+      to: opts.to,
+      subject: opts.subject,
+      text: opts.body,
+    });
+  } else {
+    // Resend API (default)
+    if (!cfg.apiKey) {
+      await logEmail({ ...opts, status: "skipped", recipientEmail: opts.to, errorMessage: "Resend: API key no configurada" });
+      return;
+    }
+    result = await sendViaResend({ apiKey: cfg.apiKey, from, to: opts.to, subject: opts.subject, text: opts.body });
+  }
+
   if (result.ok) {
     await logEmail({ reservationId: opts.reservationId, type: opts.type, status: "sent", recipientEmail: opts.to });
   } else {

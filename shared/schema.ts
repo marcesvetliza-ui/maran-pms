@@ -2300,6 +2300,12 @@ export const emailConfig = pgTable("email_config", {
   fromEmail: text("from_email").notNull().default("reservas@maransuites.com"),
   fromName: text("from_name").notNull().default("Maran Suites & Towers"),
   googleMapsUrl: text("google_maps_url"),
+  // SMTP / Gmail settings
+  smtpHost: text("smtp_host").default("smtp.gmail.com"),
+  smtpPort: integer("smtp_port").default(587),
+  smtpUser: text("smtp_user"),
+  smtpPass: text("smtp_pass"),
+  smtpSecure: boolean("smtp_secure").default(false),
   // Confirmation email
   confirmationEnabled: boolean("confirmation_enabled").notNull().default(true),
   confirmationSubject: text("confirmation_subject").notNull().default("Confirmación de tu reserva — Maran Suites & Towers"),
