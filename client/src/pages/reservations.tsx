@@ -276,7 +276,7 @@ export function ReservationFormDialog({
       setResChargeQty(1);
       setHasVoucher(!!(reservation?.voucherCode || reservation?.voucherNotes));
     }
-  }, [open, reservation?.id]);
+  }, [open, reservation?.id, defaultValues?.roomId, defaultValues?.roomTypeId, defaultValues?.checkInDate]);
 
   const createGuestMutation = useMutation({
     mutationFn: async (guest: InsertGuest): Promise<Guest> => {
@@ -555,7 +555,7 @@ export function ReservationFormDialog({
   };
 
   const availableRooms = rooms.filter((r) => {
-    const sameRoom = r.id === reservation?.roomId || r.id === defaultValues?.roomId;
+    const sameRoom = r.id === reservation?.roomId || r.id === defaultValues?.roomId || r.id === formData.roomId;
     const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
     return (isUsable || sameRoom) && r.roomTypeId === selectedRoomTypeId;
   });
