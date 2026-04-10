@@ -165,7 +165,7 @@ export function ReservationFormDialog({
     reservation?.agency || null
   );
 
-  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || "");
+  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || defaultValues?.roomTypeId || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
   // Cargos adicionales al crear
@@ -195,11 +195,18 @@ export function ReservationFormDialog({
     guestId: reservation?.guestId || "",
     companyId: reservation?.companyId || "",
     agencyId: reservation?.agencyId || "",
-    roomTypeId: reservation?.roomTypeId || "",
-    roomId: reservation?.roomId || "",
+    roomTypeId: reservation?.roomTypeId || defaultValues?.roomTypeId || "",
+    roomId: reservation?.roomId || defaultValues?.roomId || "",
     ratePlanId: reservation?.ratePlanId || "",
-    checkInDate: reservation?.checkInDate || today,
-    checkOutDate: reservation?.checkOutDate || tomorrow,
+    checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
+    checkOutDate: reservation?.checkOutDate || (() => {
+      if (defaultValues?.checkInDate) {
+        const d = new Date(defaultValues.checkInDate + "T12:00:00");
+        d.setDate(d.getDate() + 1);
+        return d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      }
+      return tomorrow;
+    })(),
     nights: reservation?.nights || 1,
     numberOfGuests: reservation?.numberOfGuests || 1,
     status: normalizeStatus(reservation?.status),

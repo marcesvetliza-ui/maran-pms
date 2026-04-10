@@ -2559,6 +2559,7 @@ export default function PlanningPage() {
       </Card>
 
       <ReservationFormDialog
+        key={newReservationDefaults ? `${newReservationDefaults.roomId}-${newReservationDefaults.checkInDate}` : "new-reservation"}
         reservation={undefined}
         guests={guests}
         rooms={allRooms}
