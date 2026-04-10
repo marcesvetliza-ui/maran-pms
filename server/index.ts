@@ -133,6 +133,22 @@ app.use((req, res, next) => {
     console.error("Critical accounts insert error (non-blocking):", err);
   }
 
+  // Migrate: add SMTP columns to email_config if they don't exist
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      ALTER TABLE email_config
+        ADD COLUMN IF NOT EXISTS smtp_host TEXT DEFAULT 'smtp.gmail.com',
+        ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587,
+        ADD COLUMN IF NOT EXISTS smtp_user TEXT,
+        ADD COLUMN IF NOT EXISTS smtp_pass TEXT,
+        ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false
+    `);
+  } catch (err) {
+    console.error("SMTP columns migration error (non-blocking):", err);
+  }
+
   await registerRoutes(httpServer, app);
 
   try {
