@@ -73,6 +73,7 @@ import {
   type AuditLog, type InsertAuditLog,
   type Package, type InsertPackage, type PackageWithDetails, type PackageStatus,
   type PackageItem, type InsertPackageItem,
+  type PackageRoomPrice, type InsertPackageRoomPrice, type PackageRoomPriceWithType,
   type SystemNotification, type InsertSystemNotification, type NotificationArea,
   type WebCheckin, type InsertWebCheckin,
   type GuestPreference, type InsertGuestPreference,
@@ -103,7 +104,7 @@ import {
   maintenanceStaff, workOrders, maintenanceBlocks,
   type MaintenanceBlock, type InsertMaintenanceBlock,
   systemUsers, systemSettings, auditLogs,
-  packages, packageItems,
+  packages, packageItems, packageRoomPrices,
   systemNotifications, webCheckins,
   guestPreferences, stayNotes, hospitalityAlerts,
   cashRegisterConfigs, cashShifts, cashMovements, cashClosingSummaries,
@@ -2934,7 +2935,14 @@ export class DatabaseStorage implements IStorage {
   private async enrichPackage(pkg: Package): Promise<PackageWithDetails> {
     const roomType = pkg.roomTypeId ? (await db.select().from(roomTypes).where(eq(roomTypes.id, pkg.roomTypeId)))[0] : undefined;
     const items = await db.select().from(packageItems).where(eq(packageItems.packageId, pkg.id));
-    return { ...pkg, roomType, items };
+    const priceRows = await db.select().from(packageRoomPrices).where(eq(packageRoomPrices.packageId, pkg.id));
+    const roomPrices: PackageRoomPriceWithType[] = await Promise.all(
+      priceRows.map(async (p) => {
+        const [rt] = await db.select().from(roomTypes).where(eq(roomTypes.id, p.roomTypeId));
+        return { ...p, roomType: rt };
+      })
+    );
+    return { ...pkg, roomType, items, roomPrices };
   }
 
   async getPackages(): Promise<PackageWithDetails[]> {
@@ -2979,8 +2987,36 @@ export class DatabaseStorage implements IStorage {
 
   async deletePackage(id: string): Promise<boolean> {
     await db.delete(packageItems).where(eq(packageItems.packageId, id));
+    await db.delete(packageRoomPrices).where(eq(packageRoomPrices.packageId, id));
     const result = await db.delete(packages).where(eq(packages.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async getPackageRoomPrices(packageId: string): Promise<PackageRoomPriceWithType[]> {
+    const rows = await db.select().from(packageRoomPrices).where(eq(packageRoomPrices.packageId, packageId));
+    return Promise.all(rows.map(async (p) => {
+      const [rt] = await db.select().from(roomTypes).where(eq(roomTypes.id, p.roomTypeId));
+      return { ...p, roomType: rt };
+    }));
+  }
+
+  async createPackageRoomPrice(data: InsertPackageRoomPrice): Promise<PackageRoomPrice> {
+    const [created] = await db.insert(packageRoomPrices).values(data as any).returning();
+    return created;
+  }
+
+  async updatePackageRoomPrice(id: string, data: Partial<InsertPackageRoomPrice>): Promise<PackageRoomPrice | undefined> {
+    const [updated] = await db.update(packageRoomPrices).set(data as any).where(eq(packageRoomPrices.id, id)).returning();
+    return updated;
+  }
+
+  async deletePackageRoomPrice(id: string): Promise<boolean> {
+    const result = await db.delete(packageRoomPrices).where(eq(packageRoomPrices.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async deletePackageRoomPricesByPackage(packageId: string): Promise<void> {
+    await db.delete(packageRoomPrices).where(eq(packageRoomPrices.packageId, packageId));
   }
 
   generatePackageCode(): string {

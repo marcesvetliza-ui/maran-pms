@@ -49,6 +49,8 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { PackageWithDetails, RoomType, PackageStatus, PackageItemType } from "@shared/schema";
 
+type RoomPriceRow = { roomTypeId: string; price: string };
+
 function PackageStatusBadge({ status }: { status: PackageStatus }) {
   const config: Record<PackageStatus, { label: string; variant: "default" | "secondary" | "destructive" }> = {
     active: { label: "Activo", variant: "default" },
@@ -86,7 +88,6 @@ function PackageFormDialog({
 
   const [name, setName] = useState(pkg?.name || "");
   const [description, setDescription] = useState(pkg?.description || "");
-  const [roomTypeId, setRoomTypeId] = useState(pkg?.roomTypeId || "");
   const [nights, setNights] = useState(pkg?.nights || 1);
   const [basePrice, setBasePrice] = useState(pkg?.basePrice || "");
   const [discountPercent, setDiscountPercent] = useState(pkg?.discountPercent || "");
@@ -97,6 +98,9 @@ function PackageFormDialog({
   const [items, setItems] = useState<{ itemType: PackageItemType; description: string; quantity: number }[]>(
     pkg?.items?.map(i => ({ itemType: i.itemType, description: i.description, quantity: i.quantity })) || []
   );
+  const [roomPrices, setRoomPrices] = useState<RoomPriceRow[]>(
+    pkg?.roomPrices?.map(rp => ({ roomTypeId: rp.roomTypeId, price: rp.price })) || []
+  );
 
   const { data: roomTypes } = useQuery<RoomType[]>({ queryKey: ["/api/room-types"] });
 
@@ -105,7 +109,7 @@ function PackageFormDialog({
       const res = await apiRequest("POST", "/api/packages", {
         name,
         description,
-        roomTypeId: roomTypeId && roomTypeId !== "any" ? roomTypeId : null,
+        roomTypeId: null,
         nights,
         basePrice: parseFloat(basePrice).toFixed(2),
         discountPercent: discountPercent ? parseFloat(discountPercent).toFixed(2) : null,
@@ -117,6 +121,9 @@ function PackageFormDialog({
       const newPkg = await res.json();
       for (const item of items) {
         await apiRequest("POST", `/api/packages/${newPkg.id}/items`, item);
+      }
+      for (const rp of roomPrices.filter(r => r.roomTypeId && r.price)) {
+        await apiRequest("POST", `/api/packages/${newPkg.id}/room-prices`, { roomTypeId: rp.roomTypeId, price: rp.price });
       }
       return newPkg;
     },
@@ -136,7 +143,7 @@ function PackageFormDialog({
       await apiRequest("PATCH", `/api/packages/${pkg!.id}`, {
         name,
         description,
-        roomTypeId: roomTypeId && roomTypeId !== "any" ? roomTypeId : null,
+        roomTypeId: null,
         nights,
         basePrice: parseFloat(basePrice).toFixed(2),
         discountPercent: discountPercent ? parseFloat(discountPercent).toFixed(2) : null,
@@ -150,6 +157,12 @@ function PackageFormDialog({
       }
       for (const item of items) {
         await apiRequest("POST", `/api/packages/${pkg!.id}/items`, item);
+      }
+      for (const existingRp of pkg!.roomPrices) {
+        await apiRequest("DELETE", `/api/package-room-prices/${existingRp.id}`);
+      }
+      for (const rp of roomPrices.filter(r => r.roomTypeId && r.price)) {
+        await apiRequest("POST", `/api/packages/${pkg!.id}/room-prices`, { roomTypeId: rp.roomTypeId, price: rp.price });
       }
     },
     onSuccess: () => {
@@ -165,7 +178,12 @@ function PackageFormDialog({
 
   const handleSubmit = () => {
     if (!name || !basePrice) {
-      toast({ title: "Nombre y precio son requeridos", variant: "destructive" });
+      toast({ title: "Nombre y precio base son requeridos", variant: "destructive" });
+      return;
+    }
+    const invalidRoomPrice = roomPrices.some(rp => (rp.roomTypeId && !rp.price) || (!rp.roomTypeId && rp.price));
+    if (invalidRoomPrice) {
+      toast({ title: "Completá tipo de habitación y precio en cada fila", variant: "destructive" });
       return;
     }
     if (isEditing) {
@@ -174,6 +192,14 @@ function PackageFormDialog({
       createMutation.mutate();
     }
   };
+
+  const addRoomPrice = () => setRoomPrices([...roomPrices, { roomTypeId: "", price: "" }]);
+  const updateRoomPrice = (idx: number, field: keyof RoomPriceRow, value: string) => {
+    const updated = [...roomPrices];
+    updated[idx][field] = value;
+    setRoomPrices(updated);
+  };
+  const removeRoomPrice = (idx: number) => setRoomPrices(roomPrices.filter((_, i) => i !== idx));
 
   const addItem = () => {
     setItems([...items, { itemType: "breakfast", description: "", quantity: 1 }]);
@@ -223,23 +249,6 @@ function PackageFormDialog({
             </div>
 
             <div>
-              <Label>Tipo de Habitación</Label>
-              <Select value={roomTypeId} onValueChange={setRoomTypeId}>
-                <SelectTrigger data-testid="select-package-room-type">
-                  <SelectValue placeholder="Cualquier tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="any">Cualquier tipo</SelectItem>
-                  {roomTypes?.map((rt) => (
-                    <SelectItem key={rt.id} value={rt.id}>
-                      {rt.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
               <Label>Noches</Label>
               <Input
                 type="number"
@@ -251,7 +260,7 @@ function PackageFormDialog({
             </div>
 
             <div>
-              <Label>Precio <span className="text-xs font-normal text-muted-foreground">(con IVA incluido)</span></Label>
+              <Label>Precio Base * <span className="text-xs font-normal text-muted-foreground">(con IVA incluido)</span></Label>
               <Input
                 type="number"
                 step="0.01"
@@ -356,6 +365,73 @@ function PackageFormDialog({
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">
                 No hay servicios incluidos. Agregue servicios al paquete.
+              </p>
+            )}
+          </div>
+
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <Label className="text-base font-medium">Tarifas por Tipo de Habitación</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Si no agregás ninguna, se usa el Precio Base para todas las categorías.
+                </p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={addRoomPrice} data-testid="button-add-room-price">
+                <Plus className="mr-2 h-4 w-4" />
+                Agregar habitación
+              </Button>
+            </div>
+
+            {roomPrices.length > 0 ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
+                  <span>Tipo de Habitación</span>
+                  <span>Precio (IVA incl.)</span>
+                  <span></span>
+                </div>
+                {roomPrices.map((rp, idx) => (
+                  <div key={idx} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center">
+                    <Select
+                      value={rp.roomTypeId}
+                      onValueChange={(v) => updateRoomPrice(idx, "roomTypeId", v)}
+                    >
+                      <SelectTrigger data-testid={`select-room-price-type-${idx}`}>
+                        <SelectValue placeholder="Seleccionar tipo..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {roomTypes?.filter(rt => !roomPrices.some((r, i) => i !== idx && r.roomTypeId === rt.id)).map((rt) => (
+                          <SelectItem key={rt.id} value={rt.id}>
+                            {rt.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      value={rp.price}
+                      onChange={(e) => updateRoomPrice(idx, "price", e.target.value)}
+                      placeholder="0.00"
+                      className="w-32"
+                      data-testid={`input-room-price-${idx}`}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeRoomPrice(idx)}
+                      data-testid={`button-remove-room-price-${idx}`}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-3 border border-dashed rounded-md">
+                Sin tarifas diferenciadas — se aplica el Precio Base a todas las categorías.
               </p>
             )}
           </div>
@@ -496,25 +572,31 @@ export default function PackagesPage() {
                     <Moon className="h-4 w-4 text-muted-foreground" />
                     <span>{pkg.nights} noches</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-semibold">${pkg.basePrice}</span>
-                  </div>
+                  {(!pkg.roomPrices || pkg.roomPrices.length === 0) && (
+                    <div className="flex items-center gap-1">
+                      <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-semibold">${pkg.basePrice}</span>
+                    </div>
+                  )}
                   {pkg.discountPercent && parseFloat(pkg.discountPercent) > 0 && (
                     <div className="flex items-center gap-1">
                       <Percent className="h-4 w-4 text-muted-foreground" />
                       <Badge variant="secondary" data-testid={`badge-discount-${pkg.id}`}>-{pkg.discountPercent}%</Badge>
-                      <span className="text-xs text-muted-foreground">
-                        (${(parseFloat(pkg.basePrice) * (1 - parseFloat(pkg.discountPercent) / 100)).toFixed(2)} final)
-                      </span>
                     </div>
                   )}
                 </div>
 
-                {pkg.roomType && (
-                  <div className="flex items-center gap-1 text-sm">
-                    <Tag className="h-4 w-4 text-muted-foreground" />
-                    <span>{pkg.roomType.name}</span>
+                {pkg.roomPrices && pkg.roomPrices.length > 0 && (
+                  <div className="space-y-1" data-testid={`room-prices-${pkg.id}`}>
+                    {pkg.roomPrices.map((rp) => (
+                      <div key={rp.id} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <Tag className="h-3.5 w-3.5" />
+                          <span>{rp.roomType?.name || rp.roomTypeId}</span>
+                        </div>
+                        <span className="font-semibold">${rp.price}</span>
+                      </div>
+                    ))}
                   </div>
                 )}
 

@@ -111,10 +111,68 @@ export function registerPackagesRoutes(app: Express) {
           });
         }
       }
+      if (original.roomPrices && original.roomPrices.length > 0) {
+        for (const rp of original.roomPrices) {
+          await storage.createPackageRoomPrice({
+            packageId: pkg.id,
+            roomTypeId: rp.roomTypeId,
+            price: rp.price,
+          });
+        }
+      }
       const duplicated = await storage.getPackage(pkg.id);
       res.status(201).json(duplicated);
     } catch (error) {
       res.status(500).json({ error: "Error duplicating package" });
+    }
+  });
+
+  // Package Room Prices endpoints
+  app.get("/api/packages/:packageId/room-prices", async (req, res) => {
+    try {
+      const prices = await storage.getPackageRoomPrices(req.params.packageId);
+      res.json(prices);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching package room prices" });
+    }
+  });
+
+  app.post("/api/packages/:packageId/room-prices", async (req, res) => {
+    try {
+      const { roomTypeId, price } = req.body;
+      if (!roomTypeId || !price) {
+        return res.status(400).json({ error: "roomTypeId and price are required" });
+      }
+      const created = await storage.createPackageRoomPrice({
+        packageId: req.params.packageId,
+        roomTypeId,
+        price: String(parseFloat(price).toFixed(2)),
+      });
+      res.status(201).json(created);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating package room price" });
+    }
+  });
+
+  app.patch("/api/package-room-prices/:id", async (req, res) => {
+    try {
+      const { price } = req.body;
+      const updated = await storage.updatePackageRoomPrice(req.params.id, {
+        price: price ? String(parseFloat(price).toFixed(2)) : undefined,
+      });
+      if (!updated) return res.status(404).json({ error: "Price not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating package room price" });
+    }
+  });
+
+  app.delete("/api/package-room-prices/:id", async (req, res) => {
+    try {
+      await storage.deletePackageRoomPrice(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting package room price" });
     }
   });
 

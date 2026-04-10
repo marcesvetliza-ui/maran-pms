@@ -1583,10 +1583,27 @@ export const insertPackageItemSchema = createInsertSchema(packageItems).omit({ i
 export type InsertPackageItem = z.infer<typeof insertPackageItemSchema>;
 export type PackageItem = typeof packageItems.$inferSelect;
 
+// Package Room Prices (precios por tipo de habitación)
+export const packageRoomPrices = pgTable("package_room_prices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  packageId: varchar("package_id").notNull(),
+  roomTypeId: varchar("room_type_id").notNull(),
+  price: decimal("price", { precision: 12, scale: 2 }).notNull(),
+});
+
+export const insertPackageRoomPriceSchema = createInsertSchema(packageRoomPrices).omit({ id: true });
+export type InsertPackageRoomPrice = z.infer<typeof insertPackageRoomPriceSchema>;
+export type PackageRoomPrice = typeof packageRoomPrices.$inferSelect;
+
+export type PackageRoomPriceWithType = PackageRoomPrice & {
+  roomType?: RoomType;
+};
+
 // Package with details
 export type PackageWithDetails = Package & {
   roomType?: RoomType;
   items: PackageItem[];
+  roomPrices: PackageRoomPriceWithType[];
 };
 
 // System Notifications (base for chatbot + web check-in)
