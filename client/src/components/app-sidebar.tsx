@@ -40,6 +40,7 @@ import {
   AlertTriangle,
   Smartphone,
   Bot,
+  Mail,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -120,8 +121,9 @@ const menuSections = [
   {
     titulo: "Experiencia al huésped",
     items: [
-      { label: "Hospitalidad", icon: HandHeart,     href: "/hospitality" },
-      { label: "MARA Chatbot", icon: MessageCircle, href: "/chatbot"      },
+      { label: "Hospitalidad",            icon: HandHeart,     href: "/hospitality"  },
+      { label: "MARA Chatbot",            icon: MessageCircle, href: "/chatbot"       },
+      { label: "Respuestas automáticas",  icon: Mail,          href: "/email-config"  },
     ],
   },
   {

@@ -67,3 +67,4 @@ Preferred communication style: Simple, everyday language.
 - **OpenAI API**: For the staff help chatbot.
 - **pdfkit**: PDF generation (for folios, reports).
 - **jszip**, **exceljs**: For SIRCAR and other accounting exports.
+- **Resend API** (via native fetch): Transactional email sending for automatic guest communications.

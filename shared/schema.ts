@@ -2286,3 +2286,74 @@ export const insertNightAuditLogSchema = createInsertSchema(nightAuditLogs).omit
 });
 export type InsertNightAuditLog = z.infer<typeof insertNightAuditLogSchema>;
 export type NightAuditLog = typeof nightAuditLogs.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email / Respuestas Automáticas
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Single-row config table (id = 1 always)
+export const emailConfig = pgTable("email_config", {
+  id: serial("id").primaryKey(),
+  globalEnabled: boolean("global_enabled").notNull().default(false),
+  provider: text("provider").notNull().default("resend"), // "resend" | "smtp"
+  apiKey: text("api_key"),
+  fromEmail: text("from_email").notNull().default("reservas@maransuites.com"),
+  fromName: text("from_name").notNull().default("Maran Suites & Towers"),
+  googleMapsUrl: text("google_maps_url"),
+  // Confirmation email
+  confirmationEnabled: boolean("confirmation_enabled").notNull().default(true),
+  confirmationSubject: text("confirmation_subject").notNull().default("Confirmación de tu reserva — Maran Suites & Towers"),
+  confirmationBody: text("confirmation_body").notNull().default("Hola {nombre_huesped},\n\nTu reserva ha sido confirmada. Te esperamos el {fecha_checkin} en la habitación {numero_habitacion}.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\nHabitaciones: {numero_habitacion}\n\n¡Nos vemos pronto!\nMaran Suites & Towers"),
+  // 2-day reminder email
+  reminderEnabled: boolean("reminder_enabled").notNull().default(true),
+  reminderSubject: text("reminder_subject").notNull().default("Tu estadía se acerca — Maran Suites & Towers"),
+  reminderBody: text("reminder_body").notNull().default("Hola {nombre_huesped},\n\nTe recordamos que en 2 días comenzás tu estadía en Maran Suites & Towers.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\nHabitación: {numero_habitacion}\n\n¡Te esperamos!\nMaran Suites & Towers"),
+  // Post-checkout + survey email
+  checkoutEnabled: boolean("checkout_enabled").notNull().default(true),
+  checkoutSubject: text("checkout_subject").notNull().default("Gracias por tu estadía — Contanos tu experiencia"),
+  checkoutBody: text("checkout_body").notNull().default("Hola {nombre_huesped},\n\nGracias por elegir Maran Suites & Towers. Esperamos que hayas disfrutado tu estadía.\n\nNos encantaría conocer tu experiencia. Completá nuestra encuesta rápida (menos de 2 minutos):\n\n{link_encuesta}\n\nSi tu estadía fue excelente, también podés dejarnos una reseña en Google Maps:\n{link_google_maps}\n\n¡Hasta la próxima!\nMaran Suites & Towers"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type EmailConfig = typeof emailConfig.$inferSelect;
+
+// Email send log
+export const emailLogs = pgTable("email_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reservationId: varchar("reservation_id"),
+  type: text("type").notNull(), // "confirmation" | "reminder" | "checkout"
+  status: text("status").notNull(), // "sent" | "failed" | "skipped"
+  recipientEmail: text("recipient_email"),
+  errorMessage: text("error_message"),
+  sentAt: timestamp("sent_at").defaultNow(),
+});
+
+export type EmailLog = typeof emailLogs.$inferSelect;
+
+// Survey tokens (one per checkout)
+export const surveyTokens = pgTable("survey_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reservationId: varchar("reservation_id").notNull(),
+  token: varchar("token").notNull().unique(),
+  completed: boolean("completed").notNull().default(false),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type SurveyToken = typeof surveyTokens.$inferSelect;
+
+// Survey responses
+export const surveyResponses = pgTable("survey_responses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  surveyTokenId: varchar("survey_token_id").notNull().references(() => surveyTokens.id),
+  ratingOverall: integer("rating_overall").notNull(),    // 1-5
+  ratingRoom: integer("rating_room").notNull(),
+  ratingCleanliness: integer("rating_cleanliness").notNull(),
+  ratingService: integer("rating_service").notNull(),
+  ratingFood: integer("rating_food"),                    // optional
+  comment: text("comment"),
+  guestName: text("guest_name"),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+});
+
+export type SurveyResponse = typeof surveyResponses.$inferSelect;

@@ -1,0 +1,23 @@
+Exacto en ambas preguntas. Te explico el plan completo antes de tocar una sola línea de código:
+
+¿A quién se envía?
+Sí, se manda al email del huésped registrado en el sistema. Si no tiene email cargado, simplemente no se envía ese disparo (sin error, sin romper nada). Voy a agregar un campo visible en los logs para saber cuáles se omitieron por falta de email.
+
+¿Cómo se activa/desactiva?
+Habrá una nueva sección de configuración en el sistema (dentro de Administración) llamada "Respuestas Automáticas" con:
+
+Un switch global que pausa todo el sistema de emails de un saque — ideal para el caso que mencionás (semana de evento)
+Tres switches individuales, uno por cada disparo (confirmación / recordatorio / post checkout), para poder desactivar solo alguno
+Los textos de cada email editables desde ahí, con variables como {nombre_huesped}, {numero_habitacion}, {fecha_checkin}, etc.
+Los 3 disparadores:
+
+Confirmación → Se envía instantáneamente cuando se crea o confirma una reserva
+Recordatorio (2 días antes del check-in) → Un scheduler que corre diariamente (como el Night Audit que ya tenemos) revisa quién tiene check-in en 2 días y manda el recordatorio, sin mandar duplicados
+Post checkout + encuesta → Se dispara cuando se ejecuta el check-out en el sistema
+Encuesta de satisfacción:
+El email de post checkout incluye un link único por estadía (con token de seguridad). El huésped entra a una página pública sin login, responde 5 preguntas rápidas (calificación estrellas + comentario libre) y listo. En el dashboard admin aparece un resumen con promedio de calificaciones y las últimas respuestas. El link a Google Maps para reseña va fijo en el email.
+
+Servicio de email:
+Uso Resend — tiene 3.000 emails gratis por mes y una API muy simple. Voy a necesitar que configures un dominio verificado con ellos (o pueden mandar desde un dominio de Resend para pruebas). La API key la cargamos como secreto del sistema.
+
+¿Arrancamos? Y si tenés cuenta en Resend o preferís otro proveedor de email (SendGrid, SMTP propio, etc.) avisame antes de que conecte el servicio

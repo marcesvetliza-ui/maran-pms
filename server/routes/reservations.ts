@@ -7,6 +7,7 @@ import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
+import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
 
 export function registerReservationsRoutes(app: Express) {
   // Reservations
@@ -122,6 +123,11 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const reservation = await storage.createReservation(data);
+
+      // Fire confirmation email if created as "confirmed"
+      if (data.status === "confirmed") {
+        sendConfirmationEmail(reservation.id).catch(e => console.error("[email] create confirmation trigger:", e));
+      }
 
       const today = new Date().toISOString().split("T")[0];
       if (data.earlyCheckIn && data.earlyCheckInCharge && parseFloat(data.earlyCheckInCharge) > 0) {
@@ -278,6 +284,10 @@ export function registerReservationsRoutes(app: Express) {
         `Reserva ${existing.reservationCode} modificada`,
         { entityType: "reservation", entityId: req.params.id, details: cambios.length > 0 ? { cambios } : undefined }
       );
+      // Fire confirmation email when status transitions to "confirmed"
+      if (req.body.status === "confirmed" && existing.status !== "confirmed") {
+        sendConfirmationEmail(req.params.id).catch(e => console.error("[email] confirmation trigger error:", e));
+      }
       res.json(reservation);
     } catch (error: any) {
       console.error("Error updating reservation:", error?.message || error);
@@ -679,6 +689,9 @@ export function registerReservationsRoutes(app: Express) {
         `Check-out: ${reservation.reservationCode} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
         { entityType: "reservation", entityId: req.params.id }
       );
+      // Fire post-checkout email asynchronously (don't block response)
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      sendCheckoutEmail(req.params.id, baseUrl).catch(e => console.error("[email] checkout trigger error:", e));
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error processing check-out" });
