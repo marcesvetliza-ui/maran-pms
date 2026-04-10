@@ -1466,12 +1466,137 @@ const NA_STATUS_LABEL: Record<string, string> = {
   success: "Exitoso", partial: "Parcial", failed: "Fallido",
 };
 
+function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: boolean; onClose: () => void }) {
+  if (!audit) return null;
+  let detail: { inHouse?: any[]; arrivals?: any[] } = {};
+  try { detail = JSON.parse(audit.detail || "{}"); } catch {}
+  const inHouse = detail.inHouse || [];
+  const arrivals = detail.arrivals || [];
+  const conSaldo = inHouse.filter((r: any) => r.hasBalance);
+  const fmt = (n: number) => n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 0 });
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Moon className="h-4 w-4" />
+            Night Audit — {audit.auditDate}
+          </DialogTitle>
+          <DialogDescription>
+            Ejecutado el {new Date(audit.executedAt).toLocaleString("es-AR")} por {audit.executedBy}
+            {audit.isManual && <Badge variant="outline" className="ml-2 text-[10px]">manual</Badge>}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: "Hab. ocupadas", value: audit.reservationsProcessed },
+              { label: "Con saldo", value: audit.reservationsSkipped },
+              { label: "Llegadas mañana", value: audit.arrivalsNextDay },
+              { label: "Sin prepago", value: audit.arrivalsWithoutPrepago },
+            ].map(({ label, value }) => (
+              <div key={label} className="text-center p-3 bg-muted/40 rounded-lg">
+                <p className="text-2xl font-bold">{value}</p>
+                <p className="text-xs text-muted-foreground">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {inHouse.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold mb-2 flex items-center gap-1">
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                Habitaciones en casa ({inHouse.length})
+              </h4>
+              <div className="rounded border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Hab.</TableHead>
+                      <TableHead className="text-xs">Código</TableHead>
+                      <TableHead className="text-xs">Check-out</TableHead>
+                      <TableHead className="text-xs text-right">Cargos</TableHead>
+                      <TableHead className="text-xs text-right">Pagado</TableHead>
+                      <TableHead className="text-xs text-right">Saldo</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {inHouse.map((r: any) => (
+                      <TableRow key={r.reservationId} className={r.hasBalance ? "bg-amber-50 dark:bg-amber-950/20" : ""}>
+                        <TableCell className="text-sm font-medium">{r.roomNumber}</TableCell>
+                        <TableCell className="text-xs font-mono text-muted-foreground">{r.reservationCode}</TableCell>
+                        <TableCell className="text-xs">{r.checkOutDate}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt(r.totalCharges)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt(r.totalPaid)}</TableCell>
+                        <TableCell className={`text-xs text-right font-semibold ${r.hasBalance ? "text-amber-600" : "text-muted-foreground"}`}>
+                          {r.hasBalance ? fmt(r.balance) : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {conSaldo.length > 0 && (
+                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  {conSaldo.length} habitación(es) con saldo pendiente
+                </p>
+              )}
+            </div>
+          )}
+
+          {arrivals.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold mb-2">Llegadas al día siguiente ({arrivals.length})</h4>
+              <div className="rounded border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Código</TableHead>
+                      <TableHead className="text-xs text-right">Prepago</TableHead>
+                      <TableHead className="text-xs text-center">Estado prepago</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {arrivals.map((a: any) => (
+                      <TableRow key={a.reservationId}>
+                        <TableCell className="text-xs font-mono">{a.reservationCode}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt(a.totalPaid)}</TableCell>
+                        <TableCell className="text-center">
+                          {a.hasPrepago
+                            ? <Badge className="text-[10px] bg-green-100 text-green-700">Con prepago</Badge>
+                            : <Badge className="text-[10px] bg-red-100 text-red-700">Sin prepago</Badge>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          {inHouse.length === 0 && arrivals.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">No hay detalle disponible para este audit.</p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cerrar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function NightAuditTab() {
   const { toast } = useToast();
   const [isRunning, setIsRunning] = useState(false);
   const [forceDate, setForceDate] = useState("");
   const [lastResult, setLastResult] = useState<any>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [selectedAudit, setSelectedAudit] = useState<any>(null);
 
   const { data: status, refetch: refetchStatus } = useQuery<any>({
     queryKey: ["/api/night-audit/status"],
@@ -1621,6 +1746,7 @@ function NightAuditTab() {
                   <TableHead className="text-center">Con saldo</TableHead>
                   <TableHead className="text-center">Llegadas mañana</TableHead>
                   <TableHead>Estado</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1649,6 +1775,18 @@ function NightAuditTab() {
                         {NA_STATUS_LABEL[audit.status] ?? audit.status}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setSelectedAudit(audit)}
+                        data-testid={`button-view-audit-${audit.id}`}
+                      >
+                        <Eye className="h-3.5 w-3.5 mr-1" />
+                        Ver
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1656,6 +1794,12 @@ function NightAuditTab() {
           )}
         </CardContent>
       </Card>
+
+      <NightAuditDetailDialog
+        audit={selectedAudit}
+        open={!!selectedAudit}
+        onClose={() => setSelectedAudit(null)}
+      />
     </div>
   );
 }
