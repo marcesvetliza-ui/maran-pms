@@ -1470,8 +1470,8 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
   if (!audit) return null;
   let detail: { inHouse?: any[]; arrivals?: any[] } = {};
   try { detail = JSON.parse(audit.detail || "{}"); } catch {}
-  const inHouse = detail.inHouse || [];
-  const arrivals = detail.arrivals || [];
+  const inHouse = (detail.inHouse || []).slice().sort((a: any, b: any) => parseInt(a.roomNumber) - parseInt(b.roomNumber));
+  const arrivals = (detail.arrivals || []).slice().sort((a: any, b: any) => parseInt(a.roomNumber) - parseInt(b.roomNumber));
   const conSaldo = inHouse.filter((r: any) => r.hasBalance);
   const fmt = (n: number) => n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 0 });
 
