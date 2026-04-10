@@ -40,7 +40,7 @@ export function registerEmailRoutes(app: Express) {
         apiKey, smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure,
       } = req.body;
 
-      const updateData: Record<string, any> = { updatedAt: new Date() };
+      const updateData: Record<string, any> = {};
       if (globalEnabled !== undefined) updateData.globalEnabled = globalEnabled;
       if (provider !== undefined) updateData.provider = provider;
       if (fromEmail !== undefined) updateData.fromEmail = fromEmail;
