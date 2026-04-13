@@ -417,7 +417,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     },
   });
 
-  const efectivoSistema = movements.filter(m => !m.anulado && m.paymentMethod === "cash").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+  const isEfectivo = (method: string) => method === "cash" || method === "efectivo";
+  const efectivoSistema = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod)).reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
   const diferencia = efectivoContado - efectivoSistema;
 
   const openShiftMutation = useMutation({
@@ -500,7 +501,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       });
     },
     onSuccess: (result: any) => {
-      const sysEfect = movements.filter(m => !m.anulado && m.paymentMethod === "cash").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+      const sysEfect = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod)).reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
       setClosingSummaryData({ shift: { ...currentShift!, closedBy, closedAt: new Date().toISOString() }, movements, turnoNuevo: result.turnoNuevo, efectivoContado, efectivoSistema: sysEfect });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
