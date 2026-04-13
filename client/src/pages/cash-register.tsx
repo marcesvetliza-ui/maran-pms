@@ -51,7 +51,13 @@ import {
   Moon,
   RefreshCw,
   CheckCircle,
+  ChevronsUpDown,
+  Building2,
+  Plane,
+  User,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type CashConfig = {
   area: string;
@@ -364,6 +370,11 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [movMethod, setMovMethod] = useState("cash");
   const [movAmount, setMovAmount] = useState("");
   const [movReceipt, setMovReceipt] = useState("");
+  // Cobro cuenta corriente
+  const [movCCEntityType, setMovCCEntityType] = useState<"company" | "agency" | "guest">("company");
+  const [movCCEntityId, setMovCCEntityId] = useState("");
+  const [movCCEntityName, setMovCCEntityName] = useState("");
+  const [movCCOpen, setMovCCOpen] = useState(false);
   const [closingSummaryData, setClosingSummaryData] = useState<{ shift: CashShift; movements: CashMovement[]; turnoNuevo?: CashShift; efectivoContado: number; efectivoSistema: number } | null>(null);
 
   const efectivoContado =
@@ -417,6 +428,23 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     },
   });
 
+  // Para cobro CC
+  const { data: accountSummaryCC } = useQuery<{
+    companies: { id: string; name: string; balance: number }[];
+    agencies: { id: string; name: string; balance: number }[];
+    guests: { id: string; name: string; balance: number }[];
+  }>({
+    queryKey: ["/api/account-summary"],
+    enabled: movementDialog,
+  });
+
+  const ccEntities = (() => {
+    if (!accountSummaryCC) return [];
+    if (movCCEntityType === "company") return [...accountSummaryCC.companies].sort((a, b) => a.name.localeCompare(b.name, "es"));
+    if (movCCEntityType === "agency") return [...accountSummaryCC.agencies].sort((a, b) => a.name.localeCompare(b.name, "es"));
+    return [...(accountSummaryCC.guests ?? [])].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  })();
+
   const isEfectivo = (method: string) => method === "cash" || method === "efectivo";
   const efectivoSistema = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod)).reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
   const diferencia = efectivoContado - efectivoSistema;
@@ -441,22 +469,34 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     },
   });
 
+  const isCobro = movType === "cobro_cc";
+
   const addMovementMutation = useMutation({
     mutationFn: async () => {
+      const label = isCobro
+        ? `Cobro CC — ${movCCEntityName}`
+        : movDesc;
       return apiRequest("POST", "/api/cash/movements", {
         shiftId: currentShift!.id,
         area,
-        sourceType: "manual",
-        sourceLabel: movDesc,
+        sourceType: isCobro ? "cobro_cc" : "manual",
+        sourceLabel: label,
         paymentMethod: movMethod,
         amount: parseFloat(movAmount),
-        movementType: movType,
+        movementType: "income",
         receiptType: movReceipt || undefined,
-        description: movDesc,
+        description: label,
+        ...(isCobro ? {
+          ccEntityType: movCCEntityType,
+          ccEntityId: movCCEntityId,
+          ccEntityName: movCCEntityName,
+        } : {}),
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
       toast({ title: "Movimiento registrado", description: "El movimiento fue agregado correctamente" });
       setMovementDialog(false);
       setMovType("income");
@@ -464,6 +504,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       setMovMethod("cash");
       setMovAmount("");
       setMovReceipt("");
+      setMovCCEntityId("");
+      setMovCCEntityName("");
+      setMovCCEntityType("company");
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -656,6 +699,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                         <TableCell>
                           {m.anulado ? (
                             <span />
+                          ) : m.sourceType === "cobro_cc" ? (
+                            <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">Cobro CC</Badge>
                           ) : m.movementType === "income" ? (
                             <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">Ingreso</Badge>
                           ) : (
@@ -744,33 +789,149 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={movementDialog} onOpenChange={setMovementDialog}>
+      <Dialog open={movementDialog} onOpenChange={(open) => {
+        setMovementDialog(open);
+        if (!open) {
+          setMovType("income");
+          setMovDesc("");
+          setMovMethod("cash");
+          setMovAmount("");
+          setMovReceipt("");
+          setMovCCEntityId("");
+          setMovCCEntityName("");
+          setMovCCEntityType("company");
+        }
+      }}>
         <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Registrar Movimiento Manual</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Tipo de movimiento */}
             <div>
               <label className="text-sm font-medium">Tipo</label>
-              <Select value={movType} onValueChange={setMovType}>
+              <Select value={movType} onValueChange={(v) => {
+                setMovType(v);
+                setMovCCEntityId("");
+                setMovCCEntityName("");
+              }}>
                 <SelectTrigger data-testid={`select-mov-type-${area}`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="income">Ingreso</SelectItem>
+                  <SelectItem value="income">Ingreso manual</SelectItem>
+                  <SelectItem value="cobro_cc">Cobro cuenta corriente</SelectItem>
                   {isAdmin && <SelectItem value="expense">Egreso (solo admin)</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <label className="text-sm font-medium">Descripción</label>
-              <Input
-                value={movDesc}
-                onChange={(e) => setMovDesc(e.target.value)}
-                placeholder="Descripción del movimiento"
-                data-testid={`input-mov-desc-${area}`}
-              />
-            </div>
+
+            {/* Bloque específico para cobro CC */}
+            {isCobro && (
+              <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Cuenta corriente a cobrar</p>
+
+                {/* Tipo de entidad */}
+                <div>
+                  <label className="text-sm font-medium">Tipo</label>
+                  <Select value={movCCEntityType} onValueChange={(v: "company" | "agency" | "guest") => {
+                    setMovCCEntityType(v);
+                    setMovCCEntityId("");
+                    setMovCCEntityName("");
+                  }}>
+                    <SelectTrigger data-testid={`select-cc-entity-type-${area}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="company">
+                        <span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Empresa</span>
+                      </SelectItem>
+                      <SelectItem value="agency">
+                        <span className="flex items-center gap-2"><Plane className="h-3.5 w-3.5" />Agencia</span>
+                      </SelectItem>
+                      <SelectItem value="guest">
+                        <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" />Cliente</span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Selector de entidad — combobox buscable */}
+                <div>
+                  <label className="text-sm font-medium">
+                    {movCCEntityType === "company" ? "Empresa" : movCCEntityType === "agency" ? "Agencia" : "Cliente"}
+                  </label>
+                  <Popover open={movCCOpen} onOpenChange={setMovCCOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        className="w-full justify-between font-normal"
+                        data-testid={`combobox-cc-entity-${area}`}
+                      >
+                        <span className={movCCEntityName ? "" : "text-muted-foreground"}>
+                          {movCCEntityName || "Seleccionar..."}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[340px] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Buscar..." />
+                        <CommandList>
+                          <CommandEmpty>Sin resultados</CommandEmpty>
+                          <CommandGroup>
+                            {ccEntities.map((e) => (
+                              <CommandItem
+                                key={e.id}
+                                value={e.name}
+                                onSelect={() => {
+                                  setMovCCEntityId(e.id);
+                                  setMovCCEntityName(e.name);
+                                  setMovCCOpen(false);
+                                }}
+                              >
+                                <div className="flex items-center justify-between w-full">
+                                  <span>{e.name}</span>
+                                  {e.balance !== 0 && (
+                                    <span className={`text-xs font-semibold tabular-nums ml-2 ${e.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                                      ${e.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                    </span>
+                                  )}
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {movCCEntityId && ccEntities.find(e => e.id === movCCEntityId) && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Saldo actual:{" "}
+                      <span className={`font-semibold ${(ccEntities.find(e => e.id === movCCEntityId)!.balance) > 0 ? "text-red-600" : "text-green-600"}`}>
+                        ${(ccEntities.find(e => e.id === movCCEntityId)!.balance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Descripción — solo para movimientos no-CC */}
+            {!isCobro && (
+              <div>
+                <label className="text-sm font-medium">Descripción</label>
+                <Input
+                  value={movDesc}
+                  onChange={(e) => setMovDesc(e.target.value)}
+                  placeholder="Descripción del movimiento"
+                  data-testid={`input-mov-desc-${area}`}
+                />
+              </div>
+            )}
+
+            {/* Método de pago */}
             <div>
               <label className="text-sm font-medium">Método de pago</label>
               <Select value={movMethod} onValueChange={setMovMethod}>
@@ -778,12 +939,16 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(PAYMENT_METHOD_MAP).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
-                  ))}
+                  {Object.entries(PAYMENT_METHOD_MAP)
+                    .filter(([key]) => !["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente"].includes(key))
+                    .map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Monto */}
             <div>
               <label className="text-sm font-medium">Monto</label>
               <Input
@@ -794,6 +959,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 data-testid={`input-mov-amount-${area}`}
               />
             </div>
+
+            {/* Comprobante */}
             <div>
               <label className="text-sm font-medium">Comprobante (opcional)</label>
               <Select value={movReceipt} onValueChange={setMovReceipt}>
@@ -812,10 +979,14 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           <DialogFooter>
             <Button
               onClick={() => addMovementMutation.mutate()}
-              disabled={!movDesc.trim() || !movAmount || addMovementMutation.isPending}
+              disabled={
+                !movAmount ||
+                addMovementMutation.isPending ||
+                (isCobro ? !movCCEntityId : !movDesc.trim())
+              }
               data-testid={`btn-confirm-movement-${area}`}
             >
-              Registrar
+              {isCobro ? "Registrar cobro CC" : "Registrar"}
             </Button>
           </DialogFooter>
         </DialogContent>

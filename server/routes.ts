@@ -1252,9 +1252,28 @@ export async function registerRoutes(
 
   app.post("/api/cash/movements", requireAuth, async (req, res) => {
     try {
-      const movement = await storage.createCashMovement(req.body);
+      const body = req.body;
+      const movement = await storage.createCashMovement(body);
+
+      // Si es un cobro de cuenta corriente, crear movimiento en account_movements
+      if (body.sourceType === "cobro_cc" && body.ccEntityType && body.ccEntityId) {
+        const user = req.user as any;
+        const today = new Date().toISOString().split("T")[0];
+        await storage.createAccountMovement({
+          entityType: body.ccEntityType,
+          entityId: body.ccEntityId,
+          date: today,
+          type: "pago",
+          description: body.sourceLabel || `Cobro en caja — ${body.ccEntityName || body.ccEntityId}`,
+          amount: String(-Math.abs(parseFloat(body.amount))),
+          reference: `Caja: ${movement.id}`,
+          createdBy: user?.id || null,
+        });
+      }
+
       res.status(201).json(movement);
     } catch (error) {
+      console.error("Error creating cash movement:", error);
       res.status(500).json({ error: "Error creating movement" });
     }
   });
