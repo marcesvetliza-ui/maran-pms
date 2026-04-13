@@ -27,7 +27,12 @@ import { Separator } from "@/components/ui/separator";
 import {
   FileText, Plus, Trash2, Search, ArrowLeft, Building2,
   CreditCard, Landmark, Receipt, ChevronRight, CheckCircle2, Clock, FileDown, Package,
+  ChevronsUpDown, Check, Eye,
 } from "lucide-react";
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Link } from "wouter";
 import { getLocalToday } from "@/lib/utils";
 
@@ -229,6 +234,8 @@ function InvoiceDialog({
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [quickForm, setQuickForm] = useState({ ...emptyQuickSupplier });
+  const [supplierOpen, setSupplierOpen] = useState(false);
+  const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
   const qf = (k: string, v: string) => setQuickForm((p) => ({ ...p, [k]: v }));
@@ -461,17 +468,55 @@ function InvoiceDialog({
                 <div className="col-span-2">
                   <Label>Proveedor</Label>
                   <div className="flex gap-2 items-center">
-                    <Select value={form.supplierId} onValueChange={handleSupplierChange}>
-                      <SelectTrigger data-testid="select-supplier" className="flex-1">
-                        <SelectValue placeholder="Seleccionar proveedor..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">— Ingresar manual —</SelectItem>
-                        {suppliers.map((s) => (
-                          <SelectItem key={s.id} value={String(s.id)}>{s.razonSocial} ({s.cuit})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className="flex-1 justify-between font-normal h-9"
+                          data-testid="select-supplier"
+                        >
+                          <span className="truncate">
+                            {form.supplierId === "manual"
+                              ? "— Ingreso manual —"
+                              : form.supplierId
+                              ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || "Seleccionar proveedor..."
+                              : "Seleccionar proveedor..."}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[400px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Buscar proveedor..." />
+                          <CommandList>
+                            <CommandEmpty>No se encontraron proveedores</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="manual"
+                                onSelect={() => { handleSupplierChange("manual"); setSupplierOpen(false); }}
+                              >
+                                <Check className={`mr-2 h-4 w-4 ${form.supplierId === "manual" ? "opacity-100" : "opacity-0"}`} />
+                                — Ingresar manual —
+                              </CommandItem>
+                              {[...suppliers]
+                                .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
+                                .map((s) => (
+                                  <CommandItem
+                                    key={s.id}
+                                    value={`${s.razonSocial} ${s.cuit}`}
+                                    onSelect={() => { handleSupplierChange(String(s.id)); setSupplierOpen(false); }}
+                                  >
+                                    <Check className={`mr-2 h-4 w-4 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
+                                    <span className="flex-1 truncate">{s.razonSocial}</span>
+                                    <span className="text-xs text-muted-foreground ml-2">{s.cuit}</span>
+                                  </CommandItem>
+                                ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     <Button
                       type="button"
                       variant="outline"
@@ -671,19 +716,49 @@ function InvoiceDialog({
                       {row.mode === "existing" ? (
                         <div>
                           <Label className="text-xs mb-1 block">Artículo del inventario</Label>
-                          <Select value={row.existingItemId || "__none__"} onValueChange={(v) => updateInvRow(i, "existingItemId", v === "__none__" ? "" : v)}>
-                            <SelectTrigger className="h-8 text-sm" data-testid={`select-existing-item-${i}`}>
-                              <SelectValue placeholder="Seleccionar artículo..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">— Seleccionar —</SelectItem>
-                              {existingInvItems.map((item: any) => (
-                                <SelectItem key={item.id} value={String(item.id)}>
-                                  {item.name} — Stock actual: {item.currentStock} {item.unit}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Popover open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                className="w-full justify-between font-normal h-8 text-sm"
+                                data-testid={`select-existing-item-${i}`}
+                              >
+                                <span className="truncate">
+                                  {row.existingItemId
+                                    ? (existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.name || "Seleccionar artículo..."
+                                    : "Seleccionar artículo..."}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[340px] p-0" align="start">
+                              <Command>
+                                <CommandInput placeholder="Buscar artículo..." />
+                                <CommandList>
+                                  <CommandEmpty>No se encontraron artículos</CommandEmpty>
+                                  <CommandGroup>
+                                    {[...existingInvItems]
+                                      .sort((a: any, b: any) => a.name.localeCompare(b.name, "es"))
+                                      .map((item: any) => (
+                                        <CommandItem
+                                          key={item.id}
+                                          value={item.name}
+                                          onSelect={() => {
+                                            updateInvRow(i, "existingItemId", String(item.id));
+                                            setExistingItemOpen((p) => ({ ...p, [i]: false }));
+                                          }}
+                                        >
+                                          <Check className={`mr-2 h-4 w-4 ${row.existingItemId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
+                                          <span className="flex-1">{item.name}</span>
+                                          <span className="text-xs text-muted-foreground ml-2">Stock: {item.currentStock} {item.unit}</span>
+                                        </CommandItem>
+                                      ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         </div>
                       ) : (
                         <div className="grid grid-cols-2 gap-2">
@@ -818,6 +893,97 @@ function InvoiceDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </Dialog>
+  );
+}
+
+// ─── Subcomponent: Invoice Detail Dialog ─────────────────────────────────────
+
+function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice | null; accounts: AccountingAccount[]; onClose: () => void }) {
+  if (!invoice) return null;
+  const fmt2 = (v?: string | number) => {
+    const n = parseFloat(String(v || "0"));
+    return n !== 0 ? `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—";
+  };
+  const account = accounts.find((a) => a.id === invoice.cuentaContableId);
+
+  const rows: [string, string][] = [
+    ["Tipo", invoice.tipoComprobante],
+    ["Número", invoice.numeroComprobanteExt || invoice.numeroComprobante],
+    ["Proveedor", invoice.supplierNombre || invoice.proveedorNombre || "—"],
+    ["CUIT", invoice.proveedorCuit || "—"],
+    ["Fecha de Emisión", invoice.fechaEmision],
+    ["Período", invoice.periodo || "—"],
+    ["Condición de Pago", invoice.condicionPago],
+    ["Estado", invoice.estado],
+    ["Cuenta contable", account ? `${account.codigo} — ${account.nombre}` : "—"],
+  ];
+  const montos: [string, string][] = [
+    ["Monto Neto (gravado)", fmt2(invoice.montoNeto)],
+    ["IVA 21%", fmt2(invoice.montoIva21)],
+    ["IVA 10.5%", fmt2(invoice.montoIva105)],
+    ["IVA 27%", fmt2(invoice.montoIva27)],
+    ...(invoice.percepcionIibb && parseFloat(invoice.percepcionIibb) !== 0 ? [["Percep. IIBB", fmt2(invoice.percepcionIibb)] as [string, string]] : []),
+    ...(invoice.percepcionIva && parseFloat(invoice.percepcionIva) !== 0 ? [["Percep. IVA", fmt2(invoice.percepcionIva)] as [string, string]] : []),
+    ...(invoice.percepcionGanancias && parseFloat(invoice.percepcionGanancias) !== 0 ? [["Percep. Ganancias", fmt2(invoice.percepcionGanancias)] as [string, string]] : []),
+    ...(invoice.retencionIibb && parseFloat(invoice.retencionIibb) !== 0 ? [["Ret. IIBB", `−${fmt2(invoice.retencionIibb)}`] as [string, string]] : []),
+    ...(invoice.retencionGanancias && parseFloat(invoice.retencionGanancias) !== 0 ? [["Ret. Ganancias", `−${fmt2(invoice.retencionGanancias)}`] as [string, string]] : []),
+    ...(invoice.retencionIva && parseFloat(invoice.retencionIva) !== 0 ? [["Ret. IVA", `−${fmt2(invoice.retencionIva)}`] as [string, string]] : []),
+    ...(invoice.retencionSuss && parseFloat(invoice.retencionSuss) !== 0 ? [["Ret. SUSS", `−${fmt2(invoice.retencionSuss)}`] as [string, string]] : []),
+    ...(invoice.impuestosInternos && parseFloat(invoice.impuestosInternos) !== 0 ? [["Imp. Internos", fmt2(invoice.impuestosInternos)] as [string, string]] : []),
+    ...(invoice.ley25413 && parseFloat(invoice.ley25413) !== 0 ? [["Ley 25.413", fmt2(invoice.ley25413)] as [string, string]] : []),
+  ];
+  return (
+    <Dialog open={!!invoice} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            Detalle del Comprobante
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {rows.map(([label, val]) => (
+              <div key={label}>
+                <div className="text-xs text-muted-foreground">{label}</div>
+                <div className="text-sm font-medium">{val}</div>
+              </div>
+            ))}
+          </div>
+          <Separator />
+          <div>
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Desglose de Montos</div>
+            <div className="space-y-1">
+              {montos.map(([label, val]) => (
+                <div key={label} className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="font-mono">{val}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between text-sm font-semibold border-t pt-2 mt-2">
+                <span>TOTAL</span>
+                <span className="font-mono text-base">{fmt2(invoice.montoTotal)}</span>
+              </div>
+            </div>
+          </div>
+          {invoice.centroCosto && (
+            <div>
+              <div className="text-xs text-muted-foreground">Centro de costo</div>
+              <div className="text-sm">{invoice.centroCosto}</div>
+            </div>
+          )}
+          {invoice.observaciones && (
+            <div>
+              <div className="text-xs text-muted-foreground">Observaciones</div>
+              <div className="text-sm text-muted-foreground">{invoice.observaciones}</div>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cerrar</Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }
@@ -1229,6 +1395,7 @@ export default function PurchaseInvoices() {
   const [newOpen, setNewOpen] = useState(false);
   const [opSupplier, setOpSupplier] = useState<CCItem | null>(null);
   const [anularId, setAnularId] = useState<number | null>(null);
+  const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
   const [search, setSearch] = useState("");
   const [filterEstado, setFilterEstado] = useState("todos");
   const [filterPeriodo, setFilterPeriodo] = useState("");
@@ -1434,15 +1601,25 @@ export default function PurchaseInvoices() {
                           <TableCell className="text-right font-semibold">${fmt(inv.montoTotal)}</TableCell>
                           <TableCell>{estadoBadge(inv.estado)}</TableCell>
                           <TableCell>
-                            {inv.estado === "pendiente" && (
+                            <div className="flex items-center gap-1">
                               <Button
                                 variant="ghost" size="icon"
-                                onClick={() => setAnularId(inv.id)}
-                                data-testid={`btn-anular-invoice-${inv.id}`}
+                                onClick={() => setDetailInvoice(inv)}
+                                title="Ver detalle"
+                                data-testid={`btn-detail-invoice-${inv.id}`}
                               >
-                                <Trash2 className="h-4 w-4 text-destructive" />
+                                <Eye className="h-4 w-4" />
                               </Button>
-                            )}
+                              {inv.estado === "pendiente" && (
+                                <Button
+                                  variant="ghost" size="icon"
+                                  onClick={() => setAnularId(inv.id)}
+                                  data-testid={`btn-anular-invoice-${inv.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1522,6 +1699,7 @@ export default function PurchaseInvoices() {
       {/* Dialogs */}
       <InvoiceDialog open={newOpen} onClose={() => setNewOpen(false)} suppliers={suppliers} accounts={accounts} />
       <PaymentOrderDialog supplier={opSupplier} open={!!opSupplier} onClose={() => setOpSupplier(null)} />
+      <InvoiceDetailDialog invoice={detailInvoice} accounts={accounts} onClose={() => setDetailInvoice(null)} />
 
       <AlertDialog open={!!anularId} onOpenChange={() => setAnularId(null)}>
         <AlertDialogContent>

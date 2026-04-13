@@ -170,6 +170,7 @@ export default function InventoryPage() {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [movementType, setMovementType] = useState<"entrada" | "salida">("entrada");
   const [areaFilter, setAreaFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ItemCategory | null>(null);
   const [catName, setCatName] = useState("");
@@ -385,12 +386,15 @@ export default function InventoryPage() {
     onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
   });
 
-  const filteredItems = items.filter((item) => {
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesArea = areaFilter === "all" || (item.category as any)?.area === areaFilter;
-    return matchesSearch && matchesArea;
-  });
+  const filteredItems = items
+    .filter((item) => {
+      const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesArea = areaFilter === "all" || (item.category as any)?.area === areaFilter;
+      const matchesCategory = categoryFilter === "all" || String((item.category as any)?.id || item.categoryId || "") === categoryFilter;
+      return matchesSearch && matchesArea && matchesCategory;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
   const totalValue = items.reduce(
     (sum, item) => sum + (item.currentStock * parseFloat(item.costPrice || "0")),
@@ -563,19 +567,34 @@ export default function InventoryPage() {
         </TabsList>
 
         <TabsContent value="items" className="space-y-4">
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar articulos..."
+                placeholder="Buscar artículos..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
                 data-testid="input-search"
               />
             </div>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
+                <SelectValue placeholder="Todas las categorías" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las categorías</SelectItem>
+                {[...categories]
+                  .sort((a, b) => a.name.localeCompare(b.name, "es"))
+                  .map((cat) => (
+                    <SelectItem key={cat.id} value={String(cat.id)}>
+                      {cat.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
             <Select value={areaFilter} onValueChange={setAreaFilter}>
-              <SelectTrigger className="w-[180px]" data-testid="select-area-filter">
+              <SelectTrigger className="w-[160px]" data-testid="select-area-filter">
                 <SelectValue placeholder="Todas las áreas" />
               </SelectTrigger>
               <SelectContent>
