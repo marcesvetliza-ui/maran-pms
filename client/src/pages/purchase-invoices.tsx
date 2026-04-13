@@ -74,6 +74,7 @@ interface Supplier {
   alicuotaIibb?: number;
   alicuotaGanancias?: number;
   alicuotaIva?: number;
+  cuentaContableId?: number;
 }
 
 interface AccountingAccount {
@@ -207,6 +208,10 @@ interface InvItemRow {
 
 const UNITS = ["unidad", "kg", "g", "litro", "ml", "caja", "paquete", "rollo", "metro", "par"];
 
+const emptyQuickSupplier = {
+  razonSocial: "", cuit: "", condicionIva: "Responsable Inscripto", cuentaContableId: "",
+};
+
 function InvoiceDialog({
   open,
   onClose,
@@ -222,8 +227,41 @@ function InvoiceDialog({
   const [form, setForm] = useState(emptyForm());
   const [step, setStep] = useState(0);
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [quickForm, setQuickForm] = useState({ ...emptyQuickSupplier });
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
+  const qf = (k: string, v: string) => setQuickForm((p) => ({ ...p, [k]: v }));
+
+  const quickCreateMut = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/accounting-suppliers", data),
+    onSuccess: (res: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      setQuickCreateOpen(false);
+      setQuickForm({ ...emptyQuickSupplier });
+      if (res?.id) {
+        f("supplierId", String(res.id));
+        f("proveedorNombre", res.razon_social || "");
+        f("proveedorCuit", res.cuit || "");
+        if (res.cuenta_contable_id) f("cuentaContableId", String(res.cuenta_contable_id));
+      }
+      toast({ title: "Proveedor creado y seleccionado" });
+    },
+    onError: (e: any) => toast({ title: "Error al crear proveedor", description: e.message, variant: "destructive" }),
+  });
+
+  const handleQuickCreateSubmit = () => {
+    if (!quickForm.razonSocial || !quickForm.cuit || !quickForm.condicionIva) {
+      toast({ title: "Complete razón social, CUIT y condición IVA", variant: "destructive" });
+      return;
+    }
+    quickCreateMut.mutate({
+      razonSocial: quickForm.razonSocial,
+      cuit: quickForm.cuit,
+      condicionIva: quickForm.condicionIva,
+      cuentaContableId: quickForm.cuentaContableId || null,
+    });
+  };
 
   const { data: itemCategories = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/categories"],
@@ -249,6 +287,7 @@ function InvoiceDialog({
       f("proveedorNombre", s.razonSocial);
       f("proveedorCuit", s.cuit);
       if (s.alicuotaIibb) f("alicuotaIibbProveedor", String(s.alicuotaIibb));
+      if (s.cuentaContableId) f("cuentaContableId", String(s.cuentaContableId));
     } else {
       f("supplierId", "");
     }
@@ -348,6 +387,21 @@ function InvoiceDialog({
       toast({ title: "Ingrese el número de comprobante", variant: "destructive" });
       return;
     }
+    const validItems = invItems.filter(
+      (r) => (r.mode === "new" && r.name.trim()) || (r.mode === "existing" && r.existingItemId)
+    );
+    if (validItems.length > 0) {
+      const itemsTotal = validItems.reduce((acc, r) => acc + (parseFloat(r.quantity) || 0) * (parseFloat(r.costPrice) || 0), 0);
+      const netoVal = $n(form.montoNeto);
+      if (netoVal > 0 && Math.abs(itemsTotal - netoVal) > 1) {
+        toast({
+          title: "Diferencia en artículos",
+          description: `La suma de artículos ($${itemsTotal.toFixed(2)}) no coincide con el Monto Neto ($${netoVal.toFixed(2)}). Revisá los precios antes de finalizar.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
     createMut.mutate({ ...form, supplierId: form.supplierId ? parseInt(form.supplierId) : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
   };
 
@@ -406,17 +460,29 @@ function InvoiceDialog({
                 </div>
                 <div className="col-span-2">
                   <Label>Proveedor</Label>
-                  <Select value={form.supplierId} onValueChange={handleSupplierChange}>
-                    <SelectTrigger data-testid="select-supplier">
-                      <SelectValue placeholder="Seleccionar proveedor..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="manual">— Ingresar manual —</SelectItem>
-                      {suppliers.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>{s.razonSocial} ({s.cuit})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex gap-2 items-center">
+                    <Select value={form.supplierId} onValueChange={handleSupplierChange}>
+                      <SelectTrigger data-testid="select-supplier" className="flex-1">
+                        <SelectValue placeholder="Seleccionar proveedor..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">— Ingresar manual —</SelectItem>
+                        {suppliers.map((s) => (
+                          <SelectItem key={s.id} value={String(s.id)}>{s.razonSocial} ({s.cuit})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setQuickCreateOpen(true)}
+                      title="Crear nuevo proveedor"
+                      data-testid="btn-quick-create-supplier"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 {(form.supplierId === "manual" || !form.supplierId) && (
                   <>
@@ -690,13 +756,68 @@ function InvoiceDialog({
             ) : (
               <Button onClick={handleSubmit} disabled={createMut.isPending} data-testid="btn-submit-invoice">
                 {createMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-                {(() => { const count = invItems.filter(r => (r.mode === "new" && r.name.trim()) || (r.mode === "existing" && r.existingItemId)).length; return count > 0 ? `Registrar + ${count} artículo(s)` : "Registrar comprobante"; })()}
+                Factura completa
               </Button>
             )}
           </div>
         </DialogFooter>
         </div>
       </DialogContent>
+
+      {/* Quick-create supplier dialog */}
+      <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nuevo Proveedor</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2">
+              <Label>Razón Social *</Label>
+              <Input value={quickForm.razonSocial} onChange={(e) => qf("razonSocial", e.target.value)} data-testid="input-quick-razon-social" />
+            </div>
+            <div>
+              <Label>CUIT *</Label>
+              <Input value={quickForm.cuit} onChange={(e) => qf("cuit", e.target.value)} placeholder="20-12345678-9" data-testid="input-quick-cuit" />
+            </div>
+            <div>
+              <Label>Condición IVA *</Label>
+              <Select value={quickForm.condicionIva} onValueChange={(v) => qf("condicionIva", v)}>
+                <SelectTrigger data-testid="select-quick-condicion-iva">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["Responsable Inscripto","Monotributo","Exento","No Responsable","Consumidor Final"].map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="col-span-2">
+              <Label>Cuenta contable por defecto</Label>
+              <Select value={quickForm.cuentaContableId} onValueChange={(v) => qf("cuentaContableId", v)}>
+                <SelectTrigger data-testid="select-quick-cuenta-contable">
+                  <SelectValue placeholder="Sin cuenta por defecto" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin cuenta por defecto</SelectItem>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={String(a.id)}>
+                      {a.codigo} — {a.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickCreateOpen(false)}>Cancelar</Button>
+            <Button onClick={handleQuickCreateSubmit} disabled={quickCreateMut.isPending} data-testid="btn-submit-quick-supplier">
+              {quickCreateMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
+              Crear proveedor
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
@@ -1125,6 +1246,7 @@ export default function PurchaseInvoices() {
     alicuotaIibb: parseFloat(r.alicuota_iibb || "0"),
     alicuotaGanancias: parseFloat(r.alicuota_ganancias || "0"),
     alicuotaIva: parseFloat(r.alicuota_iva || "0"),
+    cuentaContableId: r.cuenta_contable_id ? parseInt(r.cuenta_contable_id) : undefined,
   }));
 
   const { data: rawAccounts = [] } = useQuery<any[]>({

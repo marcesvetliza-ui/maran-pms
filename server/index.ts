@@ -145,6 +145,18 @@ app.use((req, res, next) => {
     console.error("package_room_prices migration error (non-blocking):", err);
   }
 
+  // Migrate: add cuenta_contable_id to accounting_suppliers
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      ALTER TABLE accounting_suppliers
+        ADD COLUMN IF NOT EXISTS cuenta_contable_id INTEGER REFERENCES accounting_accounts(id)
+    `);
+  } catch (err) {
+    console.error("accounting_suppliers migration error (non-blocking):", err);
+  }
+
   // Migrate: add SMTP columns to email_config + ensure the single config row exists
   try {
     const { db } = await import("./db");

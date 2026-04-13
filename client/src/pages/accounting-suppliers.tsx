@@ -39,6 +39,14 @@ interface AccountingSupplier {
   banco?: string;
   activo?: boolean;
   saldoCc?: number;
+  cuentaContableId?: number;
+}
+
+interface AccountingAccount {
+  id: number;
+  codigo: string;
+  nombre: string;
+  tipo: string;
 }
 
 const CONDICIONES_IVA = [
@@ -73,6 +81,7 @@ function camelRow(r: any): AccountingSupplier {
     banco: r.banco,
     activo: r.activo,
     saldoCc: parseFloat(r.saldo_cc || "0"),
+    cuentaContableId: r.cuenta_contable_id ? parseInt(r.cuenta_contable_id) : undefined,
   };
 }
 
@@ -80,7 +89,7 @@ const emptyForm = {
   razonSocial: "", cuit: "", condicionIva: "Responsable Inscripto",
   domicilio: "", localidad: "", provincia: "Entre Ríos", cp: "",
   alicuotaIibb: "3.50", alicuotaGanancias: "0", alicuotaIva: "0",
-  cbu: "", banco: "",
+  cbu: "", banco: "", cuentaContableId: "",
 };
 
 export default function AccountingSuppliers() {
@@ -95,6 +104,13 @@ export default function AccountingSuppliers() {
     queryKey: ["/api/accounting-suppliers"],
   });
   const suppliers = rawSuppliers.map(camelRow);
+
+  const { data: rawAccounts = [] } = useQuery<any[]>({
+    queryKey: ["/api/accounting-accounts"],
+  });
+  const accounts: AccountingAccount[] = rawAccounts.map((a: any) => ({
+    id: a.id, codigo: a.codigo, nombre: a.nombre, tipo: a.tipo,
+  }));
 
   const createMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/accounting-suppliers", data),
@@ -147,6 +163,7 @@ export default function AccountingSuppliers() {
       alicuotaIva: String(s.alicuotaIva ?? "0"),
       cbu: s.cbu || "",
       banco: s.banco || "",
+      cuentaContableId: s.cuentaContableId ? String(s.cuentaContableId) : "",
     });
     setDialogOpen(true);
   };
@@ -169,6 +186,7 @@ export default function AccountingSuppliers() {
       alicuotaIva: parseFloat(form.alicuotaIva) || 0,
       cbu: form.cbu || null,
       banco: form.banco || null,
+      cuentaContableId: form.cuentaContableId || null,
     };
     if (editing) {
       updateMut.mutate({ id: editing.id, ...payload });
@@ -372,6 +390,26 @@ export default function AccountingSuppliers() {
             <div>
               <Label>Código Postal</Label>
               <Input value={form.cp} onChange={(e) => f(e.target.value, "cp")} data-testid="input-cp" />
+            </div>
+
+            <div className="col-span-2 border-t pt-3">
+              <p className="text-sm font-semibold text-muted-foreground mb-3">Cuenta Contable por Defecto</p>
+            </div>
+            <div className="col-span-2">
+              <Label>Cuenta contable (se auto-completa en comprobantes)</Label>
+              <Select value={form.cuentaContableId} onValueChange={(v) => f(v, "cuentaContableId")}>
+                <SelectTrigger data-testid="select-cuenta-contable">
+                  <SelectValue placeholder="Sin cuenta por defecto" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin cuenta por defecto</SelectItem>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={String(a.id)}>
+                      {a.codigo} — {a.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="col-span-2 border-t pt-3">

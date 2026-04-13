@@ -1510,13 +1510,13 @@ export async function registerRoutes(
   app.post("/api/accounting-suppliers", requireAuth, async (req, res) => {
     try {
       const { razonSocial, cuit, condicionIva, domicilio, localidad, provincia, cp,
-        alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco } = req.body;
+        alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco, cuentaContableId } = req.body;
       if (!razonSocial || !cuit || !condicionIva) {
         return res.status(400).json({ error: "Razón social, CUIT y condición IVA son requeridos" });
       }
       const result = await db.execute(sql`
-        INSERT INTO accounting_suppliers (razon_social, cuit, condicion_iva, domicilio, localidad, provincia, cp, alicuota_iibb, alicuota_ganancias, alicuota_iva, cbu, banco)
-        VALUES (${razonSocial}, ${cuit}, ${condicionIva}, ${domicilio||null}, ${localidad||null}, ${provincia||"Entre Rios"}, ${cp||null}, ${alicuotaIibb||0}, ${alicuotaGanancias||0}, ${alicuotaIva||0}, ${cbu||null}, ${banco||null})
+        INSERT INTO accounting_suppliers (razon_social, cuit, condicion_iva, domicilio, localidad, provincia, cp, alicuota_iibb, alicuota_ganancias, alicuota_iva, cbu, banco, cuenta_contable_id)
+        VALUES (${razonSocial}, ${cuit}, ${condicionIva}, ${domicilio||null}, ${localidad||null}, ${provincia||"Entre Rios"}, ${cp||null}, ${alicuotaIibb||0}, ${alicuotaGanancias||0}, ${alicuotaIva||0}, ${cbu||null}, ${banco||null}, ${cuentaContableId ? parseInt(cuentaContableId) : null})
         RETURNING *
       `);
       res.status(201).json(result.rows[0]);
@@ -1530,7 +1530,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { razonSocial, cuit, condicionIva, domicilio, localidad, provincia, cp,
-        alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco, activo } = req.body;
+        alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco, activo, cuentaContableId } = req.body;
       const result = await db.execute(sql`
         UPDATE accounting_suppliers SET
           razon_social = COALESCE(${razonSocial||null}, razon_social),
@@ -1546,6 +1546,7 @@ export async function registerRoutes(
           cbu = COALESCE(${cbu !== undefined ? cbu : null}, cbu),
           banco = COALESCE(${banco !== undefined ? banco : null}, banco),
           activo = COALESCE(${activo !== undefined ? activo : null}, activo),
+          cuenta_contable_id = ${cuentaContableId !== undefined ? (cuentaContableId ? parseInt(cuentaContableId) : null) : sql`cuenta_contable_id`},
           updated_at = NOW()
         WHERE id = ${id}
         RETURNING *
