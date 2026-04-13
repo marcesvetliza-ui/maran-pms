@@ -19,6 +19,7 @@ import {
   User,
   ExternalLink,
   ChevronRight,
+  Printer,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,241 @@ type AccountMovement = {
   createdAt: string;
 };
 
-function EntityMovementsInline({ entityType, entityId }: { entityType: string; entityId: string }) {
+const TYPE_LABELS: Record<string, string> = {
+  company: "Empresa",
+  agency: "Agencia",
+  guest: "Cliente",
+};
+
+const MOVEMENT_TYPE_LABELS: Record<string, string> = {
+  cargo: "Cargo",
+  pago: "Pago",
+  nota_credito: "Nota Crédito",
+  ajuste: "Ajuste",
+};
+
+function fmtMoney(n: string | number) {
+  return `$${parseFloat(String(n)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+}
+
+function printEntityStatement(entityName: string, entityType: string, movements: AccountMovement[]) {
+  const balance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
+  const today = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" });
+  const entityTypeName = TYPE_LABELS[entityType] ?? entityType;
+
+  const rows = movements.map((m) => {
+    const amt = parseFloat(m.amount);
+    const ref = m.reservationCode ?? m.guestName ?? m.reference ?? "—";
+    const color = amt > 0 ? "#dc2626" : "#16a34a";
+    const typeColor = m.type === "cargo" ? "#dc2626" : m.type === "pago" ? "#16a34a" : "#2563eb";
+    return `
+      <tr>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;">${m.date}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;">
+          <span style="background:#f3f4f6;color:${typeColor};border:1px solid ${typeColor}33;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">
+            ${MOVEMENT_TYPE_LABELS[m.type] ?? m.type}
+          </span>
+        </td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;">${m.description}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:11px;">${ref}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600;color:${color};">${fmtMoney(m.amount)}</td>
+      </tr>`;
+  }).join("");
+
+  const balanceColor = balance > 0 ? "#dc2626" : "#16a34a";
+  const balanceLabel = balance > 0 ? "SALDO DEUDOR" : "SALDO ACREEDOR";
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Estado de Cuenta — ${entityName}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #111; background: #fff; padding: 32px 40px; font-size: 13px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; border-bottom: 2px solid #1e3a5f; padding-bottom: 18px; }
+    .hotel-name { font-size: 22px; font-weight: 800; color: #1e3a5f; letter-spacing: -0.5px; }
+    .hotel-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .doc-info { text-align: right; }
+    .doc-title { font-size: 18px; font-weight: 700; color: #1e3a5f; }
+    .doc-meta { font-size: 11px; color: #6b7280; margin-top: 4px; }
+    .entity-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin-bottom: 22px; }
+    .entity-type { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; font-weight: 600; }
+    .entity-name { font-size: 20px; font-weight: 700; color: #111; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead tr { background: #1e3a5f; color: #fff; }
+    thead th { padding: 9px 10px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    thead th:last-child { text-align: right; }
+    tbody tr:hover { background: #f9fafb; }
+    tbody tr:nth-child(even) { background: #f9fafb; }
+    .balance-row { margin-top: 0; }
+    .balance-row td { padding: 10px 10px; font-weight: 700; font-size: 14px; background: #f1f5f9; }
+    .footer { margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 14px; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-sub">Sistema de Gestión Hotelera</div>
+    </div>
+    <div class="doc-info">
+      <div class="doc-title">Estado de Cuenta</div>
+      <div class="doc-meta">Emitido: ${today}</div>
+    </div>
+  </div>
+
+  <div class="entity-box">
+    <div class="entity-type">${entityTypeName}</div>
+    <div class="entity-name">${entityName}</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Tipo</th>
+        <th>Descripción</th>
+        <th>Referencia</th>
+        <th style="text-align:right;">Importe</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#9ca3af;">Sin movimientos</td></tr>'}
+    </tbody>
+    <tfoot>
+      <tr class="balance-row">
+        <td colspan="3"></td>
+        <td style="text-align:right;color:#6b7280;font-size:12px;">${balanceLabel}:</td>
+        <td style="text-align:right;color:${balanceColor};">${fmtMoney(Math.abs(balance))}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="footer">
+    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${today}</span>
+  </div>
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`;
+
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+function printDebtListing(
+  title: string,
+  entities: { id: string; name: string; balance: number }[]
+) {
+  const today = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" });
+  const sorted = [...entities].sort((a, b) => b.balance - a.balance);
+  const total = sorted.reduce((s, e) => s + e.balance, 0);
+
+  const rows = sorted.map((e, i) => {
+    const color = e.balance > 0 ? "#dc2626" : "#16a34a";
+    return `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;color:#6b7280;">${i + 1}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:500;">${e.name}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700;color:${color};">${fmtMoney(e.balance)}</td>
+      </tr>`;
+  }).join("");
+
+  const totalColor = total > 0 ? "#dc2626" : "#16a34a";
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${title}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #111; background: #fff; padding: 32px 40px; font-size: 13px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; border-bottom: 2px solid #1e3a5f; padding-bottom: 18px; }
+    .hotel-name { font-size: 22px; font-weight: 800; color: #1e3a5f; letter-spacing: -0.5px; }
+    .hotel-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .doc-info { text-align: right; }
+    .doc-title { font-size: 18px; font-weight: 700; color: #1e3a5f; }
+    .doc-meta { font-size: 11px; color: #6b7280; margin-top: 4px; }
+    .summary { display: flex; gap: 24px; margin-bottom: 22px; }
+    .stat { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 18px; flex: 1; text-align: center; }
+    .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; font-weight: 600; }
+    .stat-value { font-size: 22px; font-weight: 800; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #1e3a5f; color: #fff; }
+    thead th { padding: 9px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    thead th:last-child { text-align: right; }
+    tbody tr:nth-child(even) { background: #f9fafb; }
+    .total-row td { padding: 10px 12px; font-weight: 700; font-size: 14px; background: #f1f5f9; border-top: 2px solid #1e3a5f; }
+    .footer { margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 14px; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-sub">Sistema de Gestión Hotelera</div>
+    </div>
+    <div class="doc-info">
+      <div class="doc-title">${title}</div>
+      <div class="doc-meta">Emitido: ${today}</div>
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="stat">
+      <div class="stat-label">Cantidad</div>
+      <div class="stat-value" style="color:#1e3a5f;">${sorted.length}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total adeudado</div>
+      <div class="stat-value" style="color:${totalColor};">${fmtMoney(total)}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:40px;">#</th>
+        <th>Nombre</th>
+        <th style="text-align:right;">Saldo</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || '<tr><td colspan="3" style="text-align:center;padding:20px;color:#9ca3af;">Sin registros con saldo</td></tr>'}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="2" style="text-align:right;color:#6b7280;font-size:12px;">TOTAL:</td>
+        <td style="text-align:right;color:${totalColor};">${fmtMoney(total)}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="footer">
+    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${today}</span>
+  </div>
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`;
+
+  const w = window.open("", "_blank", "width=800,height=650");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+function EntityMovementsInline({
+  entityType,
+  entityId,
+  entityName,
+}: {
+  entityType: string;
+  entityId: string;
+  entityName: string;
+}) {
   const { data: movements = [], isLoading } = useQuery<AccountMovement[]>({
     queryKey: ["/api/account-movements", entityType, entityId],
     queryFn: async () => {
@@ -68,16 +303,6 @@ function EntityMovementsInline({ entityType, entityId }: { entityType: string; e
       return res.json();
     },
   });
-
-  const fmt = (n: string | number) =>
-    `$${parseFloat(String(n)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
-
-  const typeLabel: Record<string, string> = {
-    cargo: "Cargo",
-    pago: "Pago",
-    nota_credito: "Nota Cred.",
-    ajuste: "Ajuste",
-  };
 
   if (isLoading) {
     return (
@@ -99,6 +324,23 @@ function EntityMovementsInline({ entityType, entityId }: { entityType: string; e
 
   return (
     <div className="mt-1 mb-2 border rounded-md overflow-hidden bg-muted/20">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/40 border-b">
+        <span className="text-xs text-muted-foreground font-medium">
+          {movements.length} movimiento{movements.length !== 1 ? "s" : ""}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs gap-1"
+          onClick={() => printEntityStatement(entityName, entityType, movements)}
+          data-testid={`button-print-statement-${entityId}`}
+        >
+          <Printer className="h-3 w-3" />
+          Imprimir estado de cuenta
+        </Button>
+      </div>
       <table className="w-full text-xs">
         <thead>
           <tr className="bg-muted/50 text-muted-foreground">
@@ -126,7 +368,7 @@ function EntityMovementsInline({ entityType, entityId }: { entityType: string; e
                         : "text-blue-600 border-blue-300"
                     }`}
                   >
-                    {typeLabel[m.type] ?? m.type}
+                    {MOVEMENT_TYPE_LABELS[m.type] ?? m.type}
                   </Badge>
                 </td>
                 <td className="px-3 py-1.5 max-w-[200px] truncate">{m.description}</td>
@@ -140,7 +382,7 @@ function EntityMovementsInline({ entityType, entityId }: { entityType: string; e
                   )}
                 </td>
                 <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${isDebt ? "text-red-600" : "text-green-600"}`}>
-                  {fmt(m.amount)}
+                  {fmtMoney(m.amount)}
                 </td>
               </tr>
             );
@@ -150,7 +392,7 @@ function EntityMovementsInline({ entityType, entityId }: { entityType: string; e
           <tr className="bg-muted/50 font-semibold">
             <td colSpan={4} className="px-3 py-1.5 text-xs text-right text-muted-foreground">Saldo total:</td>
             <td className={`px-3 py-1.5 text-right tabular-nums text-xs ${balance > 0 ? "text-red-600" : "text-green-600"}`}>
-              {fmt(balance)}
+              {fmtMoney(balance)}
             </td>
           </tr>
         </tfoot>
@@ -355,12 +597,26 @@ export default function AdminCuentasPage() {
             {/* Empresas */}
             {(expandedCard === "companies" || expandedCard === "all") && (
               <div className={expandedCard === "all" ? "mb-5" : ""}>
-                {expandedCard === "all" && (
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
                     <Building2 className="h-4 w-4 text-muted-foreground" />
                     <p className="text-sm font-semibold">Empresas</p>
+                    <span className="text-xs text-muted-foreground">({accountSummary.companies.length})</span>
                   </div>
-                )}
+                  {accountSummary.companies.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs gap-1"
+                      onClick={() => printDebtListing("Listado de Deudas — Empresas", accountSummary.companies)}
+                      data-testid="button-print-companies"
+                    >
+                      <Printer className="h-3 w-3" />
+                      Imprimir listado
+                    </Button>
+                  )}
+                </div>
                 {accountSummary.companies.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-2">Sin empresas con saldo pendiente</p>
                 ) : (
@@ -398,7 +654,7 @@ export default function AdminCuentasPage() {
                               </div>
                             </div>
                             {isExpanded && (
-                              <EntityMovementsInline entityType="company" entityId={c.id} />
+                              <EntityMovementsInline entityType="company" entityId={c.id} entityName={c.name} />
                             )}
                           </div>
                         );
@@ -411,12 +667,26 @@ export default function AdminCuentasPage() {
             {/* Agencias */}
             {(expandedCard === "agencies" || expandedCard === "all") && (
               <div className={expandedCard === "all" ? "mb-5" : ""}>
-                {expandedCard === "all" && (
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
                     <Plane className="h-4 w-4 text-muted-foreground" />
                     <p className="text-sm font-semibold">Agencias</p>
+                    <span className="text-xs text-muted-foreground">({accountSummary.agencies.length})</span>
                   </div>
-                )}
+                  {accountSummary.agencies.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs gap-1"
+                      onClick={() => printDebtListing("Listado de Deudas — Agencias", accountSummary.agencies)}
+                      data-testid="button-print-agencies"
+                    >
+                      <Printer className="h-3 w-3" />
+                      Imprimir listado
+                    </Button>
+                  )}
+                </div>
                 {accountSummary.agencies.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-2">Sin agencias con saldo pendiente</p>
                 ) : (
@@ -454,7 +724,7 @@ export default function AdminCuentasPage() {
                               </div>
                             </div>
                             {isExpanded && (
-                              <EntityMovementsInline entityType="agency" entityId={a.id} />
+                              <EntityMovementsInline entityType="agency" entityId={a.id} entityName={a.name} />
                             )}
                           </div>
                         );
@@ -467,12 +737,26 @@ export default function AdminCuentasPage() {
             {/* Clientes */}
             {(expandedCard === "guests" || expandedCard === "all") && (
               <div>
-                {expandedCard === "all" && (
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
                     <User className="h-4 w-4 text-muted-foreground" />
                     <p className="text-sm font-semibold">Clientes</p>
+                    <span className="text-xs text-muted-foreground">({accountSummary.guests?.length ?? 0})</span>
                   </div>
-                )}
+                  {(accountSummary.guests?.length ?? 0) > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs gap-1"
+                      onClick={() => printDebtListing("Listado de Deudas — Clientes", accountSummary.guests ?? [])}
+                      data-testid="button-print-guests"
+                    >
+                      <Printer className="h-3 w-3" />
+                      Imprimir listado
+                    </Button>
+                  )}
+                </div>
                 {(accountSummary.guests?.length ?? 0) === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-2">Sin clientes con saldo pendiente</p>
                 ) : (
@@ -510,7 +794,7 @@ export default function AdminCuentasPage() {
                               </div>
                             </div>
                             {isExpanded && (
-                              <EntityMovementsInline entityType="guest" entityId={g.id} />
+                              <EntityMovementsInline entityType="guest" entityId={g.id} entityName={g.name} />
                             )}
                           </div>
                         );
