@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Plus,
   ChevronDown,
+  ChevronUp,
   ArrowLeft,
   TrendingUp,
   TrendingDown,
@@ -16,6 +17,7 @@ import {
   RefreshCw,
   AlertCircle,
   User,
+  ExternalLink,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,9 +42,15 @@ type Movement = {
   type: string;
 };
 
+type ExpandedCard = "companies" | "agencies" | "guests" | "all" | null;
+
 export default function AdminCuentasPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const [expandedCard, setExpandedCard] = useState<ExpandedCard>(null);
+
+  const toggleCard = (card: ExpandedCard) =>
+    setExpandedCard((prev) => (prev === card ? null : card));
 
   const reconcileMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/reconcile-cc-payments"),
@@ -109,7 +117,7 @@ export default function AdminCuentasPage() {
         </div>
       </div>
 
-      {/* Resumen de deuda */}
+      {/* Resumen de deuda — cards clickeables */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {summaryLoading ? (
           <>
@@ -120,8 +128,13 @@ export default function AdminCuentasPage() {
           </>
         ) : (
           <>
-            <Card data-testid="card-cc-empresas-total">
-              <CardContent className="pt-6 text-center">
+            {/* Empresas */}
+            <Card
+              className={`cursor-pointer transition-all hover:shadow-md hover:border-primary/40 ${expandedCard === "companies" ? "border-primary ring-1 ring-primary/20" : ""}`}
+              onClick={() => toggleCard("companies")}
+              data-testid="card-cc-empresas-total"
+            >
+              <CardContent className="pt-5 pb-4 text-center relative">
                 <div className="flex items-center justify-center gap-2 mb-1">
                   <Building2 className="h-4 w-4 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">Empresas</p>
@@ -132,11 +145,19 @@ export default function AdminCuentasPage() {
                 <p className="text-xs text-muted-foreground mt-1">
                   {accountSummary?.companies.length || 0} empresa(s) con saldo
                 </p>
+                <div className="absolute bottom-2 right-2 text-muted-foreground">
+                  {expandedCard === "companies" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </div>
               </CardContent>
             </Card>
 
-            <Card data-testid="card-cc-agencias-total">
-              <CardContent className="pt-6 text-center">
+            {/* Agencias */}
+            <Card
+              className={`cursor-pointer transition-all hover:shadow-md hover:border-primary/40 ${expandedCard === "agencies" ? "border-primary ring-1 ring-primary/20" : ""}`}
+              onClick={() => toggleCard("agencies")}
+              data-testid="card-cc-agencias-total"
+            >
+              <CardContent className="pt-5 pb-4 text-center relative">
                 <div className="flex items-center justify-center gap-2 mb-1">
                   <Plane className="h-4 w-4 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">Agencias</p>
@@ -147,11 +168,19 @@ export default function AdminCuentasPage() {
                 <p className="text-xs text-muted-foreground mt-1">
                   {accountSummary?.agencies.length || 0} agencia(s) con saldo
                 </p>
+                <div className="absolute bottom-2 right-2 text-muted-foreground">
+                  {expandedCard === "agencies" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </div>
               </CardContent>
             </Card>
 
-            <Card data-testid="card-cc-huespedes-total">
-              <CardContent className="pt-6 text-center">
+            {/* Clientes */}
+            <Card
+              className={`cursor-pointer transition-all hover:shadow-md hover:border-primary/40 ${expandedCard === "guests" ? "border-primary ring-1 ring-primary/20" : ""}`}
+              onClick={() => toggleCard("guests")}
+              data-testid="card-cc-huespedes-total"
+            >
+              <CardContent className="pt-5 pb-4 text-center relative">
                 <div className="flex items-center justify-center gap-2 mb-1">
                   <User className="h-4 w-4 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">Clientes</p>
@@ -162,11 +191,19 @@ export default function AdminCuentasPage() {
                 <p className="text-xs text-muted-foreground mt-1">
                   {accountSummary?.guests?.length || 0} cliente(s) con saldo
                 </p>
+                <div className="absolute bottom-2 right-2 text-muted-foreground">
+                  {expandedCard === "guests" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </div>
               </CardContent>
             </Card>
 
-            <Card className="border-2 border-purple-200 dark:border-purple-800 bg-purple-50/40 dark:bg-purple-950/20" data-testid="card-cc-total">
-              <CardContent className="pt-6 text-center">
+            {/* Total */}
+            <Card
+              className={`border-2 border-purple-200 dark:border-purple-800 bg-purple-50/40 dark:bg-purple-950/20 cursor-pointer transition-all hover:shadow-md ${expandedCard === "all" ? "ring-2 ring-purple-400/40" : ""}`}
+              onClick={() => toggleCard("all")}
+              data-testid="card-cc-total"
+            >
+              <CardContent className="pt-5 pb-4 text-center relative">
                 <div className="flex items-center justify-center gap-2 mb-1">
                   <Users2 className="h-4 w-4 text-purple-600" />
                   <p className="text-sm text-muted-foreground">Total pendiente</p>
@@ -175,11 +212,153 @@ export default function AdminCuentasPage() {
                   ${totalDebt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">combinado</p>
+                <div className="absolute bottom-2 right-2 text-muted-foreground">
+                  {expandedCard === "all" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </div>
               </CardContent>
             </Card>
           </>
         )}
       </div>
+
+      {/* Panel expandible — lista de deudores */}
+      {expandedCard && accountSummary && (
+        <Card className="border-dashed">
+          <CardContent className="pt-4 pb-4">
+            {/* Empresas */}
+            {(expandedCard === "companies" || expandedCard === "all") && (
+              <div className={expandedCard === "all" ? "mb-5" : ""}>
+                {expandedCard === "all" && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <Building2 className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-sm font-semibold">Empresas</p>
+                  </div>
+                )}
+                {accountSummary.companies.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-2">Sin empresas con saldo pendiente</p>
+                ) : (
+                  <div className="space-y-1">
+                    {[...accountSummary.companies]
+                      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+                      .map((c) => (
+                        <div key={c.id} className="flex items-center justify-between p-2.5 rounded-md hover:bg-muted/50 gap-3" data-testid={`row-deuda-empresa-${c.id}`}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-sm font-medium truncate">{c.name}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className={`text-sm font-bold tabular-nums ${c.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                              ${c.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/companies?search=${encodeURIComponent(c.name)}`); }}
+                              data-testid={`button-ver-empresa-${c.id}`}
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              Ver
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Agencias */}
+            {(expandedCard === "agencies" || expandedCard === "all") && (
+              <div className={expandedCard === "all" ? "mb-5" : ""}>
+                {expandedCard === "all" && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <Plane className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-sm font-semibold">Agencias</p>
+                  </div>
+                )}
+                {accountSummary.agencies.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-2">Sin agencias con saldo pendiente</p>
+                ) : (
+                  <div className="space-y-1">
+                    {[...accountSummary.agencies]
+                      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+                      .map((a) => (
+                        <div key={a.id} className="flex items-center justify-between p-2.5 rounded-md hover:bg-muted/50 gap-3" data-testid={`row-deuda-agencia-${a.id}`}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Plane className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-sm font-medium truncate">{a.name}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className={`text-sm font-bold tabular-nums ${a.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                              ${a.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/agencies?search=${encodeURIComponent(a.name)}`); }}
+                              data-testid={`button-ver-agencia-${a.id}`}
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              Ver
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Clientes */}
+            {(expandedCard === "guests" || expandedCard === "all") && (
+              <div>
+                {expandedCard === "all" && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <User className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-sm font-semibold">Clientes</p>
+                  </div>
+                )}
+                {(accountSummary.guests?.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-2">Sin clientes con saldo pendiente</p>
+                ) : (
+                  <div className="space-y-1">
+                    {[...(accountSummary.guests ?? [])]
+                      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+                      .map((g) => (
+                        <div key={g.id} className="flex items-center justify-between p-2.5 rounded-md hover:bg-muted/50 gap-3" data-testid={`row-deuda-cliente-${g.id}`}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-sm font-medium truncate">{g.name}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className={`text-sm font-bold tabular-nums ${g.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                              ${g.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={(e) => { e.stopPropagation(); navigate("/admin/cc-huespedes"); }}
+                              data-testid={`button-ver-cliente-${g.id}`}
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              Ver
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Acciones */}
       <div className="flex flex-wrap gap-2">
@@ -248,33 +427,6 @@ export default function AdminCuentasPage() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      {/* Lista de clientes con saldo en CC */}
-      {(accountSummary?.guests?.length ?? 0) > 0 && (
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <User className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-base font-semibold">Clientes con saldo pendiente</h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {accountSummary!.guests!.map(g => (
-              <div
-                key={g.id}
-                className="flex items-center justify-between p-3 rounded-lg border bg-background"
-                data-testid={`row-cc-huesped-${g.id}`}
-              >
-                <div className="flex items-center gap-2">
-                  <User className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">{g.name}</span>
-                </div>
-                <span className={`text-sm font-bold ${g.balance > 0 ? "text-red-600" : "text-green-600"}`}>
-                  ${g.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Reconciliación de pagos CC existentes */}
       <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10">

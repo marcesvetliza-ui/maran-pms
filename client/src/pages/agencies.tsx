@@ -145,14 +145,23 @@ export default function AgenciesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingAgency, setEditingAgency] = useState<Agency | null>(null);
 
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("search") || "";
+  });
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("new") === "1") {
       setShowForm(true);
       window.history.replaceState({}, "", window.location.pathname);
     }
+    const searchParam = params.get("search");
+    if (searchParam) {
+      setSearchTerm(searchParam);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
-  const [searchTerm, setSearchTerm] = useState("");
   const [selectedAgencyId, setSelectedAgencyId] = useState<string | null>(null);
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
@@ -310,12 +319,14 @@ export default function AgenciesPage() {
     }
   };
 
-  const filteredAgencies = agencies.filter((a) =>
-    a.razonSocial.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.nombreFantasia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.cuilCuit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.contactName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredAgencies = agencies
+    .filter((a) =>
+      a.razonSocial.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.nombreFantasia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.cuilCuit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.contactName?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"));
 
   const handleEdit = (agency: Agency) => {
     setEditingAgency(agency);

@@ -127,14 +127,23 @@ export default function CompaniesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
 
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("search") || "";
+  });
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("new") === "1") {
       setShowForm(true);
       window.history.replaceState({}, "", window.location.pathname);
     }
+    const searchParam = params.get("search");
+    if (searchParam) {
+      setSearchTerm(searchParam);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
-  const [searchTerm, setSearchTerm] = useState("");
   const [viewingAccountCompany, setViewingAccountCompany] = useState<Company | null>(null);
   const [viewingCompanyDetail, setViewingCompanyDetail] = useState<Company | null>(null);
   const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
@@ -276,12 +285,14 @@ export default function CompaniesPage() {
     }
   };
 
-  const filteredCompanies = companies.filter((c) =>
-    c.razonSocial.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.nombreFantasia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.cuilCuit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.contactName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredCompanies = companies
+    .filter((c) =>
+      c.razonSocial.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.nombreFantasia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.cuilCuit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.contactName?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"));
 
   const handleEdit = (company: Company) => {
     setEditingCompany(company);
