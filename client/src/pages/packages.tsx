@@ -49,7 +49,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { PackageWithDetails, RoomType, PackageStatus, PackageItemType } from "@shared/schema";
 
-type RoomPriceRow = { roomTypeId: string; price: string };
+type RoomPriceRow = { roomTypeId: string; extraAmount: string };
 
 function PackageStatusBadge({ status }: { status: PackageStatus }) {
   const config: Record<PackageStatus, { label: string; variant: "default" | "secondary" | "destructive" }> = {
@@ -99,7 +99,7 @@ function PackageFormDialog({
     pkg?.items?.map(i => ({ itemType: i.itemType, description: i.description, quantity: i.quantity })) || []
   );
   const [roomPrices, setRoomPrices] = useState<RoomPriceRow[]>(
-    pkg?.roomPrices?.map(rp => ({ roomTypeId: rp.roomTypeId, price: rp.price })) || []
+    pkg?.roomPrices?.map(rp => ({ roomTypeId: rp.roomTypeId, extraAmount: rp.extraAmount ?? "0" })) || []
   );
 
   const { data: roomTypes } = useQuery<RoomType[]>({ queryKey: ["/api/room-types"] });
@@ -122,8 +122,14 @@ function PackageFormDialog({
       for (const item of items) {
         await apiRequest("POST", `/api/packages/${newPkg.id}/items`, item);
       }
-      for (const rp of roomPrices.filter(r => r.roomTypeId && r.price)) {
-        await apiRequest("POST", `/api/packages/${newPkg.id}/room-prices`, { roomTypeId: rp.roomTypeId, price: rp.price });
+      for (const rp of roomPrices.filter(r => r.roomTypeId)) {
+        const extra = parseFloat(rp.extraAmount || "0") || 0;
+        const total = (parseFloat(basePrice) || 0) + extra;
+        await apiRequest("POST", `/api/packages/${newPkg.id}/room-prices`, {
+          roomTypeId: rp.roomTypeId,
+          price: total.toFixed(2),
+          extraAmount: extra.toFixed(2),
+        });
       }
       return newPkg;
     },
@@ -161,8 +167,14 @@ function PackageFormDialog({
       for (const existingRp of pkg!.roomPrices) {
         await apiRequest("DELETE", `/api/package-room-prices/${existingRp.id}`);
       }
-      for (const rp of roomPrices.filter(r => r.roomTypeId && r.price)) {
-        await apiRequest("POST", `/api/packages/${pkg!.id}/room-prices`, { roomTypeId: rp.roomTypeId, price: rp.price });
+      for (const rp of roomPrices.filter(r => r.roomTypeId)) {
+        const extra = parseFloat(rp.extraAmount || "0") || 0;
+        const total = (parseFloat(basePrice) || 0) + extra;
+        await apiRequest("POST", `/api/packages/${pkg!.id}/room-prices`, {
+          roomTypeId: rp.roomTypeId,
+          price: total.toFixed(2),
+          extraAmount: extra.toFixed(2),
+        });
       }
     },
     onSuccess: () => {
@@ -181,9 +193,9 @@ function PackageFormDialog({
       toast({ title: "Nombre y precio base son requeridos", variant: "destructive" });
       return;
     }
-    const invalidRoomPrice = roomPrices.some(rp => (rp.roomTypeId && !rp.price) || (!rp.roomTypeId && rp.price));
+    const invalidRoomPrice = roomPrices.some(rp => !rp.roomTypeId);
     if (invalidRoomPrice) {
-      toast({ title: "Completá tipo de habitación y precio en cada fila", variant: "destructive" });
+      toast({ title: "Seleccioná el tipo de habitación en cada fila", variant: "destructive" });
       return;
     }
     if (isEditing) {
@@ -193,7 +205,7 @@ function PackageFormDialog({
     }
   };
 
-  const addRoomPrice = () => setRoomPrices([...roomPrices, { roomTypeId: "", price: "" }]);
+  const addRoomPrice = () => setRoomPrices([...roomPrices, { roomTypeId: "", extraAmount: "" }]);
   const updateRoomPrice = (idx: number, field: keyof RoomPriceRow, value: string) => {
     const updated = [...roomPrices];
     updated[idx][field] = value;
@@ -384,54 +396,66 @@ function PackageFormDialog({
             </div>
 
             {roomPrices.length > 0 ? (
-              <div className="space-y-2">
-                <div className="grid grid-cols-[1fr_auto_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
+              <div className="space-y-3">
+                <div className="grid grid-cols-[1fr_140px_120px_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
                   <span>Tipo de Habitación</span>
-                  <span>Precio (IVA incl.)</span>
+                  <span>Monto extra</span>
+                  <span>Precio final</span>
                   <span></span>
                 </div>
-                {roomPrices.map((rp, idx) => (
-                  <div key={idx} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center">
-                    <Select
-                      value={rp.roomTypeId}
-                      onValueChange={(v) => updateRoomPrice(idx, "roomTypeId", v)}
-                    >
-                      <SelectTrigger data-testid={`select-room-price-type-${idx}`}>
-                        <SelectValue placeholder="Seleccionar tipo..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {roomTypes?.filter(rt => !roomPrices.some((r, i) => i !== idx && r.roomTypeId === rt.id)).map((rt) => (
-                          <SelectItem key={rt.id} value={rt.id}>
-                            {rt.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={rp.price}
-                      onChange={(e) => updateRoomPrice(idx, "price", e.target.value)}
-                      placeholder="0.00"
-                      className="w-32"
-                      data-testid={`input-room-price-${idx}`}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeRoomPrice(idx)}
-                      data-testid={`button-remove-room-price-${idx}`}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                ))}
+                {roomPrices.map((rp, idx) => {
+                  const extra = parseFloat(rp.extraAmount || "0") || 0;
+                  const base = parseFloat(basePrice as string) || 0;
+                  const total = base + extra;
+                  return (
+                    <div key={idx} className="grid grid-cols-[1fr_140px_120px_auto] gap-2 items-center">
+                      <Select
+                        value={rp.roomTypeId}
+                        onValueChange={(v) => updateRoomPrice(idx, "roomTypeId", v)}
+                      >
+                        <SelectTrigger data-testid={`select-room-price-type-${idx}`}>
+                          <SelectValue placeholder="Seleccionar tipo..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roomTypes?.filter(rt => !roomPrices.some((r, i) => i !== idx && r.roomTypeId === rt.id)).map((rt) => (
+                            <SelectItem key={rt.id} value={rt.id}>
+                              {rt.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">+$</span>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          value={rp.extraAmount}
+                          onChange={(e) => updateRoomPrice(idx, "extraAmount", e.target.value)}
+                          placeholder="0.00"
+                          className="pl-8"
+                          data-testid={`input-room-extra-${idx}`}
+                        />
+                      </div>
+                      <div className="flex items-center justify-center rounded-md bg-muted px-3 h-10 text-sm font-semibold tabular-nums">
+                        ${total.toFixed(2)}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeRoomPrice(idx)}
+                        data-testid={`button-remove-room-price-${idx}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-3 border border-dashed rounded-md">
-                Sin tarifas diferenciadas — se aplica el Precio Base a todas las categorías.
+                Sin extras — se aplica el Precio Base a todas las categorías.
               </p>
             )}
           </div>
@@ -588,15 +612,23 @@ export default function PackagesPage() {
 
                 {pkg.roomPrices && pkg.roomPrices.length > 0 && (
                   <div className="space-y-1" data-testid={`room-prices-${pkg.id}`}>
-                    {pkg.roomPrices.map((rp) => (
-                      <div key={rp.id} className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-1 text-muted-foreground">
-                          <Tag className="h-3.5 w-3.5" />
-                          <span>{rp.roomType?.name || rp.roomTypeId}</span>
+                    {pkg.roomPrices.map((rp) => {
+                      const extra = parseFloat(rp.extraAmount ?? "0") || 0;
+                      return (
+                        <div key={rp.id} className="flex items-center justify-between text-sm">
+                          <div className="flex items-center gap-1 text-muted-foreground">
+                            <Tag className="h-3.5 w-3.5" />
+                            <span>{rp.roomType?.name || rp.roomTypeId}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-semibold">${rp.price}</span>
+                            {extra > 0 && (
+                              <span className="ml-1 text-xs text-muted-foreground">(+${extra.toFixed(2)})</span>
+                            )}
+                          </div>
                         </div>
-                        <span className="font-semibold">${rp.price}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 

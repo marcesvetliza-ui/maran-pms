@@ -139,7 +139,7 @@ export function registerPackagesRoutes(app: Express) {
 
   app.post("/api/packages/:packageId/room-prices", async (req, res) => {
     try {
-      const { roomTypeId, price } = req.body;
+      const { roomTypeId, price, extraAmount } = req.body;
       if (!roomTypeId || !price) {
         return res.status(400).json({ error: "roomTypeId and price are required" });
       }
@@ -147,6 +147,7 @@ export function registerPackagesRoutes(app: Express) {
         packageId: req.params.packageId,
         roomTypeId,
         price: String(parseFloat(price).toFixed(2)),
+        extraAmount: extraAmount != null ? String(parseFloat(extraAmount).toFixed(2)) : "0",
       });
       res.status(201).json(created);
     } catch (error) {
@@ -156,9 +157,10 @@ export function registerPackagesRoutes(app: Express) {
 
   app.patch("/api/package-room-prices/:id", async (req, res) => {
     try {
-      const { price } = req.body;
+      const { price, extraAmount } = req.body;
       const updated = await storage.updatePackageRoomPrice(req.params.id, {
         price: price ? String(parseFloat(price).toFixed(2)) : undefined,
+        extraAmount: extraAmount != null ? String(parseFloat(extraAmount).toFixed(2)) : undefined,
       });
       if (!updated) return res.status(404).json({ error: "Price not found" });
       res.json(updated);

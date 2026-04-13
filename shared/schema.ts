@@ -1589,6 +1589,7 @@ export const packageRoomPrices = pgTable("package_room_prices", {
   packageId: varchar("package_id").notNull(),
   roomTypeId: varchar("room_type_id").notNull(),
   price: decimal("price", { precision: 12, scale: 2 }).notNull(),
+  extraAmount: decimal("extra_amount", { precision: 12, scale: 2 }).default("0"),
 });
 
 export const insertPackageRoomPriceSchema = createInsertSchema(packageRoomPrices).omit({ id: true });

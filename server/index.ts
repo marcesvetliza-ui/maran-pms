@@ -133,6 +133,18 @@ app.use((req, res, next) => {
     console.error("Critical accounts insert error (non-blocking):", err);
   }
 
+  // Migrate: add extra_amount to package_room_prices
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      ALTER TABLE package_room_prices
+        ADD COLUMN IF NOT EXISTS extra_amount DECIMAL(12,2) DEFAULT 0
+    `);
+  } catch (err) {
+    console.error("package_room_prices migration error (non-blocking):", err);
+  }
+
   // Migrate: add SMTP columns to email_config + ensure the single config row exists
   try {
     const { db } = await import("./db");
