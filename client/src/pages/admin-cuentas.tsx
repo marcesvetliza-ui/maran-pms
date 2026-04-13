@@ -18,6 +18,7 @@ import {
   AlertCircle,
   User,
   ExternalLink,
+  ChevronRight,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,10 +45,136 @@ type Movement = {
 
 type ExpandedCard = "companies" | "agencies" | "guests" | "all" | null;
 
+type AccountMovement = {
+  id: string;
+  entityType: string;
+  entityId: string;
+  date: string;
+  type: "cargo" | "pago" | "nota_credito" | "ajuste";
+  description: string;
+  amount: string;
+  reservationCode?: string | null;
+  guestName?: string | null;
+  reference?: string | null;
+  createdAt: string;
+};
+
+function EntityMovementsInline({ entityType, entityId }: { entityType: string; entityId: string }) {
+  const { data: movements = [], isLoading } = useQuery<AccountMovement[]>({
+    queryKey: ["/api/account-movements", entityType, entityId],
+    queryFn: async () => {
+      const res = await fetch(`/api/account-movements/${entityType}/${entityId}`);
+      if (!res.ok) throw new Error("Error fetching movements");
+      return res.json();
+    },
+  });
+
+  const fmt = (n: string | number) =>
+    `$${parseFloat(String(n)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+
+  const typeLabel: Record<string, string> = {
+    cargo: "Cargo",
+    pago: "Pago",
+    nota_credito: "Nota Cred.",
+    ajuste: "Ajuste",
+  };
+
+  if (isLoading) {
+    return (
+      <div className="mt-1 px-3 py-2 bg-muted/40 rounded-md space-y-1">
+        {[1, 2, 3].map((i) => <div key={i} className="h-4 bg-muted animate-pulse rounded" />)}
+      </div>
+    );
+  }
+
+  if (movements.length === 0) {
+    return (
+      <div className="mt-1 px-3 py-2 bg-muted/30 rounded-md text-xs text-muted-foreground text-center">
+        Sin movimientos registrados
+      </div>
+    );
+  }
+
+  const balance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
+
+  return (
+    <div className="mt-1 mb-2 border rounded-md overflow-hidden bg-muted/20">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-muted/50 text-muted-foreground">
+            <th className="text-left px-3 py-1.5 font-medium">Fecha</th>
+            <th className="text-left px-3 py-1.5 font-medium">Tipo</th>
+            <th className="text-left px-3 py-1.5 font-medium">Descripción</th>
+            <th className="text-left px-3 py-1.5 font-medium">Reserva</th>
+            <th className="text-right px-3 py-1.5 font-medium">Importe</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {movements.map((m) => {
+            const isDebt = parseFloat(m.amount) > 0;
+            return (
+              <tr key={m.id} className="hover:bg-muted/30">
+                <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{m.date}</td>
+                <td className="px-3 py-1.5">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] px-1.5 py-0 ${
+                      m.type === "cargo"
+                        ? "text-red-600 border-red-300"
+                        : m.type === "pago"
+                        ? "text-green-600 border-green-300"
+                        : "text-blue-600 border-blue-300"
+                    }`}
+                  >
+                    {typeLabel[m.type] ?? m.type}
+                  </Badge>
+                </td>
+                <td className="px-3 py-1.5 max-w-[200px] truncate">{m.description}</td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  {m.reservationCode ? (
+                    <span className="font-mono">{m.reservationCode}</span>
+                  ) : m.guestName ? (
+                    m.guestName
+                  ) : (
+                    m.reference ?? "—"
+                  )}
+                </td>
+                <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${isDebt ? "text-red-600" : "text-green-600"}`}>
+                  {fmt(m.amount)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="bg-muted/50 font-semibold">
+            <td colSpan={4} className="px-3 py-1.5 text-xs text-right text-muted-foreground">Saldo total:</td>
+            <td className={`px-3 py-1.5 text-right tabular-nums text-xs ${balance > 0 ? "text-red-600" : "text-green-600"}`}>
+              {fmt(balance)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 export default function AdminCuentasPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [expandedCard, setExpandedCard] = useState<ExpandedCard>(null);
+  const [expandedEntityId, setExpandedEntityId] = useState<string | null>(null);
+  const [expandedEntityType, setExpandedEntityType] = useState<string | null>(null);
+
+  const toggleEntityDetail = (type: string, id: string) => {
+    if (expandedEntityId === id && expandedEntityType === type) {
+      setExpandedEntityId(null);
+      setExpandedEntityType(null);
+    } else {
+      setExpandedEntityId(id);
+      setExpandedEntityType(type);
+    }
+  };
 
   const toggleCard = (card: ExpandedCard) =>
     setExpandedCard((prev) => (prev === card ? null : card));
@@ -237,33 +364,45 @@ export default function AdminCuentasPage() {
                 {accountSummary.companies.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-2">Sin empresas con saldo pendiente</p>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {[...accountSummary.companies]
                       .sort((a, b) => a.name.localeCompare(b.name, "es"))
-                      .map((c) => (
-                        <div key={c.id} className="flex items-center justify-between p-2.5 rounded-md hover:bg-muted/50 gap-3" data-testid={`row-deuda-empresa-${c.id}`}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            <span className="text-sm font-medium truncate">{c.name}</span>
-                          </div>
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className={`text-sm font-bold tabular-nums ${c.balance > 0 ? "text-red-600" : "text-green-600"}`}>
-                              ${c.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                            </span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={(e) => { e.stopPropagation(); navigate(`/companies?search=${encodeURIComponent(c.name)}`); }}
-                              data-testid={`button-ver-empresa-${c.id}`}
+                      .map((c) => {
+                        const isExpanded = expandedEntityId === c.id && expandedEntityType === "company";
+                        return (
+                          <div key={c.id} data-testid={`row-deuda-empresa-${c.id}`}>
+                            <div
+                              className={`flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer select-none gap-3 transition-colors ${isExpanded ? "bg-muted/60" : "hover:bg-muted/50"}`}
+                              onClick={() => toggleEntityDetail("company", c.id)}
                             >
-                              <ExternalLink className="h-3 w-3 mr-1" />
-                              Ver
-                            </Button>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                                <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                <span className="text-sm font-medium truncate">{c.name}</span>
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className={`text-sm font-bold tabular-nums ${c.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                                  ${c.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={(e) => { e.stopPropagation(); navigate(`/companies?search=${encodeURIComponent(c.name)}`); }}
+                                  data-testid={`button-ver-empresa-${c.id}`}
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Ver
+                                </Button>
+                              </div>
+                            </div>
+                            {isExpanded && (
+                              <EntityMovementsInline entityType="company" entityId={c.id} />
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 )}
               </div>
@@ -281,33 +420,45 @@ export default function AdminCuentasPage() {
                 {accountSummary.agencies.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-2">Sin agencias con saldo pendiente</p>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {[...accountSummary.agencies]
                       .sort((a, b) => a.name.localeCompare(b.name, "es"))
-                      .map((a) => (
-                        <div key={a.id} className="flex items-center justify-between p-2.5 rounded-md hover:bg-muted/50 gap-3" data-testid={`row-deuda-agencia-${a.id}`}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Plane className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            <span className="text-sm font-medium truncate">{a.name}</span>
-                          </div>
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className={`text-sm font-bold tabular-nums ${a.balance > 0 ? "text-red-600" : "text-green-600"}`}>
-                              ${a.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                            </span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={(e) => { e.stopPropagation(); navigate(`/agencies?search=${encodeURIComponent(a.name)}`); }}
-                              data-testid={`button-ver-agencia-${a.id}`}
+                      .map((a) => {
+                        const isExpanded = expandedEntityId === a.id && expandedEntityType === "agency";
+                        return (
+                          <div key={a.id} data-testid={`row-deuda-agencia-${a.id}`}>
+                            <div
+                              className={`flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer select-none gap-3 transition-colors ${isExpanded ? "bg-muted/60" : "hover:bg-muted/50"}`}
+                              onClick={() => toggleEntityDetail("agency", a.id)}
                             >
-                              <ExternalLink className="h-3 w-3 mr-1" />
-                              Ver
-                            </Button>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                                <Plane className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                <span className="text-sm font-medium truncate">{a.name}</span>
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className={`text-sm font-bold tabular-nums ${a.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                                  ${a.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={(e) => { e.stopPropagation(); navigate(`/agencies?search=${encodeURIComponent(a.name)}`); }}
+                                  data-testid={`button-ver-agencia-${a.id}`}
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Ver
+                                </Button>
+                              </div>
+                            </div>
+                            {isExpanded && (
+                              <EntityMovementsInline entityType="agency" entityId={a.id} />
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 )}
               </div>
@@ -325,33 +476,45 @@ export default function AdminCuentasPage() {
                 {(accountSummary.guests?.length ?? 0) === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-2">Sin clientes con saldo pendiente</p>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {[...(accountSummary.guests ?? [])]
                       .sort((a, b) => a.name.localeCompare(b.name, "es"))
-                      .map((g) => (
-                        <div key={g.id} className="flex items-center justify-between p-2.5 rounded-md hover:bg-muted/50 gap-3" data-testid={`row-deuda-cliente-${g.id}`}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            <span className="text-sm font-medium truncate">{g.name}</span>
-                          </div>
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className={`text-sm font-bold tabular-nums ${g.balance > 0 ? "text-red-600" : "text-green-600"}`}>
-                              ${g.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                            </span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={(e) => { e.stopPropagation(); navigate("/admin/cc-huespedes"); }}
-                              data-testid={`button-ver-cliente-${g.id}`}
+                      .map((g) => {
+                        const isExpanded = expandedEntityId === g.id && expandedEntityType === "guest";
+                        return (
+                          <div key={g.id} data-testid={`row-deuda-cliente-${g.id}`}>
+                            <div
+                              className={`flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer select-none gap-3 transition-colors ${isExpanded ? "bg-muted/60" : "hover:bg-muted/50"}`}
+                              onClick={() => toggleEntityDetail("guest", g.id)}
                             >
-                              <ExternalLink className="h-3 w-3 mr-1" />
-                              Ver
-                            </Button>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                                <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                <span className="text-sm font-medium truncate">{g.name}</span>
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className={`text-sm font-bold tabular-nums ${g.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                                  ${g.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={(e) => { e.stopPropagation(); navigate("/admin/cc-huespedes"); }}
+                                  data-testid={`button-ver-cliente-${g.id}`}
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Ver
+                                </Button>
+                              </div>
+                            </div>
+                            {isExpanded && (
+                              <EntityMovementsInline entityType="guest" entityId={g.id} />
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 )}
               </div>

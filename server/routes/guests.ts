@@ -307,6 +307,17 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
+  app.get("/api/account-movements/:entityType/:entityId", async (req, res) => {
+    try {
+      const { entityType, entityId } = req.params as { entityType: string; entityId: string };
+      const movements = await storage.getAccountMovements(entityType as any, entityId);
+      res.json(movements);
+    } catch (error) {
+      console.error("Error fetching account movements:", error);
+      res.status(500).json({ error: "Error fetching movements" });
+    }
+  });
+
   app.get("/api/account-movements/report", async (req, res) => {
     try {
       const { from, to } = req.query as { from?: string; to?: string };
