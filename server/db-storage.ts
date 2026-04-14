@@ -1137,6 +1137,35 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteGroup(id: string): Promise<boolean> {
+    // 1. Get all linked reservations
+    const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, id));
+
+    // 2. Cancel each linked reservation and free its room
+    for (const link of links) {
+      const [res] = await db.select().from(reservations).where(eq(reservations.id, link.reservationId));
+      if (res) {
+        // Only cancel if not already checked_out
+        if (res.status !== "checked_out") {
+          await db.update(reservations)
+            .set({ status: "cancelled" })
+            .where(eq(reservations.id, res.id));
+        }
+        // Free the room (set to available) if it was held/occupied by this reservation
+        if (res.roomId) {
+          await db.update(rooms)
+            .set({ status: "available" })
+            .where(eq(rooms.id, res.roomId));
+        }
+      }
+    }
+
+    // 3. Delete group sub-records (charges, payments, blocks, links)
+    await db.delete(groupCharges).where(eq(groupCharges.groupId, id));
+    await db.delete(groupPayments).where(eq(groupPayments.groupId, id));
+    await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.groupId, id));
+    await db.delete(groupReservationLinks).where(eq(groupReservationLinks.groupId, id));
+
+    // 4. Delete the group itself
     const result = await db.delete(groups).where(eq(groups.id, id));
     return (result.rowCount ?? 0) > 0;
   }

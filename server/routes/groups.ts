@@ -94,14 +94,31 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/groups/:id", async (req, res) => {
+  app.delete("/api/groups/:id", requireAuth, async (req, res) => {
     try {
+      // Get group info before deleting for audit trail
+      const group = await storage.getGroup(req.params.id);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+
+      const reservationCount = group.reservations.filter(
+        (r: any) => r.status !== "checked_out" && r.status !== "cancelled"
+      ).length;
+
       const deleted = await storage.deleteGroup(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Group not found" });
       }
-      res.status(204).send();
-    } catch (error) {
+
+      await audit(req, "delete", "groups",
+        `Grupo eliminado: ${group.name} (${group.groupCode}). ${reservationCount} reserva(s) canceladas.`,
+        { entityType: "group", entityId: req.params.id }
+      );
+
+      res.json({ success: true, cancelledReservations: reservationCount });
+    } catch (error: any) {
+      console.error("Error deleting group:", error);
       res.status(500).json({ error: "Error deleting group" });
     }
   });
