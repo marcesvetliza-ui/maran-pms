@@ -10,6 +10,8 @@ import {
   guests,
   nightAuditLogs,
   systemNotifications,
+  guestPreferences,
+  hospitalityAlerts,
 } from "@shared/schema";
 
 function naLog(message: string) {
@@ -183,6 +185,91 @@ export async function runNightAudit(options: {
           hasPrepago,
         });
       }
+    }
+
+    // ============================================================
+    // PASO 2.5 — Alertas anticipadas de hospitalidad
+    // Para cada llegada de mañana, crea alertas para huéspedes con preferencias
+    // si todavía no existen alertas para esa reserva
+    // ============================================================
+    let advanceAlertsCreated = 0;
+    try {
+      if (arrivalsNextDay.length > 0) {
+        const guestIds = arrivalsNextDay.map((r) => r.guestId).filter(Boolean) as string[];
+        if (guestIds.length > 0) {
+          const activePrefs = await db
+            .select()
+            .from(guestPreferences)
+            .where(and(eq(guestPreferences.isActive, true), inArray(guestPreferences.guestId, guestIds)));
+
+          // Obtener habitaciones para los arrivals
+          const arrivalRoomIds = arrivalsNextDay.map((r) => r.roomId).filter(Boolean) as string[];
+          const arrivalRooms = arrivalRoomIds.length > 0
+            ? await db.select({ id: rooms.id, roomNumber: rooms.roomNumber }).from(rooms).where(inArray(rooms.id, arrivalRoomIds))
+            : [];
+          const arrivalRoomMap = new Map(arrivalRooms.map((r) => [r.id, r.roomNumber]));
+
+          // Obtener alertas ya existentes para estas reservas (para evitar duplicados)
+          const arrivalResIds = arrivalsNextDay.map((r) => r.id);
+          const existingAlerts = await db
+            .select({ reservationId: hospitalityAlerts.reservationId, preferenceId: hospitalityAlerts.preferenceId })
+            .from(hospitalityAlerts)
+            .where(inArray(hospitalityAlerts.reservationId, arrivalResIds));
+          const existingKeys = new Set(existingAlerts.map((a) => `${a.reservationId}|${a.preferenceId}`));
+
+          const prefsByGuest = new Map<string, typeof activePrefs>();
+          for (const p of activePrefs) {
+            if (!prefsByGuest.has(p.guestId)) prefsByGuest.set(p.guestId, []);
+            prefsByGuest.get(p.guestId)!.push(p);
+          }
+
+          const areaMap: Record<string, string[]> = {
+            alimentacion: ["restaurant", "reception"],
+            habitacion: ["housekeeping", "reception"],
+            amenities: ["housekeeping"],
+            servicio: ["reception"],
+            fecha_especial: ["reception"],
+            motivo_viaje: ["reception"],
+            nota_interna: ["reception"],
+            otro: ["reception"],
+          };
+
+          for (const arrival of arrivalsNextDay) {
+            if (!arrival.guestId) continue;
+            const prefs = prefsByGuest.get(arrival.guestId) || [];
+            if (prefs.length === 0) continue;
+
+            const roomNumber = arrival.roomId ? arrivalRoomMap.get(arrival.roomId) : null;
+            const roomLabel = roomNumber ? ` — Hab. ${roomNumber}` : " — llegada mañana";
+
+            for (const pref of prefs) {
+              const targetAreas = areaMap[pref.category] || ["reception"];
+              for (const area of targetAreas) {
+                const key = `${arrival.id}|${pref.id}`;
+                if (existingKeys.has(key)) continue; // ya existe
+                await db.insert(hospitalityAlerts).values({
+                  id: randomUUID(),
+                  reservationId: arrival.id,
+                  guestId: arrival.guestId,
+                  preferenceId: pref.id,
+                  alertMessage: `[Llegada mañana${roomLabel}] ${pref.title}: ${pref.description || pref.title}`,
+                  targetArea: area,
+                  priority: pref.priority as any,
+                  status: "pending",
+                  isAcknowledged: false,
+                  createdAt: new Date(),
+                });
+                existingKeys.add(key);
+                advanceAlertsCreated++;
+              }
+            }
+          }
+          naLog(`Alertas anticipadas creadas: ${advanceAlertsCreated}`);
+        }
+      }
+    } catch (advErr: any) {
+      naLog(`Error generando alertas anticipadas: ${advErr.message}`);
+      errors.push(`Alertas anticipadas: ${advErr.message}`);
     }
 
     // ============================================================

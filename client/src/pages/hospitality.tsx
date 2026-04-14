@@ -123,7 +123,12 @@ function GuestCard({ item, testPrefix }: { item: any; testPrefix: string }) {
             <p className="font-medium">{item.guest?.firstName} {item.guest?.lastName}</p>
             <SegmentBadge segment={item.guest?.segment} />
           </div>
-          <p className="text-xs text-muted-foreground">Hab. {item.reservation?.roomId} · {item.checkInDate}</p>
+          <p className="text-xs text-muted-foreground">
+            {(item.reservation as any)?.room?.roomNumber && (
+              <span className="font-mono font-medium">Hab. {(item.reservation as any).room.roomNumber} · </span>
+            )}
+            {item.checkInDate}
+          </p>
           <div className="flex flex-wrap gap-1 mt-1">
             {item.preferences?.slice(0, 4).map((p: GuestPreference) => (
               <Badge key={p.id} variant="outline" className="text-xs">
@@ -363,17 +368,39 @@ function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
 
   return (
     <div className="space-y-2">
-      {alerts.map((alert) => (
+      {alerts.map((alert) => {
+        const enriched = alert as any;
+        const isInHouse = enriched.isInHouse;
+        const roomNumber = enriched.roomNumber;
+        const guestName = enriched.guestName;
+        const isAdvance = !isInHouse && enriched.checkInDate;
+        return (
         <div
           key={alert.id}
           className={`flex items-start justify-between gap-3 p-3 border rounded-lg ${
             (alert as any).status === "completed" ? "opacity-60 bg-muted/30" : ""
-          }`}
+          } ${isAdvance ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-900/10" : ""}`}
           data-testid={`alert-${alert.id}`}
         >
           <div className="flex items-start gap-2 flex-1 min-w-0">
             {getPriorityBadge(alert.priority)}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                {roomNumber && (
+                  <Badge variant="outline" className="text-xs font-mono px-1.5 py-0 h-5">
+                    Hab. {roomNumber}
+                  </Badge>
+                )}
+                {isAdvance && (
+                  <Badge className="text-xs px-1.5 py-0 h-5 bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 border-0">
+                    <CalendarClock className="h-3 w-3 mr-1" />
+                    Llegada mañana
+                  </Badge>
+                )}
+                {guestName && (
+                  <span className="text-xs text-muted-foreground font-medium">{guestName}</span>
+                )}
+              </div>
               <p className="text-sm">{alert.alertMessage}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 Área: {AREA_OPTIONS.find((a) => a.value === alert.targetArea)?.label || alert.targetArea}
@@ -420,7 +447,8 @@ function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -952,7 +980,7 @@ function StayNotesTab() {
                 <SelectContent>
                   {checkedInReservations.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
-                      {r.guestId ? getGuestName(r.guestId) : "Sin huésped"} - Hab. {r.roomId}
+                      {r.guestId ? getGuestName(r.guestId) : "Sin huésped"} - Hab. {(r as any).room?.roomNumber || r.roomId}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1165,7 +1193,7 @@ function HistoryTab() {
                           <div key={r.id} className="border rounded-lg overflow-hidden" data-testid={`history-stay-${r.id}`}>
                             <div className="flex items-center justify-between px-3 py-2 bg-muted/50">
                               <div className="flex items-center gap-2 text-sm">
-                                <span className="font-medium">Hab. {r.roomId}</span>
+                                <span className="font-medium">Hab. {(r as any).room?.roomNumber || r.roomId}</span>
                                 <span className="text-muted-foreground">·</span>
                                 <span>{r.checkInDate} → {r.checkOutDate}</span>
                               </div>

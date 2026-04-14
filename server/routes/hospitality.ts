@@ -2,8 +2,46 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { db } from "../db";
-import { hospitalityAlerts, guestPreferences } from "@shared/schema";
+import { hospitalityAlerts, guestPreferences, reservations, rooms, guests } from "@shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
+
+/** Enriquece una lista de alertas con datos de habitación y huésped */
+async function enrichAlerts(alerts: any[]) {
+  if (alerts.length === 0) return alerts;
+  const reservationIds = [...new Set(alerts.map((a) => a.reservationId))];
+  const reservationRows = await db
+    .select({
+      id: reservations.id,
+      roomId: reservations.roomId,
+      guestId: reservations.guestId,
+      status: reservations.status,
+      checkInDate: reservations.checkInDate,
+    })
+    .from(reservations)
+    .where(inArray(reservations.id, reservationIds));
+
+  const roomIds = reservationRows.map((r) => r.roomId).filter(Boolean) as string[];
+  const guestIds = reservationRows.map((r) => r.guestId).filter(Boolean) as string[];
+
+  const roomRows = roomIds.length > 0
+    ? await db.select({ id: rooms.id, roomNumber: rooms.roomNumber }).from(rooms).where(inArray(rooms.id, roomIds))
+    : [];
+  const guestRows = guestIds.length > 0
+    ? await db.select({ id: guests.id, firstName: guests.firstName, lastName: guests.lastName }).from(guests).where(inArray(guests.id, guestIds))
+    : [];
+
+  const roomMap = new Map(roomRows.map((r) => [r.id, r.roomNumber]));
+  const guestMap = new Map(guestRows.map((g) => [g.id, `${g.firstName} ${g.lastName}`]));
+  const resMap = new Map(reservationRows.map((r) => [r.id, r]));
+
+  return alerts.map((alert) => {
+    const res = resMap.get(alert.reservationId);
+    const roomNumber = res?.roomId ? roomMap.get(res.roomId) ?? null : null;
+    const guestName = res?.guestId ? guestMap.get(res.guestId) ?? null : null;
+    const isInHouse = res?.status === "checked_in";
+    return { ...alert, roomNumber, guestName, isInHouse, checkInDate: res?.checkInDate ?? null };
+  });
+}
 
 export function registerHospitalityRoutes(app: Express) {
   app.get("/api/reservations/:id/stay-notes", async (req, res) => {
@@ -79,7 +117,8 @@ export function registerHospitalityRoutes(app: Express) {
     try {
       const area = req.query.area as string | undefined;
       const alerts = await storage.getHospitalityAlerts(area);
-      res.json(alerts);
+      const enriched = await enrichAlerts(alerts);
+      res.json(enriched);
     } catch (error) {
       res.status(500).json({ error: "Error fetching alerts" });
     }
@@ -167,9 +206,10 @@ export function registerHospitalityRoutes(app: Express) {
 
       const relevantReservationIds = new Set(relevantReservations.map(r => r.id));
       const allAlerts = await storage.getHospitalityAlerts();
-      const pendingAlerts = allAlerts.filter(a =>
+      const rawPendingAlerts = allAlerts.filter(a =>
         a.status !== "completed" && relevantReservationIds.has(a.reservationId)
       );
+      const pendingAlerts = await enrichAlerts(rawPendingAlerts);
 
       const criticalPrefs = guestsWithPrefs
         .filter(g => g.hasCritical)
