@@ -702,7 +702,8 @@ export function registerGroupsRoutes(app: Express) {
       let distribution: Record<string, number> = {};
 
       if (config === "accommodation" || config === "all") {
-        // Proportional by each room's share of the master folio
+        // Proportional by each room's share, CAPPED at each room's own charges
+        // to avoid generating credits (negative balances) in individual folios
         let roomShares: { id: string; share: number }[] = [];
         let totalShare = 0;
 
@@ -720,15 +721,22 @@ export function registerGroupsRoutes(app: Express) {
           totalShare += share;
         }
 
-        for (const { id, share } of roomShares) {
-          distribution[id] = totalShare > 0 ? (share / totalShare) * totalAmount : totalAmount / (activeRes.length || 1);
+        // Distribute proportionally but cap each room at its own share (no credits)
+        let totalDistributed = 0;
+        for (const { id, share } of roomShares.slice(0, -1)) {
+          const proportional = totalShare > 0
+            ? (share / totalShare) * totalAmount
+            : totalAmount / (activeRes.length || 1);
+          const capped = Math.min(proportional, share); // never exceed room's own charges
+          const rounded = Math.round(capped * 100) / 100;
+          distribution[id] = rounded;
+          totalDistributed += rounded;
         }
-
-        // Rounding correction on last
-        if (roomShares.length > 1) {
-          const sumExceptLast = roomShares.slice(0, -1).reduce((s, { id }) => s + parseFloat(distribution[id].toFixed(2)), 0);
-          const lastId = roomShares[roomShares.length - 1].id;
-          distribution[lastId] = Math.max(0, totalAmount - sumExceptLast);
+        // Last room: gets the remainder, also capped at its own share
+        if (roomShares.length > 0) {
+          const last = roomShares[roomShares.length - 1];
+          const remainder = Math.max(0, totalAmount - totalDistributed);
+          distribution[last.id] = Math.min(remainder, last.share);
         }
       }
 
