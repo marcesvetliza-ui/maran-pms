@@ -64,7 +64,7 @@ export function registerGroupsRoutes(app: Express) {
 
   app.patch("/api/groups/:id", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color, masterFolioConfig } = req.body;
       const nullIfEmpty = (v: any) => (v === "" || v === null || v === undefined) ? null : v;
       const updateData: Record<string, unknown> = {};
 
@@ -81,6 +81,7 @@ export function registerGroupsRoutes(app: Express) {
       if (releaseDate !== undefined) updateData.releaseDate = nullIfEmpty(releaseDate);
       if (notes !== undefined) updateData.notes = nullIfEmpty(notes);
       if (color !== undefined) updateData.color = color;
+      if (masterFolioConfig !== undefined) updateData.masterFolioConfig = masterFolioConfig;
 
       const group = await storage.updateGroup(req.params.id, updateData);
       if (!group) {
@@ -568,10 +569,189 @@ export function registerGroupsRoutes(app: Express) {
       const { chargeId } = req.body;
       if (!chargeId) return res.status(400).json({ error: "chargeId es requerido" });
       const transferred = await storage.transferChargeToGroup(chargeId, req.params.groupId);
+      // Also delete the source charge to avoid double-counting
+      try { await storage.deleteCharge(chargeId); } catch {}
       res.json(transferred);
     } catch (error: any) {
       if (error.message === "Cargo no encontrado") return res.status(404).json({ error: error.message });
       res.status(500).json({ error: "Error al transferir cargo" });
+    }
+  });
+
+  // ─── MASTER FOLIO ───────────────────────────────────────────────────────────
+
+  // GET master folio data — breakdown for the organizer's folio
+  app.get("/api/groups/:groupId/master-folio", requireAuth, async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      const config = (group as any).masterFolioConfig || "accommodation";
+      const gCharges = await storage.getGroupCharges(req.params.groupId);
+      const gPayments = await storage.getGroupPayments(req.params.groupId);
+
+      // Build per-room data
+      const rooms: any[] = [];
+      let masterAccommodation = 0;
+      let masterExtras = 0;
+      let masterTransferred = 0;
+
+      for (const res of group.reservations) {
+        if (res.status === "cancelled") continue;
+        const resCharges = await storage.getCharges(res.id);
+        const resPayments = await storage.getPayments(res.id);
+
+        const accommodation = parseFloat((res as any).totalRoomAmount || "0");
+        const activeCharges = resCharges.filter((c: any) => c.status !== "anulado");
+        const extras = activeCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+        const paid = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+
+        masterAccommodation += accommodation;
+        if (config === "all") masterExtras += extras;
+
+        rooms.push({
+          reservationId: res.id,
+          guestName: `${res.guest?.firstName || ""} ${res.guest?.lastName || ""}`.trim(),
+          roomNumber: res.room?.roomNumber || "-",
+          status: res.status,
+          nights: res.nights || 0,
+          accommodation,
+          extras,
+          charges: activeCharges.map((c: any) => ({
+            id: c.id,
+            description: c.description,
+            amount: parseFloat(c.amount),
+            date: c.date,
+            category: c.category,
+          })),
+          individualPayments: paid,
+          // balance that remains on the individual folio
+          individualBalance: config === "accommodation"
+            ? extras - paid  // accommodation covered by master
+            : config === "all"
+              ? 0 - paid  // everything covered by master
+              : accommodation + extras - paid, // nothing covered by master
+        });
+      }
+
+      // Group charges (events, services) always go to master
+      const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+
+      // Total master folio charges
+      const masterTotal = masterAccommodation + masterExtras + groupChargesTotal + masterTransferred;
+
+      // Payments received at the group/master level
+      const masterPaid = gPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      const masterBalance = masterTotal - masterPaid;
+
+      res.json({
+        config,
+        masterTotal,
+        masterAccommodation,
+        masterExtras,
+        groupChargesTotal,
+        masterPaid,
+        masterBalance,
+        groupCharges: gCharges,
+        groupPayments: gPayments,
+        rooms,
+      });
+    } catch (error: any) {
+      console.error("master-folio error:", error);
+      res.status(500).json({ error: "Error al obtener folio maestro" });
+    }
+  });
+
+  // POST master payment — pays the master folio, distributes to individual rooms
+  app.post("/api/groups/:groupId/master-payment", requireAuth, async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      const { amount, method, date, reference, notes } = req.body;
+      if (!amount || !method) return res.status(400).json({ error: "amount y method son requeridos" });
+
+      const totalAmount = parseFloat(amount);
+      if (totalAmount <= 0) return res.status(400).json({ error: "El monto debe ser positivo" });
+
+      const config = (group as any).masterFolioConfig || "accommodation";
+      const paymentDate = date || getArgentinaToday();
+
+      const activeRes = group.reservations.filter(
+        (r: any) => r.status === "confirmed" || r.status === "checked_in"
+      );
+
+      // Distribute based on config
+      let distribution: Record<string, number> = {};
+
+      if (config === "accommodation" || config === "all") {
+        // Proportional by each room's share of the master folio
+        let roomShares: { id: string; share: number }[] = [];
+        let totalShare = 0;
+
+        for (const r of activeRes) {
+          const accommodation = parseFloat((r as any).totalRoomAmount || "0");
+          let share = accommodation;
+          if (config === "all") {
+            const resCharges = await storage.getCharges(r.id);
+            const extras = resCharges
+              .filter((c: any) => c.status !== "anulado")
+              .reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+            share += extras;
+          }
+          roomShares.push({ id: r.id, share });
+          totalShare += share;
+        }
+
+        for (const { id, share } of roomShares) {
+          distribution[id] = totalShare > 0 ? (share / totalShare) * totalAmount : totalAmount / (activeRes.length || 1);
+        }
+
+        // Rounding correction on last
+        if (roomShares.length > 1) {
+          const sumExceptLast = roomShares.slice(0, -1).reduce((s, { id }) => s + parseFloat(distribution[id].toFixed(2)), 0);
+          const lastId = roomShares[roomShares.length - 1].id;
+          distribution[lastId] = Math.max(0, totalAmount - sumExceptLast);
+        }
+      }
+
+      // Create group payment record (master folio audit)
+      const groupPayment = await storage.createGroupPayment({
+        groupId: req.params.groupId,
+        amount: totalAmount.toFixed(2),
+        method,
+        date: paymentDate,
+        reference: reference || `Pago Folio Maestro — ${group.name}`,
+        distribution: "master_folio",
+        distributionDetail: distribution,
+        receivedBy: (req.user as any)?.username || null,
+        notes: notes || null,
+      });
+
+      // Apply individual room payments based on distribution
+      let distributed = 0;
+      for (const [reservationId, amt] of Object.entries(distribution)) {
+        if (amt > 0.005) {
+          await storage.createPayment({
+            reservationId,
+            amount: amt.toFixed(2),
+            method,
+            reference: reference || `Pago Folio Maestro — ${group.name}`,
+            date: paymentDate,
+          });
+          distributed++;
+        }
+      }
+
+      await audit(req, "create", "groups",
+        `Pago Folio Maestro: $${totalAmount.toFixed(2)} (${method}) — config: ${config}`,
+        { entityType: "group", entityId: req.params.groupId }
+      );
+
+      res.json({ success: true, groupPayment, distributed });
+    } catch (error: any) {
+      console.error("master-payment error:", error);
+      res.status(500).json({ error: "Error al registrar pago maestro" });
     }
   });
 }

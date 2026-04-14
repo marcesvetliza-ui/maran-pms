@@ -194,6 +194,18 @@ app.use((req, res, next) => {
     console.error("Email config migration error (non-blocking):", err);
   }
 
+  // Migrate: add master_folio_config to groups
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      ALTER TABLE groups
+        ADD COLUMN IF NOT EXISTS master_folio_config TEXT DEFAULT 'accommodation'
+    `);
+  } catch (err) {
+    console.error("groups master_folio_config migration error (non-blocking):", err);
+  }
+
   await registerRoutes(httpServer, app);
 
   try {

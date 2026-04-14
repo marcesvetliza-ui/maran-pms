@@ -28,6 +28,12 @@ import {
   FileDown,
   Receipt,
   Wallet,
+  ChevronDown,
+  ChevronRight,
+  ArrowRight,
+  Settings2,
+  Building2,
+  Banknote,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -82,7 +88,17 @@ import type {
   ReservationWithDetails,
   GroupFolioData,
   GroupCharge,
+  MasterFolioConfig,
 } from "@shared/schema";
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: "Efectivo",
+  transfer: "Transferencia",
+  credit_card: "Tarjeta Crédito",
+  debit_card: "Tarjeta Débito",
+  check: "Cheque",
+  other: "Otro",
+};
 
 const fmtDate = (d: string) => {
   if (!d) return "-";
@@ -584,6 +600,13 @@ export default function GroupDetailPage() {
   const [manualDistribution, setManualDistribution] = useState<Record<string, number>>({});
   const [transferChargeTarget, setTransferChargeTarget] = useState<GroupCharge | null>(null);
 
+  // Master Folio state
+  const [showMasterPaymentDialog, setShowMasterPaymentDialog] = useState(false);
+  const [masterPaymentAmount, setMasterPaymentAmount] = useState("");
+  const [masterPaymentMethod, setMasterPaymentMethod] = useState("cash");
+  const [masterPaymentReference, setMasterPaymentReference] = useState("");
+  const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
+
   const { data: group, isLoading } = useQuery<GroupWithDetails>({
     queryKey: ["/api/groups", groupId],
   });
@@ -593,6 +616,15 @@ export default function GroupDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/groups/${groupId}/folio`, { credentials: "include" });
       if (!res.ok) throw new Error("Error loading folio");
+      return res.json();
+    },
+  });
+
+  const { data: masterFolio, isLoading: masterFolioLoading } = useQuery<any>({
+    queryKey: ["/api/groups", groupId, "master-folio"],
+    queryFn: async () => {
+      const res = await fetch(`/api/groups/${groupId}/master-folio`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error loading master folio");
       return res.json();
     },
   });
@@ -780,10 +812,42 @@ export default function GroupDetailPage() {
       apiRequest("POST", `/api/groups/${groupId}/transfer-charge`, { chargeId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
-      toast({ title: "Cargo transferido al folio grupal" });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      toast({ title: "Cargo transferido al Folio Maestro" });
       setTransferChargeTarget(null);
     },
     onError: () => toast({ title: "Error al transferir cargo", variant: "destructive" }),
+  });
+
+  const updateMasterFolioConfigMutation = useMutation({
+    mutationFn: (config: MasterFolioConfig) =>
+      apiRequest("PATCH", `/api/groups/${groupId}`, { masterFolioConfig: config }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      toast({ title: "Configuración del Folio Maestro actualizada" });
+    },
+    onError: () => toast({ title: "Error al actualizar configuración", variant: "destructive" }),
+  });
+
+  const masterPaymentMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("POST", `/api/groups/${groupId}/master-payment`, {
+        amount: masterPaymentAmount,
+        method: masterPaymentMethod,
+        reference: masterPaymentReference || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      toast({ title: "Pago al Folio Maestro registrado exitosamente" });
+      setShowMasterPaymentDialog(false);
+      setMasterPaymentAmount("");
+      setMasterPaymentMethod("cash");
+      setMasterPaymentReference("");
+    },
+    onError: () => toast({ title: "Error al registrar pago maestro", variant: "destructive" }),
   });
 
   const loadInvoice = async () => {
@@ -1284,255 +1348,423 @@ export default function GroupDetailPage() {
 
         {/* ─── FOLIO GRUPAL ─── */}
         <TabsContent value="folio" className="mt-4">
-          {folioLoading ? (
+          {(folioLoading || masterFolioLoading) ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : folio ? (
-            <div className="space-y-4">
+          ) : masterFolio ? (
+            <div className="space-y-5">
 
-              {/* Resumen financiero — tarjetas de colores */}
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Resumen Financiero del Grupo</h3>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const a = document.createElement("a");
-                    a.href = `/api/folios/group/${groupId}/pdf`;
-                    a.download = `folio-grupo-${group?.name || groupId}.pdf`;
-                    a.click();
-                  }}
-                  data-testid="button-folio-pdf"
-                >
-                  <FileDown className="h-4 w-4 mr-1" />
-                  PDF Folio
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <Card className="border-blue-200 dark:border-blue-900">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Hotel className="h-4 w-4 text-blue-500" />
-                      <span className="text-xs text-muted-foreground">Alojamiento</span>
-                    </div>
-                    <p className="text-xl font-bold text-blue-600" data-testid="folio-accommodation">
-                      ${folio.totals.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="border-purple-200 dark:border-purple-900">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Receipt className="h-4 w-4 text-purple-500" />
-                      <span className="text-xs text-muted-foreground">Cargos extras</span>
-                    </div>
-                    <p className="text-xl font-bold text-purple-600" data-testid="folio-extras">
-                      ${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="border-orange-200 dark:border-orange-900">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <DollarSign className="h-4 w-4 text-orange-500" />
-                      <span className="text-xs text-muted-foreground">Cargos grupales</span>
-                    </div>
-                    <p className="text-xl font-bold text-orange-600" data-testid="folio-group-charges">
-                      ${folio.totals.groupCharges.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="border-green-200 dark:border-green-900">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Wallet className="h-4 w-4 text-green-500" />
-                      <span className="text-xs text-muted-foreground">Pagos recibidos</span>
-                    </div>
-                    <p className="text-xl font-bold text-green-600" data-testid="folio-payments">
-                      ${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className={`${folio.totals.balance > 0.01 ? "border-red-200 dark:border-red-900 bg-red-50/40 dark:bg-red-950/20" : "border-green-200 dark:border-green-900 bg-green-50/40 dark:bg-green-950/20"}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      {folio.totals.balance > 0.01
-                        ? <AlertTriangle className="h-4 w-4 text-red-500" />
-                        : <CheckCircle className="h-4 w-4 text-green-500" />}
-                      <span className="text-xs text-muted-foreground">Saldo pendiente</span>
-                    </div>
-                    <p className={`text-xl font-bold ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`} data-testid="folio-balance">
-                      ${folio.totals.balance.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Cargos del grupo */}
+              {/* ── Configuración del Folio Maestro ── */}
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-3">
-                  <CardTitle className="text-base">Cargos del Grupo</CardTitle>
-                  <Button size="sm" onClick={() => setShowAddGroupChargeDialog(true)} data-testid="button-add-group-charge">
-                    <Plus className="h-4 w-4 mr-1" /> Agregar cargo
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  {folio.groupCharges.length > 0 ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Descripción</TableHead>
-                          <TableHead>Categoría</TableHead>
-                          <TableHead>Fecha</TableHead>
-                          <TableHead className="text-right">Monto</TableHead>
-                          <TableHead className="w-[50px]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {folio.groupCharges.map((gc) => (
-                          <TableRow key={gc.id} data-testid={`row-group-charge-${gc.id}`}>
-                            <TableCell className="font-medium">{gc.description}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{gc.category}</Badge>
-                            </TableCell>
-                            <TableCell className="text-sm">{fmtDate(gc.date)}</TableCell>
-                            <TableCell className="text-right font-medium">${parseFloat(gc.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => deleteGroupChargeMutation.mutate(gc.id)}
-                                disabled={deleteGroupChargeMutation.isPending}
-                                data-testid={`button-delete-group-charge-${gc.id}`}
-                              >
-                                <Trash2 className="h-3 w-3 text-destructive" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        <TableRow className="bg-muted/30">
-                          <TableCell colSpan={3} className="font-semibold text-right">Total cargos grupales</TableCell>
-                          <TableCell className="text-right font-bold">${folio.groupChargesTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                          <TableCell />
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  ) : (
-                    <div className="text-center py-6 text-muted-foreground text-sm">
-                      No hay cargos directos al grupo. Use "Agregar cargo" para registrar servicios generales.
+                <CardContent className="pt-4 pb-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <Settings2 className="h-4 w-4" />
+                      <span>¿Qué cubre el organizador?</span>
                     </div>
-                  )}
+                    <div className="flex gap-2 flex-wrap">
+                      {(["accommodation", "all", "none"] as MasterFolioConfig[]).map((cfg) => {
+                        const labels: Record<MasterFolioConfig, string> = {
+                          accommodation: "Solo alojamiento",
+                          all: "Paga todo",
+                          none: "Cada huésped paga su cuenta",
+                        };
+                        const isActive = (group as any)?.masterFolioConfig === cfg || (!( group as any)?.masterFolioConfig && cfg === "accommodation");
+                        return (
+                          <Button
+                            key={cfg}
+                            size="sm"
+                            variant={isActive ? "default" : "outline"}
+                            onClick={() => !isActive && updateMasterFolioConfigMutation.mutate(cfg)}
+                            disabled={updateMasterFolioConfigMutation.isPending}
+                            data-testid={`btn-master-config-${cfg}`}
+                          >
+                            {labels[cfg]}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    {masterFolio.config === "accommodation" && (
+                      <span className="text-xs text-muted-foreground">El organizador paga el alojamiento + cargos grupales. Los consumos individuales van a cada habitación.</span>
+                    )}
+                    {masterFolio.config === "all" && (
+                      <span className="text-xs text-muted-foreground">El organizador paga todo. Los extras de cada hab. también van al Folio Maestro.</span>
+                    )}
+                    {masterFolio.config === "none" && (
+                      <span className="text-xs text-muted-foreground">Sin folio maestro. Cada habitación paga su propia cuenta al hacer check-out.</span>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 
-              {/* Desglose por habitación */}
+              {/* ══════════════════════════════════════════════════ */}
+              {/* FOLIO MAESTRO — solo cuando config !== "none"      */}
+              {/* ══════════════════════════════════════════════════ */}
+              {masterFolio.config !== "none" && (
+                <Card className="border-2 border-primary/20">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Building2 className="h-5 w-5 text-primary" />
+                          Folio Maestro
+                          <Badge variant="outline" className="text-xs font-normal ml-1">
+                            {masterFolio.config === "accommodation" ? "Alojamiento + Cargos grupales" : "Todo incluido"}
+                          </Badge>
+                        </CardTitle>
+                        <CardDescription>Lo que paga el organizador del grupo</CardDescription>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const a = document.createElement("a");
+                            a.href = `/api/folios/group/${groupId}/pdf`;
+                            a.download = `folio-maestro-${group?.name || groupId}.pdf`;
+                            a.click();
+                          }}
+                          data-testid="button-folio-pdf"
+                        >
+                          <FileDown className="h-4 w-4 mr-1" />
+                          PDF
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setMasterPaymentAmount(masterFolio.masterBalance > 0 ? masterFolio.masterBalance.toFixed(2) : "");
+                            setShowMasterPaymentDialog(true);
+                          }}
+                          disabled={masterFolio.masterBalance <= 0.01}
+                          data-testid="button-master-payment"
+                        >
+                          <CreditCard className="h-4 w-4 mr-1" />
+                          Pagar Folio Maestro
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+
+                    {/* Resumen maestro */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 p-3 border border-blue-200 dark:border-blue-800">
+                        <p className="text-xs text-muted-foreground mb-1">Alojamiento</p>
+                        <p className="text-lg font-bold text-blue-700 dark:text-blue-400">${masterFolio.masterAccommodation.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                      </div>
+                      {masterFolio.config === "all" && (
+                        <div className="rounded-lg bg-purple-50 dark:bg-purple-950/30 p-3 border border-purple-200 dark:border-purple-800">
+                          <p className="text-xs text-muted-foreground mb-1">Extras (hab.)</p>
+                          <p className="text-lg font-bold text-purple-700 dark:text-purple-400">${masterFolio.masterExtras.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                        </div>
+                      )}
+                      <div className="rounded-lg bg-orange-50 dark:bg-orange-950/30 p-3 border border-orange-200 dark:border-orange-800">
+                        <p className="text-xs text-muted-foreground mb-1">Cargos grupales</p>
+                        <p className="text-lg font-bold text-orange-700 dark:text-orange-400">${masterFolio.groupChargesTotal.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className="rounded-lg bg-green-50 dark:bg-green-950/30 p-3 border border-green-200 dark:border-green-800">
+                        <p className="text-xs text-muted-foreground mb-1">Pagado</p>
+                        <p className="text-lg font-bold text-green-700 dark:text-green-400">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className={`rounded-lg p-3 border col-span-2 sm:col-span-1 ${masterFolio.masterBalance > 0.01 ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800" : "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800"}`}>
+                        <p className="text-xs text-muted-foreground mb-1">Saldo pendiente</p>
+                        <p className={`text-lg font-bold ${masterFolio.masterBalance > 0.01 ? "text-red-700 dark:text-red-400" : "text-green-700 dark:text-green-400"}`} data-testid="folio-master-balance">
+                          ${masterFolio.masterBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Desglose de alojamiento por habitación */}
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Alojamiento por habitación</p>
+                      <div className="rounded-md border divide-y">
+                        {masterFolio.rooms.map((r: any) => (
+                          <div key={r.reservationId} className="flex items-center justify-between px-3 py-2 text-sm">
+                            <div className="flex items-center gap-3">
+                              <span className="font-bold w-10">Hab. {r.roomNumber}</span>
+                              <span className="text-muted-foreground">{r.guestName || "Sin asignar"}</span>
+                              <span className="text-xs text-muted-foreground">{r.nights} noche(s)</span>
+                            </div>
+                            <span className="font-semibold">${r.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between px-3 py-2 text-sm bg-muted/30 font-semibold">
+                          <span>Total alojamiento</span>
+                          <span>${masterFolio.masterAccommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Cargos grupales */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Cargos grupales (eventos, servicios)</p>
+                        <Button size="sm" variant="outline" onClick={() => setShowAddGroupChargeDialog(true)} data-testid="button-add-group-charge">
+                          <Plus className="h-3.5 w-3.5 mr-1" /> Agregar
+                        </Button>
+                      </div>
+                      {masterFolio.groupCharges.length > 0 ? (
+                        <div className="rounded-md border divide-y">
+                          {masterFolio.groupCharges.map((gc: any) => (
+                            <div key={gc.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-charge-${gc.id}`}>
+                              <div className="flex items-center gap-3">
+                                <Badge variant="outline" className="text-xs">{gc.category}</Badge>
+                                <span className="font-medium">{gc.description}</span>
+                                <span className="text-xs text-muted-foreground">{fmtDate(gc.date)}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">${parseFloat(gc.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                <Button
+                                  variant="ghost" size="icon" className="h-6 w-6"
+                                  onClick={() => deleteGroupChargeMutation.mutate(gc.id)}
+                                  disabled={deleteGroupChargeMutation.isPending}
+                                  data-testid={`button-delete-group-charge-${gc.id}`}
+                                >
+                                  <Trash2 className="h-3 w-3 text-destructive" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between px-3 py-2 text-sm bg-muted/30 font-semibold">
+                            <span>Total cargos grupales</span>
+                            <span>${masterFolio.groupChargesTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-4 text-muted-foreground text-sm border rounded-md">
+                          Sin cargos grupales. Usá "Agregar" para eventos, salones, etc.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Pagos al folio maestro */}
+                    {masterFolio.groupPayments.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pagos recibidos del organizador</p>
+                        <div className="rounded-md border divide-y">
+                          {masterFolio.groupPayments.map((gp: any) => (
+                            <div key={gp.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-${gp.id}`}>
+                              <div className="flex items-center gap-3">
+                                <span className="text-muted-foreground">{fmtDate(gp.date)}</span>
+                                <Badge variant="secondary">{PAYMENT_METHOD_LABELS[gp.method] || gp.method}</Badge>
+                                {gp.reference && <span className="text-xs text-muted-foreground">{gp.reference}</span>}
+                                {gp.distribution === "master_folio" && (
+                                  <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs">Folio Maestro</Badge>
+                                )}
+                              </div>
+                              <span className="font-semibold text-green-600">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between px-3 py-2 text-sm bg-muted/30 font-semibold text-green-700 dark:text-green-400">
+                            <span>Total pagado</span>
+                            <span>${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* ══════════════════════════════════════════════════ */}
+              {/* FOLIOS INDIVIDUALES POR HABITACIÓN                */}
+              {/* ══════════════════════════════════════════════════ */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Desglose por Habitación</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <DoorOpen className="h-5 w-5 text-muted-foreground" />
+                      Folios Individuales por Habitación
+                    </CardTitle>
+                    {masterFolio.config === "none" && (
+                      <Button size="sm" variant="outline" onClick={() => setShowFolioPaymentDialog(true)} data-testid="button-folio-payment">
+                        <CreditCard className="h-4 w-4 mr-1" /> Pago grupal distribuido
+                      </Button>
+                    )}
+                  </div>
+                  {masterFolio.config !== "none" && (
+                    <CardDescription>
+                      {masterFolio.config === "accommodation"
+                        ? "El alojamiento está cubierto por el Folio Maestro. Aquí se ven los consumos individuales de cada habitación."
+                        : "El Folio Maestro cubre todo. Las cuentas individuales deberían quedar en cero."}
+                    </CardDescription>
+                  )}
                 </CardHeader>
-                <CardContent>
-                  {folio.reservations.length > 0 ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Hab.</TableHead>
-                          <TableHead>Huésped</TableHead>
-                          <TableHead className="text-right">Noches</TableHead>
-                          <TableHead className="text-right">Alojamiento</TableHead>
-                          <TableHead className="text-right">Extras</TableHead>
-                          <TableHead className="text-right">Pagos</TableHead>
-                          <TableHead className="text-right">Saldo</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {folio.reservations.map((r) => (
-                          <TableRow key={r.reservationId} data-testid={`row-folio-res-${r.reservationId}`}>
-                            <TableCell className="font-bold">{r.roomNumber}</TableCell>
-                            <TableCell>{r.guestName || "-"}</TableCell>
-                            <TableCell className="text-right">{r.nights}</TableCell>
-                            <TableCell className="text-right">${r.accommodationTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                            <TableCell className="text-right">${r.extrasTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                            <TableCell className="text-right text-green-600">${r.paymentsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                            <TableCell className={`text-right font-semibold ${r.balance > 0.01 ? "text-red-600" : "text-green-600"}`}>
-                              ${r.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        <TableRow className="bg-muted/30 font-semibold">
-                          <TableCell colSpan={3} className="text-right">Totales</TableCell>
-                          <TableCell className="text-right">${folio.totals.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                          <TableCell className="text-right">${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                          <TableCell className="text-right text-green-600">${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                          <TableCell className={`text-right ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`}>
-                            ${folio.totals.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
+                <CardContent className="space-y-2">
+                  {masterFolio.rooms.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No hay habitaciones asignadas al grupo.
+                    </div>
                   ) : (
-                    <div className="text-center py-6 text-muted-foreground text-sm">
-                      No hay reservas asignadas a este grupo.
+                    masterFolio.rooms.map((r: any) => {
+                      const isExpanded = expandedRoomId === r.reservationId;
+                      const hasExtras = r.extras > 0;
+                      const indivBalance = r.individualBalance;
+                      const hasDebt = indivBalance > 0.01;
+
+                      return (
+                        <div key={r.reservationId} className="rounded-lg border overflow-hidden" data-testid={`room-folio-${r.reservationId}`}>
+                          {/* Header de la habitación */}
+                          <button
+                            className={`w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/40 transition-colors ${hasDebt ? "border-l-4 border-l-red-500" : "border-l-4 border-l-green-500"}`}
+                            onClick={() => setExpandedRoomId(isExpanded ? null : r.reservationId)}
+                            data-testid={`button-expand-room-${r.reservationId}`}
+                          >
+                            <div className="flex items-center gap-4">
+                              <span className="font-bold text-sm w-14">Hab. {r.roomNumber}</span>
+                              <span className="text-sm">{r.guestName || "Sin asignar"}</span>
+                              <Badge variant="outline" className="text-xs">{r.nights} noche(s)</Badge>
+                              {hasExtras && masterFolio.config !== "none" && (
+                                <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 text-xs">
+                                  ${r.extras.toLocaleString("es-AR", { minimumFractionDigits: 0 })} en extras
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="text-xs text-muted-foreground">
+                                  {masterFolio.config === "none" ? "Saldo total" : "Saldo individual"}
+                                </p>
+                                <p className={`font-bold text-sm ${hasDebt ? "text-red-600" : "text-green-600"}`}>
+                                  ${indivBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                              {isExpanded
+                                ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                            </div>
+                          </button>
+
+                          {/* Detalle expandido */}
+                          {isExpanded && (
+                            <div className="border-t bg-muted/20 px-4 py-3 space-y-3">
+                              {/* Alojamiento */}
+                              <div className="flex items-center justify-between text-sm">
+                                <div className="flex items-center gap-2">
+                                  <Hotel className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span className="text-muted-foreground">Alojamiento ({r.nights} noche(s))</span>
+                                  {masterFolio.config !== "none" && (
+                                    <Badge className="bg-primary/10 text-primary text-xs border-0">Folio Maestro</Badge>
+                                  )}
+                                </div>
+                                <span className={`font-medium ${masterFolio.config !== "none" ? "text-muted-foreground line-through" : ""}`}>
+                                  ${r.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+
+                              {/* Consumos individuales */}
+                              {r.charges.length > 0 ? (
+                                <div>
+                                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                                    Consumos individuales
+                                    {masterFolio.config === "all" && <span className="ml-2 text-muted-foreground font-normal normal-case">(cubiertos por Folio Maestro)</span>}
+                                  </p>
+                                  <div className="space-y-1">
+                                    {r.charges.map((c: any) => (
+                                      <div key={c.id} className="flex items-center justify-between text-sm bg-background rounded px-2 py-1.5">
+                                        <div className="flex items-center gap-2">
+                                          <Badge variant="outline" className="text-xs">{c.category}</Badge>
+                                          <span>{c.description}</span>
+                                          <span className="text-xs text-muted-foreground">{fmtDate(c.date)}</span>
+                                          {masterFolio.config === "all" && (
+                                            <Badge className="bg-primary/10 text-primary text-xs border-0">Folio Maestro</Badge>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-medium">${c.amount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                          {masterFolio.config === "accommodation" && (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="h-6 text-xs px-2"
+                                              onClick={() => transferChargeMutation.mutate({ chargeId: c.id })}
+                                              disabled={transferChargeMutation.isPending}
+                                              title="Mover al Folio Maestro"
+                                              data-testid={`button-transfer-charge-${c.id}`}
+                                            >
+                                              <ArrowRight className="h-3 w-3 mr-1" />
+                                              Al maestro
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                    <div className="flex items-center justify-between text-sm font-semibold px-2 py-1 border-t">
+                                      <span>Total consumos</span>
+                                      <span>${r.extras.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground italic">Sin consumos individuales registrados</p>
+                              )}
+
+                              {/* Pagos individuales */}
+                              {r.individualPayments > 0 && (
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-muted-foreground">Pagos individuales recibidos</span>
+                                  <span className="font-medium text-green-600">${r.individualPayments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                </div>
+                              )}
+
+                              {/* Saldo individual */}
+                              <div className={`flex items-center justify-between text-sm font-semibold rounded p-2 ${hasDebt ? "bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400" : "bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"}`}>
+                                <span>
+                                  {masterFolio.config === "none" ? "Saldo total pendiente" :
+                                   masterFolio.config === "accommodation" ? "Saldo en consumos individuales" :
+                                   "Saldo individual (debe ser $0)"}
+                                </span>
+                                <span>${indivBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                              </div>
+
+                              <div className="flex justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-xs"
+                                  onClick={() => navigate(`/reservations?view=${r.reservationId}`)}
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Ver reserva completa
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* Totales resumen */}
+                  {folio && masterFolio.rooms.length > 0 && (
+                    <div className="mt-3 rounded-lg border bg-muted/30 px-4 py-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total alojamiento</p>
+                          <p className="font-bold">${folio.totals.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total extras</p>
+                          <p className="font-bold">${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total pagos</p>
+                          <p className="font-bold text-green-600">${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Saldo total grupo</p>
+                          <p className={`font-bold ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                            ${folio.totals.balance.toLocaleString("es-AR", { minimumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Pagos grupales */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-3">
-                  <CardTitle className="text-base">Pagos Registrados</CardTitle>
-                  <Button size="sm" onClick={() => setShowFolioPaymentDialog(true)} data-testid="button-folio-payment">
-                    <CreditCard className="h-4 w-4 mr-1" /> Registrar pago
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  {folio.groupPayments.length > 0 ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Fecha</TableHead>
-                          <TableHead>Método</TableHead>
-                          <TableHead>Distribución</TableHead>
-                          <TableHead>Referencia</TableHead>
-                          <TableHead className="text-right">Monto</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {folio.groupPayments.map((gp) => (
-                          <TableRow key={gp.id} data-testid={`row-group-payment-${gp.id}`}>
-                            <TableCell className="text-sm">{fmtDate(gp.date)}</TableCell>
-                            <TableCell>
-                              <Badge variant="secondary">{gp.method}</Badge>
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {gp.distribution === "equal" ? "Partes iguales" :
-                               gp.distribution === "proportional_nights" ? "Prop. noches" :
-                               gp.distribution === "proportional_rate" ? "Prop. tarifa" :
-                               "Manual"}
-                            </TableCell>
-                            <TableCell className="text-sm">{gp.reference || "-"}</TableCell>
-                            <TableCell className="text-right font-semibold text-green-600">
-                              ${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        <TableRow className="bg-muted/30">
-                          <TableCell colSpan={4} className="font-semibold text-right">Total pagos grupales</TableCell>
-                          <TableCell className="text-right font-bold text-green-600">
-                            ${folio.groupPaymentsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  ) : (
-                    <div className="text-center py-6 text-muted-foreground text-sm">
-                      No hay pagos grupales registrados.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">Error cargando folio grupal.</div>
@@ -2034,6 +2266,87 @@ export default function GroupDetailPage() {
             >
               <CreditCard className="mr-2 h-4 w-4" />
               {groupPaymentMutation.isPending ? "Procesando..." : groupPaymentCloseAll ? "Pagar y Cerrar Grupo" : "Registrar Pago"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Dialog: Pago al Folio Maestro ─── */}
+      <Dialog open={showMasterPaymentDialog} onOpenChange={(open) => {
+        setShowMasterPaymentDialog(open);
+        if (!open) { setMasterPaymentAmount(""); setMasterPaymentMethod("cash"); setMasterPaymentReference(""); }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Banknote className="h-5 w-5 text-primary" />
+              Pago al Folio Maestro
+            </DialogTitle>
+            <DialogDescription>
+              Este pago cubre los cargos del organizador del grupo. Se distribuirá proporcionalmente entre las habitaciones.
+            </DialogDescription>
+          </DialogHeader>
+          {masterFolio && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-muted/40 px-4 py-3 text-sm space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total del Folio Maestro</span>
+                  <span className="font-semibold">${masterFolio.masterTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Ya pagado</span>
+                  <span className="font-semibold text-green-600">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between font-semibold border-t pt-1">
+                  <span>Saldo pendiente</span>
+                  <span className={masterFolio.masterBalance > 0.01 ? "text-red-600" : "text-green-600"}>
+                    ${masterFolio.masterBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <Label>Monto a pagar</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={masterPaymentAmount}
+                  onChange={(e) => setMasterPaymentAmount(e.target.value)}
+                  placeholder={masterFolio.masterBalance.toFixed(2)}
+                  data-testid="input-master-payment-amount"
+                />
+              </div>
+              <div>
+                <Label>Método de pago</Label>
+                <Select value={masterPaymentMethod} onValueChange={setMasterPaymentMethod}>
+                  <SelectTrigger data-testid="select-master-payment-method">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PAYMENT_METHOD_LABELS).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Referencia / comprobante (opcional)</Label>
+                <Input
+                  value={masterPaymentReference}
+                  onChange={(e) => setMasterPaymentReference(e.target.value)}
+                  placeholder="Nro de transferencia, cheque, etc."
+                  data-testid="input-master-payment-reference"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMasterPaymentDialog(false)}>Cancelar</Button>
+            <Button
+              onClick={() => masterPaymentMutation.mutate()}
+              disabled={!masterPaymentAmount || parseFloat(masterPaymentAmount) <= 0 || masterPaymentMutation.isPending}
+              data-testid="button-confirm-master-payment"
+            >
+              {masterPaymentMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : "Registrar pago"}
             </Button>
           </DialogFooter>
         </DialogContent>

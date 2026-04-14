@@ -442,6 +442,8 @@ export type OTAReservationLogWithChannel = OTAReservationLog & {
 // Groups (Grupos de reservas)
 export type GroupStatus = "tentative" | "blocked" | "confirmed" | "inhouse" | "finished" | "cancelled";
 
+export type MasterFolioConfig = "accommodation" | "all" | "none";
+
 export const groups = pgTable("groups", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   groupCode: text("group_code").notNull().unique(),
@@ -458,6 +460,7 @@ export const groups = pgTable("groups", {
   releaseDate: date("release_date"),
   notes: text("notes"),
   color: text("color").default("#6366f1"),
+  masterFolioConfig: text("master_folio_config").$type<MasterFolioConfig>().default("accommodation"),
   createdAt: timestamp("created_at").notNull(),
   createdBy: varchar("created_by"),
 });
