@@ -6,3 +6,9 @@ id = "Jwr6ksoE4fCwuGV0OVYQl"
 uri = "file://codigo-maran.zip"
 type = "unspecified"
 title = "Código completo - Maran Suite System"
+
+[[outputs]]
+id = "v3H5Gs1FFnsSAaECOL8PT"
+uri = "file://maran-suite-codigo.zip"
+type = "unspecified"
+title = "Maran Suite System — Código Fuente Completo"
