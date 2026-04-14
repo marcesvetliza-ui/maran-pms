@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
@@ -127,6 +127,16 @@ export function registerReservationsRoutes(app: Express) {
       // Fire confirmation email if created as "confirmed"
       if (data.status === "confirmed") {
         sendConfirmationEmail(reservation.id).catch(e => console.error("[email] create confirmation trigger:", e));
+      }
+
+      // Generar alertas de hospitalidad para reservas con check-in HOY
+      if (reservation.guestId && reservation.checkInDate) {
+        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        if (reservation.checkInDate === todayStr) {
+          generateSameDayHospitalityAlerts(reservation.id, reservation.guestId, reservation.roomId ?? null).catch(
+            (e) => console.error("[hospitality] same-day alert error:", e)
+          );
+        }
       }
 
       const today = new Date().toISOString().split("T")[0];
@@ -1237,4 +1247,66 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+}
+
+// Helper: genera alertas de hospitalidad inmediatamente para reservas con check-in el mismo día
+async function generateSameDayHospitalityAlerts(
+  reservationId: string,
+  guestId: string,
+  roomId: string | null
+) {
+  const areaMap: Record<string, string[]> = {
+    alimentacion: ["restaurant", "reception"],
+    habitacion: ["housekeeping", "reception"],
+    amenities: ["housekeeping"],
+    servicio: ["reception"],
+    fecha_especial: ["reception"],
+    motivo_viaje: ["reception"],
+    nota_interna: ["reception"],
+    otro: ["reception"],
+  };
+
+  const activePrefs = await db
+    .select()
+    .from(guestPreferences)
+    .where(and(eq(guestPreferences.guestId, guestId), eq(guestPreferences.isActive, true)));
+
+  if (activePrefs.length === 0) return;
+
+  // Obtener número de habitación si existe
+  let roomNumber: string | null = null;
+  if (roomId) {
+    const [room] = await db.select({ roomNumber: rooms.roomNumber }).from(rooms).where(eq(rooms.id, roomId));
+    roomNumber = room?.roomNumber ?? null;
+  }
+
+  // Evitar duplicados para esta reserva
+  const existingAlerts = await db
+    .select({ preferenceId: hospitalityAlerts.preferenceId })
+    .from(hospitalityAlerts)
+    .where(eq(hospitalityAlerts.reservationId, reservationId));
+  const existingPrefIds = new Set(existingAlerts.map((a) => a.preferenceId));
+
+  const roomLabel = roomNumber ? ` — Hab. ${roomNumber}` : "";
+
+  for (const pref of activePrefs) {
+    if (existingPrefIds.has(pref.id)) continue;
+    const targetAreas = areaMap[pref.category] || ["reception"];
+    for (const area of targetAreas) {
+      await db.insert(hospitalityAlerts).values({
+        id: randomUUID(),
+        reservationId,
+        guestId,
+        preferenceId: pref.id,
+        alertMessage: `[Llegada hoy${roomLabel}] ${pref.title}: ${pref.description || pref.title}`,
+        targetArea: area,
+        priority: pref.priority as any,
+        status: "pending",
+        isAcknowledged: false,
+        createdAt: new Date(),
+      });
+    }
+    existingPrefIds.add(pref.id);
+  }
+  console.log(`[hospitality] ${activePrefs.length} preferencias → alertas de llegada hoy generadas para reserva ${reservationId}`);
 }
