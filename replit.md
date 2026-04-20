@@ -19,7 +19,8 @@ Preferred communication style: Simple, everyday language.
 - **Runtime**: Node.js with Express.
 - **Language**: TypeScript (ESM modules).
 - **API Style**: RESTful JSON API.
-- **Authentication**: Passport.js with local strategy, bcrypt for hashing, and `connect-pg-simple` for session storage in PostgreSQL. Role-based access control.
+- **Authentication**: Passport.js with local strategy, bcrypt for hashing, and `connect-pg-simple` for session storage in PostgreSQL. Role-based access control with 8 roles: `admin`, `manager`, `reception`, `housekeeping`, `maintenance`, `restaurant`, `spa`, `events`.
+- **User Management**: Full CRUD via `POST/PATCH/GET/DELETE /api/admin/users` (admin-only). Passwords hashed with bcrypt. Cannot delete/demote the last admin. Sidebar filters menu items by role automatically.
 - **Security**: `helmet` HTTP headers, rate limiting.
 - **Audit Logging**: Records critical events to `audit_logs` table.
 

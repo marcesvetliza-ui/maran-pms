@@ -247,50 +247,87 @@ export async function registerRoutes(
     }
   });
 
-  // System Users
-  app.get("/api/admin/users", async (req, res) => {
+  // System Users — only admins can manage users
+  app.get("/api/admin/users", requireRole(["admin"]), async (req, res) => {
     try {
       const users = await storage.getSystemUsers();
-      res.json(users);
+      // Never expose password hashes
+      res.json(users.map(({ password: _, ...u }) => u));
     } catch (error) {
       res.status(500).json({ error: "Error fetching users" });
     }
   });
 
-  app.get("/api/admin/users/:id", async (req, res) => {
+  app.get("/api/admin/users/:id", requireRole(["admin"]), async (req, res) => {
     try {
       const user = await storage.getSystemUser(req.params.id);
       if (!user) return res.status(404).json({ error: "User not found" });
-      res.json(user);
+      const { password: _, ...safeUser } = user;
+      res.json(safeUser);
     } catch (error) {
       res.status(500).json({ error: "Error fetching user" });
     }
   });
 
-  app.post("/api/admin/users", async (req, res) => {
+  app.post("/api/admin/users", requireRole(["admin"]), async (req, res) => {
     try {
+      const { password, ...rest } = req.body;
+      if (!password || password.length < 6) {
+        return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+      }
+      const existing = await db.select({ id: systemUsers.id }).from(systemUsers).where(eq(systemUsers.username, rest.username)).limit(1);
+      if (existing.length > 0) {
+        return res.status(409).json({ error: "El nombre de usuario ya existe" });
+      }
+      const hashedPassword = await hashPassword(password);
       const user = await storage.createSystemUser({
-        ...req.body,
+        ...rest,
+        id: randomUUID(),
+        password: hashedPassword,
         createdAt: new Date(),
       });
-      res.status(201).json(user);
+      const { password: _, ...safeUser } = user;
+      res.status(201).json(safeUser);
     } catch (error) {
       res.status(500).json({ error: "Error creating user" });
     }
   });
 
-  app.patch("/api/admin/users/:id", async (req, res) => {
+  app.patch("/api/admin/users/:id", requireRole(["admin"]), async (req, res) => {
     try {
-      const user = await storage.updateSystemUser(req.params.id, req.body);
+      const { password, ...rest } = req.body;
+      // Prevent demoting the last admin
+      if (rest.role && rest.role !== "admin") {
+        const currentUser = await storage.getSystemUser(req.params.id);
+        if (currentUser?.role === "admin") {
+          const admins = await db.select({ id: systemUsers.id }).from(systemUsers).where(eq(systemUsers.role, "admin"));
+          if (admins.length <= 1) {
+            return res.status(400).json({ error: "No se puede cambiar el rol del único administrador" });
+          }
+        }
+      }
+      const updateData: any = { ...rest };
+      if (password && password.length >= 6) {
+        updateData.password = await hashPassword(password);
+      }
+      const user = await storage.updateSystemUser(req.params.id, updateData);
       if (!user) return res.status(404).json({ error: "User not found" });
-      res.json(user);
+      const { password: _, ...safeUser } = user;
+      res.json(safeUser);
     } catch (error) {
       res.status(500).json({ error: "Error updating user" });
     }
   });
 
-  app.delete("/api/admin/users/:id", async (req, res) => {
+  app.delete("/api/admin/users/:id", requireRole(["admin"]), async (req, res) => {
     try {
+      const targetUser = await storage.getSystemUser(req.params.id);
+      if (targetUser?.role === "admin") {
+        const admins = await db.select({ id: systemUsers.id }).from(systemUsers).where(eq(systemUsers.role, "admin"));
+        if (admins.length <= 1) {
+          return res.status(400).json({ error: "No se puede eliminar el único administrador" });
+        }
+      }
       await storage.deleteSystemUser(req.params.id);
       res.status(204).send();
     } catch (error) {

@@ -66,79 +66,85 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { SystemNotification } from "@shared/schema";
 
+// roles: qué roles pueden ver el ítem. Sin la propiedad = todos.
+// admin y manager siempre ven todo.
+const ALL_ROLES = ["admin", "manager", "reception", "housekeeping", "maintenance", "restaurant", "spa", "events"];
+const HOTEL_OPS  = ["admin", "manager", "reception"];
+const MGMT_ONLY  = ["admin", "manager"];
+
 const menuSections = [
   {
     titulo: "Gerencia",
     items: [
-      { label: "Dashboard",    icon: LayoutDashboard, href: "/"             },
-      { label: "Operaciones",  icon: Activity,        href: "/operaciones"  },
-      { label: "Ejecutivo",    icon: TrendingUp,      href: "/executive"    },
-      { label: "Reportes",   icon: BarChart2,        href: "/reports"   },
+      { label: "Dashboard",   icon: LayoutDashboard, href: "/",           roles: ALL_ROLES },
+      { label: "Operaciones", icon: Activity,        href: "/operaciones", roles: [...HOTEL_OPS, "events"] },
+      { label: "Ejecutivo",   icon: TrendingUp,      href: "/executive",   roles: MGMT_ONLY },
+      { label: "Reportes",    icon: BarChart2,        href: "/reports",    roles: MGMT_ONLY },
     ],
   },
   {
     titulo: "Hotel",
     items: [
-      { label: "Planning",        icon: CalendarDays, href: "/planning"         },
-      { label: "Reservas",        icon: BookOpen,     href: "/reservations"     },
-      { label: "Reserva rápida",  icon: Zap,          href: "/new-reservation"  },
-      { label: "Check in",        icon: LogIn,        href: "/check-in"         },
-      { label: "Check out",       icon: LogOut,       href: "/check-out"        },
-      { label: "Habitaciones",    icon: BedDouble,    href: "/rooms"            },
-      { label: "Tarifas",         icon: Tag,          href: "/rate-plans"       },
-      { label: "Paquetes",        icon: Package,      href: "/packages"         },
-      { label: "Canales OTAs",    icon: Globe,        href: "/ota-channels"     },
-      { label: "Motor de Reservas", icon: Globe,      href: "/admin/booking-engine" },
-      { label: "Grupos",          icon: Users,        href: "/groups"           },
-      { label: "Reseñas",         icon: Star,         href: "/reviews"          },
+      { label: "Planning",          icon: CalendarDays, href: "/planning",              roles: [...HOTEL_OPS, "events"] },
+      { label: "Reservas",          icon: BookOpen,     href: "/reservations",          roles: HOTEL_OPS },
+      { label: "Reserva rápida",    icon: Zap,          href: "/new-reservation",       roles: HOTEL_OPS },
+      { label: "Check in",          icon: LogIn,        href: "/check-in",              roles: HOTEL_OPS },
+      { label: "Check out",         icon: LogOut,       href: "/check-out",             roles: HOTEL_OPS },
+      { label: "Habitaciones",      icon: BedDouble,    href: "/rooms",                 roles: [...HOTEL_OPS, "housekeeping", "maintenance"] },
+      { label: "Tarifas",           icon: Tag,          href: "/rate-plans",            roles: MGMT_ONLY },
+      { label: "Paquetes",          icon: Package,      href: "/packages",              roles: HOTEL_OPS },
+      { label: "Canales OTAs",      icon: Globe,        href: "/ota-channels",          roles: MGMT_ONLY },
+      { label: "Motor de Reservas", icon: Globe,        href: "/admin/booking-engine",  roles: MGMT_ONLY },
+      { label: "Grupos",            icon: Users,        href: "/groups",                roles: [...HOTEL_OPS, "events"] },
+      { label: "Reseñas",           icon: Star,         href: "/reviews",               roles: MGMT_ONLY },
     ],
   },
   {
     titulo: "Base de datos",
     items: [
-      { label: "Huéspedes", icon: User,      href: "/guests"    },
-      { label: "Empresas",  icon: Building2, href: "/companies" },
-      { label: "Agencias",  icon: Briefcase, href: "/agencies"  },
+      { label: "Huéspedes", icon: User,      href: "/guests",    roles: HOTEL_OPS },
+      { label: "Empresas",  icon: Building2, href: "/companies", roles: HOTEL_OPS },
+      { label: "Agencias",  icon: Briefcase, href: "/agencies",  roles: MGMT_ONLY },
     ],
   },
   {
     titulo: "Servicios",
     items: [
-      { label: "Restaurant",    icon: UtensilsCrossed, href: "/restaurant"  },
-      { label: "Spa",           icon: Sparkles,        href: "/spa"          },
-      { label: "Clientes Spa",  icon: Heart,           href: "/spa-clients"  },
-      { label: "Eventos",       icon: CalendarCheck,   href: "/events"       },
+      { label: "Restaurant",   icon: UtensilsCrossed, href: "/restaurant",  roles: [...HOTEL_OPS, "restaurant"] },
+      { label: "Spa",          icon: Sparkles,        href: "/spa",         roles: [...HOTEL_OPS, "spa"] },
+      { label: "Clientes Spa", icon: Heart,           href: "/spa-clients", roles: [...HOTEL_OPS, "spa"] },
+      { label: "Eventos",      icon: CalendarCheck,   href: "/events",      roles: [...HOTEL_OPS, "events"] },
     ],
   },
   {
     titulo: "Operaciones",
     items: [
-      { label: "Housekeeping",  icon: Brush,        href: "/housekeeping" },
-      { label: "Mantenimiento", icon: Wrench,       href: "/maintenance"  },
-      { label: "Inventario",    icon: ClipboardList, href: "/inventory"   },
+      { label: "Housekeeping",  icon: Brush,         href: "/housekeeping", roles: [...HOTEL_OPS, "housekeeping"] },
+      { label: "Mantenimiento", icon: Wrench,         href: "/maintenance",  roles: [...HOTEL_OPS, "maintenance"] },
+      { label: "Inventario",    icon: ClipboardList,  href: "/inventory",    roles: [...MGMT_ONLY, "maintenance"] },
     ],
   },
   {
     titulo: "Experiencia al huésped",
     items: [
-      { label: "Hospitalidad",            icon: HandHeart,     href: "/hospitality"  },
-      { label: "MARA Chatbot",            icon: MessageCircle, href: "/chatbot"       },
-      { label: "Respuestas automáticas",  icon: Mail,          href: "/email-config"  },
+      { label: "Hospitalidad",           icon: HandHeart,     href: "/hospitality",  roles: [...HOTEL_OPS, "housekeeping"] },
+      { label: "MARA Chatbot",           icon: MessageCircle, href: "/chatbot",       roles: HOTEL_OPS },
+      { label: "Respuestas automáticas", icon: Mail,          href: "/email-config",  roles: MGMT_ONLY },
     ],
   },
   {
     titulo: "Administración",
     items: [
-      { label: "Administración", icon: Calculator, href: "/admin"          },
-      { label: "Caja",           icon: Landmark,   href: "/cash-register"  },
+      { label: "Administración", icon: Calculator, href: "/admin",         roles: MGMT_ONLY },
+      { label: "Caja",           icon: Landmark,   href: "/cash-register", roles: [...HOTEL_OPS, "restaurant", "spa"] },
     ],
   },
   {
     titulo: "Configuración",
     items: [
-      { label: "Configuración",          icon: Settings, href: "/administration"  },
-      { label: "Administración sistema", icon: Shield,   href: "/administration"  },
-      { label: "Código fuente",          icon: Code2,    href: "/source-code",     adminOnly: true, devOnly: true },
+      { label: "Configuración",          icon: Settings, href: "/administration",  roles: ["admin"] },
+      { label: "Administración sistema", icon: Shield,   href: "/administration",  roles: ["admin"], adminOnly: true },
+      { label: "Código fuente",          icon: Code2,    href: "/source-code",     roles: ["admin"], adminOnly: true, devOnly: true },
     ],
   },
 ];
@@ -357,14 +363,31 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {menuSections.map((section) => (
+        {menuSections.map((section) => {
+          const role = user?.role || "";
+          const visibleItems = section.items.filter(item => {
+            const itemRoles = (item as any).roles as string[] | undefined;
+            if (itemRoles && !itemRoles.includes(role)) return false;
+            if ((item as any).devOnly && !import.meta.env.DEV) return false;
+            return true;
+          });
+          if (visibleItems.length === 0) return null;
+          return (
           <SidebarGroup key={section.titulo} className="py-0">
             <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-4 py-1.5 mt-2">
               {section.titulo}
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {section.items.filter(item => (!(item as any).adminOnly || user?.role === "admin") && (!(item as any).devOnly || import.meta.env.DEV)).map((item) => {
+                {section.items.filter(item => {
+                  const role = user?.role || "";
+                  const itemRoles = (item as any).roles as string[] | undefined;
+                  // Role check: if roles defined, user must be in that list
+                  if (itemRoles && !itemRoles.includes(role)) return false;
+                  // devOnly items only in development
+                  if ((item as any).devOnly && !import.meta.env.DEV) return false;
+                  return true;
+                }).map((item) => {
                   const isActive =
                     item.href === "/"
                       ? location === "/"
@@ -388,7 +411,8 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        ))}
+          );
+        })}
       </SidebarContent>
 
       <SidebarFooter />

@@ -52,6 +52,7 @@ type DashboardStats = {
 
 const userFormSchema = z.object({
   username: z.string().min(3, "Minimo 3 caracteres"),
+  password: z.string().optional(),
   email: z.string().email("Email invalido"),
   fullName: z.string().min(2, "Nombre requerido"),
   role: z.string(),
@@ -922,6 +923,7 @@ export default function AdministrationPage() {
     resolver: zodResolver(userFormSchema),
     defaultValues: {
       username: "",
+      password: "",
       email: "",
       fullName: "",
       role: "reception",
@@ -943,7 +945,12 @@ export default function AdministrationPage() {
 
   const createUserMutation = useMutation({
     mutationFn: async (data: UserFormValues) => {
-      return apiRequest("POST", "/api/admin/users", data);
+      const res = await apiRequest("POST", "/api/admin/users", data);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Error al crear usuario");
+      }
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -952,15 +959,20 @@ export default function AdministrationPage() {
       userForm.reset();
       toast({ title: "Usuario creado correctamente" });
     },
-    onError: () => {
-      toast({ title: "Error al crear usuario", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: err.message || "Error al crear usuario", variant: "destructive" });
     },
   });
 
   const updateUserMutation = useMutation({
     mutationFn: async (data: UserFormValues & { id: string }) => {
       const { id, ...userData } = data;
-      return apiRequest("PATCH", `/api/admin/users/${id}`, userData);
+      const res = await apiRequest("PATCH", `/api/admin/users/${id}`, userData);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Error al actualizar usuario");
+      }
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -970,22 +982,26 @@ export default function AdministrationPage() {
       userForm.reset();
       toast({ title: "Usuario actualizado correctamente" });
     },
-    onError: () => {
-      toast({ title: "Error al actualizar usuario", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: err.message || "Error al actualizar usuario", variant: "destructive" });
     },
   });
 
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/admin/users/${id}`);
+      const res = await apiRequest("DELETE", `/api/admin/users/${id}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Error al eliminar usuario");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
       toast({ title: "Usuario eliminado correctamente" });
     },
-    onError: () => {
-      toast({ title: "Error al eliminar usuario", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: err.message || "Error al eliminar usuario", variant: "destructive" });
     },
   });
 
@@ -1024,6 +1040,7 @@ export default function AdministrationPage() {
     setEditingUser(null);
     userForm.reset({
       username: "",
+      password: "",
       email: "",
       fullName: "",
       role: "reception",
@@ -1038,6 +1055,7 @@ export default function AdministrationPage() {
     setEditingUser(user);
     userForm.reset({
       username: user.username,
+      password: "",
       email: user.email,
       fullName: user.fullName,
       role: user.role,
@@ -1700,6 +1718,30 @@ export default function AdministrationPage() {
                         placeholder="nombre.usuario"
                         disabled={!!editingUser}
                         data-testid="input-user-username"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={userForm.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Contraseña{" "}
+                      {editingUser && (
+                        <span className="text-xs text-muted-foreground font-normal">(dejar vacío para no cambiar)</span>
+                      )}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="password"
+                        placeholder={editingUser ? "••••••••" : "Mínimo 6 caracteres"}
+                        data-testid="input-user-password"
                       />
                     </FormControl>
                     <FormMessage />
