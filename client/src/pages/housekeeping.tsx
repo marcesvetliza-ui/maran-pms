@@ -19,6 +19,10 @@ import {
   Plus,
   LogIn,
   LogOut,
+  Smartphone,
+  LayoutGrid,
+  ChevronRight,
+  Star,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -852,12 +856,204 @@ function LostFoundTab() {
   );
 }
 
+// ===================== MOBILE ROOM CARD =====================
+
+function MobileRoomCard({
+  room,
+  tasks,
+  checkoutToday,
+  checkinToday,
+  onStartTask,
+  onCompleteTask,
+  onInspectTask,
+  onUpdateStatus,
+  onQuickStart,
+  isUpdating,
+}: {
+  room: RoomWithType;
+  tasks: HousekeepingTaskWithRoom[];
+  checkoutToday: boolean;
+  checkinToday: boolean;
+  onStartTask: (taskId: string) => void;
+  onCompleteTask: (taskId: string) => void;
+  onInspectTask: (taskId: string) => void;
+  onUpdateStatus: (roomId: string, status: RoomStatus) => void;
+  onQuickStart: (roomId: string) => void;
+  isUpdating: boolean;
+}) {
+  const config = statusConfig[room.status];
+  const Icon = config.icon;
+
+  const activeTask = tasks.find(t => t.status === "in_progress");
+  const pendingTask = tasks.find(t => t.status === "pending");
+  const completedTask = tasks.find(t => t.status === "completed");
+  const currentTask = activeTask || pendingTask || completedTask;
+
+  const isUrgent = checkoutToday && (room.status === "dirty" || room.status === "occupied");
+
+  return (
+    <div
+      className={`rounded-xl border-2 p-4 space-y-3 transition-all ${
+        isUrgent
+          ? "border-red-400 dark:border-red-600 bg-red-50/60 dark:bg-red-950/20"
+          : room.status === "dirty"
+          ? "border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/20"
+          : room.status === "cleaning"
+          ? "border-yellow-300 dark:border-yellow-700 bg-yellow-50/50 dark:bg-yellow-950/20"
+          : room.status === "available"
+          ? "border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-950/10"
+          : "border-border bg-muted/20"
+      }`}
+      data-testid={`card-mobile-room-${room.id}`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl font-bold tracking-tight">{room.roomNumber}</span>
+          <div className="flex flex-col gap-0.5">
+            <div className={`flex items-center gap-1 text-sm font-medium ${config.className}`}>
+              <Icon className="h-4 w-4" />
+              {config.label}
+            </div>
+            <span className="text-xs text-muted-foreground">{room.roomType?.name || room.roomType?.code || "—"} · Piso {room.floor}</span>
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          {isUrgent && (
+            <Badge className="bg-red-500 text-white border-0 text-xs animate-pulse">
+              ⚠ Checkout hoy
+            </Badge>
+          )}
+          {checkinToday && (
+            <Badge className="bg-blue-500 text-white border-0 text-xs">
+              Check-in hoy
+            </Badge>
+          )}
+          {room.bedConfig && (
+            <span className="text-xs text-muted-foreground font-medium">{room.bedConfig}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Task info */}
+      {currentTask && (
+        <div className={`rounded-lg px-3 py-2 text-sm ${
+          currentTask.status === "in_progress" ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300" :
+          currentTask.status === "completed" ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" :
+          "bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300"
+        }`}>
+          <span className="font-medium">{taskTypeLabels[currentTask.taskType as TaskType] || currentTask.taskType}</span>
+          {" · "}
+          <span>{taskStatusConfig[currentTask.status as TaskStatus].label}</span>
+          {currentTask.notes && (
+            <p className="text-xs mt-0.5 opacity-80 truncate">{currentTask.notes}</p>
+          )}
+        </div>
+      )}
+
+      {/* Main action buttons */}
+      <div className="flex flex-col gap-2">
+        {/* No active task on a dirty/occupied room → Quick start */}
+        {!currentTask && (room.status === "dirty" || (checkoutToday && room.status === "occupied")) && (
+          <Button
+            className="w-full h-12 text-base bg-orange-500 hover:bg-orange-600 text-white"
+            disabled={isUpdating}
+            onClick={() => onQuickStart(room.id)}
+            data-testid={`button-quick-start-${room.id}`}
+          >
+            <Play className="h-5 w-5 mr-2" />
+            Iniciar limpieza
+          </Button>
+        )}
+
+        {/* Pending task → Start */}
+        {pendingTask && !activeTask && (
+          <Button
+            className="w-full h-12 text-base bg-yellow-500 hover:bg-yellow-600 text-white"
+            disabled={isUpdating}
+            onClick={() => onStartTask(pendingTask.id)}
+            data-testid={`button-start-task-${pendingTask.id}`}
+          >
+            <Play className="h-5 w-5 mr-2" />
+            Iniciar tarea
+          </Button>
+        )}
+
+        {/* Active task → Complete */}
+        {activeTask && (
+          <Button
+            className="w-full h-12 text-base bg-green-500 hover:bg-green-600 text-white"
+            disabled={isUpdating}
+            onClick={() => onCompleteTask(activeTask.id)}
+            data-testid={`button-complete-task-${activeTask.id}`}
+          >
+            <CheckCircle className="h-5 w-5 mr-2" />
+            Marcar lista
+          </Button>
+        )}
+
+        {/* Completed task → Inspect */}
+        {completedTask && !activeTask && !pendingTask && (
+          <Button
+            className="w-full h-12 text-base bg-blue-500 hover:bg-blue-600 text-white"
+            disabled={isUpdating}
+            onClick={() => onInspectTask(completedTask.id)}
+            data-testid={`button-inspect-task-${completedTask.id}`}
+          >
+            <Star className="h-5 w-5 mr-2" />
+            Aprobar (inspección)
+          </Button>
+        )}
+
+        {/* Already available and no action needed */}
+        {room.status === "available" && !currentTask && !checkoutToday && (
+          <div className="text-center text-sm text-green-600 dark:text-green-400 font-medium py-1">
+            <CheckCircle className="h-4 w-4 inline mr-1" />
+            Lista
+          </div>
+        )}
+      </div>
+
+      {/* Quick status row */}
+      <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+        <span className="text-xs text-muted-foreground flex-1">Cambiar estado:</span>
+        <button
+          className="text-[11px] px-2 py-1 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium"
+          onClick={() => onUpdateStatus(room.id, "available")}
+          disabled={isUpdating || room.status === "available"}
+          data-testid={`button-set-available-${room.id}`}
+        >
+          Disponible
+        </button>
+        <button
+          className="text-[11px] px-2 py-1 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium"
+          onClick={() => onUpdateStatus(room.id, "dirty")}
+          disabled={isUpdating || room.status === "dirty"}
+          data-testid={`button-set-dirty-${room.id}`}
+        >
+          Sucia
+        </button>
+        <button
+          className="text-[11px] px-2 py-1 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium"
+          onClick={() => onUpdateStatus(room.id, "maintenance")}
+          disabled={isUpdating || room.status === "maintenance"}
+          data-testid={`button-set-maintenance-${room.id}`}
+        >
+          Mant.
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ===================== HOUSEKEEPING MAIN =====================
 
 export default function Housekeeping() {
   const { toast } = useToast();
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [mobileView, setMobileView] = useState(() => localStorage.getItem("hk_mobile_view") === "true");
+  const toggleMobileView = () => setMobileView(v => { const next = !v; localStorage.setItem("hk_mobile_view", String(next)); return next; });
   const [createTaskDialogOpen, setCreateTaskDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
@@ -941,6 +1137,37 @@ export default function Housekeeping() {
     },
   });
 
+  const inspectTaskMutation = useMutation({
+    mutationFn: (taskId: string) => apiRequest("POST", `/api/housekeeping/${taskId}/inspect`, { inspectedBy: "Supervisor" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Habitación aprobada", description: "La inspección fue registrada." });
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo registrar la inspección.", variant: "destructive" }),
+  });
+
+  const quickStartMutation = useMutation({
+    mutationFn: async (roomId: string) => {
+      const resp = await apiRequest("POST", "/api/housekeeping", {
+        roomId,
+        taskType: "checkout_clean",
+        priority: "high",
+        scheduledDate: today,
+      });
+      if (!resp.ok) throw new Error("create failed");
+      const task = await resp.json();
+      await apiRequest("POST", `/api/housekeeping/${task.id}/start`);
+      return task;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Limpieza iniciada" });
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo iniciar la limpieza.", variant: "destructive" }),
+  });
+
   const floors = rooms ? Array.from(new Set(rooms.map(r => r.floor))).sort((a, b) => a - b) : [];
   
   const filteredRooms = rooms?.filter(room => {
@@ -969,6 +1196,13 @@ export default function Housekeeping() {
   const salidashoy = checkouts.filter((r: any) => r.checkOutDate === today).length;
   const entradasHoy = checkins.filter((r: any) => r.checkInDate === today && r.status === "confirmed").length;
   const continuaciones = rooms?.filter(r => r.status === "occupied").length ?? 0;
+
+  const checkoutRoomIds = new Set(
+    checkouts.filter((r: any) => r.checkOutDate === today).map((r: any) => r.roomId)
+  );
+  const checkinRoomIds = new Set(
+    checkins.filter((r: any) => r.checkInDate === today && r.status === "confirmed").map((r: any) => r.roomId)
+  );
   const tareasHoy = tasks?.length ?? 0;
   const tareasCompletadas = tasks?.filter(t => t.status === "completed" || t.status === "inspected").length ?? 0;
 
@@ -1120,33 +1354,47 @@ export default function Housekeeping() {
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <Select value={floorFilter} onValueChange={setFloorFilter}>
-                <SelectTrigger className="w-32" data-testid="select-floor-filter">
-                  <SelectValue placeholder="Piso" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los pisos</SelectItem>
-                  {floors.map(floor => (
-                    <SelectItem key={floor} value={floor.toString()}>Piso {floor}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40" data-testid="select-status-filter">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="available">Disponible</SelectItem>
-                  <SelectItem value="occupied">Ocupada</SelectItem>
-                  <SelectItem value="dirty">Sucia</SelectItem>
-                  <SelectItem value="cleaning">Limpiando</SelectItem>
-                  <SelectItem value="maintenance">Mantenimiento</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                <Select value={floorFilter} onValueChange={setFloorFilter}>
+                  <SelectTrigger className="w-32" data-testid="select-floor-filter">
+                    <SelectValue placeholder="Piso" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos los pisos</SelectItem>
+                    {floors.map(floor => (
+                      <SelectItem key={floor} value={floor.toString()}>Piso {floor}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-40" data-testid="select-status-filter">
+                    <SelectValue placeholder="Estado" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos los estados</SelectItem>
+                    <SelectItem value="available">Disponible</SelectItem>
+                    <SelectItem value="occupied">Ocupada</SelectItem>
+                    <SelectItem value="dirty">Sucia</SelectItem>
+                    <SelectItem value="cleaning">Limpiando</SelectItem>
+                    <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <button
+                onClick={toggleMobileView}
+                data-testid="button-toggle-mobile-view"
+                title={mobileView ? "Cambiar a vista escritorio" : "Cambiar a vista móvil (táctil)"}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                  mobileView
+                    ? "bg-violet-100 dark:bg-violet-900/40 border-violet-400 text-violet-800 dark:text-violet-300"
+                    : "bg-muted border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {mobileView ? <LayoutGrid className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
+                {mobileView ? "Vista escritorio" : "Vista móvil"}
+              </button>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -1207,35 +1455,84 @@ export default function Housekeeping() {
         </Card>
       </div>
 
-      {Object.entries(roomsByFloor)
-        .sort(([a], [b]) => parseInt(a) - parseInt(b))
-        .map(([floor, floorRooms]) => (
-          <div key={floor} className="space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              Piso {floor}
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-              {floorRooms
-                .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber))
-                .map(room => (
-                  <RoomCard
-                    key={room.id}
-                    room={room}
-                    tasks={getTasksForRoom(room.id)}
-                    onStartTask={(taskId) => startTaskMutation.mutate(taskId)}
-                    onCompleteTask={(taskId) => completeTaskMutation.mutate(taskId)}
-                    onCreateTask={handleCreateTask}
-                    onUpdateStatus={(roomId, status) => 
-                      updateRoomStatusMutation.mutate({ roomId, status })
-                    }
-                    onOpenDetails={handleOpenDetails}
-                    onEditBedConfig={handleEditBedConfig}
-                  />
-                ))}
+      {mobileView ? (
+        /* ── VISTA MÓVIL ── */
+        <div className="space-y-3">
+          {filteredRooms.length === 0 && (
+            <div className="text-center py-16 text-muted-foreground">
+              <Sparkles className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium">No hay habitaciones que mostrar</p>
             </div>
-          </div>
-        ))}
+          )}
+          {/* Urgentes primero: checkout hoy + sucia/ocupada */}
+          {filteredRooms
+            .slice()
+            .sort((a, b) => {
+              const urgentA = checkoutRoomIds.has(a.id) && (a.status === "dirty" || a.status === "occupied") ? 0 : 1;
+              const urgentB = checkoutRoomIds.has(b.id) && (b.status === "dirty" || b.status === "occupied") ? 0 : 1;
+              if (urgentA !== urgentB) return urgentA - urgentB;
+              const orderMap: Record<string, number> = { dirty: 1, cleaning: 2, maintenance: 3, occupied: 4, available: 5, oos: 6 };
+              const oA = orderMap[a.status] ?? 9;
+              const oB = orderMap[b.status] ?? 9;
+              if (oA !== oB) return oA - oB;
+              return parseInt(a.roomNumber) - parseInt(b.roomNumber);
+            })
+            .map(room => (
+              <MobileRoomCard
+                key={room.id}
+                room={room}
+                tasks={getTasksForRoom(room.id)}
+                checkoutToday={checkoutRoomIds.has(room.id)}
+                checkinToday={checkinRoomIds.has(room.id)}
+                onStartTask={(taskId) => startTaskMutation.mutate(taskId)}
+                onCompleteTask={(taskId) => completeTaskMutation.mutate(taskId)}
+                onInspectTask={(taskId) => inspectTaskMutation.mutate(taskId)}
+                onUpdateStatus={(roomId, status) => updateRoomStatusMutation.mutate({ roomId, status })}
+                onQuickStart={(roomId) => quickStartMutation.mutate(roomId)}
+                isUpdating={
+                  startTaskMutation.isPending ||
+                  completeTaskMutation.isPending ||
+                  inspectTaskMutation.isPending ||
+                  updateRoomStatusMutation.isPending ||
+                  quickStartMutation.isPending
+                }
+              />
+            ))}
+        </div>
+      ) : (
+        /* ── VISTA ESCRITORIO (grid existente) ── */
+        <>
+          {Object.entries(roomsByFloor)
+            .sort(([a], [b]) => parseInt(a) - parseInt(b))
+            .map(([floor, floorRooms]) => (
+              <div key={floor} className="space-y-3">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  Piso {floor}
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                  {floorRooms
+                    .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber))
+                    .map(room => (
+                      <RoomCard
+                        key={room.id}
+                        room={room}
+                        tasks={getTasksForRoom(room.id)}
+                        onStartTask={(taskId) => startTaskMutation.mutate(taskId)}
+                        onCompleteTask={(taskId) => completeTaskMutation.mutate(taskId)}
+                        onCreateTask={handleCreateTask}
+                        onUpdateStatus={(roomId, status) =>
+                          updateRoomStatusMutation.mutate({ roomId, status })
+                        }
+                        onOpenDetails={handleOpenDetails}
+                        onEditBedConfig={handleEditBedConfig}
+                      />
+                    ))}
+                </div>
+              </div>
+            ))}
+        </>
+      )}
           </div>
         </TabsContent>
 
