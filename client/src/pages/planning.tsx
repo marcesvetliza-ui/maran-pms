@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal, ShoppingCart, XCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal, ShoppingCart, XCircle, TrendingUp } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -1733,6 +1733,13 @@ export default function PlanningPage() {
   const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string } | null>(null);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [blocksExpanded, setBlocksExpanded] = useState(false);
+  const [showRevenue, setShowRevenue] = useState(() => localStorage.getItem("planning_revenue") === "true");
+
+  const toggleRevenue = () => setShowRevenue(v => {
+    const next = !v;
+    localStorage.setItem("planning_revenue", String(next));
+    return next;
+  });
 
   type PlanningFilter = {
     showEmpty: boolean;
@@ -2224,12 +2231,27 @@ export default function PlanningPage() {
 
       <Card>
         <CardHeader className="py-3 px-4 border-b">
-          <CardTitle className="text-base font-medium flex items-center gap-2">
-            <Info className="h-4 w-4 text-muted-foreground" />
-            <span>
-              {data ? `${filteredRooms.length} habitaciones${filteredRooms.length !== data.rooms.length ? ` (de ${data.rooms.length})` : ""}` : "Cargando..."} | {" "}
-              {dateRange.start} — {dateRange.end}
-            </span>
+          <CardTitle className="text-base font-medium flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Info className="h-4 w-4 text-muted-foreground" />
+              <span>
+                {data ? `${filteredRooms.length} habitaciones${filteredRooms.length !== data.rooms.length ? ` (de ${data.rooms.length})` : ""}` : "Cargando..."} | {" "}
+                {dateRange.start} — {dateRange.end}
+              </span>
+            </div>
+            <button
+              onClick={toggleRevenue}
+              title={showRevenue ? "Ocultar indicadores de revenue" : "Mostrar indicadores de ocupación y revenue"}
+              data-testid="button-toggle-revenue"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                showRevenue
+                  ? "bg-emerald-100 dark:bg-emerald-900/40 border-emerald-400 text-emerald-800 dark:text-emerald-300"
+                  : "bg-muted border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <TrendingUp className="h-3.5 w-3.5" />
+              Revenue
+            </button>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -2312,6 +2334,80 @@ export default function PlanningPage() {
                         );
                       })}
                     </tr>
+                    {/* ── FILA DE REVENUE ──────────────────────────── */}
+                    {showRevenue && (
+                      <tr className="border-b bg-emerald-50/50 dark:bg-emerald-950/20">
+                        <td className="sticky left-0 z-30 bg-emerald-50/90 dark:bg-emerald-950/40 px-3 py-1.5 border-r w-24">
+                          <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                            <TrendingUp className="h-3 w-3" />
+                            Revenue
+                          </div>
+                        </td>
+                        {data.days.map((day, dayIndex) => {
+                          const total = data.rooms.length || 66;
+                          const occupied = data.rooms.filter(r => {
+                            const st = data.occupancy[r.id]?.[dayIndex] ?? "available";
+                            return st !== "available" && st !== "maintenance";
+                          }).length;
+                          const pct = Math.round((occupied / total) * 100);
+
+                          let barColor = "bg-green-400";
+                          let textColor = "text-green-700 dark:text-green-400";
+                          let demandLabel = "Demanda baja";
+                          let suggestion = "Tarifa estándar o descuento";
+
+                          if (pct >= 85) {
+                            barColor = "bg-red-500";
+                            textColor = "text-red-700 dark:text-red-400";
+                            demandLabel = "Casi lleno";
+                            suggestion = "↑ Subir tarifa +20–25%";
+                          } else if (pct >= 70) {
+                            barColor = "bg-orange-400";
+                            textColor = "text-orange-700 dark:text-orange-400";
+                            demandLabel = "Demanda alta";
+                            suggestion = "↑ Subir tarifa +10–15%";
+                          } else if (pct >= 40) {
+                            barColor = "bg-yellow-400";
+                            textColor = "text-yellow-700 dark:text-yellow-500";
+                            demandLabel = "Demanda media";
+                            suggestion = "Mantener tarifa";
+                          }
+
+                          const info = formatDate(day);
+                          return (
+                            <td
+                              key={day}
+                              className={`px-1 py-1 min-w-[60px] align-middle ${
+                                info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : ""
+                              }`}
+                            >
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex flex-col items-center gap-0.5 cursor-default select-none">
+                                    <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full transition-all ${barColor}`}
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                    </div>
+                                    <span className={`text-[9px] font-semibold leading-none ${textColor}`}>
+                                      {pct}%
+                                    </span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom" className="text-xs max-w-[160px]">
+                                  <div className="space-y-0.5 text-center">
+                                    <div className="font-semibold">{demandLabel}</div>
+                                    <div className="text-muted-foreground">{occupied}/{total} hab. ocupadas</div>
+                                    <div className="text-emerald-600 dark:text-emerald-400 font-medium">{suggestion}</div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )}
                   </thead>
                   <tbody>
                     {floors.map((floor) => (
