@@ -2367,3 +2367,50 @@ export const surveyResponses = pgTable("survey_responses", {
 });
 
 export type SurveyResponse = typeof surveyResponses.$inferSelect;
+
+// ==================== PRESUPUESTOS ====================
+export type PresupuestoEstado = "borrador" | "enviado" | "aceptado" | "vencido" | "cancelado";
+export type PresupuestoSector = "alojamiento" | "restaurant" | "spa" | "evento" | "otro";
+
+export const presupuestos = pgTable("presupuestos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  numero: varchar("numero").notNull(),
+  para: text("para").notNull(),
+  clienteType: varchar("cliente_type").default("libre"),
+  clienteId: varchar("cliente_id"),
+  fechaEmision: varchar("fecha_emision").notNull(),
+  fechaVencimiento: varchar("fecha_vencimiento"),
+  estado: varchar("estado").$type<PresupuestoEstado>().notNull().default("borrador"),
+  notas: text("notas"),
+  condiciones: text("condiciones"),
+  subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  descuentoGlobal: numeric("descuento_global", { precision: 5, scale: 2 }).notNull().default("0"),
+  total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertPresupuestoSchema = createInsertSchema(presupuestos).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertPresupuesto = z.infer<typeof insertPresupuestoSchema>;
+export type Presupuesto = typeof presupuestos.$inferSelect;
+
+export const presupuestoItems = pgTable("presupuesto_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  presupuestoId: varchar("presupuesto_id").notNull().references(() => presupuestos.id, { onDelete: "cascade" }),
+  sector: varchar("sector").$type<PresupuestoSector>().notNull().default("otro"),
+  descripcion: text("descripcion").notNull(),
+  detalle: text("detalle"),
+  cantidad: numeric("cantidad", { precision: 8, scale: 2 }).notNull().default("1"),
+  precioUnitario: numeric("precio_unitario", { precision: 12, scale: 2 }).notNull().default("0"),
+  descuento: numeric("descuento", { precision: 5, scale: 2 }).notNull().default("0"),
+  subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  orden: integer("orden").notNull().default(0),
+});
+
+export const insertPresupuestoItemSchema = createInsertSchema(presupuestoItems).omit({ id: true });
+export type InsertPresupuestoItem = z.infer<typeof insertPresupuestoItemSchema>;
+export type PresupuestoItem = typeof presupuestoItems.$inferSelect;
+
+export type PresupuestoWithItems = Presupuesto & { items: PresupuestoItem[] };

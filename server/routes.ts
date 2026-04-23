@@ -34,6 +34,7 @@ import { registerRestaurantRoutes } from "./routes/restaurant";
 import { registerInventoryRoutes } from "./routes/inventory";
 import { registerSpaRoutes } from "./routes/spa";
 import { registerEventsRoutes } from "./routes/events";
+import { registerPresupuestosRoutes } from "./routes/presupuestos";
 import { registerMaintenanceRoutes } from "./routes/maintenance";
 import { registerFolioRoutes } from "./routes/folios";
 import { registerPublicBookingRoutes } from "./routes/publicBooking";
@@ -2279,6 +2280,7 @@ export async function registerRoutes(
   registerInventoryRoutes(app);
   registerSpaRoutes(app);
   registerEventsRoutes(app);
+  registerPresupuestosRoutes(app);
   registerRoomsRoutes(app);
   registerHospitalityRoutes(app);
   registerOtaRoutes(app);

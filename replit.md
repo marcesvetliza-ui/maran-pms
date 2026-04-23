@@ -47,6 +47,7 @@ Preferred communication style: Simple, everyday language.
 - **Administration Module**: Central hub for financial sub-modules (Billing, Corporate/Agency Current Accounts, Receipts, Reports, Cash Desk).
 - **Electronic Billing (AFIP)**: Configuration, generation of sales invoices (FA/FB/FC, NC A/B) with CAE, and PDF generation.
 - **Online Booking Engine**: Public 4-step booking wizard, iframe-embeddable, with admin configuration for rooms, photos, amenities, and management of pending web reservations.
+- **Presupuestos**: Full quote module with numbered quotes (PRES-YYYY-NNNN), line items per sector (alojamiento/restaurant/spa/evento/otro), room type autocomplete, global discount, per-item discounts, editable legal conditions, PDF generation via PDFKit, and status workflow (borrador → enviado → aceptado/vencido/cancelado).
 
 ## External Dependencies
 

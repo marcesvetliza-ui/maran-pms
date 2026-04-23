@@ -42,6 +42,7 @@ import CashRegisterPage from "@/pages/cash-register";
 import SourceCodePage from "@/pages/source-code";
 import AdminPage from "@/pages/admin";
 import SpaClientsPage from "@/pages/spa-clients";
+import PresupuestosPage from "@/pages/presupuestos";
 import AccountingSuppliersPage from "@/pages/accounting-suppliers";
 import PurchaseInvoicesPage from "@/pages/purchase-invoices";
 import AdminConsultasPage from "@/pages/admin-consultas";
@@ -99,6 +100,7 @@ function Router() {
       <Route path="/ota-channels" component={OTAChannelsPage} />
       <Route path="/reviews" component={ReviewsPage} />
       <Route path="/housekeeping" component={HousekeepingPage} />
+      <Route path="/presupuestos" component={PresupuestosPage} />
       <Route path="/restaurant" component={RestaurantPage} />
       <Route path="/inventory" component={InventoryPage} />
       <Route path="/spa" component={SpaPage} />

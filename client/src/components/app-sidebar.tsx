@@ -93,6 +93,7 @@ const menuSections = [
       { label: "Habitaciones",      icon: BedDouble,    href: "/rooms",                 roles: [...HOTEL_OPS, "housekeeping", "maintenance"] },
       { label: "Tarifas",           icon: Tag,          href: "/rate-plans",            roles: MGMT_ONLY },
       { label: "Paquetes",          icon: Package,      href: "/packages",              roles: HOTEL_OPS },
+      { label: "Presupuestos",      icon: ClipboardList, href: "/presupuestos",          roles: HOTEL_OPS },
       { label: "Canales OTAs",      icon: Globe,        href: "/ota-channels",          roles: MGMT_ONLY },
       { label: "Motor de Reservas", icon: Globe,        href: "/admin/booking-engine",  roles: MGMT_ONLY },
       { label: "Grupos",            icon: Users,        href: "/groups",                roles: [...HOTEL_OPS, "events"] },
