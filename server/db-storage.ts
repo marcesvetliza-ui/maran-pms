@@ -830,14 +830,14 @@ export class DatabaseStorage implements IStorage {
       const roomBlocks = maintenanceBlocksByRoom.get(room.id) || [];
 
       for (const day of days) {
-        // Check permanent room status OR date-range maintenance block
-        const isBlockedForDay = room.status === "maintenance" ||
-          roomBlocks.some(b => day >= b.blockFrom && day <= b.blockTo);
+        // Only block cells when there is a date-range maintenance block (created from Maintenance module)
+        // Rooms with status "maintenance" from Housekeeping show the wrench icon but are NOT blocked
+        const isBlockedForDay = roomBlocks.some(b => day >= b.blockFrom && day <= b.blockTo);
         if (isBlockedForDay) {
           occupancy[room.id].push("maintenance");
           continue;
         }
-        // dirty, cleaning, inspected: show status badge in room column but DON'T block cells
+        // dirty, cleaning, inspected, maintenance: show status badge in room column but DON'T block cells
 
         const reservation = allReservations.find(r => {
           if (r.roomId !== room.id) return false;

@@ -44,6 +44,8 @@ type Room = {
   id: string;
   roomNumber: string;
   floor: number;
+  status: string;
+  roomType?: { id: string; name: string } | null;
 };
 
 type MaintenanceStaff = {
@@ -646,6 +648,20 @@ export default function MaintenancePage() {
     },
   });
 
+  const clearMaintenanceFlagMutation = useMutation({
+    mutationFn: async (roomId: string) => {
+      return apiRequest("PATCH", `/api/housekeeping/room/${roomId}/status`, { status: "available" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      toast({ title: "Habitación disponible", description: "La habitación volvió a estado disponible" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo actualizar la habitación", variant: "destructive" });
+    },
+  });
+
   const filteredOrders = workOrders.filter((order) => {
     if (statusFilter === "active") {
       return order.status !== "completed" && order.status !== "cancelled";
@@ -760,6 +776,15 @@ export default function MaintenancePage() {
       <Tabs defaultValue="orders" className="space-y-4">
         <TabsList>
           <TabsTrigger value="orders" data-testid="tab-orders">Ordenes de Trabajo</TabsTrigger>
+          <TabsTrigger value="rooms" data-testid="tab-rooms">
+            <Wrench className="h-4 w-4 mr-1" />
+            Habitaciones
+            {rooms.filter(r => r.status === "maintenance").length > 0 && (
+              <span className="ml-1.5 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5 font-bold leading-none">
+                {rooms.filter(r => r.status === "maintenance").length}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="staff" data-testid="tab-staff">Personal</TabsTrigger>
           <TabsTrigger value="bitacora" data-testid="tab-bitacora">
             <AlertTriangle className="h-4 w-4 mr-1" />
@@ -880,6 +905,77 @@ export default function MaintenancePage() {
               </TableBody>
             </Table>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="rooms" className="space-y-4">
+          {rooms.filter(r => r.status === "maintenance").length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <Wrench className="h-10 w-10 text-muted-foreground mb-3" />
+                <p className="text-muted-foreground font-medium">Sin habitaciones en mantenimiento</p>
+                <p className="text-sm text-muted-foreground mt-1">Cuando Housekeeping marque una habitación con la herramienta, aparecerá aquí.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {rooms
+                .filter(r => r.status === "maintenance")
+                .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }))
+                .map(room => (
+                  <Card key={room.id} className="border-l-4 border-l-red-500" data-testid={`card-maintenance-room-${room.id}`}>
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Wrench className="h-4 w-4 text-red-500" />
+                          <span className="text-xl font-bold">{room.roomNumber}</span>
+                        </div>
+                        <Badge variant="destructive" className="text-xs">Mantenimiento</Badge>
+                      </div>
+                      {room.roomType && (
+                        <p className="text-sm text-muted-foreground">{room.roomType.name}</p>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Marcada por Housekeeping — no bloquea reservas
+                      </p>
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 text-xs"
+                          onClick={() => clearMaintenanceFlagMutation.mutate(room.id)}
+                          disabled={clearMaintenanceFlagMutation.isPending}
+                          data-testid={`button-clear-maintenance-${room.id}`}
+                        >
+                          Marcar disponible
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1 text-xs"
+                          onClick={() => {
+                            orderForm.reset({
+                              title: `Hab. ${room.roomNumber} — mantenimiento`,
+                              roomId: room.id,
+                              description: "",
+                              location: "",
+                              category: "general",
+                              priority: "medium",
+                              assignedToId: "",
+                              scheduledDate: "",
+                              estimatedCost: "",
+                              notes: "",
+                            });
+                            setIsNewOrderDialogOpen(true);
+                          }}
+                          data-testid={`button-create-order-room-${room.id}`}
+                        >
+                          Crear orden
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="bitacora" className="space-y-4">
