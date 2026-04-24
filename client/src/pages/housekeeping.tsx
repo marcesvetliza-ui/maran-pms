@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Sparkles,
@@ -23,6 +23,8 @@ import {
   LayoutGrid,
   ChevronRight,
   Star,
+  Timer,
+  StopCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,6 +46,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Popover,
   PopoverContent,
@@ -858,6 +870,35 @@ function LostFoundTab() {
 
 // ===================== MOBILE ROOM CARD =====================
 
+// ─── Elapsed time hook ────────────────────────────────────────────────────────
+function useElapsedTime(startedAt: Date | string | null | undefined): string {
+  const [elapsed, setElapsed] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!startedAt) { setElapsed(0); return; }
+    const start = new Date(startedAt).getTime();
+    const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000));
+    tick();
+    intervalRef.current = setInterval(tick, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [startedAt]);
+
+  const m = Math.floor(elapsed / 60).toString().padStart(2, "0");
+  const s = (elapsed % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+// ─── Pending action type ───────────────────────────────────────────────────────
+interface PendingAction {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  confirmClass?: string;
+  fn: () => void;
+}
+
+// ─── MobileRoomCard ───────────────────────────────────────────────────────────
 function MobileRoomCard({
   room,
   tasks,
@@ -883,6 +924,7 @@ function MobileRoomCard({
 }) {
   const config = statusConfig[room.status];
   const Icon = config.icon;
+  const [pending, setPending] = useState<PendingAction | null>(null);
 
   const activeTask = tasks.find(t => t.status === "in_progress");
   const pendingTask = tasks.find(t => t.status === "pending");
@@ -891,158 +933,249 @@ function MobileRoomCard({
 
   const isUrgent = checkoutToday && (room.status === "dirty" || room.status === "occupied");
 
+  // Cronómetro — corre solo cuando hay tarea activa con startedAt
+  const elapsed = useElapsedTime(activeTask?.startedAt);
+
+  // Helper para pedir confirmación antes de ejecutar cualquier acción
+  const confirm = useCallback((action: PendingAction) => {
+    setPending(action);
+  }, []);
+
+  const handleConfirm = () => {
+    pending?.fn();
+    setPending(null);
+  };
+
   return (
-    <div
-      className={`rounded-xl border-2 p-4 space-y-3 transition-all ${
-        isUrgent
-          ? "border-red-400 dark:border-red-600 bg-red-50/60 dark:bg-red-950/20"
-          : room.status === "dirty"
-          ? "border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/20"
-          : room.status === "cleaning"
-          ? "border-yellow-300 dark:border-yellow-700 bg-yellow-50/50 dark:bg-yellow-950/20"
-          : room.status === "available"
-          ? "border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-950/10"
-          : "border-border bg-muted/20"
-      }`}
-      data-testid={`card-mobile-room-${room.id}`}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-3xl font-bold tracking-tight">{room.roomNumber}</span>
-          <div className="flex flex-col gap-0.5">
-            <div className={`flex items-center gap-1 text-sm font-medium ${config.className}`}>
-              <Icon className="h-4 w-4" />
-              {config.label}
+    <>
+      <div
+        className={`rounded-xl border-2 p-4 space-y-3 transition-all ${
+          isUrgent
+            ? "border-red-400 dark:border-red-600 bg-red-50/60 dark:bg-red-950/20"
+            : room.status === "dirty"
+            ? "border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/20"
+            : room.status === "cleaning"
+            ? "border-yellow-300 dark:border-yellow-700 bg-yellow-50/50 dark:bg-yellow-950/20"
+            : room.status === "available"
+            ? "border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-950/10"
+            : "border-border bg-muted/20"
+        }`}
+        data-testid={`card-mobile-room-${room.id}`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl font-bold tracking-tight">{room.roomNumber}</span>
+            <div className="flex flex-col gap-0.5">
+              <div className={`flex items-center gap-1 text-sm font-medium ${config.className}`}>
+                <Icon className="h-4 w-4" />
+                {config.label}
+              </div>
+              <span className="text-xs text-muted-foreground">{room.roomType?.name || room.roomType?.code || "—"} · Piso {room.floor}</span>
             </div>
-            <span className="text-xs text-muted-foreground">{room.roomType?.name || room.roomType?.code || "—"} · Piso {room.floor}</span>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            {isUrgent && (
+              <Badge className="bg-red-500 text-white border-0 text-xs animate-pulse">
+                ⚠ Checkout hoy
+              </Badge>
+            )}
+            {checkinToday && (
+              <Badge className="bg-blue-500 text-white border-0 text-xs">
+                Check-in hoy
+              </Badge>
+            )}
+            {room.bedConfig && (
+              <span className="text-xs text-muted-foreground font-medium">{room.bedConfig}</span>
+            )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          {isUrgent && (
-            <Badge className="bg-red-500 text-white border-0 text-xs animate-pulse">
-              ⚠ Checkout hoy
-            </Badge>
-          )}
-          {checkinToday && (
-            <Badge className="bg-blue-500 text-white border-0 text-xs">
-              Check-in hoy
-            </Badge>
-          )}
-          {room.bedConfig && (
-            <span className="text-xs text-muted-foreground font-medium">{room.bedConfig}</span>
-          )}
-        </div>
-      </div>
 
-      {/* Task info */}
-      {currentTask && (
-        <div className={`rounded-lg px-3 py-2 text-sm ${
-          currentTask.status === "in_progress" ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300" :
-          currentTask.status === "completed" ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" :
-          "bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300"
-        }`}>
-          <span className="font-medium">{taskTypeLabels[currentTask.taskType as TaskType] || currentTask.taskType}</span>
-          {" · "}
-          <span>{taskStatusConfig[currentTask.status as TaskStatus].label}</span>
-          {currentTask.notes && (
-            <p className="text-xs mt-0.5 opacity-80 truncate">{currentTask.notes}</p>
-          )}
-        </div>
-      )}
-
-      {/* Main action buttons */}
-      <div className="flex flex-col gap-2">
-        {/* No active task on a dirty/occupied room → Quick start */}
-        {!currentTask && (room.status === "dirty" || (checkoutToday && room.status === "occupied")) && (
-          <Button
-            className="w-full h-12 text-base bg-orange-500 hover:bg-orange-600 text-white"
-            disabled={isUpdating}
-            onClick={() => onQuickStart(room.id)}
-            data-testid={`button-quick-start-${room.id}`}
-          >
-            <Play className="h-5 w-5 mr-2" />
-            Iniciar limpieza
-          </Button>
-        )}
-
-        {/* Pending task → Start */}
-        {pendingTask && !activeTask && (
-          <Button
-            className="w-full h-12 text-base bg-yellow-500 hover:bg-yellow-600 text-white"
-            disabled={isUpdating}
-            onClick={() => onStartTask(pendingTask.id)}
-            data-testid={`button-start-task-${pendingTask.id}`}
-          >
-            <Play className="h-5 w-5 mr-2" />
-            Iniciar tarea
-          </Button>
-        )}
-
-        {/* Active task → Complete */}
-        {activeTask && (
-          <Button
-            className="w-full h-12 text-base bg-green-500 hover:bg-green-600 text-white"
-            disabled={isUpdating}
-            onClick={() => onCompleteTask(activeTask.id)}
-            data-testid={`button-complete-task-${activeTask.id}`}
-          >
-            <CheckCircle className="h-5 w-5 mr-2" />
-            Marcar lista
-          </Button>
-        )}
-
-        {/* Completed task → Inspect */}
-        {completedTask && !activeTask && !pendingTask && (
-          <Button
-            className="w-full h-12 text-base bg-blue-500 hover:bg-blue-600 text-white"
-            disabled={isUpdating}
-            onClick={() => onInspectTask(completedTask.id)}
-            data-testid={`button-inspect-task-${completedTask.id}`}
-          >
-            <Star className="h-5 w-5 mr-2" />
-            Aprobar (inspección)
-          </Button>
-        )}
-
-        {/* Already available and no action needed */}
-        {room.status === "available" && !currentTask && !checkoutToday && (
-          <div className="text-center text-sm text-green-600 dark:text-green-400 font-medium py-1">
-            <CheckCircle className="h-4 w-4 inline mr-1" />
-            Lista
+        {/* Task info + cronómetro */}
+        {currentTask && (
+          <div className={`rounded-lg px-3 py-2 text-sm ${
+            currentTask.status === "in_progress" ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300" :
+            currentTask.status === "completed" ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" :
+            "bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300"
+          }`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-medium">{taskTypeLabels[currentTask.taskType as TaskType] || currentTask.taskType}</span>
+                {" · "}
+                <span>{taskStatusConfig[currentTask.status as TaskStatus].label}</span>
+              </div>
+              {/* Cronómetro: solo visible cuando la tarea está en progreso */}
+              {activeTask && (
+                <div className="flex items-center gap-1.5 bg-yellow-200 dark:bg-yellow-800/50 rounded-md px-2 py-0.5">
+                  <Timer className="h-3.5 w-3.5 animate-pulse" />
+                  <span className="font-mono font-bold text-base tracking-widest" data-testid={`timer-room-${room.id}`}>
+                    {elapsed}
+                  </span>
+                </div>
+              )}
+            </div>
+            {currentTask.notes && (
+              <p className="text-xs mt-0.5 opacity-80 truncate">{currentTask.notes}</p>
+            )}
           </div>
         )}
+
+        {/* Main action buttons */}
+        <div className="flex flex-col gap-2">
+          {/* No active task on a dirty/occupied room → Quick start */}
+          {!currentTask && (room.status === "dirty" || (checkoutToday && room.status === "occupied")) && (
+            <Button
+              className="w-full h-12 text-base bg-orange-500 hover:bg-orange-600 text-white"
+              disabled={isUpdating}
+              onClick={() => confirm({
+                title: `Iniciar limpieza — Hab. ${room.roomNumber}`,
+                description: "Se creará una tarea de limpieza y comenzará a correr el cronómetro. ¿Continuar?",
+                confirmLabel: "Sí, iniciar",
+                confirmClass: "bg-orange-500 hover:bg-orange-600",
+                fn: () => onQuickStart(room.id),
+              })}
+              data-testid={`button-quick-start-${room.id}`}
+            >
+              <Play className="h-5 w-5 mr-2" />
+              Iniciar limpieza
+            </Button>
+          )}
+
+          {/* Pending task → Start */}
+          {pendingTask && !activeTask && (
+            <Button
+              className="w-full h-12 text-base bg-yellow-500 hover:bg-yellow-600 text-white"
+              disabled={isUpdating}
+              onClick={() => confirm({
+                title: `Iniciar tarea — Hab. ${room.roomNumber}`,
+                description: "Se registrará el inicio de la tarea y comenzará el cronómetro. ¿Continuar?",
+                confirmLabel: "Sí, iniciar",
+                confirmClass: "bg-yellow-500 hover:bg-yellow-600",
+                fn: () => onStartTask(pendingTask.id),
+              })}
+              data-testid={`button-start-task-${pendingTask.id}`}
+            >
+              <Play className="h-5 w-5 mr-2" />
+              Iniciar tarea
+            </Button>
+          )}
+
+          {/* Active task → Complete */}
+          {activeTask && (
+            <Button
+              className="w-full h-12 text-base bg-green-500 hover:bg-green-600 text-white"
+              disabled={isUpdating}
+              onClick={() => confirm({
+                title: `Marcar lista — Hab. ${room.roomNumber}`,
+                description: `La limpieza duró ${elapsed}. ¿Marcar la habitación como limpia y lista?`,
+                confirmLabel: "Sí, está lista",
+                confirmClass: "bg-green-500 hover:bg-green-600",
+                fn: () => onCompleteTask(activeTask.id),
+              })}
+              data-testid={`button-complete-task-${activeTask.id}`}
+            >
+              <CheckCircle className="h-5 w-5 mr-2" />
+              Marcar lista
+            </Button>
+          )}
+
+          {/* Completed task → Inspect */}
+          {completedTask && !activeTask && !pendingTask && (
+            <Button
+              className="w-full h-12 text-base bg-blue-500 hover:bg-blue-600 text-white"
+              disabled={isUpdating}
+              onClick={() => confirm({
+                title: `Inspeccionar — Hab. ${room.roomNumber}`,
+                description: "¿Confirmar que la habitación fue inspeccionada y está aprobada?",
+                confirmLabel: "Sí, aprobar",
+                confirmClass: "bg-blue-500 hover:bg-blue-600",
+                fn: () => onInspectTask(completedTask.id),
+              })}
+              data-testid={`button-inspect-task-${completedTask.id}`}
+            >
+              <Star className="h-5 w-5 mr-2" />
+              Aprobar (inspección)
+            </Button>
+          )}
+
+          {/* Already available and no action needed */}
+          {room.status === "available" && !currentTask && !checkoutToday && (
+            <div className="text-center text-sm text-green-600 dark:text-green-400 font-medium py-1">
+              <CheckCircle className="h-4 w-4 inline mr-1" />
+              Lista
+            </div>
+          )}
+        </div>
+
+        {/* Quick status row */}
+        <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+          <span className="text-xs text-muted-foreground flex-1">Cambiar estado:</span>
+          <button
+            className="text-[11px] px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
+            onClick={() => confirm({
+              title: `Disponible — Hab. ${room.roomNumber}`,
+              description: "¿Marcar esta habitación como disponible?",
+              confirmLabel: "Sí, disponible",
+              fn: () => onUpdateStatus(room.id, "available"),
+            })}
+            disabled={isUpdating || room.status === "available"}
+            data-testid={`button-set-available-${room.id}`}
+          >
+            Disponible
+          </button>
+          <button
+            className="text-[11px] px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
+            onClick={() => confirm({
+              title: `Sucia — Hab. ${room.roomNumber}`,
+              description: "¿Marcar esta habitación como sucia?",
+              confirmLabel: "Sí, sucia",
+              fn: () => onUpdateStatus(room.id, "dirty"),
+            })}
+            disabled={isUpdating || room.status === "dirty"}
+            data-testid={`button-set-dirty-${room.id}`}
+          >
+            Sucia
+          </button>
+          <button
+            className="text-[11px] px-2 py-1.5 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium disabled:opacity-40"
+            onClick={() => confirm({
+              title: `Mantenimiento — Hab. ${room.roomNumber}`,
+              description: "¿Pasar esta habitación a estado de mantenimiento?",
+              confirmLabel: "Sí, mantenimiento",
+              fn: () => onUpdateStatus(room.id, "maintenance"),
+            })}
+            disabled={isUpdating || room.status === "maintenance"}
+            data-testid={`button-set-maintenance-${room.id}`}
+          >
+            Mant.
+          </button>
+        </div>
       </div>
 
-      {/* Quick status row */}
-      <div className="flex items-center gap-2 pt-1 border-t border-border/50">
-        <span className="text-xs text-muted-foreground flex-1">Cambiar estado:</span>
-        <button
-          className="text-[11px] px-2 py-1 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium"
-          onClick={() => onUpdateStatus(room.id, "available")}
-          disabled={isUpdating || room.status === "available"}
-          data-testid={`button-set-available-${room.id}`}
-        >
-          Disponible
-        </button>
-        <button
-          className="text-[11px] px-2 py-1 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium"
-          onClick={() => onUpdateStatus(room.id, "dirty")}
-          disabled={isUpdating || room.status === "dirty"}
-          data-testid={`button-set-dirty-${room.id}`}
-        >
-          Sucia
-        </button>
-        <button
-          className="text-[11px] px-2 py-1 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium"
-          onClick={() => onUpdateStatus(room.id, "maintenance")}
-          disabled={isUpdating || room.status === "maintenance"}
-          data-testid={`button-set-maintenance-${room.id}`}
-        >
-          Mant.
-        </button>
-      </div>
-    </div>
+      {/* Confirmation dialog — local al componente, no bloquea otras tarjetas */}
+      <AlertDialog open={!!pending} onOpenChange={open => !open && setPending(null)}>
+        <AlertDialogContent className="max-w-sm mx-4">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pending?.title}</AlertDialogTitle>
+            <AlertDialogDescription className="text-base">
+              {pending?.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 flex-col sm:flex-row">
+            <AlertDialogCancel className="w-full sm:w-auto">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={`w-full sm:w-auto text-white ${pending?.confirmClass || "bg-primary hover:bg-primary/90"}`}
+              onClick={handleConfirm}
+              data-testid="button-confirm-action"
+            >
+              {pending?.confirmLabel || "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
