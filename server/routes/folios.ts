@@ -213,6 +213,77 @@ export function registerFolioRoutes(app: Express) {
     }
   });
 
+  // Daily movements — all folio_movements for a given date across all modules
+  app.get("/api/folios/movements/by-date", requireAuth, async (req, res) => {
+    try {
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+
+      const date = (req.query.date as string) || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const entityType = req.query.entityType as string | undefined;
+      const movType = req.query.type as string | undefined;
+
+      let query = sql`
+        SELECT
+          fm.id,
+          fm.folio_id,
+          fm.type,
+          fm.amount,
+          fm.description,
+          fm.source_type,
+          fm.source_id,
+          fm.payment_method,
+          fm.registered_by,
+          fm.receipt_type,
+          fm.created_at,
+          f.codigo,
+          f.entity_type,
+          f.entity_id
+        FROM folio_movements fm
+        JOIN folios f ON fm.folio_id = f.id
+        WHERE DATE(fm.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires') = ${date}
+      `;
+
+      if (entityType && entityType !== "all") {
+        query = sql`${query} AND f.entity_type = ${entityType}`;
+      }
+      if (movType && movType !== "all") {
+        query = sql`${query} AND fm.type = ${movType}`;
+      }
+
+      query = sql`${query} ORDER BY fm.created_at ASC`;
+
+      const result = await db.execute(query);
+
+      const rows = result.rows.map((r: any) => ({
+        id: r.id,
+        folioId: r.folio_id,
+        type: r.type,
+        amount: r.amount,
+        description: r.description,
+        sourceType: r.source_type,
+        sourceId: r.source_id,
+        paymentMethod: r.payment_method,
+        registeredBy: r.registered_by,
+        receiptType: r.receipt_type,
+        createdAt: r.created_at,
+        folioCodigo: r.codigo,
+        entityType: r.entity_type,
+        entityId: r.entity_id,
+      }));
+
+      // Daily totals
+      const charges = rows.filter((r: any) => ["charge", "transfer_in"].includes(r.type)).reduce((s: number, r: any) => s + Number(r.amount), 0);
+      const payments = rows.filter((r: any) => ["payment", "advance"].includes(r.type)).reduce((s: number, r: any) => s + Number(r.amount), 0);
+      const discounts = rows.filter((r: any) => r.type === "discount").reduce((s: number, r: any) => s + Number(r.amount), 0);
+
+      res.json({ date, movements: rows, totals: { charges, payments, discounts } });
+    } catch (error) {
+      console.error("Error fetching daily movements:", error);
+      res.status(500).json({ error: "Error al obtener movimientos del día" });
+    }
+  });
+
   // PDF export — must be before /:entityType/:entityId
   app.get("/api/folios/:entityType/:entityId/pdf", requireAuth, async (req, res) => {
     try {
