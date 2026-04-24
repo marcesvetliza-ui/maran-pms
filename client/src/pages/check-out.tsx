@@ -91,6 +91,7 @@ export default function CheckOutPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentReceiptType, setPaymentReceiptType] = useState("cierre_habitacion");
   const [paymentBillingTarget, setPaymentBillingTarget] = useState<"guest" | "company" | "agency">("guest");
   const [checkoutComplete, setCheckoutComplete] = useState(false);
   const [finalSummary, setFinalSummary] = useState<{ guestName: string; roomNumber: string; checkOutDate: string; totalPaid: number; methods: string[] } | null>(null);
@@ -131,13 +132,14 @@ export default function CheckOutPage() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; billingTarget: "guest" | "company" | "agency" }) => {
+    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; receiptType: string; billingTarget: "guest" | "company" | "agency" }) => {
       return apiRequest("POST", "/api/payments", {
         reservationId: selectedReservation!.id,
         amount: data.amount,
         method: data.method,
         date: getLocalToday(),
         reference: data.reference || null,
+        receiptType: data.receiptType,
         billingTarget: data.billingTarget,
       });
     },
@@ -145,6 +147,7 @@ export default function CheckOutPage() {
       refetchFolio();
       setPaymentAmount("");
       setPaymentReference("");
+      setPaymentReceiptType("cierre_habitacion");
       setPaymentBillingTarget("guest");
       toast({ title: "Pago registrado" });
     },
@@ -498,13 +501,18 @@ export default function CheckOutPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <Label>Referencia (opcional)</Label>
-                        <Input
-                          value={paymentReference}
-                          onChange={(e) => setPaymentReference(e.target.value)}
-                          placeholder="N° de comprobante..."
-                          data-testid="input-payment-reference"
-                        />
+                        <Label>Tipo de comprobante</Label>
+                        <Select value={paymentReceiptType} onValueChange={setPaymentReceiptType}>
+                          <SelectTrigger data-testid="select-receipt-type">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
+                            <SelectItem value="factura_a">Factura A</SelectItem>
+                            <SelectItem value="factura_b">Factura B</SelectItem>
+                            <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div>
                         <Label>Facturar a</Label>
@@ -520,6 +528,17 @@ export default function CheckOutPage() {
                         </Select>
                       </div>
                     </div>
+                    <div className="grid grid-cols-1 gap-3">
+                      <div>
+                        <Label>Referencia (opcional)</Label>
+                        <Input
+                          value={paymentReference}
+                          onChange={(e) => setPaymentReference(e.target.value)}
+                          placeholder="N° de comprobante..."
+                          data-testid="input-payment-reference"
+                        />
+                      </div>
+                    </div>
                     <Button
                       onClick={() => {
                         const amount = paymentAmount || balance.toFixed(2);
@@ -531,6 +550,7 @@ export default function CheckOutPage() {
                           amount,
                           method: paymentMethod,
                           reference: paymentReference,
+                          receiptType: paymentReceiptType,
                           billingTarget: paymentBillingTarget,
                         });
                       }}

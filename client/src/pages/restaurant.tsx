@@ -239,6 +239,7 @@ const SHOW_FACTURA_C = false;
 
 const receiptTypeLabels: Record<string, string> = {
   ticket: "Ticket",
+  cierre_mesa: "Cierre de mesa",
   factura_a: "Factura A",
   factura_b: "Factura B",
   voucher: "Voucher (No Fiscal)",
@@ -363,6 +364,7 @@ export default function RestaurantPage() {
   const [reservationSearchText, setReservationSearchText] = useState("");
   const [closeBillingName, setCloseBillingName] = useState("");
   const [closeBillingCuit, setCloseBillingCuit] = useState("");
+  const [closeBillingCompanyId, setCloseBillingCompanyId] = useState("");
   const [closeCcEntityType, setCloseCcEntityType] = useState<"company" | "agency">("company");
   const [closeCcEntityId, setCloseCcEntityId] = useState("");
 
@@ -451,7 +453,7 @@ export default function RestaurantPage() {
     enabled: isRecipeDialogOpen,
   });
 
-  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
+  const { data: companies = [] } = useQuery<{ id: string; name: string; razonSocial: string; nombreFantasia?: string | null; cuilCuit: string }[]>({
     queryKey: ["/api/companies"],
   });
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
@@ -697,6 +699,7 @@ export default function RestaurantPage() {
       setCloseRoomId("");
       setCloseBillingName("");
       setCloseBillingCuit("");
+      setCloseBillingCompanyId("");
       setCloseCcEntityType("company");
       setCloseCcEntityId("");
       toast({ title: "Pedido cerrado" });
@@ -2756,9 +2759,11 @@ export default function RestaurantPage() {
                               if (v === "factura_b") {
                                 setCloseBillingName("CONSUMIDOR FINAL");
                                 setCloseBillingCuit("");
+                                setCloseBillingCompanyId("");
                               } else if (v !== "factura_a") {
                                 setCloseBillingName("");
                                 setCloseBillingCuit("");
+                                setCloseBillingCompanyId("");
                               }
                             }}>
                               <SelectTrigger data-testid="select-receipt-type">
@@ -2833,11 +2838,48 @@ export default function RestaurantPage() {
                 {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && closePaymentMethod !== "cuenta_habitacion" && (
                   <div className="space-y-3 p-3 border rounded-md bg-muted/30">
                     <p className="text-sm font-medium">Datos de facturación</p>
+                    {closeReceiptType === "factura_a" && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Empresa existente (opcional)</Label>
+                        <Select
+                          value={closeBillingCompanyId || "manual"}
+                          onValueChange={(v) => {
+                            if (v === "manual") {
+                              setCloseBillingCompanyId("");
+                              setCloseBillingName("");
+                              setCloseBillingCuit("");
+                            } else {
+                              setCloseBillingCompanyId(v);
+                              const company = companies.find(c => c.id === v);
+                              if (company) {
+                                setCloseBillingName(company.razonSocial);
+                                setCloseBillingCuit(company.cuilCuit);
+                              }
+                            }
+                          }}
+                        >
+                          <SelectTrigger data-testid="select-billing-company">
+                            <SelectValue placeholder="— Ingresar datos manualmente —" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="manual">— Ingresar datos manualmente —</SelectItem>
+                            {companies.length === 0 && (
+                              <div className="px-3 py-2 text-xs text-muted-foreground">Sin empresas cargadas</div>
+                            )}
+                            {companies.map(c => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.razonSocial}{c.nombreFantasia ? ` (${c.nombreFantasia})` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div>
                       <Label className="text-xs">Razón social / Nombre</Label>
                       <Input
                         value={closeBillingName}
-                        onChange={(e) => setCloseBillingName(e.target.value)}
+                        onChange={(e) => { setCloseBillingName(e.target.value); setCloseBillingCompanyId(""); }}
                         placeholder="Ej: Juan García / Empresa SA"
                         data-testid="input-billing-name"
                       />
@@ -2846,7 +2888,7 @@ export default function RestaurantPage() {
                       <Label className="text-xs">CUIT / DNI</Label>
                       <Input
                         value={closeBillingCuit}
-                        onChange={(e) => setCloseBillingCuit(e.target.value)}
+                        onChange={(e) => { setCloseBillingCuit(e.target.value); setCloseBillingCompanyId(""); }}
                         placeholder="20-12345678-9"
                         data-testid="input-billing-cuit"
                       />
