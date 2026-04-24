@@ -6,6 +6,22 @@ Maran Suite System is a comprehensive full-stack hospitality management suite fo
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 
+## Module Structure (Sellable Modules)
+The sidebar is organized into 8 independently sellable modules. This reflects the commercial structure for future multi-tenant licensing:
+
+| # | Module | Sidebar Label | Key Features |
+|---|---|---|---|
+| 1 | **PMS Core** | PMS — Recepción | Planning, Reservas, Check-in/out, Habitaciones, Tarifas, Huéspedes. Non-negotiable base. |
+| 2 | **Comercial** | Comercial | Motor de Reservas, OTAs, Grupos, Empresas, Agencias, Paquetes, Presupuestos |
+| 3 | **Servicios** | Servicios | Restaurant POS, SPA, Clientes SPA, Eventos |
+| 4 | **Operaciones** | Operaciones | Housekeeping (mobile), Mantenimiento, Inventario |
+| 5 | **Experiencia al Huésped** | Experiencia al Huésped | Hospitalidad, MARA Chatbot, Respuestas automáticas, Reseñas |
+| 6 | **Administración** | Administración | Back-office financiero: Facturación AFIP, Caja, Contabilidad |
+| 7 | **Gerencia & Revenue** | Gerencia & Revenue | Dashboard Ejecutivo, Operaciones, Reportes avanzados |
+| — | **Configuración** | Configuración | Sistema, usuarios, admin (always visible to admin) |
+
+Future: module activation will be controlled per-hotel via a `hotel_modules` table, with backend middleware checking access per module.
+
 ## System Architecture
 
 ### Frontend
