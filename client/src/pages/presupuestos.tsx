@@ -229,6 +229,7 @@ function PresupuestoDialog({
   const [para, setPara] = useState(presupuesto?.para || "");
   const [fechaEmision, setFechaEmision] = useState(presupuesto?.fechaEmision || today);
   const [fechaVencimiento, setFechaVencimiento] = useState(presupuesto?.fechaVencimiento || "");
+  const [fechaEvento, setFechaEvento] = useState(presupuesto?.fechaEvento || "");
   const [estado, setEstado] = useState<PresupuestoEstado>(presupuesto?.estado || "borrador");
   const [notas, setNotas] = useState(presupuesto?.notas || "");
   const [condiciones, setCondiciones] = useState(presupuesto?.condiciones || DEFAULT_CONDICIONES);
@@ -268,6 +269,7 @@ function PresupuestoDialog({
     para: para.trim(),
     fechaEmision,
     fechaVencimiento: fechaVencimiento || null,
+    fechaEvento: fechaEvento || null,
     estado,
     notas: notas.trim() || null,
     condiciones: condiciones.trim() || null,
@@ -336,6 +338,11 @@ function PresupuestoDialog({
             <div>
               <Label>Válido hasta</Label>
               <Input type="date" value={fechaVencimiento} onChange={e => setFechaVencimiento(e.target.value)} className="mt-1" data-testid="input-fecha-vencimiento" />
+            </div>
+            <div>
+              <Label>Fecha del evento / estadía</Label>
+              <Input type="date" value={fechaEvento} onChange={e => setFechaEvento(e.target.value)} className="mt-1" data-testid="input-fecha-evento" />
+              <p className="text-xs text-muted-foreground mt-1">La fecha para la que se presupuesta</p>
             </div>
             <div className="col-span-2">
               <Label>Notas internas (no aparecen en el PDF)</Label>

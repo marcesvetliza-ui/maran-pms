@@ -156,12 +156,17 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("DIRIGIDO A", 62, infoY);
       doc.fillColor(DARK).fontSize(11).font("Helvetica-Bold").text(pres.para, 62, infoY + 12);
       const emisY = infoY;
-      const col2 = 340;
+      const col2 = 310;
+      const col3 = 430;
       doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("FECHA EMISIÓN", col2, emisY);
       doc.fillColor(DARK).fontSize(10).font("Helvetica").text(formatFecha(pres.fechaEmision), col2, emisY + 12);
       if (pres.fechaVencimiento) {
         doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("VÁLIDO HASTA", col2, emisY + 30);
         doc.fillColor(DARK).fontSize(10).font("Helvetica").text(formatFecha(pres.fechaVencimiento), col2, emisY + 42);
+      }
+      if ((pres as any).fechaEvento) {
+        doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("FECHA EVENTO", col3, emisY);
+        doc.fillColor(PRIMARY).fontSize(10).font("Helvetica-Bold").text(formatFecha((pres as any).fechaEvento), col3, emisY + 12);
       }
       doc.y += 80;
 

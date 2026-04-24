@@ -2380,6 +2380,7 @@ export const presupuestos = pgTable("presupuestos", {
   clienteId: varchar("cliente_id"),
   fechaEmision: varchar("fecha_emision").notNull(),
   fechaVencimiento: varchar("fecha_vencimiento"),
+  fechaEvento: varchar("fecha_evento"),
   estado: varchar("estado").$type<PresupuestoEstado>().notNull().default("borrador"),
   notas: text("notas"),
   condiciones: text("condiciones"),
