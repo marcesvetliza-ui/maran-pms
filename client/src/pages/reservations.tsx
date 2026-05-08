@@ -3490,7 +3490,7 @@ export default function ReservationsPage() {
                 <TableHead>Check-out</TableHead>
                 <TableHead>Huéspedes</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead>Total</TableHead>
+                <TableHead>Saldo</TableHead>
                 <TableHead className="w-[50px]"></TableHead>
               </TableRow>
             </TableHeader>
@@ -3535,7 +3535,11 @@ export default function ReservationsPage() {
                       const extras = (reservation.charges || [])
                         .filter((c: any) => c.status !== "anulado" && c.category !== "payment")
                         .reduce((sum: number, c: any) => sum + parseFloat(c.amount || "0"), 0);
-                      return `$${(room + extras).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+                      const pagado = (reservation.payments || [])
+                        .filter((p: any) => p.status !== "anulado")
+                        .reduce((sum: number, p: any) => sum + parseFloat(p.amount || "0"), 0);
+                      const saldo = room + extras - pagado;
+                      return `$${saldo.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
                     })()}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
