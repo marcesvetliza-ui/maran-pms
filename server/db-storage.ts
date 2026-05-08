@@ -3598,9 +3598,8 @@ export class DatabaseStorage implements IStorage {
       const [room] = await db.select().from(rooms)
         .where(eq(rooms.id, reservation.roomId));
 
-      if (!room || !["available", "inspected"].includes(room.status)) {
+      if (!room) {
         skipped++;
-        if (room) skippedRooms.push(room.roomNumber);
         continue;
       }
 

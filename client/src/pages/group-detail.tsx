@@ -34,6 +34,7 @@ import {
   Settings2,
   Building2,
   Banknote,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -585,6 +586,10 @@ export default function GroupDetailPage() {
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
 
+  // Cambiar habitación
+  const [changingReservation, setChangingReservation] = useState<ReservationWithDetails | null>(null);
+  const [changeRoomId, setChangeRoomId] = useState("");
+
   // Folio Grupal state
   const [showAddGroupChargeDialog, setShowAddGroupChargeDialog] = useState(false);
   const [showFolioPaymentDialog, setShowFolioPaymentDialog] = useState(false);
@@ -638,6 +643,40 @@ export default function GroupDetailPage() {
     },
     onError: () => {
       toast({ title: "Error al eliminar bloque", variant: "destructive" });
+    },
+  });
+
+  const { data: changeRoomOptions = [] } = useQuery<RoomWithType[]>({
+    queryKey: ["/api/rooms/available", changingReservation?.checkInDate, changingReservation?.checkOutDate],
+    queryFn: async () => {
+      if (!changingReservation) return [];
+      const params = new URLSearchParams({
+        checkIn: changingReservation.checkInDate,
+        checkOut: changingReservation.checkOutDate,
+      });
+      const res = await fetch(`/api/rooms/available?${params}`);
+      if (!res.ok) throw new Error("Error al cargar habitaciones");
+      return res.json();
+    },
+    enabled: !!changingReservation,
+  });
+
+  const changeRoomMutation = useMutation({
+    mutationFn: async ({ reservationId, roomId, roomTypeId }: { reservationId: string; roomId: string; roomTypeId: string }) => {
+      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
+      toast({ title: "Habitación cambiada", description: "La tarifa original fue conservada." });
+      setChangingReservation(null);
+      setChangeRoomId("");
+    },
+    onError: (err: any) => {
+      let msg = "Error al cambiar habitación";
+      try { const b = JSON.parse(err.message.replace(/^\d+:\s*/, "")); if (b.error) msg = b.error; } catch {}
+      toast({ title: msg, variant: "destructive" });
     },
   });
 
@@ -1299,7 +1338,8 @@ export default function GroupDetailPage() {
                       <TableHead>Habitación</TableHead>
                       <TableHead>Fechas</TableHead>
                       <TableHead>Estado</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
+                      <TableHead>Tarifa</TableHead>
+                      <TableHead className="w-[100px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1321,14 +1361,35 @@ export default function GroupDetailPage() {
                             {res.status}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" className="h-7 w-7"
-                            onClick={(e) => { e.stopPropagation(); navigate(`/reservations?view=${res.id}`); }}
-                            data-testid={`button-view-reservation-${res.id}`}
-                            title="Ver detalle de reserva"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </Button>
+                        <TableCell className="text-sm">
+                          {res.finalRatePerNight
+                            ? `$${parseFloat(res.finalRatePerNight).toLocaleString("es-AR")}`
+                            : <span className="text-destructive font-medium">Sin tarifa</span>
+                          }
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1">
+                            {!["checked_in", "checked_out", "cancelled"].includes(res.status) && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs px-2"
+                                onClick={() => { setChangingReservation(res); setChangeRoomId(""); }}
+                                data-testid={`button-change-room-${res.id}`}
+                                title="Cambiar habitación preservando tarifa"
+                              >
+                                <ArrowLeftRight className="h-3 w-3 mr-1" />
+                                Cambiar
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => navigate(`/reservations?view=${res.id}`)}
+                              data-testid={`button-view-reservation-${res.id}`}
+                              title="Ver detalle de reserva"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -2566,6 +2627,81 @@ export default function GroupDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ─── CAMBIAR HABITACIÓN ─── */}
+      <Dialog open={!!changingReservation} onOpenChange={(open) => { if (!open) { setChangingReservation(null); setChangeRoomId(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowLeftRight className="h-5 w-5" />
+              Cambiar Habitación
+            </DialogTitle>
+            <DialogDescription>
+              Reserva <span className="font-mono font-medium">{changingReservation?.reservationCode}</span>{" "}
+              — Hab. actual: <strong>{changingReservation?.room?.roomNumber}</strong>
+              {changingReservation?.finalRatePerNight && (
+                <span className="ml-1 text-muted-foreground">· Tarifa: ${parseFloat(changingReservation.finalRatePerNight).toLocaleString("es-AR")}/noche (se conserva)</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-3">
+            <div>
+              <Label>Nueva habitación</Label>
+              <Select value={changeRoomId} onValueChange={setChangeRoomId}>
+                <SelectTrigger data-testid="select-change-room">
+                  <SelectValue placeholder="Seleccionar habitación..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {changeRoomOptions
+                    .filter(r => r.id !== changingReservation?.roomId)
+                    .map(r => (
+                      <SelectItem key={r.id} value={r.id}>
+                        Hab. {r.roomNumber} — Piso {r.floor} ({r.roomType?.name || r.roomTypeId})
+                      </SelectItem>
+                    ))
+                  }
+                  {changeRoomOptions.filter(r => r.id !== changingReservation?.roomId).length === 0 && (
+                    <SelectItem value="_none" disabled>Sin disponibilidad para esas fechas</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {changingReservation && !changingReservation.finalRatePerNight && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>Esta reserva no tiene tarifa asignada. Luego de cambiar la habitación, editá la reserva para ingresar la tarifa correcta.</span>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setChangingReservation(null); setChangeRoomId(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={!changeRoomId || changeRoomMutation.isPending}
+              onClick={() => {
+                if (!changingReservation || !changeRoomId) return;
+                const selectedRoom = changeRoomOptions.find(r => r.id === changeRoomId);
+                changeRoomMutation.mutate({
+                  reservationId: changingReservation.id,
+                  roomId: changeRoomId,
+                  roomTypeId: selectedRoom?.roomTypeId || changingReservation.roomTypeId,
+                });
+              }}
+              data-testid="button-confirm-change-room"
+            >
+              {changeRoomMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cambiando...</>
+              ) : (
+                "Confirmar cambio"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );
