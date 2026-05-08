@@ -164,7 +164,7 @@ export default function NewReservationPage() {
       setSelectedGuest(newGuest);
       toast({
         title: "Huesped creado",
-        description: `${newGuest.firstName} ${newGuest.lastName} ha sido registrado.`,
+        description: `${newGuest.lastName} ${newGuest.firstName} ha sido registrado.`,
       });
     },
     onError: () => {
@@ -677,7 +677,7 @@ export default function NewReservationPage() {
             <div>
               <p className="text-sm text-muted-foreground">Huesped</p>
               <p className="font-medium">
-                {selectedGuest ? `${selectedGuest.firstName} ${selectedGuest.lastName}` : "-"}
+                {selectedGuest ? `${selectedGuest.lastName} ${selectedGuest.firstName}` : "-"}
               </p>
             </div>
             <div>

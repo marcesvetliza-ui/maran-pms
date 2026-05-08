@@ -179,7 +179,7 @@ export default function CheckOutPage() {
 
       const methods = folio?.payments?.map(p => paymentMethodLabels[p.method as PaymentMethod] || p.method) || [];
       setFinalSummary({
-        guestName: `${selectedReservation?.guest?.firstName} ${selectedReservation?.guest?.lastName}`,
+        guestName: `${selectedReservation?.guest?.lastName} ${selectedReservation?.guest?.firstName}`,
         roomNumber: selectedReservation?.room?.roomNumber || "",
         checkOutDate: new Date().toLocaleDateString("es-AR"),
         totalPaid: folio?.totalPayments || 0,
@@ -205,7 +205,7 @@ export default function CheckOutPage() {
   const overdueReservations = reservations?.filter((res) => res.checkOutDate < today) ?? [];
   const filteredReservations = reservations?.filter((res) => {
     if (res.checkOutDate !== today) return false;
-    const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
+    const guestName = `${res.guest?.lastName} ${res.guest?.firstName}`.toLowerCase();
     return (
       guestName.includes(searchQuery.toLowerCase()) ||
       res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -245,7 +245,7 @@ export default function CheckOutPage() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold tracking-tight" data-testid="text-wizard-title">
-              Check-out — {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName}
+              Check-out — {selectedReservation.guest?.lastName} {selectedReservation.guest?.firstName}
             </h1>
             <p className="text-muted-foreground">Hab. {selectedReservation.room?.roomNumber}</p>
           </div>
@@ -769,11 +769,11 @@ export default function CheckOutPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 font-semibold">
-                      {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                      {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
                     </div>
                     <div>
                       <CardTitle className="text-lg">
-                        {reservation.guest?.firstName} {reservation.guest?.lastName}
+                        {reservation.guest?.lastName} {reservation.guest?.firstName}
                       </CardTitle>
                       <CardDescription>{reservation.guest?.phone || reservation.guest?.email}</CardDescription>
                     </div>
@@ -874,11 +874,11 @@ export default function CheckOutPage() {
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 font-semibold text-sm shrink-0">
-                        {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                        {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
                       </div>
                       <div className="min-w-0">
                         <p className="font-medium text-sm truncate">
-                          {reservation.guest?.firstName} {reservation.guest?.lastName}
+                          {reservation.guest?.lastName} {reservation.guest?.firstName}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Hab. {reservation.room?.roomNumber} · Venció: {formatDateAR(reservation.checkOutDate)}

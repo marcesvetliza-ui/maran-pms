@@ -287,7 +287,7 @@ export function registerGroupsRoutes(app: Express) {
 
         invoiceData.reservations.push({
           reservationCode: reservation.reservationCode,
-          guest: `${reservation.guest?.firstName} ${reservation.guest?.lastName}`,
+          guest: `${reservation.guest?.lastName} ${reservation.guest?.firstName}`,
           room: reservation.room?.roomNumber,
           nights,
           ratePerNight: rate,
@@ -628,7 +628,7 @@ export function registerGroupsRoutes(app: Express) {
 
         rooms.push({
           reservationId: res.id,
-          guestName: `${res.guest?.firstName || ""} ${res.guest?.lastName || ""}`.trim(),
+          guestName: `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
           roomNumber: res.room?.roomNumber || "-",
           status: res.status,
           nights: res.nights || 0,

@@ -135,7 +135,7 @@ function GuestFormDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       toast({
         title: isEditing ? "Huésped actualizado" : "Huésped registrado",
-        description: `${formData.firstName} ${formData.lastName} ha sido ${isEditing ? "actualizado" : "registrado"} exitosamente.`,
+        description: `${formData.lastName} ${formData.firstName} ha sido ${isEditing ? "actualizado" : "registrado"} exitosamente.`,
       });
       onSuccess();
       onOpenChange(false);
@@ -726,12 +726,12 @@ function GuestDetailDialog({
         <div className="grid gap-4 py-4">
           <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xl">
-              {guest.firstName?.[0]}{guest.lastName?.[0]}
+              {guest.lastName?.[0]}{guest.firstName?.[0]}
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="font-semibold text-xl">
-                  {guest.firstName} {guest.lastName}
+                  {guest.lastName} {guest.firstName}
                 </p>
                 {guest.segment && guest.segment !== "OTHER" && (() => {
                   const segColors: Record<string, string> = {
@@ -939,7 +939,7 @@ export default function GuestsPage() {
   });
 
   const filteredGuests = guests?.filter((guest) => {
-    const fullName = `${guest.firstName} ${guest.lastName}`.toLowerCase();
+    const fullName = `${guest.lastName} ${guest.firstName}`.toLowerCase();
     const matchesSearch =
       fullName.includes(searchQuery.toLowerCase()) ||
       guest.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1023,10 +1023,10 @@ export default function GuestsPage() {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-sm">
-                        {guest.firstName?.[0]}{guest.lastName?.[0]}
+                        {guest.lastName?.[0]}{guest.firstName?.[0]}
                       </div>
                       <span className="font-medium">
-                        {guest.firstName} {guest.lastName}
+                        {guest.lastName} {guest.firstName}
                       </span>
                     </div>
                   </TableCell>

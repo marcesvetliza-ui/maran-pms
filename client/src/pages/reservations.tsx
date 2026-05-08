@@ -303,7 +303,7 @@ export function ReservationFormDialog({
       setFormData((prev) => ({ ...prev, guestId: newGuest.id }));
       toast({
         title: "Huesped creado",
-        description: `${newGuest.firstName} ${newGuest.lastName} ha sido registrado.`,
+        description: `${newGuest.lastName} ${newGuest.firstName} ha sido registrado.`,
       });
     },
     onError: () => {
@@ -1767,11 +1767,11 @@ function ReservationDetailDialog({
           <TabsContent value="datos" className="space-y-4 mt-4">
             <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-lg">
-                {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
               </div>
               <div className="flex-1">
                 <p className="font-semibold text-lg" data-testid="text-guest-name">
-                  {reservation.guest?.firstName} {reservation.guest?.lastName}
+                  {reservation.guest?.lastName} {reservation.guest?.firstName}
                 </p>
                 <p className="text-sm text-muted-foreground">{reservation.guest?.email}</p>
                 {reservation.guest?.phone && (
@@ -1954,10 +1954,10 @@ function ReservationDetailDialog({
                     <li key={c.id} className="flex items-center justify-between px-4 py-2.5" data-testid={`companion-row-${c.id}`}>
                       <div className="flex items-center gap-3">
                         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                          {c.firstName?.[0]}{c.lastName?.[0]}
+                          {c.lastName?.[0]}{c.firstName?.[0]}
                         </div>
                         <div>
-                          <p className="text-sm font-medium">{c.firstName} {c.lastName}</p>
+                          <p className="text-sm font-medium">{c.lastName} {c.firstName}</p>
                           <p className="text-xs text-muted-foreground">
                             {c.documentType} {c.documentNumber || "—"}
                             {c.nationality ? ` · ${c.nationality}` : ""}
@@ -2349,7 +2349,7 @@ function ReservationDetailDialog({
                             <Users2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
                             <p className="text-xs text-blue-700 dark:text-blue-400 leading-tight">
                               El cargo se registrará en la Cuenta Corriente del huésped
-                              {reservation.guest ? <strong> {reservation.guest.firstName} {reservation.guest.lastName}</strong> : ""}.
+                              {reservation.guest ? <strong> {reservation.guest.lastName} {reservation.guest.firstName}</strong> : ""}.
                             </p>
                           </div>
                         )}
@@ -2652,7 +2652,7 @@ function ReservationDetailDialog({
             <AlertDialogDescription asChild>
               <div className="space-y-2">
                 <p>
-                  El huésped <strong>{reservation.guest?.firstName} {reservation.guest?.lastName}</strong> tiene reserva 
+                  El huésped <strong>{reservation.guest?.lastName} {reservation.guest?.firstName}</strong> tiene reserva 
                   hasta el <strong>{(() => { const [y,m,d] = reservation.checkOutDate.split("-"); return `${d}/${m}/${y}`; })()}</strong>.
                 </p>
                 <p>Al confirmar el check-out anticipado, la habitación <strong>{reservation.room?.roomNumber}</strong> quedará libre inmediatamente.</p>
@@ -2723,7 +2723,7 @@ function ReservationDetailDialog({
                   <SelectContent>
                     {activeReservations?.map((r) => (
                       <SelectItem key={r.id} value={r.id}>
-                        Hab. {r.room?.roomNumber} — {r.guest?.firstName} {r.guest?.lastName}
+                        Hab. {r.room?.roomNumber} — {r.guest?.lastName} {r.guest?.firstName}
                         {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}
                       </SelectItem>
                     ))}
@@ -2788,7 +2788,7 @@ function ReservationDetailDialog({
                 <SelectContent>
                   {activeReservations?.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
-                      Hab. {r.room?.roomNumber} — {r.guest?.firstName} {r.guest?.lastName}
+                      Hab. {r.room?.roomNumber} — {r.guest?.lastName} {r.guest?.firstName}
                       {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}
                     </SelectItem>
                   ))}
@@ -3049,7 +3049,7 @@ function CancelReservationDialog({
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Huésped:</span>
               <span className="font-medium">
-                {reservation.guest?.firstName} {reservation.guest?.lastName}
+                {reservation.guest?.lastName} {reservation.guest?.firstName}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -3286,7 +3286,7 @@ export default function ReservationsPage() {
 
   const filteredReservations = reservations
     ?.filter((res) => {
-      const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
+      const guestName = `${res.guest?.lastName} ${res.guest?.firstName}`.toLowerCase();
       const matchesSearch =
         guestName.includes(searchQuery.toLowerCase()) ||
         res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -3784,12 +3784,12 @@ export default function ReservationsPage() {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-sm">
-                        {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                        {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
                       </div>
                       <div>
                         <div className="flex items-center gap-1.5">
                           <p className="font-medium">
-                            {reservation.guest?.firstName} {reservation.guest?.lastName}
+                            {reservation.guest?.lastName} {reservation.guest?.firstName}
                           </p>
                           {reservation.voucherCode && (
                             <span title={`Voucher: ${reservation.voucherCode}`}>
@@ -3993,7 +3993,7 @@ export default function ReservationsPage() {
                 <div className="p-3 rounded-md bg-muted">
                   <p className="text-sm font-medium">Reserva original:</p>
                   <p className="text-sm text-muted-foreground">
-                    {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName} - Hab. {selectedReservation.room?.roomNumber}
+                    {selectedReservation.guest?.lastName} {selectedReservation.guest?.firstName} - Hab. {selectedReservation.room?.roomNumber}
                   </p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">

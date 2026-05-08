@@ -90,7 +90,7 @@ function AgencyReservationDetailRow({ r }: { r: ReservationWithDetails }) {
               <AgReservationStatusBadge status={r.status} />
             </div>
             <p className="text-muted-foreground text-xs">
-              {r.guest?.firstName} {r.guest?.lastName} · Hab. {r.room?.roomNumber}
+              {r.guest?.lastName} {r.guest?.firstName} · Hab. {r.room?.roomNumber}
               {(r.room as any)?.roomType?.name && ` · ${(r.room as any).roomType.name}`}
             </p>
             <p className="text-muted-foreground text-xs">{r.checkInDate} → {r.checkOutDate} ({r.nights}n)</p>

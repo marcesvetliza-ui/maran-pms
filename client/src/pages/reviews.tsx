@@ -173,7 +173,7 @@ function ReviewFormDialog({
               <SelectContent>
                 {guests?.map((guest) => (
                   <SelectItem key={guest.id} value={guest.id}>
-                    {guest.firstName} {guest.lastName}
+                    {guest.lastName} {guest.firstName}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -304,7 +304,7 @@ function ReviewDetailDialog({
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <p className="text-sm text-muted-foreground">Huesped</p>
-              <p className="font-medium">{review.guest?.firstName} {review.guest?.lastName}</p>
+              <p className="font-medium">{review.guest?.lastName} {review.guest?.firstName}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Fecha</p>
@@ -444,7 +444,7 @@ export default function ReviewsPage() {
     const matchesSearch =
       review.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
       review.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      `${review.guest?.firstName} ${review.guest?.lastName}`.toLowerCase().includes(searchQuery.toLowerCase());
+      `${review.guest?.lastName} ${review.guest?.firstName}`.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesSentiment =
       sentimentFilter === "all" ||
@@ -587,7 +587,7 @@ export default function ReviewsPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-sm font-medium truncate">
-                    {review.guest?.firstName} {review.guest?.lastName}
+                    {review.guest?.lastName} {review.guest?.firstName}
                   </CardTitle>
                   <SentimentBadge sentiment={review.sentiment as SentimentType | null} />
                 </div>

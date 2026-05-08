@@ -812,7 +812,7 @@ export class DatabaseStorage implements IStorage {
 
         reservationsMap[res.id] = {
           id: res.id,
-          guestName: guest ? `${guest.firstName} ${guest.lastName}` : "(Sin huésped)",
+          guestName: guest ? `${guest.lastName} ${guest.firstName}` : "(Sin huésped)",
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,
@@ -1373,7 +1373,7 @@ export class DatabaseStorage implements IStorage {
 
       return {
         reservationId: res.id,
-        guestName: `${res.guest?.firstName || ""} ${res.guest?.lastName || ""}`.trim(),
+        guestName: `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
         roomNumber: res.room?.roomNumber || "-",
         nights,
         accommodationTotal: accTotal,
@@ -4050,7 +4050,7 @@ export class DatabaseStorage implements IStorage {
       guests: guestRows
         .map(g => ({
           id: g.id,
-          name: `${g.firstName} ${g.lastName}`,
+          name: `${g.lastName} ${g.firstName}`,
           balance: calcBalance("guest", g.id),
           lastMovement: lastMovementDate("guest", g.id),
         }))

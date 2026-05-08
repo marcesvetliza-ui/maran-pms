@@ -893,7 +893,7 @@ export default function GroupDetailPage() {
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;text-align:center;">${idx + 1}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-weight:bold;">${res.room?.roomNumber || "-"}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.room?.roomType?.name || "-"}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.guest?.firstName || ""} ${res.guest?.lastName || ""}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.guest?.lastName || ""} ${res.guest?.firstName || ""}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${fmtDate(res.checkInDate)}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${fmtDate(res.checkOutDate)}</td>
@@ -1311,7 +1311,7 @@ export default function GroupDetailPage() {
                         onClick={() => navigate(`/reservations?view=${res.id}`)}
                       >
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
-                        <TableCell>{res.guest?.firstName} {res.guest?.lastName}</TableCell>
+                        <TableCell>{res.guest?.lastName} {res.guest?.firstName}</TableCell>
                         <TableCell>{res.room?.roomNumber}</TableCell>
                         <TableCell className="text-sm">
                           {fmtDate(res.checkInDate)} - {fmtDate(res.checkOutDate)}
@@ -2027,7 +2027,7 @@ export default function GroupDetailPage() {
                         <TableCell className="font-medium">{idx + 1}</TableCell>
                         <TableCell className="font-bold">{res.room?.roomNumber}</TableCell>
                         <TableCell>{res.room?.roomType?.name || "-"}</TableCell>
-                        <TableCell className="font-medium">{res.guest?.firstName} {res.guest?.lastName}</TableCell>
+                        <TableCell className="font-medium">{res.guest?.lastName} {res.guest?.firstName}</TableCell>
                         <TableCell className="text-sm">
                           {res.guest?.documentNumber
                             ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}`

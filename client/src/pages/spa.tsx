@@ -1579,7 +1579,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     <SelectContent>
                       {checkedInReservations.map((res) => (
                         <SelectItem key={res.id} value={res.id}>
-                          Hab. {res.room?.roomNumber} - {res.guest?.firstName} {res.guest?.lastName}
+                          Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -2069,7 +2069,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <SelectContent>
                     {checkedInReservations.map((res) => (
                       <SelectItem key={res.id} value={res.id}>
-                        Hab. {res.room?.roomNumber} - {res.guest?.firstName} {res.guest?.lastName}
+                        Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
                       </SelectItem>
                     ))}
                   </SelectContent>

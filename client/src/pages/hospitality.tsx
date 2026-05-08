@@ -116,11 +116,11 @@ function GuestCard({ item, testPrefix }: { item: any; testPrefix: string }) {
     <div className="flex items-start justify-between p-3 border rounded-lg" data-testid={`${testPrefix}-${item.guest?.id}`}>
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
-          {item.guest?.firstName?.[0]}{item.guest?.lastName?.[0]}
+          {item.guest?.lastName?.[0]}{item.guest?.firstName?.[0]}
         </div>
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-medium">{item.guest?.firstName} {item.guest?.lastName}</p>
+            <p className="font-medium">{item.guest?.lastName} {item.guest?.firstName}</p>
             <SegmentBadge segment={item.guest?.segment} />
           </div>
           <p className="text-xs text-muted-foreground">
@@ -235,7 +235,7 @@ function DashboardTab() {
                   <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-medium">{item.guest?.firstName} {item.guest?.lastName}</p>
+                      <p className="font-medium">{item.guest?.lastName} {item.guest?.firstName}</p>
                       <SegmentBadge segment={item.guest?.segment} />
                     </div>
                     {item.preferences?.map((p: GuestPreference) => (
@@ -264,7 +264,7 @@ function DashboardTab() {
                   <Gift className="h-4 w-4 text-yellow-600 mt-0.5 flex-shrink-0" />
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-medium text-sm">{item.guest?.firstName} {item.guest?.lastName}</p>
+                      <p className="font-medium text-sm">{item.guest?.lastName} {item.guest?.firstName}</p>
                       <SegmentBadge segment={item.guest?.segment} />
                       <Badge variant="outline" className="text-xs">{item.reservation?.status === "checked_in" ? "In-house" : `Llega ${item.reservation?.checkInDate}`}</Badge>
                     </div>
@@ -685,7 +685,7 @@ function PreferencesTab() {
                   onClick={() => setSelectedGuest(guest)}
                   data-testid={`btn-select-guest-${guest.id}`}
                 >
-                  <p className="font-medium text-sm">{guest.firstName} {guest.lastName}</p>
+                  <p className="font-medium text-sm">{guest.lastName} {guest.firstName}</p>
                   <p className="text-xs text-muted-foreground">{guest.documentType?.toUpperCase()} {guest.documentNumber}</p>
                 </button>
               ))}
@@ -698,7 +698,7 @@ function PreferencesTab() {
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-base">
             {selectedGuest
-              ? `Preferencias de ${selectedGuest.firstName} ${selectedGuest.lastName}`
+              ? `Preferencias de ${selectedGuest.lastName} ${selectedGuest.firstName}`
               : "Selecciona un huésped"}
           </CardTitle>
           {selectedGuest && (
@@ -881,7 +881,7 @@ function StayNotesTab() {
 
   const getGuestName = (guestId: string) => {
     const g = guests.find((g) => g.id === guestId);
-    return g ? `${g.firstName} ${g.lastName}` : "Desconocido";
+    return g ? `${g.lastName} ${g.firstName}` : "Desconocido";
   };
 
   return (
@@ -1113,7 +1113,7 @@ function HistoryTab() {
                   onClick={() => setSelectedGuestId(g.id)}
                   data-testid={`btn-history-guest-${g.id}`}
                 >
-                  <p className="font-medium text-sm">{g.firstName} {g.lastName}</p>
+                  <p className="font-medium text-sm">{g.lastName} {g.firstName}</p>
                   <p className="text-xs text-muted-foreground">{g.documentType?.toUpperCase()} {g.documentNumber}</p>
                 </button>
               ))}
@@ -1127,11 +1127,11 @@ function HistoryTab() {
           {selectedGuest ? (
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                {selectedGuest.firstName?.[0]}{selectedGuest.lastName?.[0]}
+                {selectedGuest.lastName?.[0]}{selectedGuest.firstName?.[0]}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <CardTitle className="text-base">{selectedGuest.firstName} {selectedGuest.lastName}</CardTitle>
+                  <CardTitle className="text-base">{selectedGuest.lastName} {selectedGuest.firstName}</CardTitle>
                   <SegmentBadge segment={selectedGuest.segment} />
                 </div>
                 <p className="text-xs text-muted-foreground">{selectedGuest.documentType?.toUpperCase()} {selectedGuest.documentNumber}</p>

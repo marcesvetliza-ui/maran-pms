@@ -363,7 +363,7 @@ export default function Dashboard() {
                     >
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">
-                          {reservation.guest?.firstName} {reservation.guest?.lastName}
+                          {reservation.guest?.lastName} {reservation.guest?.firstName}
                         </p>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <span>Hab. {reservation.room?.roomNumber}</span>
@@ -427,7 +427,7 @@ export default function Dashboard() {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">
-                        {reservation.guest?.firstName} {reservation.guest?.lastName}
+                        {reservation.guest?.lastName} {reservation.guest?.firstName}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         Hab. {reservation.room?.roomNumber} | ${reservation.totalRoomAmount}
@@ -525,11 +525,11 @@ export default function Dashboard() {
                   >
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-                        {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                        {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
                       </div>
                       <div>
                         <p className="font-medium">
-                          {reservation.guest?.firstName} {reservation.guest?.lastName}
+                          {reservation.guest?.lastName} {reservation.guest?.firstName}
                         </p>
                         <p className="text-sm text-muted-foreground">
                           Hab. {reservation.room?.roomNumber} | {reservation.checkInDate} - {reservation.checkOutDate}

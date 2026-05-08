@@ -314,7 +314,7 @@ function QuickReservationDialog({
 
   const filteredGuests = guestSearch.length > 0
     ? guests.filter(g => 
-        `${g.firstName} ${g.lastName} ${g.documentNumber || ""}`.toLowerCase().includes(guestSearch.toLowerCase())
+        `${g.lastName} ${g.firstName} ${g.documentNumber || ""}`.toLowerCase().includes(guestSearch.toLowerCase())
       ).slice(0, 10)
     : guests.slice(0, 10);
 
@@ -532,10 +532,10 @@ function QuickReservationDialog({
                       <div
                         key={guest.id}
                         className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-accent ${guestId === guest.id ? "bg-accent font-medium" : ""}`}
-                        onClick={() => { setGuestId(guest.id); setGuestSearch(`${guest.firstName} ${guest.lastName}`); }}
+                        onClick={() => { setGuestId(guest.id); setGuestSearch(`${guest.lastName} ${guest.firstName}`); }}
                         data-testid={`guest-option-${guest.id}`}
                       >
-                        {guest.firstName} {guest.lastName} {guest.documentNumber ? `— ${guest.documentNumber}` : ""}
+                        {guest.lastName} {guest.firstName} {guest.documentNumber ? `— ${guest.documentNumber}` : ""}
                       </div>
                     ))}
                     {filteredGuests.length === 0 && (
@@ -1368,7 +1368,7 @@ function ReservationDetailModal({
               {checkoutStep === 4 && (
                 <div className="space-y-3">
                   <div className="p-3 bg-muted/50 rounded-md text-sm space-y-1">
-                    <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.firstName} {reservation.guest?.lastName}</span>.</p>
+                    <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.lastName} {reservation.guest?.firstName}</span>.</p>
                     <p>Habitación <span className="font-bold">{reservation.room?.roomNumber}</span> quedará en estado <Badge variant="outline" className="text-orange-700">Sucia</Badge>.</p>
                     <p>Se creará tarea de limpieza en Housekeeping.</p>
                   </div>
@@ -1438,7 +1438,7 @@ function ReservationDetailModal({
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium">
-                  {reservation.guest?.firstName} {reservation.guest?.lastName}
+                  {reservation.guest?.lastName} {reservation.guest?.firstName}
                 </span>
               </div>
               <Badge variant={statusBadge?.variant}>{statusBadge?.label}</Badge>

@@ -109,7 +109,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
             <div className="flex items-center gap-2 flex-wrap">
               <User className="h-4 w-4 text-muted-foreground" />
               <span className="font-medium">
-                {selectedGuest.firstName} {selectedGuest.lastName}
+                {selectedGuest.lastName} {selectedGuest.firstName}
               </span>
               {selectedGuest.codigo && (
                 <Badge variant="secondary" className="text-xs">
@@ -183,7 +183,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="font-medium">
-                          {guest.firstName} {guest.lastName}
+                          {guest.lastName} {guest.firstName}
                           {guest.codigo && <span className="text-muted-foreground ml-2 text-sm">({guest.codigo})</span>}
                         </p>
                         <p className="text-sm text-muted-foreground">

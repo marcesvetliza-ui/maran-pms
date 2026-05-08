@@ -230,7 +230,7 @@ function RestaurantTicketDetail({ orderId }: { orderId: string }) {
         {order.waiterName && <span>Mozo: <strong>{order.waiterName}</strong></span>}
         <span>{tableLabel}</span>
         {order.guest && (
-          <span>Huésped: <strong>{order.guest.firstName} {order.guest.lastName}</strong></span>
+          <span>Huésped: <strong>{order.guest.lastName} {order.guest.firstName}</strong></span>
         )}
       </div>
 
@@ -334,7 +334,7 @@ function ReservationDetailPanel({ reservationId }: { reservationId: string }) {
         {res.guest && (
           <div className="col-span-2">
             <span className="text-xs text-muted-foreground">Huésped</span>
-            <p className="font-semibold">{res.guest.firstName} {res.guest.lastName}</p>
+            <p className="font-semibold">{res.guest.lastName} {res.guest.firstName}</p>
           </div>
         )}
         {res.room && (

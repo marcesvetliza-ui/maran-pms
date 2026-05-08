@@ -143,7 +143,7 @@ export default function SpaClientsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold truncate" data-testid={`text-client-name-${client.id}`}>
-                      {client.firstName} {client.lastName || ""}
+                      {client.lastName || ""} {client.firstName}
                     </p>
                     {client.phone && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
@@ -166,7 +166,7 @@ export default function SpaClientsPage() {
                       <Pencil className="h-3 w-3" />
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => {
-                      if (window.confirm(`¿Eliminar a ${client.firstName} ${client.lastName || ""}?`)) {
+                      if (window.confirm(`¿Eliminar a ${client.lastName || ""} ${client.firstName}?`)) {
                         deleteMutation.mutate(client.id);
                       }
                     }} data-testid={`button-delete-spa-client-${client.id}`}>

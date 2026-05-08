@@ -195,7 +195,7 @@ export default function CheckInPage() {
       });
       toast({
         title: "Check-in realizado",
-        description: `El huesped ${selectedReservation?.guest?.firstName} ${selectedReservation?.guest?.lastName} ha sido registrado exitosamente.`,
+        description: `El huesped ${selectedReservation?.guest?.lastName} ${selectedReservation?.guest?.firstName} ha sido registrado exitosamente.`,
       });
       setConfirmDialogOpen(false);
       setRetroactivoDialog(false);
@@ -234,7 +234,7 @@ export default function CheckInPage() {
       setSelectedGuest(newGuest);
       toast({
         title: "Huesped creado",
-        description: `${newGuest.firstName} ${newGuest.lastName} ha sido registrado.`,
+        description: `${newGuest.lastName} ${newGuest.firstName} ha sido registrado.`,
       });
     },
     onError: () => {
@@ -312,7 +312,7 @@ export default function CheckInPage() {
       });
       toast({
         title: "Walk-in exitoso",
-        description: `${selectedGuest?.firstName} ${selectedGuest?.lastName} ha sido registrado en la habitacion.`,
+        description: `${selectedGuest?.lastName} ${selectedGuest?.firstName} ha sido registrado en la habitacion.`,
       });
       resetWalkInForm();
       setActiveTab("reservations");
@@ -340,7 +340,7 @@ export default function CheckInPage() {
   const today = getLocalToday();
   const filteredReservations = reservations?.filter((res) => {
     if (res.checkInDate !== today) return false;
-    const guestName = `${res.guest?.firstName} ${res.guest?.lastName}`.toLowerCase();
+    const guestName = `${res.guest?.lastName} ${res.guest?.firstName}`.toLowerCase();
     return (
       guestName.includes(searchQuery.toLowerCase()) ||
       res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -454,11 +454,11 @@ export default function CheckInPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-                          {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                          {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
                         </div>
                         <div>
                           <CardTitle className="text-lg">
-                            {reservation.guest?.firstName} {reservation.guest?.lastName}
+                            {reservation.guest?.lastName} {reservation.guest?.firstName}
                           </CardTitle>
                           <CardDescription>{reservation.guest?.email}</CardDescription>
                         </div>
@@ -660,7 +660,7 @@ export default function CheckInPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Huesped:</span>
                     <span className="font-medium">
-                      {selectedGuest ? `${selectedGuest.firstName} ${selectedGuest.lastName}` : "-"}
+                      {selectedGuest ? `${selectedGuest.lastName} ${selectedGuest.firstName}` : "-"}
                     </span>
                   </div>
                   {selectedCompany && (
@@ -756,10 +756,10 @@ export default function CheckInPage() {
                     >
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
-                          {res.guest?.firstName?.[0]}{res.guest?.lastName?.[0]}
+                          {res.guest?.lastName?.[0]}{res.guest?.firstName?.[0]}
                         </div>
                         <div>
-                          <p className="font-medium text-sm">{res.guest?.firstName} {res.guest?.lastName}</p>
+                          <p className="font-medium text-sm">{res.guest?.lastName} {res.guest?.firstName}</p>
                           <p className="text-xs text-muted-foreground">
                             Hab. {res.room?.roomNumber} | {formatDateAR(res.checkInDate)} - {formatDateAR(res.checkOutDate)}
                           </p>
@@ -943,11 +943,11 @@ export default function CheckInPage() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10 text-green-600 font-semibold">
-                            {reservation.guest?.firstName?.[0]}{reservation.guest?.lastName?.[0]}
+                            {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
                           </div>
                           <div>
                             <CardTitle className="text-lg">
-                              {reservation.guest?.firstName} {reservation.guest?.lastName}
+                              {reservation.guest?.lastName} {reservation.guest?.firstName}
                             </CardTitle>
                             <CardDescription>{reservation.reservationCode}</CardDescription>
                           </div>
@@ -1011,7 +1011,7 @@ export default function CheckInPage() {
           {webCheckinReservation && (
             <div className="space-y-4">
               <div className="bg-muted/50 rounded-lg p-3 text-sm">
-                <p className="font-medium">{webCheckinReservation.guest?.firstName} {webCheckinReservation.guest?.lastName}</p>
+                <p className="font-medium">{webCheckinReservation.guest?.lastName} {webCheckinReservation.guest?.firstName}</p>
                 <p className="text-muted-foreground">
                   Hab. {webCheckinReservation.room?.roomNumber} | {formatDateAR(webCheckinReservation.checkInDate)} - {formatDateAR(webCheckinReservation.checkOutDate)}
                 </p>
@@ -1099,11 +1099,11 @@ export default function CheckInPage() {
                     <div className="mb-3 rounded-lg border bg-muted/30 divide-y text-sm">
                       <div className="flex items-center gap-3 p-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-base shrink-0">
-                          {selectedReservation.guest?.firstName?.[0]}{selectedReservation.guest?.lastName?.[0]}
+                          {selectedReservation.guest?.lastName?.[0]}{selectedReservation.guest?.firstName?.[0]}
                         </div>
                         <div>
                           <p className="font-semibold text-foreground">
-                            {selectedReservation.guest?.firstName} {selectedReservation.guest?.lastName}
+                            {selectedReservation.guest?.lastName} {selectedReservation.guest?.firstName}
                           </p>
                           {selectedReservation.guest?.email && (
                             <p className="text-xs text-muted-foreground">{selectedReservation.guest?.email}</p>

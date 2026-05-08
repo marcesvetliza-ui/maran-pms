@@ -2086,7 +2086,7 @@ export default function EventsPage() {
                               <SelectContent>
                                 {activeReservations.map((r) => (
                                   <SelectItem key={r.id} value={r.id}>
-                                    Hab. {r.room?.roomNumber || "?"} - {r.guest?.firstName} {r.guest?.lastName}
+                                    Hab. {r.room?.roomNumber || "?"} - {r.guest?.lastName} {r.guest?.firstName}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -2613,7 +2613,7 @@ export default function EventsPage() {
                             <SelectContent>
                               {activeReservations.map((r) => (
                                 <SelectItem key={r.id} value={r.id}>
-                                  Hab. {r.room?.roomNumber || "?"} - {r.guest?.firstName} {r.guest?.lastName}
+                                  Hab. {r.room?.roomNumber || "?"} - {r.guest?.lastName} {r.guest?.firstName}
                                 </SelectItem>
                               ))}
                             </SelectContent>

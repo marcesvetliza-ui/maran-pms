@@ -515,7 +515,7 @@ function LostFoundForm({
             {displayedGuest ? (
               <div className="flex items-center gap-2 mt-1 p-2 border rounded-md bg-muted/40">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{displayedGuest.firstName} {displayedGuest.lastName}</p>
+                  <p className="text-sm font-medium truncate">{displayedGuest.lastName} {displayedGuest.firstName}</p>
                   {displayedGuest.documentNumber && (
                     <p className="text-xs text-muted-foreground">DNI/Pasaporte: {displayedGuest.documentNumber}</p>
                   )}
@@ -562,7 +562,7 @@ function LostFoundForm({
                             data-testid={`item-lf-guest-${g.id}`}
                           >
                             <div>
-                              <p className="text-sm font-medium">{g.firstName} {g.lastName}</p>
+                              <p className="text-sm font-medium">{g.lastName} {g.firstName}</p>
                               {g.documentNumber && (
                                 <p className="text-xs text-muted-foreground">DNI/Pas: {g.documentNumber}</p>
                               )}
@@ -828,7 +828,7 @@ function LostFoundTab() {
               <LostFoundCard
                 key={item.id}
                 item={item}
-                guestName={guest ? `${guest.firstName} ${guest.lastName}` : undefined}
+                guestName={guest ? `${guest.lastName} ${guest.firstName}` : undefined}
                 onEdit={() => { setEditingItem(item); setShowForm(true); }}
                 onDeliver={() => { setDeliveringItem(item); setShowDeliveryDialog(true); }}
                 onStatusChange={status => updateStatusMutation.mutate({ id: item.id, status })}

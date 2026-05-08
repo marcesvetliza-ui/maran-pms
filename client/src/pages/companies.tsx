@@ -72,7 +72,7 @@ function ReservationDetailRow({ r }: { r: ReservationWithDetails }) {
               <ReservationStatusBadge status={r.status} />
             </div>
             <p className="text-muted-foreground text-xs">
-              {r.guest?.firstName} {r.guest?.lastName} · Hab. {r.room?.roomNumber}
+              {r.guest?.lastName} {r.guest?.firstName} · Hab. {r.room?.roomNumber}
               {(r.room as any)?.roomType?.name && ` · ${(r.room as any).roomType.name}`}
             </p>
             <p className="text-muted-foreground text-xs">{r.checkInDate} → {r.checkOutDate} ({r.nights}n)</p>
@@ -824,10 +824,10 @@ export default function CompaniesPage() {
                   {companyGuests.map(g => (
                     <div key={g.id} className="p-3 flex items-center gap-3" data-testid={`company-guest-${g.id}`}>
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm shrink-0">
-                        {g.firstName?.[0]}{g.lastName?.[0]}
+                        {g.lastName?.[0]}{g.firstName?.[0]}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm">{g.firstName} {g.lastName}</p>
+                        <p className="font-medium text-sm">{g.lastName} {g.firstName}</p>
                         <p className="text-xs text-muted-foreground">{g.documentType?.toUpperCase()}: {g.documentNumber || "-"} · {g.email || g.phone || "Sin contacto"}</p>
                       </div>
                       <Badge variant="outline" className="text-xs shrink-0">{g.segment || "LEISURE"}</Badge>
