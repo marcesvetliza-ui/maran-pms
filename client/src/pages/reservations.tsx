@@ -41,6 +41,7 @@ import {
   UserPlus,
   Trash2,
   UserCheck,
+  TrendingUp,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -196,6 +197,7 @@ export function ReservationFormDialog({
   const [resChargeQty, setResChargeQty] = useState(1);
   const [resChargeCategory, setResChargeCategory] = useState("otros");
   const [hasVoucher, setHasVoucher] = useState(!!(reservation?.voucherCode || reservation?.voucherNotes));
+  const [isUpgrade, setIsUpgrade] = useState(!!(reservation?.isUpgrade));
 
   const [formData, setFormData] = useState<Partial<InsertReservation>>({
     reservationCode: reservation?.reservationCode || "",
@@ -234,6 +236,8 @@ export function ReservationFormDialog({
     notes: reservation?.notes || "",
     voucherCode: reservation?.voucherCode || "",
     voucherNotes: reservation?.voucherNotes || "",
+    isUpgrade: reservation?.isUpgrade || false,
+    originalRoomTypeId: reservation?.originalRoomTypeId || "",
     createdAt: reservation?.createdAt || new Date().toISOString(),
   });
 
@@ -280,6 +284,8 @@ export function ReservationFormDialog({
         notes: reservation?.notes || "",
         voucherCode: reservation?.voucherCode || "",
         voucherNotes: reservation?.voucherNotes || "",
+        isUpgrade: reservation?.isUpgrade || false,
+        originalRoomTypeId: reservation?.originalRoomTypeId || "",
         createdAt: reservation?.createdAt || new Date().toISOString(),
       });
       setPendingCharges([]);
@@ -289,6 +295,7 @@ export function ReservationFormDialog({
       setResChargeAmount("");
       setResChargeQty(1);
       setHasVoucher(!!(reservation?.voucherCode || reservation?.voucherNotes));
+      setIsUpgrade(!!(reservation?.isUpgrade));
     }
   }, [open, reservation?.id, defaultValues?.roomId, defaultValues?.roomTypeId, defaultValues?.checkInDate]);
 
@@ -578,11 +585,16 @@ export function ReservationFormDialog({
     });
   };
 
-  const availableRooms = rooms.filter((r) => {
-    const sameRoom = r.id === reservation?.roomId || r.id === defaultValues?.roomId || r.id === formData.roomId;
-    const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
-    return (isUsable || sameRoom) && r.roomTypeId === selectedRoomTypeId;
-  });
+  const availableRooms = isUpgrade
+    ? rooms.filter((r) => {
+        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
+        return isUsable || r.id === formData.roomId;
+      })
+    : rooms.filter((r) => {
+        const sameRoom = r.id === reservation?.roomId || r.id === defaultValues?.roomId || r.id === formData.roomId;
+        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
+        return (isUsable || sameRoom) && r.roomTypeId === selectedRoomTypeId;
+      });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -665,12 +677,15 @@ export function ReservationFormDialog({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="roomType">Tipo de Habitación</Label>
+                <Label htmlFor="roomType">
+                  {isUpgrade ? "Tipo reservado (tarifa)" : "Tipo de Habitación"}
+                </Label>
                 <Select
                   value={selectedRoomTypeId}
-                  onValueChange={handleRoomTypeChange}
+                  onValueChange={isUpgrade ? undefined : handleRoomTypeChange}
+                  disabled={isUpgrade}
                 >
-                  <SelectTrigger data-testid="select-room-type">
+                  <SelectTrigger data-testid="select-room-type" className={isUpgrade ? "opacity-60" : ""}>
                     <SelectValue placeholder="Seleccionar tipo" />
                   </SelectTrigger>
                   <SelectContent>
@@ -681,23 +696,38 @@ export function ReservationFormDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {isUpgrade && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">Tarifa correspondiente al tipo reservado</p>
+                )}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="room">Habitación</Label>
+                <Label htmlFor="room">
+                  {isUpgrade ? "Habitación de Upgrade ↑" : "Habitación"}
+                </Label>
                 <Select
                   value={formData.roomId}
-                  onValueChange={(value) => setFormData({ ...formData, roomId: value })}
-                  disabled={!selectedRoomTypeId}
+                  onValueChange={(value) => {
+                    if (isUpgrade) {
+                      const selectedRoom = rooms.find(r => r.id === value);
+                      setFormData({ ...formData, roomId: value, roomTypeId: selectedRoom?.roomTypeId || formData.roomTypeId || "" });
+                    } else {
+                      setFormData({ ...formData, roomId: value });
+                    }
+                  }}
+                  disabled={isUpgrade ? false : !selectedRoomTypeId}
                 >
-                  <SelectTrigger data-testid="select-room">
+                  <SelectTrigger data-testid="select-room" className={isUpgrade ? "border-amber-400 dark:border-amber-600" : ""}>
                     <SelectValue placeholder="Seleccionar habitación" />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableRooms.map((room) => (
-                      <SelectItem key={room.id} value={room.id}>
-                        Hab. {room.roomNumber}
-                      </SelectItem>
-                    ))}
+                    {availableRooms.map((room) => {
+                      const roomType = isUpgrade ? roomTypes.find(t => t.id === room.roomTypeId) : null;
+                      return (
+                        <SelectItem key={room.id} value={room.id}>
+                          Hab. {room.roomNumber}{roomType ? ` — ${roomType.name}` : ""}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -751,24 +781,54 @@ export function ReservationFormDialog({
               })()}
             </div>
 
-            {/* Voucher */}
+            {/* Voucher + Upgrade */}
             <div className="grid gap-2">
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="hasVoucher"
-                  checked={hasVoucher}
-                  onCheckedChange={(checked) => {
-                    setHasVoucher(checked);
-                    if (!checked) {
-                      setFormData(prev => ({ ...prev, voucherCode: "", voucherNotes: "" }));
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="hasVoucher"
+                    checked={hasVoucher}
+                    onCheckedChange={(checked) => {
+                      setHasVoucher(checked);
+                      if (!checked) {
+                        setFormData(prev => ({ ...prev, voucherCode: "", voucherNotes: "" }));
+                      }
+                    }}
+                    data-testid="switch-has-voucher"
+                  />
+                  <Label htmlFor="hasVoucher" className="flex items-center gap-1.5 cursor-pointer">
+                    <Ticket className="h-4 w-4 text-muted-foreground" />
+                    Tiene voucher
+                  </Label>
+                </div>
+                <Button
+                  type="button"
+                  variant={isUpgrade ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    const newVal = !isUpgrade;
+                    setIsUpgrade(newVal);
+                    if (newVal) {
+                      setFormData(prev => ({
+                        ...prev,
+                        isUpgrade: true,
+                        originalRoomTypeId: selectedRoomTypeId || prev.roomTypeId || "",
+                      }));
+                    } else {
+                      setFormData(prev => ({
+                        ...prev,
+                        isUpgrade: false,
+                        originalRoomTypeId: "",
+                        roomTypeId: selectedRoomTypeId || prev.roomTypeId || "",
+                      }));
                     }
                   }}
-                  data-testid="switch-has-voucher"
-                />
-                <Label htmlFor="hasVoucher" className="flex items-center gap-1.5 cursor-pointer">
-                  <Ticket className="h-4 w-4 text-muted-foreground" />
-                  Tiene voucher
-                </Label>
+                  className={isUpgrade ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-500" : "border-amber-400 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-950/30"}
+                  data-testid="button-toggle-upgrade"
+                >
+                  <TrendingUp className="h-4 w-4 mr-1.5" />
+                  Up Grade
+                </Button>
               </div>
             </div>
             {hasVoucher && (
@@ -1992,6 +2052,21 @@ function ReservationDetailDialog({
                 <ReservationStatusBadge status={reservation.status} />
               </div>
             </div>
+            {reservation.isUpgrade && (
+              <div className="p-3 border border-amber-300 dark:border-amber-700 rounded-lg bg-amber-50 dark:bg-amber-950/30">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <TrendingUp className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">Up Grade aplicado</p>
+                </div>
+                {reservation.originalRoomTypeId && (() => {
+                  const origType = (reservation as any).originalRoomType;
+                  return origType ? (
+                    <p className="text-sm text-muted-foreground">Tipo reservado: <span className="font-medium text-foreground">{origType.name}</span></p>
+                  ) : null;
+                })()}
+                <p className="text-sm text-muted-foreground mt-0.5">Habitación asignada: <span className="font-medium text-foreground">Hab. {reservation.room?.roomNumber} — {reservation.room?.roomType?.name}</span></p>
+              </div>
+            )}
             {(reservation.voucherCode || reservation.voucherNotes) && (
               <div className="p-3 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/20">
                 <div className="flex items-center gap-1.5 mb-2">
@@ -3791,6 +3866,11 @@ export default function ReservationsPage() {
                           <p className="font-medium">
                             {reservation.guest?.lastName} {reservation.guest?.firstName}
                           </p>
+                          {reservation.isUpgrade && (
+                            <span title="Up Grade aplicado">
+                              <TrendingUp className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                            </span>
+                          )}
                           {reservation.voucherCode && (
                             <span title={`Voucher: ${reservation.voucherCode}`}>
                               <Ticket className="h-3.5 w-3.5 text-amber-500 shrink-0" />

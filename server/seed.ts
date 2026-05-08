@@ -564,6 +564,8 @@ export async function refreshRealData() {
     await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_housekeeping text`);
     await db.execute(sql`ALTER TABLE cancelled_reservation_logs ADD COLUMN IF NOT EXISTS reservation_id VARCHAR`);
     await db.execute(sql`ALTER TABLE cancelled_reservation_logs ADD COLUMN IF NOT EXISTS total_amount TEXT`);
+    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS is_upgrade BOOLEAN DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS original_room_type_id VARCHAR`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS reservation_companions (
         id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),

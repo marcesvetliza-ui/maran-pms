@@ -215,6 +215,8 @@ export const reservations = pgTable("reservations", {
   notes: text("notes"),
   voucherCode: text("voucher_code"),
   voucherNotes: text("voucher_notes"),
+  isUpgrade: boolean("is_upgrade").default(false),
+  originalRoomTypeId: varchar("original_room_type_id"),
   createdAt: timestamp("created_at").notNull(),
   lastModifiedBy: varchar("last_modified_by"),
 });
@@ -350,7 +352,7 @@ export type PlanningData = {
   rooms: RoomWithType[];
   days: string[];
   occupancy: Record<string, PlanningCellStatus[]>;
-  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null }>;
+  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null; isUpgrade?: boolean }>;
   cellReservations: Record<string, Record<string, string>>; // roomId -> date -> reservationId
   groupBlocks: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }>;
   cellGroupBlocks: Record<string, Record<string, string>>; // roomId -> date -> groupBlockId
