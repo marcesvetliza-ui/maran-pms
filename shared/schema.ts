@@ -283,6 +283,8 @@ export const cancelledReservationLogs = pgTable("cancelled_reservation_logs", {
   cancellationDate: timestamp("cancellation_date").notNull(),
   cancelledBy: varchar("cancelled_by"),
   reason: text("reason"),
+  reservationId: varchar("reservation_id"),
+  totalAmount: text("total_amount"),
 });
 
 export const insertCancelledReservationLogSchema = createInsertSchema(cancelledReservationLogs).omit({ id: true });

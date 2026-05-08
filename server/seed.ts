@@ -562,6 +562,21 @@ export async function refreshRealData() {
     await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_cocina text`);
     await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_mantenimiento text`);
     await db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notas_housekeeping text`);
+    await db.execute(sql`ALTER TABLE cancelled_reservation_logs ADD COLUMN IF NOT EXISTS reservation_id VARCHAR`);
+    await db.execute(sql`ALTER TABLE cancelled_reservation_logs ADD COLUMN IF NOT EXISTS total_amount TEXT`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS reservation_companions (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        reservation_id VARCHAR NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        document_type TEXT DEFAULT 'DNI',
+        document_number TEXT,
+        date_of_birth DATE,
+        nationality TEXT DEFAULT 'Argentina',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
     await db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'`);
     await db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS anulado_por text`);
     await db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS motivo_anulacion text`);

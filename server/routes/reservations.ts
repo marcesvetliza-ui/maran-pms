@@ -728,6 +728,8 @@ export function registerReservationsRoutes(app: Express) {
         cancellationDate: new Date(),
         cancelledBy: req.body.cancelledBy || null,
         reason: req.body.reason || null,
+        reservationId: reservation.id,
+        totalAmount: reservation.totalRoomAmount || "0",
       });
 
       await storage.updateReservation(req.params.id, { status: "cancelled" });
@@ -735,8 +737,25 @@ export function registerReservationsRoutes(app: Express) {
       if (reservation.room?.status === "occupied") {
         await storage.updateRoom(reservation.roomId, { status: "dirty" });
       }
-      await audit(req, "delete", "reservations",
-        `Cancelación: ${reservation.reservationCode}`,
+
+      try {
+        const guestName = `${reservation.guest?.firstName || ""} ${reservation.guest?.lastName || ""}`.trim();
+        await storage.registerCashMovement(
+          "reception",
+          "reservation_cancellation",
+          reservation.id,
+          `Anulación reserva ${reservation.reservationCode} — ${guestName} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
+          "cash",
+          reservation.totalRoomAmount || "0",
+          "anulacion_reserva",
+          (req as any).user?.username || "sistema"
+        );
+      } catch (e) {
+        console.error("[cancel] Error registrando en caja:", e);
+      }
+
+      await audit(req, "cancel", "reservations",
+        `Anulación: ${reservation.reservationCode} — Motivo: ${req.body.reason || "Sin motivo"}`,
         { entityType: "reservation", entityId: req.params.id }
       );
       res.json({ success: true });

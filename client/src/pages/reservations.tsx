@@ -3122,7 +3122,7 @@ export default function ReservationsPage() {
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | undefined>();
 
   const todayStr = getLocalToday();
-  const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created">("upcoming");
+  const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created" | "anuladas">("upcoming");
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState("");
   const [createdFrom, setCreatedFrom] = useState(todayStr);
@@ -3197,6 +3197,7 @@ export default function ReservationsPage() {
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations", dateMode, dateFrom, dateTo, createdFrom, createdTo],
+    enabled: dateMode !== "anuladas",
     queryFn: async () => {
       const params = new URLSearchParams();
       if (dateMode === "today") {
@@ -3216,6 +3217,11 @@ export default function ReservationsPage() {
       if (!res.ok) throw new Error("Failed to fetch reservations");
       return res.json();
     },
+  });
+
+  const { data: cancelledLogs = [], isLoading: isLoadingCancelled } = useQuery<any[]>({
+    queryKey: ["/api/cancelled-reservations"],
+    enabled: dateMode === "anuladas",
   });
 
   useEffect(() => {
@@ -3565,6 +3571,16 @@ export default function ReservationsPage() {
                 <CalendarRange className="h-3.5 w-3.5 mr-1.5" />
                 Por fecha de creación
               </Button>
+              <Button
+                variant={dateMode === "anuladas" ? "destructive" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("anuladas")}
+                data-testid="button-filter-anuladas"
+                className={dateMode !== "anuladas" ? "border-red-300 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30" : ""}
+              >
+                <XCircle className="h-3.5 w-3.5 mr-1.5" />
+                Anuladas
+              </Button>
               {dateMode === "range" && (
                 <div className="flex items-center gap-2 ml-2">
                   <Input
@@ -3604,6 +3620,7 @@ export default function ReservationsPage() {
                 </div>
               )}
             </div>
+            {dateMode !== "anuladas" && (
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -3639,11 +3656,12 @@ export default function ReservationsPage() {
                 {showHistory ? "Ocultar historial" : "Ver historial"}
               </Button>
             </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      {!isLoading && filteredReservations && (
+      {!isLoading && filteredReservations && dateMode !== "anuladas" && (
         <div className="flex items-center justify-between text-sm text-muted-foreground px-1" data-testid="text-results-count">
           <span>
             {filteredReservations.length} reserva{filteredReservations.length !== 1 ? "s" : ""}
@@ -3654,8 +3672,83 @@ export default function ReservationsPage() {
         </div>
       )}
 
+      {/* Cancelled Reservations Table */}
+      {dateMode === "anuladas" && (
+        isLoadingCancelled ? (
+          <Card>
+            <CardContent className="p-6">
+              <div className="space-y-4">
+                {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16" />)}
+              </div>
+            </CardContent>
+          </Card>
+        ) : cancelledLogs.length > 0 ? (
+          <>
+            <div className="flex items-center justify-between text-sm text-muted-foreground px-1">
+              <span>{cancelledLogs.length} reserva{cancelledLogs.length !== 1 ? "s" : ""} anulada{cancelledLogs.length !== 1 ? "s" : ""}</span>
+            </div>
+            <Card className="border-red-200 dark:border-red-900">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Código</TableHead>
+                    <TableHead>Huésped</TableHead>
+                    <TableHead>Hab.</TableHead>
+                    <TableHead>Check-in</TableHead>
+                    <TableHead>Check-out</TableHead>
+                    <TableHead>Total reserva</TableHead>
+                    <TableHead>Fecha anulación</TableHead>
+                    <TableHead>Anulado por</TableHead>
+                    <TableHead>Motivo</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cancelledLogs.map((log: any) => (
+                    <TableRow key={log.id} data-testid={`cancelled-log-row-${log.id}`}>
+                      <TableCell className="font-mono text-sm font-medium">{log.reservationCode}</TableCell>
+                      <TableCell>{log.guestName}</TableCell>
+                      <TableCell>{log.roomNumber}</TableCell>
+                      <TableCell>{formatDateAR(log.checkInDate)}</TableCell>
+                      <TableCell>{formatDateAR(log.checkOutDate)}</TableCell>
+                      <TableCell className="font-medium">
+                        {log.totalAmount ? `$${parseFloat(log.totalAmount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {log.cancellationDate
+                          ? new Date(log.cancellationDate).toLocaleString("es-AR", {
+                              day: "2-digit", month: "2-digit", year: "numeric",
+                              hour: "2-digit", minute: "2-digit",
+                              timeZone: "America/Argentina/Buenos_Aires",
+                            })
+                          : "—"}
+                      </TableCell>
+                      <TableCell>{log.cancelledBy || "—"}</TableCell>
+                      <TableCell className="max-w-[250px]">
+                        {log.reason ? (
+                          <span className="text-sm text-muted-foreground italic">{log.reason}</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/50">Sin motivo</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          </>
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+              <XCircle className="h-16 w-16 text-muted-foreground/30 mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Sin anulaciones</h3>
+              <p className="text-muted-foreground">No hay reservas anuladas registradas en el sistema.</p>
+            </CardContent>
+          </Card>
+        )
+      )}
+
       {/* Reservations Table */}
-      {isLoading ? (
+      {dateMode !== "anuladas" && (isLoading ? (
         <Card>
           <CardContent className="p-6">
             <div className="space-y-4">
@@ -3822,7 +3915,7 @@ export default function ReservationsPage() {
             )}
           </CardContent>
         </Card>
-      )}
+      ))}
 
       {/* Reservation Form Dialog */}
       <ReservationFormDialog
