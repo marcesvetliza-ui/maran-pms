@@ -38,6 +38,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  UserPlus,
+  Trash2,
+  UserCheck,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1422,6 +1425,41 @@ function ReservationDetailDialog({
     { amount: "", method: "efectivo", reference: "", billingTarget: "guest" },
   ]);
 
+  // Companions
+  const [showAddCompanion, setShowAddCompanion] = useState(false);
+  const [newCompanion, setNewCompanion] = useState({
+    firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "",
+  });
+
+  const { data: companions = [], refetch: refetchCompanions } = useQuery<any[]>({
+    queryKey: ["/api/reservations", reservation.id, "companions"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservation.id}/companions`, { credentials: "include" });
+      return res.json();
+    },
+  });
+
+  const addCompanionMutation = useMutation({
+    mutationFn: async (data: typeof newCompanion) =>
+      apiRequest("POST", `/api/reservations/${reservation.id}/companions`, data),
+    onSuccess: () => {
+      refetchCompanions();
+      setShowAddCompanion(false);
+      setNewCompanion({ firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "" });
+      toast({ title: "Acompañante agregado" });
+    },
+    onError: () => toast({ title: "Error al agregar acompañante", variant: "destructive" }),
+  });
+
+  const deleteCompanionMutation = useMutation({
+    mutationFn: async (id: string) =>
+      apiRequest("DELETE", `/api/reservations/${reservation.id}/companions/${id}`, undefined),
+    onSuccess: () => {
+      refetchCompanions();
+      toast({ title: "Acompañante eliminado" });
+    },
+  });
+
   // Fetch active reservations for transfer target selection
   const { data: activeReservations, isError: isActiveReservationsError, isLoading: isActiveReservationsLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations", "transfer-targets"],
@@ -1793,6 +1831,154 @@ function ReservationDetailDialog({
                 <p className="text-sm">{reservation.notes}</p>
               </div>
             )}
+
+            {/* Companions Section */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 bg-muted/40">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium text-sm">Acompañantes</span>
+                  {companions.length > 0 && (
+                    <Badge variant="secondary" className="text-xs">{companions.length}</Badge>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => setShowAddCompanion(v => !v)}
+                  data-testid="button-add-companion"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Agregar
+                </Button>
+              </div>
+
+              {showAddCompanion && (
+                <div className="p-4 border-t bg-muted/10 space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
+                      <Input
+                        placeholder="Nombre"
+                        value={newCompanion.firstName}
+                        onChange={e => setNewCompanion(p => ({ ...p, firstName: e.target.value }))}
+                        data-testid="input-companion-firstname"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                      <Input
+                        placeholder="Apellido"
+                        value={newCompanion.lastName}
+                        onChange={e => setNewCompanion(p => ({ ...p, lastName: e.target.value }))}
+                        data-testid="input-companion-lastname"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Tipo doc.</label>
+                      <select
+                        value={newCompanion.documentType}
+                        onChange={e => setNewCompanion(p => ({ ...p, documentType: e.target.value }))}
+                        className="w-full h-8 text-sm border rounded-md px-2 bg-background"
+                        data-testid="select-companion-doctype"
+                      >
+                        <option value="DNI">DNI</option>
+                        <option value="Pasaporte">Pasaporte</option>
+                        <option value="LC">LC</option>
+                        <option value="LE">LE</option>
+                        <option value="CI">CI (extranjero)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Nº documento</label>
+                      <Input
+                        placeholder="Número"
+                        value={newCompanion.documentNumber}
+                        onChange={e => setNewCompanion(p => ({ ...p, documentNumber: e.target.value }))}
+                        data-testid="input-companion-docnumber"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Fecha de nacimiento</label>
+                      <Input
+                        type="date"
+                        value={newCompanion.dateOfBirth}
+                        onChange={e => setNewCompanion(p => ({ ...p, dateOfBirth: e.target.value }))}
+                        data-testid="input-companion-dob"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</label>
+                      <Input
+                        placeholder="Argentina"
+                        value={newCompanion.nationality}
+                        onChange={e => setNewCompanion(p => ({ ...p, nationality: e.target.value }))}
+                        data-testid="input-companion-nationality"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddCompanion(false)}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs"
+                      disabled={!newCompanion.firstName || !newCompanion.lastName || addCompanionMutation.isPending}
+                      onClick={() => addCompanionMutation.mutate(newCompanion)}
+                      data-testid="button-save-companion"
+                    >
+                      Guardar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {companions.length === 0 && !showAddCompanion ? (
+                <div className="px-4 py-5 text-center text-sm text-muted-foreground">
+                  Sin acompañantes registrados
+                </div>
+              ) : (
+                <ul className="divide-y">
+                  {companions.map((c: any) => (
+                    <li key={c.id} className="flex items-center justify-between px-4 py-2.5" data-testid={`companion-row-${c.id}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+                          {c.firstName?.[0]}{c.lastName?.[0]}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{c.firstName} {c.lastName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {c.documentType} {c.documentNumber || "—"}
+                            {c.nationality ? ` · ${c.nationality}` : ""}
+                            {c.dateOfBirth ? ` · ${new Date(c.dateOfBirth).toLocaleDateString("es-AR")}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        onClick={() => deleteCompanionMutation.mutate(c.id)}
+                        data-testid={`button-delete-companion-${c.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="folio" className="space-y-4 mt-4">

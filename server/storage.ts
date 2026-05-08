@@ -22,6 +22,8 @@ import {
   type InsertCharge,
   type Payment,
   type InsertPayment,
+  type ReservationCompanion,
+  type InsertReservationCompanion,
   type CancelledReservationLog,
   type InsertCancelledReservationLog,
   type OTAChannel,
@@ -275,6 +277,11 @@ export interface IStorage {
   updateCharge(id: string, charge: Partial<InsertCharge>): Promise<Charge | undefined>;
   deleteCharge(id: string): Promise<boolean>;
   getChargesTotal(reservationId: string): Promise<number>;
+
+  // Companions
+  getReservationCompanions(reservationId: string): Promise<ReservationCompanion[]>;
+  addReservationCompanion(data: InsertReservationCompanion): Promise<ReservationCompanion>;
+  deleteReservationCompanion(id: string): Promise<void>;
 
   // Payments
   getPayments(reservationId: string): Promise<Payment[]>;
@@ -5114,4 +5121,7 @@ export class MemStorage implements IStorage {
   async getAccountBalance(_entityType: AccountEntityType, _entityId: string): Promise<number> { return 0; }
   async createAccountMovement(_data: InsertAccountMovement): Promise<AccountMovement> { return {} as AccountMovement; }
   async getAccountSummary(): Promise<{ companies: any[]; agencies: any[] }> { return { companies: [], agencies: [] }; }
+  async getReservationCompanions(_reservationId: string): Promise<ReservationCompanion[]> { return []; }
+  async addReservationCompanion(_data: InsertReservationCompanion): Promise<ReservationCompanion> { return {} as ReservationCompanion; }
+  async deleteReservationCompanion(_id: string): Promise<void> {}
 }

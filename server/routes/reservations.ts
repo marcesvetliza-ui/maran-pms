@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
@@ -1244,6 +1244,36 @@ export function registerReservationsRoutes(app: Express) {
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting payment" });
+    }
+  });
+
+  // ── Companions ──────────────────────────────────────────────────────────
+  app.get("/api/reservations/:id/companions", requireAuth, async (req, res) => {
+    try {
+      const companions = await storage.getReservationCompanions(req.params.id);
+      res.json(companions);
+    } catch {
+      res.status(500).json({ error: "Error fetching companions" });
+    }
+  });
+
+  app.post("/api/reservations/:id/companions", requireAuth, async (req, res) => {
+    try {
+      const parsed = insertReservationCompanionSchema.safeParse({ ...req.body, reservationId: req.params.id });
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      const companion = await storage.addReservationCompanion(parsed.data);
+      res.status(201).json(companion);
+    } catch {
+      res.status(500).json({ error: "Error adding companion" });
+    }
+  });
+
+  app.delete("/api/reservations/:id/companions/:companionId", requireAuth, async (req, res) => {
+    try {
+      await storage.deleteReservationCompanion(req.params.companionId);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Error deleting companion" });
     }
   });
 

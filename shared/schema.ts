@@ -2415,3 +2415,20 @@ export type InsertPresupuestoItem = z.infer<typeof insertPresupuestoItemSchema>;
 export type PresupuestoItem = typeof presupuestoItems.$inferSelect;
 
 export type PresupuestoWithItems = Presupuesto & { items: PresupuestoItem[] };
+
+// Reservation Companions
+export const reservationCompanions = pgTable("reservation_companions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reservationId: varchar("reservation_id").notNull().references(() => reservations.id, { onDelete: "cascade" }),
+  firstName: varchar("first_name", { length: 100 }).notNull(),
+  lastName: varchar("last_name", { length: 100 }).notNull(),
+  documentType: varchar("document_type", { length: 20 }).notNull().default("DNI"),
+  documentNumber: varchar("document_number", { length: 50 }),
+  dateOfBirth: date("date_of_birth"),
+  nationality: varchar("nationality", { length: 100 }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertReservationCompanionSchema = createInsertSchema(reservationCompanions).omit({ id: true, createdAt: true });
+export type InsertReservationCompanion = z.infer<typeof insertReservationCompanionSchema>;
+export type ReservationCompanion = typeof reservationCompanions.$inferSelect;

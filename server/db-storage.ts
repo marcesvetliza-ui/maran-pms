@@ -110,9 +110,27 @@ import {
   cashRegisterConfigs, cashShifts, cashMovements, cashClosingSummaries,
   accountMovements,
   folios, folioMovements,
+  reservationCompanions,
+  type ReservationCompanion, type InsertReservationCompanion,
 } from "@shared/schema";
 
 export class DatabaseStorage implements IStorage {
+
+  // Reservation Companions
+  async getReservationCompanions(reservationId: string): Promise<ReservationCompanion[]> {
+    return db.select().from(reservationCompanions)
+      .where(eq(reservationCompanions.reservationId, reservationId))
+      .orderBy(asc(reservationCompanions.createdAt));
+  }
+
+  async addReservationCompanion(data: InsertReservationCompanion): Promise<ReservationCompanion> {
+    const [created] = await db.insert(reservationCompanions).values({ ...data, id: randomUUID() } as any).returning();
+    return created;
+  }
+
+  async deleteReservationCompanion(id: string): Promise<void> {
+    await db.delete(reservationCompanions).where(eq(reservationCompanions.id, id));
+  }
 
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
