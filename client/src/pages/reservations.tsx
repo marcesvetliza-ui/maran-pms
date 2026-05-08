@@ -3529,7 +3529,15 @@ export default function ReservationsPage() {
                   <TableCell>
                     <ReservationStatusBadge status={reservation.status} />
                   </TableCell>
-                  <TableCell className="font-medium">${reservation.totalRoomAmount || 0}</TableCell>
+                  <TableCell className="font-medium">
+                    {(() => {
+                      const room = parseFloat(reservation.totalRoomAmount || "0");
+                      const extras = (reservation.charges || [])
+                        .filter((c: any) => c.status !== "anulado" && c.category !== "payment")
+                        .reduce((sum: number, c: any) => sum + parseFloat(c.amount || "0"), 0);
+                      return `$${(room + extras).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+                    })()}
+                  </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
