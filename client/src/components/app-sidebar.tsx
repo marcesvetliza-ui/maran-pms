@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -44,6 +44,7 @@ import {
   ShoppingBag,
   MonitorSmartphone,
   Megaphone,
+  ChevronDown,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -372,9 +373,51 @@ function TurnoAlert() {
   );
 }
 
+const COLLAPSED_KEY = "sidebar_collapsed_sections";
+
 export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
+
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem(COLLAPSED_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const toggleSection = (titulo: string) => {
+    setCollapsed(prev => {
+      const next = { ...prev, [titulo]: !prev[titulo] };
+      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  // Auto-expand the section that contains the current active route
+  useEffect(() => {
+    const role = user?.role || "";
+    for (const section of menuSections) {
+      const hasActive = section.items.some(item => {
+        if ((item as any).roles && !(item as any).roles.includes(role)) return false;
+        return item.href === "/"
+          ? location === "/"
+          : location === item.href || location.startsWith(item.href + "/");
+      });
+      if (hasActive) {
+        setCollapsed(prev => {
+          if (!prev[section.titulo]) return prev;
+          const next = { ...prev, [section.titulo]: false };
+          try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)); } catch {}
+          return next;
+        });
+      }
+    }
+  }, [location, user?.role]);
 
   return (
     <Sidebar>
@@ -402,45 +445,56 @@ export function AppSidebar() {
             return true;
           });
           if (visibleItems.length === 0) return null;
+
+          const isCollapsed = !!collapsed[section.titulo];
+
           return (
-          <SidebarGroup key={section.titulo} className="py-0">
-            <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-4 py-1.5 mt-2">
-              {section.titulo}
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {section.items.filter(item => {
-                  const role = user?.role || "";
-                  const itemRoles = (item as any).roles as string[] | undefined;
-                  // Role check: if roles defined, user must be in that list
-                  if (itemRoles && !itemRoles.includes(role)) return false;
-                  // devOnly items only in development
-                  if ((item as any).devOnly && !import.meta.env.DEV) return false;
-                  return true;
-                }).map((item) => {
-                  const isActive =
-                    item.href === "/"
-                      ? location === "/"
-                      : location === item.href || location.startsWith(item.href + "/");
-                  const testId = `nav-${item.href.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
-                  return (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive}
-                        data-testid={testId}
-                      >
-                        <Link href={item.href}>
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span>{item.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+            <SidebarGroup key={section.titulo} className="py-0">
+              <button
+                onClick={() => toggleSection(section.titulo)}
+                className="flex items-center justify-between w-full px-4 py-1.5 mt-2 group hover:bg-sidebar-accent/50 rounded-md transition-colors"
+                data-testid={`sidebar-section-${section.titulo.replace(/\s+/g, "-").toLowerCase()}`}
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 group-hover:text-muted-foreground/90 transition-colors">
+                  {section.titulo}
+                </span>
+                <ChevronDown
+                  className={`h-3 w-3 text-muted-foreground/50 group-hover:text-muted-foreground/80 transition-all duration-200 ${isCollapsed ? "-rotate-90" : "rotate-0"}`}
+                />
+              </button>
+
+              <div
+                ref={el => { contentRefs.current[section.titulo] = el; }}
+                className="overflow-hidden transition-all duration-200 ease-in-out"
+                style={{ maxHeight: isCollapsed ? "0px" : "600px", opacity: isCollapsed ? 0 : 1 }}
+              >
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {visibleItems.map((item) => {
+                      const isActive =
+                        item.href === "/"
+                          ? location === "/"
+                          : location === item.href || location.startsWith(item.href + "/");
+                      const testId = `nav-${item.href.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
+                      return (
+                        <SidebarMenuItem key={item.href}>
+                          <SidebarMenuButton
+                            asChild
+                            isActive={isActive}
+                            data-testid={testId}
+                          >
+                            <Link href={item.href}>
+                              <item.icon className="h-4 w-4 shrink-0" />
+                              <span>{item.label}</span>
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </div>
+            </SidebarGroup>
           );
         })}
       </SidebarContent>
