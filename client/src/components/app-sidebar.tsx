@@ -477,7 +477,7 @@ export function AppSidebar() {
                           : location === item.href || location.startsWith(item.href + "/");
                       const testId = `nav-${item.href.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
                       return (
-                        <SidebarMenuItem key={item.href}>
+                        <SidebarMenuItem key={`${item.href}-${item.label}`}>
                           <SidebarMenuButton
                             asChild
                             isActive={isActive}
