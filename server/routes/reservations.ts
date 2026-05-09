@@ -2,14 +2,40 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
 import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
+import PDFDocument from "pdfkit";
+
+// ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
+const HOTEL_NAME    = "Maran Suites & Towers";
+const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
+const HOTEL_PHONE   = "+54 343 000-0000";
+const HOTEL_EMAIL   = "reservas@maran.com.ar";
+const HOTEL_CUIT    = "33-68110008-9";
+const HOTEL_WEB     = "www.maransuites.com.ar";
+const PRIMARY_COLOR = "#1a4f8a";
+
+function fmtDatePdf(d: string | null | undefined): string {
+  if (!d) return "—";
+  const [y, m, day] = d.split("-");
+  return `${day}/${m}/${y}`;
+}
+function fmtMoneyPdf(v: any): string {
+  const n = parseFloat(String(v ?? 0));
+  return `$ ${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+}
+function nightCount(checkIn: string, checkOut: string): number {
+  return Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
+}
 
 export function registerReservationsRoutes(app: Express) {
+  // ── PDF confirmation download ───────────────────────────────────────────────
+  app.get("/api/reservations/:id/confirmation-pdf", requireAuth, handleConfirmationPdf);
+
   // Reservations
   app.get("/api/reservations", async (req, res) => {
     try {
@@ -1358,4 +1384,191 @@ async function generateSameDayHospitalityAlerts(
     existingPrefIds.add(pref.id);
   }
   console.log(`[hospitality] ${activePrefs.length} preferencias → alertas de llegada hoy generadas para reserva ${reservationId}`);
+}
+
+// ─── GET /api/reservations/:id/confirmation-pdf ───────────────────────────────
+// Generates a downloadable PDF confirmation for a reservation
+async function handleConfirmationPdf(req: any, res: any) {
+  try {
+    const [reservation] = await db.select().from(reservations).where(eq(reservations.id, req.params.id));
+    if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
+
+    const [guest] = reservation.guestId
+      ? await db.select().from(guests).where(eq(guests.id, reservation.guestId))
+      : [null];
+    const [room] = reservation.roomId
+      ? await db.select().from(rooms).where(eq(rooms.id, reservation.roomId))
+      : [null];
+    const [roomType] = room?.roomTypeId
+      ? await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId))
+      : [null];
+
+    const activeCharges = await db
+      .select()
+      .from(charges)
+      .where(and(eq(charges.reservationId, reservation.id), eq(charges.isActive, true)));
+    const consumptionCharges = activeCharges.filter(c => c.category !== "payment" && c.category !== "accommodation");
+
+    const guestName = guest ? `${guest.lastName?.toUpperCase() || ""} ${guest.firstName || ""}`.trim() : "Huésped";
+    const nights = nightCount(reservation.checkInDate, reservation.checkOutDate);
+    const totalConExtras =
+      parseFloat(reservation.totalRoomAmount || "0") +
+      (reservation.earlyCheckIn ? parseFloat(String(reservation.earlyCheckInCharge || 0)) : 0) +
+      (reservation.lateCheckOut ? parseFloat(String(reservation.lateCheckOutCharge || 0)) : 0);
+    const totalServices = consumptionCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
+    const grandTotal = totalConExtras + totalServices;
+
+    const doc = new PDFDocument({ margin: 0, size: "A4" });
+    const filename = `Confirmacion-${reservation.reservationCode || reservation.id}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    doc.pipe(res);
+
+    const pageW = 595;
+    const margin = 40;
+    const contentW = pageW - margin * 2;
+
+    // ── HEADER BAND ────────────────────────────────────────────────────────
+    doc.rect(0, 0, pageW, 80).fill(PRIMARY_COLOR);
+    doc.fillColor("white")
+      .fontSize(20).font("Helvetica-Bold")
+      .text(HOTEL_NAME, margin, 20, { width: contentW });
+    doc.fontSize(8).font("Helvetica")
+      .text(`${HOTEL_ADDRESS}  ·  ${HOTEL_PHONE}  ·  ${HOTEL_EMAIL}  ·  CUIT ${HOTEL_CUIT}`, margin, 46, { width: contentW });
+
+    // Reservation code top-right
+    doc.fontSize(9).font("Helvetica-Bold")
+      .text(reservation.reservationCode || reservation.id, margin, 22, { width: contentW, align: "right" });
+    doc.fontSize(7).font("Helvetica").fillColor("#cde")
+      .text("CONFIRMACIÓN DE RESERVA", margin, 35, { width: contentW, align: "right" });
+
+    doc.fillColor("#000");
+    let y = 96;
+
+    // ── GUEST BLOCK ────────────────────────────────────────────────────────
+    doc.rect(margin, y, contentW, 48).fill("#f4f7fb").stroke("#dde6f0");
+    doc.fillColor("#6b7280").fontSize(7).font("Helvetica-Bold")
+      .text("HUÉSPED", margin + 10, y + 8);
+    doc.fillColor("#111").fontSize(13).font("Helvetica-Bold")
+      .text(guestName, margin + 10, y + 18);
+    if (guest?.email || guest?.phone) {
+      doc.fillColor("#555").fontSize(8).font("Helvetica")
+        .text([guest?.email, guest?.phone].filter(Boolean).join("  ·  "), margin + 10, y + 35);
+    }
+    y += 60;
+
+    // ── KEY DATES GRID (5 cells) ───────────────────────────────────────────
+    const cells = [
+      { label: "CHECK-IN",    value: fmtDatePdf(reservation.checkInDate) },
+      { label: "CHECK-OUT",   value: fmtDatePdf(reservation.checkOutDate) },
+      { label: "NOCHES",      value: String(nights) },
+      { label: "HABITACIÓN",  value: room?.roomNumber || "—" },
+      { label: "HUÉSPEDES",   value: String(reservation.numberOfGuests || 1) },
+    ];
+    const cellW = contentW / cells.length;
+    cells.forEach((cell, i) => {
+      const cx = margin + i * cellW;
+      doc.rect(cx, y, cellW, 44)
+        .fill(i % 2 === 0 ? "#ffffff" : "#f9fafb")
+        .stroke("#e5e7eb");
+      doc.fillColor("#9ca3af").fontSize(7).font("Helvetica-Bold")
+        .text(cell.label, cx + 6, y + 7, { width: cellW - 12, align: "center" });
+      doc.fillColor(PRIMARY_COLOR).fontSize(13).font("Helvetica-Bold")
+        .text(cell.value, cx + 6, y + 20, { width: cellW - 12, align: "center" });
+    });
+    y += 56;
+
+    // ── ROOM TYPE ──────────────────────────────────────────────────────────
+    if (roomType) {
+      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold")
+        .text("Tipo de habitación:", margin, y);
+      doc.fillColor("#111").font("Helvetica")
+        .text(roomType.name, margin + 120, y);
+      y += 18;
+    }
+
+    // ── EARLY CHECK-IN / LATE CHECK-OUT ────────────────────────────────────
+    if (reservation.earlyCheckIn && reservation.earlyCheckInTime) {
+      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Early Check-in:", margin, y);
+      doc.fillColor("#111").font("Helvetica")
+        .text(`${reservation.earlyCheckInTime} hs  (+${fmtMoneyPdf(reservation.earlyCheckInCharge)})`, margin + 120, y);
+      y += 16;
+    }
+    if (reservation.lateCheckOut && reservation.lateCheckOutTime) {
+      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Late Check-out:", margin, y);
+      doc.fillColor("#111").font("Helvetica")
+        .text(`${reservation.lateCheckOutTime} hs  (+${fmtMoneyPdf(reservation.lateCheckOutCharge)})`, margin + 120, y);
+      y += 16;
+    }
+    y += 10;
+
+    // ── PRICING TABLE ──────────────────────────────────────────────────────
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e5e7eb").stroke();
+    y += 10;
+    doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Detalle de tarifas", margin, y);
+    y += 14;
+
+    const drawRow = (label: string, value: string, bold = false, highlight = false) => {
+      if (highlight) {
+        doc.rect(margin, y - 2, contentW, 18).fill(PRIMARY_COLOR);
+        doc.fillColor("white").fontSize(10).font("Helvetica-Bold")
+          .text(label, margin + 6, y + 1, { width: contentW - 90 })
+          .text(value, margin + 6, y + 1, { width: contentW - 12, align: "right" });
+      } else {
+        doc.fillColor(bold ? "#111" : "#555").fontSize(9)
+          .font(bold ? "Helvetica-Bold" : "Helvetica")
+          .text(label, margin + 6, y, { width: contentW - 90 })
+          .text(value, margin + 6, y, { width: contentW - 12, align: "right" });
+      }
+      y += 18;
+    };
+
+    drawRow(
+      `Alojamiento — ${nights} noche${nights !== 1 ? "s" : ""} × ${fmtMoneyPdf(reservation.finalRatePerNight || 0)}`,
+      fmtMoneyPdf(reservation.totalRoomAmount || 0)
+    );
+    if (reservation.earlyCheckIn && parseFloat(String(reservation.earlyCheckInCharge || 0)) > 0) {
+      drawRow("Early Check-in", fmtMoneyPdf(reservation.earlyCheckInCharge));
+    }
+    if (reservation.lateCheckOut && parseFloat(String(reservation.lateCheckOutCharge || 0)) > 0) {
+      drawRow("Late Check-out", fmtMoneyPdf(reservation.lateCheckOutCharge));
+    }
+
+    if (consumptionCharges.length > 0) {
+      y += 4;
+      doc.fillColor("#6b7280").fontSize(8).font("Helvetica-Bold").text("SERVICIOS ADICIONALES", margin + 6, y);
+      y += 14;
+      for (const c of consumptionCharges) {
+        drawRow(c.description || "Servicio", fmtMoneyPdf(c.amount));
+      }
+    }
+
+    y += 4;
+    drawRow("TOTAL", fmtMoneyPdf(grandTotal), true, true);
+    y += 8;
+
+    // ── NOTES ──────────────────────────────────────────────────────────────
+    if (reservation.notes) {
+      doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e5e7eb").stroke();
+      y += 10;
+      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Observaciones:", margin, y);
+      y += 14;
+      doc.fillColor("#555").fontSize(9).font("Helvetica")
+        .text(reservation.notes, margin, y, { width: contentW });
+      y += doc.heightOfString(reservation.notes, { width: contentW }) + 10;
+    }
+
+    // ── FOOTER ─────────────────────────────────────────────────────────────
+    doc.rect(0, 810, pageW, 32).fill("#f3f4f6");
+    doc.fillColor("#9ca3af").fontSize(7).font("Helvetica")
+      .text(
+        `${HOTEL_NAME}  ·  ${HOTEL_WEB}  ·  CUIT ${HOTEL_CUIT}  ·  Generado el ${new Date().toLocaleDateString("es-AR")}`,
+        margin, 820, { width: contentW, align: "center" }
+      );
+
+    doc.end();
+  } catch (e: any) {
+    console.error("[confirmation-pdf]", e);
+    res.status(500).json({ error: "Error generando PDF", detail: e?.message });
+  }
 }
