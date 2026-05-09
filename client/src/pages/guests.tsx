@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Users,
@@ -29,6 +29,8 @@ import {
   Star,
   Gift,
   Briefcase,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +58,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
   Table,
   TableBody,
@@ -113,6 +117,7 @@ function GuestFormDialog({
   });
 
   const [formData, setFormData] = useState<Partial<InsertGuest>>(() => buildFormData(guest));
+  const [companyOpen, setCompanyOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -262,20 +267,60 @@ function GuestFormDialog({
 
             <div className="grid gap-2">
               <Label>Empresa asociada</Label>
-              <Select
-                value={formData.companyId || "__none__"}
-                onValueChange={(v) => setFormData({ ...formData, companyId: v === "__none__" ? null : v })}
-              >
-                <SelectTrigger data-testid="select-company">
-                  <SelectValue placeholder="Sin empresa" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Sin empresa</SelectItem>
-                  {companies?.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.razonSocial}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={companyOpen}
+                    className="w-full justify-between font-normal"
+                    data-testid="select-company"
+                  >
+                    {formData.companyId
+                      ? (companies?.find(c => c.id === formData.companyId)?.nombreFantasia ||
+                         companies?.find(c => c.id === formData.companyId)?.razonSocial ||
+                         "Empresa")
+                      : "Sin empresa"}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Buscar empresa..." />
+                    <CommandList>
+                      <CommandEmpty>Sin resultados.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="__none__"
+                          onSelect={() => {
+                            setFormData({ ...formData, companyId: null });
+                            setCompanyOpen(false);
+                          }}
+                        >
+                          <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />
+                          Sin empresa
+                        </CommandItem>
+                        {companies?.map(c => (
+                          <CommandItem
+                            key={c.id}
+                            value={`${c.razonSocial} ${c.nombreFantasia || ""}`}
+                            onSelect={() => {
+                              setFormData({ ...formData, companyId: c.id });
+                              setCompanyOpen(false);
+                            }}
+                          >
+                            <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
+                            {c.nombreFantasia || c.razonSocial}
+                            {c.nombreFantasia && (
+                              <span className="ml-1 text-xs text-muted-foreground">({c.razonSocial})</span>
+                            )}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="pt-2 border-t">
