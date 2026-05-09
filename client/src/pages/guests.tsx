@@ -31,6 +31,7 @@ import {
   Briefcase,
   Check,
   ChevronsUpDown,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -118,10 +119,12 @@ function GuestFormDialog({
 
   const [formData, setFormData] = useState<Partial<InsertGuest>>(() => buildFormData(guest));
   const [companyOpen, setCompanyOpen] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open) {
       setFormData(buildFormData(guest));
+      setFormErrors({});
     }
   }, [open, guest?.id]);
 
@@ -156,6 +159,14 @@ function GuestFormDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const errors: Record<string, string> = {};
+    if (!formData.firstName?.trim()) errors.firstName = "El nombre es obligatorio";
+    if (!formData.lastName?.trim()) errors.lastName = "El apellido es obligatorio";
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+    setFormErrors({});
     mutation.mutate(formData);
   };
 
@@ -172,26 +183,34 @@ function GuestFormDialog({
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="firstName">Nombre</Label>
+                <Label htmlFor="firstName">Nombre <span className="text-red-500">*</span></Label>
                 <Input
                   id="firstName"
                   value={formData.firstName}
-                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, firstName: e.target.value });
+                    if (e.target.value.trim()) setFormErrors(prev => { const n = {...prev}; delete n.firstName; return n; });
+                  }}
                   placeholder="Juan"
-                  required
+                  className={formErrors.firstName ? "border-red-500 focus-visible:ring-red-500" : ""}
                   data-testid="input-first-name"
                 />
+                {formErrors.firstName && <p className="text-xs text-red-500">{formErrors.firstName}</p>}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="lastName">Apellido</Label>
+                <Label htmlFor="lastName">Apellido <span className="text-red-500">*</span></Label>
                 <Input
                   id="lastName"
                   value={formData.lastName}
-                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, lastName: e.target.value });
+                    if (e.target.value.trim()) setFormErrors(prev => { const n = {...prev}; delete n.lastName; return n; });
+                  }}
                   placeholder="Pérez"
-                  required
+                  className={formErrors.lastName ? "border-red-500 focus-visible:ring-red-500" : ""}
                   data-testid="input-last-name"
                 />
+                {formErrors.lastName && <p className="text-xs text-red-500">{formErrors.lastName}</p>}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -380,7 +399,9 @@ function GuestFormDialog({
               Cancelar
             </Button>
             <Button type="submit" disabled={mutation.isPending} data-testid="button-submit-guest">
-              {mutation.isPending ? "Guardando..." : isEditing ? "Guardar Cambios" : "Registrar Huésped"}
+              {mutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Guardando...</>
+              ) : isEditing ? "Guardar Cambios" : "Registrar Huésped"}
             </Button>
           </DialogFooter>
         </form>

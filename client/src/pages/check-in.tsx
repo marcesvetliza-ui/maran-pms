@@ -22,6 +22,7 @@ import {
   Image,
   AlertCircle,
   Heart,
+  Loader2,
   AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -711,7 +712,7 @@ export default function CheckInPage() {
                     data-testid="button-complete-walkin"
                   >
                     {walkInMutation.isPending ? (
-                      "Procesando..."
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
                     ) : (
                       <>
                         <Check className="h-4 w-4 mr-2" />
@@ -1218,7 +1219,9 @@ export default function CheckInPage() {
               disabled={checkInMutation.isPending}
               data-testid="button-confirm-checkin"
             >
-              {checkInMutation.isPending ? "Procesando..." : "Confirmar Check-in"}
+              {checkInMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
+              ) : "Confirmar Check-in"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

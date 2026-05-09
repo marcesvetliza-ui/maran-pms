@@ -449,8 +449,23 @@ export default function AgenciesPage() {
                 <TableBody>
                   {filteredAgencies.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        {searchTerm ? "No se encontraron agencias" : "No hay agencias registradas"}
+                      <TableCell colSpan={7} className="py-16">
+                        <div className="flex flex-col items-center gap-3 text-center">
+                          <Plane className="h-10 w-10 text-muted-foreground/40" />
+                          <div>
+                            <p className="font-medium text-muted-foreground">
+                              {searchTerm ? "Sin resultados" : "No hay agencias registradas"}
+                            </p>
+                            <p className="text-sm text-muted-foreground/70 mt-0.5">
+                              {searchTerm ? `No se encontraron agencias para "${searchTerm}"` : "Comenzá agregando la primera agencia de viajes"}
+                            </p>
+                          </div>
+                          {!searchTerm && (
+                            <Button size="sm" onClick={() => setIsCreating(true)} data-testid="button-empty-new-agency">
+                              <Plus className="h-4 w-4 mr-2" />Nueva Agencia
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (

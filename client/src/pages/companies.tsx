@@ -400,8 +400,23 @@ export default function CompaniesPage() {
             <TableBody>
               {filteredCompanies.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    {searchTerm ? "No se encontraron empresas" : "No hay empresas registradas"}
+                  <TableCell colSpan={7} className="py-16">
+                    <div className="flex flex-col items-center gap-3 text-center">
+                      <Building2 className="h-10 w-10 text-muted-foreground/40" />
+                      <div>
+                        <p className="font-medium text-muted-foreground">
+                          {searchTerm ? "Sin resultados" : "No hay empresas registradas"}
+                        </p>
+                        <p className="text-sm text-muted-foreground/70 mt-0.5">
+                          {searchTerm ? `No se encontraron empresas para "${searchTerm}"` : "Comenzá agregando la primera empresa"}
+                        </p>
+                      </div>
+                      {!searchTerm && (
+                        <Button size="sm" onClick={() => setIsCreating(true)} data-testid="button-empty-new-company">
+                          <Plus className="h-4 w-4 mr-2" />Nueva Empresa
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (

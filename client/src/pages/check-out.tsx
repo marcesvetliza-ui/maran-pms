@@ -18,6 +18,7 @@ import {
   Trash2,
   ArrowLeft,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -563,7 +564,9 @@ export default function CheckOutPage() {
                       disabled={addPaymentMutation.isPending}
                       data-testid="button-register-payment"
                     >
-                      {addPaymentMutation.isPending ? "Registrando..." : "Registrar pago"}
+                      {addPaymentMutation.isPending ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Registrando...</>
+                      ) : "Registrar pago"}
                     </Button>
                   </CardContent>
                 </Card>
@@ -620,11 +623,9 @@ export default function CheckOutPage() {
                 variant={isHistorical ? "destructive" : "default"}
                 data-testid="button-confirm-checkout"
               >
-                {checkOutMutation.isPending
-                  ? "Procesando..."
-                  : isHistorical
-                  ? "Cerrar Habitación Histórica"
-                  : "Confirmar Check-out"}
+                {checkOutMutation.isPending ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
+                ) : isHistorical ? "Cerrar Habitación Histórica" : "Confirmar Check-out"}
               </Button>
             </div>
           </div>
