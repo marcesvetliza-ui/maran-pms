@@ -439,29 +439,35 @@ export default function CheckOutPage() {
 
         {wizardStep === 2 && (
           <div className="grid gap-4">
-            {isHistorical ? (
+            {isHistorical && (
               <Card className="border-amber-300 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800">
-                <CardContent className="flex flex-col items-center py-8 gap-3">
-                  <AlertCircle className="h-12 w-12 text-amber-500" />
-                  <h3 className="text-lg font-semibold text-amber-700 dark:text-amber-400">Cierre histórico</h3>
-                  <p className="text-sm text-muted-foreground text-center">
-                    La habitación se cerrará tal como está registrada.
-                    {balance > 0.01 && (
-                      <span className="block mt-1 font-medium text-amber-700 dark:text-amber-400">
-                        Saldo pendiente sin saldar: ${balance.toFixed(2)}
-                      </span>
-                    )}
-                  </p>
+                <CardContent className="flex items-start gap-3 py-4">
+                  <AlertCircle className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-amber-700 dark:text-amber-400">Cierre histórico</p>
+                    <p className="text-sm text-muted-foreground">
+                      La habitación se cerrará con fecha de hoy.
+                      {balance > 0.01 && (
+                        <span className="block mt-0.5 font-medium text-amber-700 dark:text-amber-400">
+                          Podés registrar el pago antes de cerrar.
+                        </span>
+                      )}
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
-            ) : balance <= 0.01 ? (
-              <Card className="border-green-300 bg-green-50 dark:bg-green-900/10 dark:border-green-800">
-                <CardContent className="flex flex-col items-center py-8 gap-3">
-                  <CircleCheck className="h-12 w-12 text-green-500" />
-                  <h3 className="text-lg font-semibold text-green-700 dark:text-green-400" data-testid="text-account-settled">Cuenta saldada</h3>
-                  <p className="text-sm text-muted-foreground">El huésped no tiene saldo pendiente.</p>
-                </CardContent>
-              </Card>
+            )}
+
+            {balance <= 0.01 ? (
+              !isHistorical && (
+                <Card className="border-green-300 bg-green-50 dark:bg-green-900/10 dark:border-green-800">
+                  <CardContent className="flex flex-col items-center py-8 gap-3">
+                    <CircleCheck className="h-12 w-12 text-green-500" />
+                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-400" data-testid="text-account-settled">Cuenta saldada</h3>
+                    <p className="text-sm text-muted-foreground">El huésped no tiene saldo pendiente.</p>
+                  </CardContent>
+                </Card>
+              )
             ) : (
               <>
                 <Card>
