@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { subDays } from "date-fns";
 import { formatDateAR } from "@/lib/utils";
@@ -86,6 +86,27 @@ function RatePlanFormDialog({
   });
   const [versionMode, setVersionMode] = useState<"direct" | "new_version">("direct");
   const [effectiveFrom, setEffectiveFrom] = useState<string>("");
+
+  useEffect(() => {
+    if (open) {
+      setFormData({
+        name: ratePlan?.name || "",
+        roomTypeId: ratePlan?.roomTypeId || "",
+        baseRate: ratePlan?.baseRate || "",
+        rate1pax: ratePlan?.rate1pax || "",
+        rate2pax: ratePlan?.rate2pax || "",
+        rate3pax: ratePlan?.rate3pax || "",
+        rate4pax: ratePlan?.rate4pax || "",
+        currency: ratePlan?.currency || "ARS",
+        refundable: ratePlan?.refundable || "true",
+        cancellationPolicy: ratePlan?.cancellationPolicy || "",
+        validFrom: ratePlan?.validFrom || "",
+        validTo: ratePlan?.validTo || "",
+      });
+      setVersionMode("direct");
+      setEffectiveFrom("");
+    }
+  }, [open, ratePlan?.id]);
 
   const selectedRoomType = roomTypes.find(rt => rt.id === formData.roomTypeId);
   const maxOcc = selectedRoomType?.maxOccupancy || 4;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Package,
@@ -101,6 +101,22 @@ function PackageFormDialog({
   const [roomPrices, setRoomPrices] = useState<RoomPriceRow[]>(
     pkg?.roomPrices?.map(rp => ({ roomTypeId: rp.roomTypeId, extraAmount: rp.extraAmount ?? "0" })) || []
   );
+
+  useEffect(() => {
+    if (open) {
+      setName(pkg?.name || "");
+      setDescription(pkg?.description || "");
+      setNights(pkg?.nights || 1);
+      setBasePrice(pkg?.basePrice || "");
+      setDiscountPercent(pkg?.discountPercent || "");
+      setValidFrom(pkg?.validFrom || "");
+      setValidUntil(pkg?.validUntil || "");
+      setStatus(pkg?.status || "active");
+      setTerms(pkg?.terms || "");
+      setItems(pkg?.items?.map(i => ({ itemType: i.itemType, description: i.description, quantity: i.quantity })) || []);
+      setRoomPrices(pkg?.roomPrices?.map(rp => ({ roomTypeId: rp.roomTypeId, extraAmount: rp.extraAmount ?? "0" })) || []);
+    }
+  }, [open, pkg?.id]);
 
   const { data: roomTypes } = useQuery<RoomType[]>({ queryKey: ["/api/room-types"] });
 

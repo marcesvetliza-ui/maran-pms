@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   DoorOpen,
@@ -155,6 +155,18 @@ function RoomFormDialog({
     status: room?.status || "available",
     notes: room?.notes || "",
   });
+
+  useEffect(() => {
+    if (open) {
+      setFormData({
+        roomNumber: room?.roomNumber || "",
+        roomTypeId: room?.roomTypeId || "",
+        floor: room?.floor || 1,
+        status: room?.status || "available",
+        notes: room?.notes || "",
+      });
+    }
+  }, [open, room?.id]);
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertRoom>) => {
