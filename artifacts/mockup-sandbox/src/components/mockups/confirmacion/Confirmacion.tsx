@@ -21,23 +21,32 @@ export function Confirmacion() {
     room: "412",
     roomType: "Suite Ejecutiva",
     pax: 2,
-    ratePerNight: "$ 45.000,00",
-    totalAlojamiento: "$ 135.000,00",
-    extraServices: [
-      { desc: "Desayuno para 2 pax × 3 días", amount: "$ 18.000,00" },
-      { desc: "Late Check-out (hasta 15:00 hs)", amount: "$ 5.000,00" },
-    ],
-    totalExtras: "$ 23.000,00",
-    grandTotal: "$ 158.000,00",
-    saldo: "$ 0,00",
+    ratePerNight: 45000,
     paymentMethod: "Tarjeta de crédito (pago anticipado)",
     notes: "Solicita habitación alta con vista al parque. Aniversario de bodas.",
     status: "Confirmada",
     issuedDate: "09/05/2026",
   };
 
+  const totalAlojamiento = reservation.ratePerNight * reservation.nights;
+
+  function fmtMoney(n: number) {
+    return `$ ${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+  }
+
   const accentOrange = "#e8841a";
   const footerBg = "#a0522d";
+  const navyBlue = "#1a3a6c";
+
+  const terminos = [
+    "La reserva queda confirmada sujeta al pago del anticipo correspondiente dentro de las 48 horas de recibida esta confirmación.",
+    "El check-in se realiza a partir de las 14:00 hs. El check-out debe efectuarse antes de las 11:00 hs. Fuera de este horario podrán aplicarse cargos adicionales.",
+    "En caso de cancelación con más de 7 días de anticipación al arribo, se reintegrará el 100% del importe abonado. Con menos de 7 días, se retendrá el equivalente a 1 (una) noche de alojamiento.",
+    "El hotel no se responsabiliza por objetos de valor dejados fuera de la caja de seguridad habilitada en cada habitación.",
+    "Está estrictamente prohibido el ingreso de mascotas, así como el uso de estufas eléctricas u otros artefactos no provistos por el establecimiento.",
+    "Las tarifas incluyen IVA y desayuno continental buffet, salvo aclaración en contrario.",
+    "El establecimiento se reserva el derecho de admisión.",
+  ];
 
   return (
     <div
@@ -101,23 +110,23 @@ export function Confirmacion() {
                 <div style={{ fontSize: 14, fontWeight: "bold", color: "#333", marginTop: 2 }}>{reservation.code}</div>
                 <div style={{ fontSize: 9, color: "#aaa", marginTop: 2 }}>Emitida: {reservation.issuedDate}</div>
               </div>
-              <div
-                style={{
-                  marginTop: 6,
-                  display: "inline-block",
-                  background: "#e8f5e9",
-                  color: "#2e7d32",
-                  border: "1px solid #a5d6a7",
-                  borderRadius: 12,
-                  padding: "3px 10px",
-                  fontSize: 9,
-                  fontWeight: "bold",
-                  letterSpacing: 1,
-                  textTransform: "uppercase",
-                  marginLeft: 2,
-                }}
-              >
-                {reservation.status}
+              <div style={{ marginTop: 6 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    background: "#e8f5e9",
+                    color: "#2e7d32",
+                    border: "1px solid #a5d6a7",
+                    borderRadius: 12,
+                    padding: "3px 10px",
+                    fontSize: 9,
+                    fontWeight: "bold",
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {reservation.status}
+                </span>
               </div>
             </div>
           </div>
@@ -156,13 +165,13 @@ export function Confirmacion() {
                 <div style={{ fontSize: 8, color: "#999", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
                   {cell.label}
                 </div>
-                <div style={{ fontSize: 13, fontWeight: "bold", color: "#1a3a6c" }}>{cell.value}</div>
+                <div style={{ fontSize: 13, fontWeight: "bold", color: navyBlue }}>{cell.value}</div>
               </div>
             ))}
           </div>
 
           {/* TWO COLUMNS: Guest + Room */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 22 }}>
             {/* Guest */}
             <div style={{ background: "#f8f9fa", borderRadius: 8, padding: "14px 16px", border: "1px solid #eee" }}>
               <div
@@ -203,24 +212,76 @@ export function Confirmacion() {
               >
                 Tipo de Habitación
               </div>
-              <div style={{ fontSize: 14, fontWeight: "bold", color: "#111", marginBottom: 4 }}>{reservation.roomType}</div>
-              <div style={{ fontSize: 10, color: "#555", marginBottom: 2 }}>Tarifa por noche: <strong>{reservation.ratePerNight}</strong></div>
-              <div style={{ fontSize: 10, color: "#555" }}>Método de pago: {reservation.paymentMethod}</div>
+              <div style={{ fontSize: 14, fontWeight: "bold", color: "#111", marginBottom: 6 }}>{reservation.roomType}</div>
+
+              {/* Rate row */}
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#555", marginBottom: 3 }}>
+                <span>Tarifa por noche</span>
+                <span style={{ fontWeight: "bold" }}>{fmtMoney(reservation.ratePerNight)}</span>
+              </div>
+              {/* Total row */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11,
+                  borderTop: `1px solid #ddd`,
+                  paddingTop: 5,
+                  marginTop: 4,
+                }}
+              >
+                <span style={{ color: navyBlue, fontWeight: "bold" }}>
+                  Total alojamiento ({reservation.nights} noches)
+                </span>
+                <span style={{ color: navyBlue, fontWeight: "bold" }}>{fmtMoney(totalAlojamiento)}</span>
+              </div>
+
+              {/* Payment method */}
+              <div style={{ fontSize: 9, color: "#888", marginTop: 8 }}>
+                Forma de pago: {reservation.paymentMethod}
+              </div>
             </div>
           </div>
 
-          {/* PRICING TABLE */}
+          {/* OBSERVATIONS */}
+          {reservation.notes && (
+            <div
+              style={{
+                background: "#fffbf0",
+                border: `1px solid #ffe0a0`,
+                borderRadius: 8,
+                padding: "12px 16px",
+                marginBottom: 22,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 8,
+                  color: "#b8860b",
+                  fontWeight: "bold",
+                  letterSpacing: 1.5,
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Observaciones
+              </div>
+              <div style={{ fontSize: 10, color: "#555", lineHeight: 1.6 }}>{reservation.notes}</div>
+            </div>
+          )}
+
+          {/* TÉRMINOS Y CONDICIONES */}
           <div
             style={{
               border: "1px solid #e0e0e0",
               borderRadius: 8,
               overflow: "hidden",
-              marginBottom: 20,
+              marginBottom: 22,
             }}
           >
             <div
               style={{
-                background: "#1a3a6c",
+                background: navyBlue,
                 color: "white",
                 padding: "8px 14px",
                 fontSize: 9,
@@ -229,93 +290,31 @@ export function Confirmacion() {
                 textTransform: "uppercase",
               }}
             >
-              Resumen de Cargos
+              Términos y Condiciones
             </div>
-            <div style={{ padding: "0 14px" }}>
-              {/* Alojamiento row */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  padding: "10px 0",
-                  borderBottom: "1px solid #f0f0f0",
-                  fontSize: 11,
-                }}
-              >
-                <span style={{ color: "#444" }}>
-                  Alojamiento — {reservation.nights} noches × {reservation.ratePerNight}
-                </span>
-                <span style={{ fontWeight: "bold", color: "#111" }}>{reservation.totalAlojamiento}</span>
-              </div>
-              {/* Extra services */}
-              {reservation.extraServices.map((s, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    padding: "8px 0",
-                    borderBottom: "1px solid #f0f0f0",
-                    fontSize: 11,
-                    color: "#555",
-                  }}
-                >
-                  <span>{s.desc}</span>
-                  <span style={{ fontWeight: "bold" }}>{s.amount}</span>
-                </div>
-              ))}
-              {/* Total */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  padding: "12px 0 10px",
-                  fontSize: 13,
-                  fontWeight: "bold",
-                  borderTop: `2px solid ${accentOrange}`,
-                  marginTop: 4,
-                }}
-              >
-                <span style={{ color: "#1a3a6c" }}>TOTAL</span>
-                <span style={{ color: "#1a3a6c", fontSize: 15 }}>{reservation.grandTotal}</span>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  padding: "0 0 10px",
-                  fontSize: 11,
-                  color: "#27ae60",
-                }}
-              >
-                <span>Saldo pendiente</span>
-                <span style={{ fontWeight: "bold" }}>{reservation.saldo}</span>
-              </div>
+            <div style={{ padding: "12px 14px" }}>
+              <ol style={{ margin: 0, paddingLeft: 18 }}>
+                {terminos.map((t, i) => (
+                  <li
+                    key={i}
+                    style={{
+                      fontSize: 9,
+                      color: "#444",
+                      lineHeight: 1.65,
+                      marginBottom: i < terminos.length - 1 ? 6 : 0,
+                    }}
+                  >
+                    {t}
+                  </li>
+                ))}
+              </ol>
             </div>
           </div>
 
-          {/* NOTES */}
-          {reservation.notes && (
-            <div
-              style={{
-                background: "#fffbf0",
-                border: `1px solid #ffe0a0`,
-                borderRadius: 8,
-                padding: "10px 14px",
-                marginBottom: 20,
-              }}
-            >
-              <div style={{ fontSize: 8, color: "#b8860b", fontWeight: "bold", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 5 }}>
-                Observaciones
-              </div>
-              <div style={{ fontSize: 10, color: "#555", lineHeight: 1.6 }}>{reservation.notes}</div>
-            </div>
-          )}
-
           {/* GREETING */}
-          <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, textAlign: "center", fontStyle: "italic", marginBottom: 8 }}>
+          <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, textAlign: "center", fontStyle: "italic" }}>
             Estimado/a <strong>{reservation.guestName}</strong>, gracias por elegirnos.<br />
-            Le esperamos con mucho gusto en nuestro hotel. Ante cualquier consulta no dude en contactarnos.
+            Le esperamos con mucho gusto. Ante cualquier consulta no dude en contactarnos.
           </div>
         </div>
 
