@@ -6,9 +6,9 @@ import { eq, desc, like } from "drizzle-orm";
 import PDFDocument from "pdfkit";
 
 const HOTEL_NAME = "Maran Suites & Towers";
-const HOTEL_ADDRESS = "San Martín 232, Maran, La Pampa";
-const HOTEL_PHONE = "+54 9 2952 000000";
-const HOTEL_EMAIL = "info@maransuites.com.ar";
+const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
+const HOTEL_PHONE = "+54 (0343) 503-8070";
+const HOTEL_EMAIL = "recepcion@maran.com.ar";
 
 async function generateNumero(): Promise<string> {
   const year = new Date().getFullYear();

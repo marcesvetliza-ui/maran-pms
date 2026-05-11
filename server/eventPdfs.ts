@@ -50,7 +50,7 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
 
     // ── ENCABEZADO ──────────────────────────────────────────────────────────
     doc.fontSize(18).font("Helvetica-Bold").text("HOJA DE FUNCIÓN", { align: "center" });
-    doc.fontSize(11).font("Helvetica").text("Hotel Maran Suites & Towers", { align: "center" });
+    doc.fontSize(11).font("Helvetica").text("Maran Suites & Towers · Alameda de la Federación 698, Paraná, Entre Ríos", { align: "center" });
     doc.moveDown(0.5);
     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
     doc.moveDown(0.5);
@@ -180,9 +180,9 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
 
     // ── ENCABEZADO ──────────────────────────────────────────────────────────
     doc.fontSize(18).font("Helvetica-Bold").text("CONFIRMACIÓN DE EVENTO", { align: "center" });
-    doc.fontSize(11).font("Helvetica").text("Hotel Maran Suites & Towers", { align: "center" });
+    doc.fontSize(11).font("Helvetica").text("Maran Suites & Towers", { align: "center" });
     doc.fontSize(9).fillColor("#666666")
-      .text("Alameda de la Federación 698, Paraná, Entre Ríos | reservas@maran.com.ar", { align: "center" });
+      .text("Alameda de la Federación 698, Paraná, Entre Ríos  ·  +54 (0343) 503-8070  ·  recepcion@maran.com.ar", { align: "center" });
     doc.fillColor("#000000");
     doc.moveDown(0.5);
     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
@@ -281,7 +281,7 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
     doc.moveDown(2);
 
     doc.fontSize(8).fillColor("#888888").text(
-      `Confirmación de Evento — Maran SA — CUIT 33-68110008-9 — Generado el ${new Date().toLocaleDateString("es-AR")}`,
+      `Confirmación de Evento — Maran Suites & Towers — CUIT 33-68110008-9 — Generado el ${new Date().toLocaleDateString("es-AR")}`,
       { align: "center" }
     );
 

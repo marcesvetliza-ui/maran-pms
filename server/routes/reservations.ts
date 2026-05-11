@@ -13,10 +13,10 @@ import PDFDocument from "pdfkit";
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
-const HOTEL_PHONE   = "+54 343 000-0000";
-const HOTEL_EMAIL   = "reservas@maran.com.ar";
+const HOTEL_PHONE   = "+54 (0343) 503-8070";
+const HOTEL_EMAIL   = "recepcion@maran.com.ar";
 const HOTEL_CUIT    = "33-68110008-9";
-const HOTEL_WEB     = "www.maransuites.com.ar";
+const HOTEL_WEB     = "www.maran.com.ar";
 const PRIMARY_COLOR = "#1a4f8a";
 
 function fmtDatePdf(d: string | null | undefined): string {
