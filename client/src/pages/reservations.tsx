@@ -3206,6 +3206,7 @@ export default function ReservationsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailReturnTo, setDetailReturnTo] = useState<string | null>(null);
+  const [editReturnTo, setEditReturnTo] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateCheckIn, setDuplicateCheckIn] = useState("");
@@ -4026,12 +4027,15 @@ export default function ReservationsPage() {
         onOpenChange={setDialogOpen}
         onSuccess={() => {
           const editingId = selectedReservation?.id;
+          const savedReturnTo = editReturnTo;
+          setEditReturnTo(null);
           setSelectedReservation(undefined);
           if (editingId) {
             fetch(`/api/reservations/${editingId}`, { credentials: "include" })
               .then(r => r.json())
               .then(updated => {
                 setSelectedReservation(updated);
+                setDetailReturnTo(savedReturnTo);
                 setDetailDialogOpen(true);
               })
               .catch(() => {});
@@ -4053,6 +4057,8 @@ export default function ReservationsPage() {
           }}
           onCancel={() => setCancelDialogOpen(true)}
           onEdit={() => {
+            setEditReturnTo(detailReturnTo);
+            setDetailReturnTo(null);
             setDetailDialogOpen(false);
             setDialogOpen(true);
           }}
