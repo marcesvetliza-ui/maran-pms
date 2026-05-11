@@ -252,6 +252,8 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Group not found" });
       }
 
+      const groupChargesList = await storage.getGroupCharges(req.params.groupId);
+
       const invoiceData = {
         group: {
           code: group.groupCode,
@@ -263,9 +265,16 @@ export function registerGroupsRoutes(app: Express) {
           checkOutDate: group.checkOutDate,
         },
         reservations: [] as any[],
+        groupCharges: groupChargesList.map((c: any) => ({
+          description: c.description,
+          amount: parseFloat(c.amount),
+          category: c.category,
+          date: c.createdAt,
+        })),
         totals: {
           accommodation: 0,
           charges: 0,
+          groupCharges: 0,
           payments: 0,
           balance: 0,
         }
@@ -314,7 +323,12 @@ export function registerGroupsRoutes(app: Express) {
         invoiceData.totals.payments += paymentsTotal;
       }
 
-      invoiceData.totals.balance = invoiceData.totals.accommodation + invoiceData.totals.charges - invoiceData.totals.payments;
+      invoiceData.totals.groupCharges = groupChargesList.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+      invoiceData.totals.balance =
+        invoiceData.totals.accommodation +
+        invoiceData.totals.charges +
+        invoiceData.totals.groupCharges -
+        invoiceData.totals.payments;
 
       res.json(invoiceData);
     } catch (error) {

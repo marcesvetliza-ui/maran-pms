@@ -1348,7 +1348,7 @@ export default function GroupDetailPage() {
                         key={res.id} 
                         data-testid={`row-reservation-${res.id}`}
                         className="cursor-pointer hover:bg-accent"
-                        onClick={() => navigate(`/reservations?view=${res.id}`)}
+                        onClick={() => navigate(`/reservations?view=${res.id}&returnTo=/groups/${groupId}`)}
                       >
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
                         <TableCell>{res.guest?.lastName} {res.guest?.firstName}</TableCell>
@@ -1383,7 +1383,7 @@ export default function GroupDetailPage() {
                               </Button>
                             )}
                             <Button variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => navigate(`/reservations?view=${res.id}`)}
+                              onClick={() => navigate(`/reservations?view=${res.id}&returnTo=/groups/${groupId}`)}
                               data-testid={`button-view-reservation-${res.id}`}
                               title="Ver detalle de reserva"
                             >
@@ -1967,6 +1967,27 @@ export default function GroupDetailPage() {
                 ))}
               </div>
 
+              {/* Group-level charges (coffee, salons, etc.) */}
+              {invoiceData.groupCharges && invoiceData.groupCharges.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="font-semibold">Cargos Grupales</h3>
+                  <Card className="print:border print:shadow-none">
+                    <CardContent className="pt-4 space-y-1 text-sm">
+                      {invoiceData.groupCharges.map((c: any, i: number) => (
+                        <div key={i} className="flex justify-between">
+                          <span>{c.description}{c.category ? <span className="text-muted-foreground ml-1">({c.category})</span> : null}</span>
+                          <span className="font-medium">${c.amount.toFixed(2)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-semibold border-t pt-2 mt-1">
+                        <span>Subtotal cargos grupales</span>
+                        <span>${invoiceData.totals.groupCharges.toFixed(2)}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
               {/* Totals */}
               <Card className="bg-muted print:bg-transparent print:border-2">
                 <CardContent className="pt-4">
@@ -1976,9 +1997,15 @@ export default function GroupDetailPage() {
                       <span className="font-medium">${invoiceData.totals.accommodation.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Total Consumos</span>
+                      <span>Consumos por habitación</span>
                       <span className="font-medium">${invoiceData.totals.charges.toFixed(2)}</span>
                     </div>
+                    {invoiceData.totals.groupCharges > 0 && (
+                      <div className="flex justify-between">
+                        <span>Cargos grupales</span>
+                        <span className="font-medium">${invoiceData.totals.groupCharges.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-green-600">
                       <span>Total Pagos</span>
                       <span className="font-medium">-${invoiceData.totals.payments.toFixed(2)}</span>

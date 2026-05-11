@@ -3205,6 +3205,7 @@ export default function ReservationsPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [detailReturnTo, setDetailReturnTo] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateCheckIn, setDuplicateCheckIn] = useState("");
@@ -3317,10 +3318,12 @@ export default function ReservationsPage() {
   useEffect(() => {
     const params = new URLSearchParams(searchParams);
     const viewId = params.get("view");
+    const returnTo = params.get("returnTo");
     if (viewId && reservations) {
       const reservation = reservations.find(r => r.id === viewId);
       if (reservation) {
         setSelectedReservation(reservation);
+        setDetailReturnTo(returnTo);
         setDetailDialogOpen(true);
         navigate("/reservations", { replace: true });
       } else if (dateMode !== "all") {
@@ -4041,7 +4044,13 @@ export default function ReservationsPage() {
         <ReservationDetailDialog
           reservation={selectedReservation}
           open={detailDialogOpen}
-          onOpenChange={setDetailDialogOpen}
+          onOpenChange={(open) => {
+            setDetailDialogOpen(open);
+            if (!open && detailReturnTo) {
+              navigate(detailReturnTo);
+              setDetailReturnTo(null);
+            }
+          }}
           onCancel={() => setCancelDialogOpen(true)}
           onEdit={() => {
             setDetailDialogOpen(false);
