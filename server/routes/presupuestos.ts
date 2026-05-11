@@ -1,4 +1,6 @@
 import type { Express, Request, Response } from "express";
+import fs from "fs";
+import path from "path";
 import { db } from "../db";
 import { presupuestos, presupuestoItems } from "@shared/schema";
 import { requireAuth } from "../auth";
@@ -126,136 +128,201 @@ export function registerPresupuestosRoutes(app: Express) {
         .where(eq(presupuestoItems.presupuestoId, pres.id))
         .orderBy(presupuestoItems.orden);
 
-      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      const doc = new PDFDocument({ margin: 0, size: "A4" });
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="${pres.numero}.pdf"`);
       doc.pipe(res);
 
-      const PRIMARY = "#1a4f8a";
-      const LIGHT_GRAY = "#f5f5f5";
-      const DARK = "#1a1a1a";
-      const MUTED = "#6b6b6b";
-      const pageW = 595 - 100;
+      const pageW   = 595;
+      const pageH   = 842;
+      const margin  = 40;
+      const contentW = pageW - margin * 2;
+      const NAVY    = "#1a3a6c";
+      const ORANGE  = "#e8841a";
+      const FOOTER_BG = "#8b4513";
+      const DARK    = "#1a1a1a";
+      const MUTED   = "#6b6b6b";
 
-      // ── HEADER ──────────────────────────────────────────────
-      doc.rect(0, 0, 595, 90).fill(PRIMARY);
-      doc.fillColor("white").fontSize(22).font("Helvetica-Bold").text(HOTEL_NAME, 50, 22);
-      doc.fontSize(9).font("Helvetica").text(HOTEL_ADDRESS, 50, 48);
-      doc.text(`${HOTEL_PHONE}  ·  ${HOTEL_EMAIL}`, 50, 61);
+      // ── HEADER IMAGE ────────────────────────────────────────
+      const headerH = 148;
+      const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+      if (fs.existsSync(headerImgPath)) {
+        doc.image(headerImgPath, 0, 0, { width: pageW, height: headerH, cover: [pageW, headerH] });
+      } else {
+        doc.rect(0, 0, pageW, headerH).fill(NAVY);
+      }
+      doc.rect(0, headerH, pageW, 5).fill(ORANGE);
 
-      // Número de presupuesto en la derecha del header
-      doc.fontSize(10).font("Helvetica-Bold").text(pres.numero, 50, 22, { align: "right", width: pageW });
-      doc.fontSize(9).font("Helvetica").fillColor("#cde").text("PRESUPUESTO", 50, 36, { align: "right", width: pageW });
+      // ── TITLE ROW ───────────────────────────────────────────
+      const titleY = headerH + 16;
+      doc.fillColor("#888888").fontSize(7).font("Helvetica")
+        .text("PRESUPUESTO", margin, titleY, { characterSpacing: 2 });
+      doc.fillColor("#1a1a1a").fontSize(17).font("Helvetica-Bold")
+        .text(HOTEL_NAME, margin, titleY + 11, { width: 300 });
+      doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
+        .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 33);
 
-      doc.y = 110;
-      doc.fillColor(DARK);
+      // Code box (right)
+      const codeBoxW = 138;
+      const codeBoxX = pageW - margin - codeBoxW;
+      doc.roundedRect(codeBoxX, titleY, codeBoxW, 44, 5).fillAndStroke("#f8f4ef", ORANGE);
+      doc.fillColor("#888888").fontSize(7).font("Helvetica")
+        .text("N° DE PRESUPUESTO", codeBoxX, titleY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
+      doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
+        .text(pres.numero, codeBoxX, titleY + 19, { width: codeBoxW, align: "center" });
+      doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
+        .text(`Emitida: ${formatFecha(pres.fechaEmision)}`, codeBoxX, titleY + 33, { width: codeBoxW, align: "center" });
 
-      // ── INFO SECTION ────────────────────────────────────────
-      doc.rect(50, doc.y, pageW, 68).fill(LIGHT_GRAY).stroke("#e0e0e0");
-      const infoY = doc.y + 10;
-      doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("DIRIGIDO A", 62, infoY);
-      doc.fillColor(DARK).fontSize(11).font("Helvetica-Bold").text(pres.para, 62, infoY + 12);
-      const emisY = infoY;
-      const col2 = 310;
-      const col3 = 430;
-      doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("FECHA EMISIÓN", col2, emisY);
-      doc.fillColor(DARK).fontSize(10).font("Helvetica").text(formatFecha(pres.fechaEmision), col2, emisY + 12);
+      // Status badge
+      const statusMap: Record<string, { bg: string; bd: string; tx: string; lb: string }> = {
+        borrador:  { bg: "#f5f5f5", bd: "#cccccc", tx: "#666666", lb: "BORRADOR"  },
+        enviado:   { bg: "#e3f2fd", bd: "#90caf9", tx: "#1565c0", lb: "ENVIADO"   },
+        aceptado:  { bg: "#e8f5e9", bd: "#a5d6a7", tx: "#2e7d32", lb: "ACEPTADO"  },
+        vencido:   { bg: "#fff3e0", bd: "#ffcc80", tx: "#e65100", lb: "VENCIDO"   },
+        cancelado: { bg: "#fce4ec", bd: "#f48fb1", tx: "#c62828", lb: "CANCELADO" },
+      };
+      const st = statusMap[pres.estado || "borrador"] || statusMap.borrador;
+      doc.roundedRect(codeBoxX + 16, titleY + 50, codeBoxW - 32, 15, 7).fillAndStroke(st.bg, st.bd);
+      doc.fillColor(st.tx).fontSize(7).font("Helvetica-Bold")
+        .text(st.lb, codeBoxX + 16, titleY + 54, { width: codeBoxW - 32, align: "center", characterSpacing: 0.5 });
+
+      // Separator
+      let y = titleY + 56;
+      doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+      y += 10;
+
+      // ── INFO BOX (para + fechas) ─────────────────────────────
+      const infoBoxH = 62;
+      doc.roundedRect(margin, y, contentW, infoBoxH, 6).fillAndStroke("#f8f9fa", "#eeeeee");
+      doc.fillColor("#888888").fontSize(7).font("Helvetica-Bold")
+        .text("DIRIGIDO A", margin + 12, y + 10, { characterSpacing: 1 });
+      doc.fillColor("#111111").fontSize(12).font("Helvetica-Bold")
+        .text(pres.para, margin + 12, y + 22, { width: 250 });
+
+      const col2x = margin + 295;
+      const col3x = margin + 395;
+      doc.fillColor("#888888").fontSize(7).font("Helvetica-Bold")
+        .text("FECHA EMISIÓN", col2x, y + 10, { characterSpacing: 0.5 });
+      doc.fillColor("#333333").fontSize(9.5).font("Helvetica")
+        .text(formatFecha(pres.fechaEmision), col2x, y + 22);
       if (pres.fechaVencimiento) {
-        doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("VÁLIDO HASTA", col2, emisY + 30);
-        doc.fillColor(DARK).fontSize(10).font("Helvetica").text(formatFecha(pres.fechaVencimiento), col2, emisY + 42);
+        doc.fillColor("#888888").fontSize(7).font("Helvetica-Bold")
+          .text("VÁLIDO HASTA", col2x, y + 38, { characterSpacing: 0.5 });
+        doc.fillColor("#333333").fontSize(9.5).font("Helvetica")
+          .text(formatFecha(pres.fechaVencimiento), col2x, y + 50);
       }
       if ((pres as any).fechaEvento) {
-        doc.fillColor(MUTED).fontSize(8).font("Helvetica-Bold").text("FECHA EVENTO", col3, emisY);
-        doc.fillColor(PRIMARY).fontSize(10).font("Helvetica-Bold").text(formatFecha((pres as any).fechaEvento), col3, emisY + 12);
+        doc.fillColor("#888888").fontSize(7).font("Helvetica-Bold")
+          .text("FECHA EVENTO", col3x, y + 10, { characterSpacing: 0.5 });
+        doc.fillColor(NAVY).fontSize(9.5).font("Helvetica-Bold")
+          .text(formatFecha((pres as any).fechaEvento), col3x, y + 22);
       }
-      doc.y += 80;
+      y += infoBoxH + 8;
 
       if (pres.notas) {
-        doc.fillColor(MUTED).fontSize(8).font("Helvetica").text(pres.notas, 50, doc.y, { width: pageW });
-        doc.moveDown(0.5);
+        doc.fillColor(MUTED).fontSize(8).font("Helvetica")
+          .text(pres.notas, margin, y, { width: contentW });
+        y += doc.heightOfString(pres.notas, { width: contentW }) + 8;
       }
 
-      doc.moveDown(0.5);
-
-      // ── TABLE HEADER ────────────────────────────────────────
-      const cols = { sector: 50, desc: 110, cant: 335, precio: 375, dto: 425, sub: 470 };
-      doc.rect(50, doc.y, pageW, 18).fill(PRIMARY);
+      // ── TABLE ────────────────────────────────────────────────
+      const cols = {
+        sector: margin,
+        desc:   margin + 60,
+        cant:   margin + 288,
+        precio: margin + 328,
+        dto:    margin + 378,
+        sub:    margin + 428,
+      };
+      doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
       doc.fillColor("white").fontSize(8).font("Helvetica-Bold");
-      const thY = doc.y + 5;
-      doc.text("SECTOR", cols.sector, thY, { width: 55 });
-      doc.text("DESCRIPCIÓN", cols.desc, thY, { width: 220 });
-      doc.text("CANT", cols.cant, thY, { width: 35, align: "right" });
-      doc.text("PRECIO", cols.precio, thY, { width: 45, align: "right" });
-      doc.text("DTO%", cols.dto, thY, { width: 40, align: "right" });
-      doc.text("SUBTOTAL", cols.sub, thY, { width: 75, align: "right" });
-      doc.y += 20;
+      const thY = y + 6;
+      doc.text("SECTOR",      cols.sector + 6, thY, { width: 55 });
+      doc.text("DESCRIPCIÓN", cols.desc,       thY, { width: 220 });
+      doc.text("CANT",        cols.cant,        thY, { width: 35, align: "right" });
+      doc.text("PRECIO",      cols.precio,      thY, { width: 45, align: "right" });
+      doc.text("DTO%",        cols.dto,         thY, { width: 40, align: "right" });
+      doc.text("SUBTOTAL",    cols.sub,         thY, { width: 75, align: "right" });
+      y += 22;
 
-      // ── TABLE ROWS ──────────────────────────────────────────
       const SECTOR_LABELS: Record<string, string> = {
-        alojamiento: "Alojamiento", restaurant: "Restaurant", spa: "SPA", evento: "Evento", otro: "Otro",
+        alojamiento: "Alojamiento", restaurant: "Restaurant",
+        spa: "SPA", evento: "Evento", otro: "Otro",
       };
       items.forEach((item, idx) => {
         const rowH = Math.max(22, doc.heightOfString(item.descripcion, { width: 220 }) + 12);
-        if (doc.y + rowH > 750) { doc.addPage(); doc.y = 50; }
-        const rowY = doc.y;
-        if (idx % 2 === 0) doc.rect(50, rowY, pageW, rowH).fill("#fafafa");
-        doc.rect(50, rowY, pageW, rowH).stroke("#e8e8e8");
+        if (y + rowH > pageH - 90) { doc.addPage(); y = 40; }
+        doc.rect(margin, y, contentW, rowH)
+          .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
         doc.fillColor(DARK).fontSize(8).font("Helvetica");
-        const cellY = rowY + 6;
-        doc.text(SECTOR_LABELS[item.sector] || item.sector, cols.sector, cellY, { width: 55 });
+        const cellY = y + 6;
+        doc.text(SECTOR_LABELS[item.sector] || item.sector, cols.sector + 6, cellY, { width: 55 });
         doc.font("Helvetica-Bold").text(item.descripcion, cols.desc, cellY, { width: 220 });
         if (item.detalle) {
           doc.font("Helvetica").fillColor(MUTED).fontSize(7)
             .text(item.detalle, cols.desc, cellY + 11, { width: 220 });
         }
         doc.font("Helvetica").fillColor(DARK).fontSize(8);
-        doc.text(formatNum(item.cantidad), cols.cant, cellY, { width: 35, align: "right" });
+        doc.text(formatNum(item.cantidad),           cols.cant,  cellY, { width: 35, align: "right" });
         doc.text(`$ ${formatMoney(item.precioUnitario)}`, cols.precio, cellY, { width: 45, align: "right" });
-        doc.text(`${formatNum(item.descuento)}%`, cols.dto, cellY, { width: 40, align: "right" });
-        doc.font("Helvetica-Bold").text(`$ ${formatMoney(item.subtotal)}`, cols.sub, cellY, { width: 75, align: "right" });
-        doc.y = rowY + rowH;
+        doc.text(`${formatNum(item.descuento)}%`,    cols.dto,   cellY, { width: 40, align: "right" });
+        doc.font("Helvetica-Bold")
+          .text(`$ ${formatMoney(item.subtotal)}`,   cols.sub,   cellY, { width: 75, align: "right" });
+        y = y + rowH;
       });
+      y += 8;
 
-      doc.moveDown(0.5);
-
-      // ── TOTALS ──────────────────────────────────────────────
-      const totW = 200;
-      const totX = 595 - 50 - totW;
-      const drawTotRow = (label: string, val: string, bold = false, bg?: string) => {
-        const rH = 18;
-        if (bg) doc.rect(totX, doc.y, totW, rH).fill(bg);
-        doc.fillColor(bold ? DARK : MUTED).fontSize(bold ? 10 : 8)
-          .font(bold ? "Helvetica-Bold" : "Helvetica");
-        doc.text(label, totX + 6, doc.y + 4, { width: totW / 2 });
-        doc.text(val, totX, doc.y - rH + 4, { width: totW - 6, align: "right" });
-        doc.y += rH;
-      };
-      drawTotRow("Subtotal", `$ ${formatMoney(pres.subtotal)}`);
+      // ── TOTALS ───────────────────────────────────────────────
+      const totW = 210;
+      const totX = margin + contentW - totW;
+      doc.fillColor(MUTED).fontSize(8).font("Helvetica")
+        .text("Subtotal", totX + 6, y + 4, { width: totW / 2 });
+      doc.text(`$ ${formatMoney(pres.subtotal)}`, totX, y + 4, { width: totW - 6, align: "right" });
+      y += 18;
       if (parseFloat(pres.descuentoGlobal) > 0) {
-        drawTotRow(`Descuento (${pres.descuentoGlobal}%)`, `- $ ${formatMoney((parseFloat(pres.subtotal) * parseFloat(pres.descuentoGlobal) / 100).toFixed(2))}`);
-      }
-      doc.rect(totX, doc.y, totW, 22).fill(PRIMARY);
-      doc.fillColor("white").fontSize(12).font("Helvetica-Bold");
-      doc.text("TOTAL", totX + 6, doc.y + 5, { width: totW / 2 });
-      doc.text(`$ ${formatMoney(pres.total)}`, totX, doc.y + 5, { width: totW - 6, align: "right" });
-      doc.y += 24;
-
-      // ── CONDICIONES ─────────────────────────────────────────
-      if (pres.condiciones) {
-        doc.moveDown(1);
-        doc.rect(50, doc.y, pageW, 12).fill(LIGHT_GRAY);
-        doc.fillColor(PRIMARY).fontSize(8).font("Helvetica-Bold")
-          .text("CONDICIONES Y OBSERVACIONES", 56, doc.y + 2);
-        doc.y += 14;
+        const descAmt = (parseFloat(pres.subtotal) * parseFloat(pres.descuentoGlobal) / 100).toFixed(2);
         doc.fillColor(MUTED).fontSize(8).font("Helvetica")
-          .text(pres.condiciones, 50, doc.y, { width: pageW });
+          .text(`Descuento (${pres.descuentoGlobal}%)`, totX + 6, y + 4, { width: totW / 2 });
+        doc.text(`- $ ${formatMoney(descAmt)}`, totX, y + 4, { width: totW - 6, align: "right" });
+        y += 18;
+      }
+      doc.roundedRect(totX, y, totW, 22, 4).fill(NAVY);
+      doc.fillColor("white").fontSize(12).font("Helvetica-Bold")
+        .text("TOTAL", totX + 6, y + 5, { width: totW / 2 });
+      doc.text(`$ ${formatMoney(pres.total)}`, totX, y + 5, { width: totW - 6, align: "right" });
+      y += 30;
+
+      // ── CONDITIONS ───────────────────────────────────────────
+      if (pres.condiciones) {
+        const condTextH = doc.heightOfString(pres.condiciones, { width: contentW - 28 });
+        const condBoxH  = condTextH + 32;
+        doc.roundedRect(margin, y, contentW, condBoxH, 6).stroke("#e0e0e0");
+        doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
+        doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
+        doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold")
+          .text("CONDICIONES Y OBSERVACIONES", margin + 14, y + 8, { characterSpacing: 1, width: contentW - 28 });
+        doc.fillColor(MUTED).fontSize(8.5).font("Helvetica")
+          .text(pres.condiciones, margin + 14, y + 26, { width: contentW - 28 });
+        y += condBoxH + 10;
       }
 
-      // ── FOOTER ──────────────────────────────────────────────
-      doc.fontSize(7).fillColor(MUTED).font("Helvetica")
-        .text(`${HOTEL_NAME}  ·  ${HOTEL_ADDRESS}  ·  ${HOTEL_EMAIL}`, 50, 790, {
-          width: pageW, align: "center",
-        });
+      // ── FOOTER ───────────────────────────────────────────────
+      const footerY = pageH - 72;
+      doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
+      const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, margin, footerY + 14, { width: 95 });
+      }
+      const cx = margin + 100;
+      const cw = contentW - 200;
+      doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+        .text(HOTEL_ADDRESS, cx, footerY + 13, { width: cw, align: "center" });
+      doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+        .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, cx, footerY + 26, { width: cw, align: "center" });
+      doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
+        .text("CUIT 33-68110008-9 · Responsable Inscripto", cx, footerY + 40, { width: cw, align: "center" });
+      doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
+        .text("MARAN.COM.AR", pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
 
       doc.end();
     } catch (e: any) {

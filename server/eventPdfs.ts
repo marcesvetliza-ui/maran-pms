@@ -1,5 +1,49 @@
 import PDFDocument from "pdfkit";
+import fs from "fs";
+import path from "path";
 import type { EventWithDetails } from "@shared/schema";
+
+const HOTEL_NAME    = "Maran Suites & Towers";
+const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
+const HOTEL_PHONE   = "+54 (0343) 503-8070";
+const HOTEL_EMAIL   = "recepcion@maran.com.ar";
+const HOTEL_CUIT    = "33-68110008-9";
+const HOTEL_WEB     = "MARAN.COM.AR";
+const NAVY          = "#1a3a6c";
+const ORANGE        = "#e8841a";
+const FOOTER_BG     = "#8b4513";
+
+function pdfBrandedHeader(doc: InstanceType<typeof PDFDocument>, pageW: number, subtitle: string) {
+  const headerH = 148;
+  const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+  if (fs.existsSync(headerImgPath)) {
+    doc.image(headerImgPath, 0, 0, { width: pageW, height: headerH, cover: [pageW, headerH] });
+  } else {
+    doc.rect(0, 0, pageW, headerH).fill(NAVY);
+  }
+  doc.rect(0, headerH, pageW, 5).fill(ORANGE);
+  return headerH + 5;
+}
+
+function pdfBrandedFooter(doc: InstanceType<typeof PDFDocument>, pageW: number, pageH: number, margin: number, contentW: number) {
+  const footerY = pageH - 72;
+  doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
+  const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, margin, footerY + 14, { width: 95 });
+  }
+  const cx = margin + 100;
+  const cw = contentW - 200;
+  doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+    .text(HOTEL_ADDRESS, cx, footerY + 13, { width: cw, align: "center" });
+  doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+    .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, cx, footerY + 26, { width: cw, align: "center" });
+  doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
+    .text(`CUIT ${HOTEL_CUIT} · Responsable Inscripto`, cx, footerY + 40, { width: cw, align: "center" });
+  doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
+    .text(HOTEL_WEB, pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
+  return footerY;
+}
 
 function eventTypeLabel(type: string): string {
   const labels: Record<string, string> = {
@@ -43,129 +87,140 @@ const fmtMoney = (v: string | number) =>
 
 export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<Buffer> {
   return new Promise((resolve) => {
-    const doc = new PDFDocument({ margin: 50, size: "A4" });
+    const doc = new PDFDocument({ margin: 0, size: "A4" });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-    // ── ENCABEZADO ──────────────────────────────────────────────────────────
-    doc.fontSize(18).font("Helvetica-Bold").text("HOJA DE FUNCIÓN", { align: "center" });
-    doc.fontSize(11).font("Helvetica").text("Maran Suites & Towers · Alameda de la Federación 698, Paraná, Entre Ríos", { align: "center" });
-    doc.moveDown(0.5);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-    doc.moveDown(0.5);
+    const pageW    = 595;
+    const pageH    = 842;
+    const margin   = 40;
+    const contentW = pageW - margin * 2;
+    const col1     = margin;
+    const col2     = margin + 150;
+    const col3     = margin + 270;
+    const col4     = margin + 410;
 
-    // ── DATOS DEL EVENTO ────────────────────────────────────────────────────
-    doc.fontSize(14).font("Helvetica-Bold").text(event.name);
-    doc.fontSize(10).font("Helvetica").text(`Código: ${event.eventCode}`);
-    doc.moveDown(0.5);
+    // ── HEADER ──────────────────────────────────────────────────────────────
+    const stripeEnd = pdfBrandedHeader(doc, pageW, "HOJA DE FUNCIÓN");
+    const titleY = stripeEnd + 14;
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+      .text("HOJA DE FUNCIÓN — USO INTERNO", margin, titleY, { characterSpacing: 2 });
+    doc.fillColor("#1a1a1a").fontSize(17).font("Helvetica-Bold")
+      .text(HOTEL_NAME, margin, titleY + 11, { width: 340 });
+    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
+      .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 33);
 
-    const col1 = 50;
-    const col2 = 200;
-    const col3 = 320;
-    const col4 = 460;
+    // Code box
+    const codeBoxW = 138;
+    const codeBoxX = pageW - margin - codeBoxW;
+    doc.roundedRect(codeBoxX, titleY, codeBoxW, 44, 5).fillAndStroke("#f8f4ef", ORANGE);
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+      .text("CÓDIGO DE EVENTO", codeBoxX, titleY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
+    doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
+      .text(event.eventCode, codeBoxX, titleY + 19, { width: codeBoxW, align: "center" });
+    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
+      .text(`Generado: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, titleY + 33, { width: codeBoxW, align: "center" });
 
+    let y = titleY + 54;
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+    y += 10;
+
+    // ── EVENT NAME + DETAILS ─────────────────────────────────────────────────
+    doc.fillColor("#1a1a1a").fontSize(14).font("Helvetica-Bold")
+      .text(event.name, margin, y);
+    y += 20;
+    doc.fillColor("#666666").fontSize(9).font("Helvetica")
+      .text(`Tipo: ${eventTypeLabel(event.eventType)}`, margin, y);
+    y += 14;
+
+    // Data grid
     const row = (label1: string, val1: string, label2?: string, val2?: string) => {
-      const y = doc.y;
-      doc.fontSize(9).font("Helvetica-Bold").text(label1, col1, y);
-      doc.fontSize(9).font("Helvetica").text(val1, col2, y);
+      const ry = y;
+      doc.fontSize(9).font("Helvetica-Bold").fillColor("#555555").text(label1, col1, ry, { width: 110 });
+      doc.fontSize(9).font("Helvetica").fillColor("#1a1a1a").text(val1, col2, ry, { width: 110 });
       if (label2 && val2) {
-        doc.fontSize(9).font("Helvetica-Bold").text(label2, col3, y);
-        doc.fontSize(9).font("Helvetica").text(val2, col4, y);
+        doc.fontSize(9).font("Helvetica-Bold").fillColor("#555555").text(label2, col3, ry, { width: 110 });
+        doc.fontSize(9).font("Helvetica").fillColor("#1a1a1a").text(val2, col4, ry, { width: 110 });
       }
-      doc.moveDown(0.6);
+      y += 16;
     };
 
-    row("Salón:", event.eventRoom?.name || "-", "Tipo:", eventTypeLabel(event.eventType));
+    row("Salón:", event.eventRoom?.name || "—", "Asistentes:", desglosarAsistentes(event));
     row(
       "Fecha:",
       event.startDate === event.endDate
         ? fmtDate(event.startDate)
         : `${fmtDate(event.startDate)} al ${fmtDate(event.endDate)}`,
-      "Asistentes:",
-      desglosarAsistentes(event)
+      event.startTime ? "Horario:" : "",
+      event.startTime ? `${event.startTime}${event.endTime ? ` - ${event.endTime}` : ""}` : ""
     );
-    if (event.startTime) {
-      row("Horario:", `${event.startTime}${event.endTime ? ` - ${event.endTime}` : ""}`, "", "");
-    }
-    row("Contacto:", event.contactName, "Teléfono:", event.contactPhone || "-");
-    if (event.contactEmail) {
-      row("Email:", event.contactEmail, "", "");
-    }
-    if (event.company) {
-      row("Empresa:", (event.company as any).name || "-", "", "");
-    }
+    row("Contacto:", event.contactName, "Teléfono:", event.contactPhone || "—");
+    if (event.contactEmail) row("Email:", event.contactEmail, "", "");
+    if (event.company)      row("Empresa:", (event.company as any).name || "—", "", "");
+    y += 6;
 
-    doc.moveDown(0.3);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#cccccc").stroke();
-    doc.moveDown(0.5);
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+    y += 10;
 
-    // ── SERVICIOS / CARGOS (sin precios) ────────────────────────────────────
+    // ── SERVICIOS ────────────────────────────────────────────────────────────
     if (event.charges && event.charges.length > 0) {
-      doc.fontSize(12).font("Helvetica-Bold").text("Servicios contratados");
-      doc.moveDown(0.3);
-
-      const y0 = doc.y;
-      doc.rect(50, y0, 495, 18).fillColor("#f0f0f0").fill();
-      doc.fillColor("#000000");
-      doc.fontSize(9).font("Helvetica-Bold");
-      doc.text("Descripción", 55, y0 + 4);
-      doc.text("Cantidad", 420, y0 + 4, { width: 60, align: "right" });
-      doc.moveDown(1.2);
-
+      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Servicios contratados", margin, y);
+      y += 18;
+      doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
+      doc.fillColor("white").fontSize(8).font("Helvetica-Bold")
+        .text("Descripción", margin + 8, y + 6, { width: 360 });
+      doc.text("Cantidad", margin + 8, y + 6, { width: contentW - 16, align: "right" });
+      y += 22;
       for (const charge of event.charges) {
-        const yc = doc.y;
-        doc.fontSize(9).font("Helvetica");
-        doc.text(charge.description, 55, yc, { width: 340 });
-        doc.text(String(charge.quantity), 420, yc, { width: 60, align: "right" });
+        const rh = Math.max(18, doc.heightOfString(charge.description, { width: 360 }) + 8);
+        doc.rect(margin, y, contentW, rh).fill("#fafafa").stroke("#e8e8e8");
+        doc.fillColor("#1a1a1a").fontSize(9).font("Helvetica")
+          .text(charge.description, margin + 8, y + 5, { width: 360 });
+        doc.text(String(charge.quantity), margin + 8, y + 5, { width: contentW - 16, align: "right" });
         if (charge.notes) {
-          doc.moveDown(0.2);
-          doc.fontSize(8).fillColor("#666666").text(`   ${charge.notes}`, 55);
-          doc.fillColor("#000000");
+          doc.fillColor("#666666").fontSize(7.5).font("Helvetica")
+            .text(charge.notes, margin + 8, y + 18, { width: 360 });
         }
-        doc.moveDown(0.5);
+        y += rh;
       }
+      y += 10;
     }
 
-    // ── NOTAS INTERNAS ──────────────────────────────────────────────────────
+    // ── NOTAS + ÁREAS ────────────────────────────────────────────────────────
     if (event.notes) {
-      doc.moveDown(0.5);
-      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#cccccc").stroke();
-      doc.moveDown(0.5);
-      doc.fontSize(11).font("Helvetica-Bold").text("Notas / Instrucciones operativas");
-      doc.moveDown(0.3);
-      doc.fontSize(9).font("Helvetica").text(event.notes, 50, doc.y, { width: 495 });
+      doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+      y += 8;
+      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Notas / Instrucciones operativas", margin, y);
+      y += 16;
+      doc.fillColor("#444444").fontSize(9).font("Helvetica")
+        .text(event.notes, margin, y, { width: contentW });
+      y += doc.heightOfString(event.notes, { width: contentW }) + 10;
     }
 
-    // ── COORDINACIÓN POR ÁREA ───────────────────────────────────────────────
     const areas = [
-      { label: "ARMADO",          value: (event as any).notasArmado },
-      { label: "COCINA",          value: (event as any).notasCocina },
-      { label: "MANTENIMIENTO",   value: (event as any).notasMantenimiento },
-      { label: "HOUSEKEEPING",    value: (event as any).notasHousekeeping },
+      { label: "ARMADO",        value: (event as any).notasArmado },
+      { label: "COCINA",        value: (event as any).notasCocina },
+      { label: "MANTENIMIENTO", value: (event as any).notasMantenimiento },
+      { label: "HOUSEKEEPING",  value: (event as any).notasHousekeeping },
     ].filter((a) => a.value);
 
     if (areas.length > 0) {
-      doc.moveDown(0.5);
-      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#cccccc").stroke();
-      doc.moveDown(0.5);
-      doc.fontSize(11).font("Helvetica-Bold").text("Coordinación por Área");
-      doc.moveDown(0.4);
+      doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+      y += 8;
+      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Coordinación por Área", margin, y);
+      y += 16;
       for (const area of areas) {
-        doc.fontSize(10).font("Helvetica-Bold").text(area.label + ":", 50);
-        doc.fontSize(9).font("Helvetica").text(area.value!, 50, doc.y, { indent: 10, width: 485 });
-        doc.moveDown(0.5);
+        doc.fillColor("#333333").fontSize(10).font("Helvetica-Bold").text(`${area.label}:`, margin, y);
+        y += 14;
+        doc.fillColor("#444444").fontSize(9).font("Helvetica")
+          .text(area.value!, margin + 10, y, { width: contentW - 10 });
+        y += doc.heightOfString(area.value!, { width: contentW - 10 }) + 8;
       }
     }
 
-    // ── PIE DE PÁGINA ───────────────────────────────────────────────────────
-    doc.moveDown(2);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-    doc.moveDown(0.5);
-    doc.fontSize(8).fillColor("#888888").text(
-      `Hoja de Función — USO INTERNO — Generado el ${new Date().toLocaleDateString("es-AR")}`,
-      { align: "center" }
-    );
+    // ── FOOTER ───────────────────────────────────────────────────────────────
+    pdfBrandedFooter(doc, pageW, pageH, margin, contentW);
 
     doc.end();
   });
@@ -173,117 +228,154 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
 
 export async function generateConfirmacionEventoPdf(event: EventWithDetails): Promise<Buffer> {
   return new Promise((resolve) => {
-    const doc = new PDFDocument({ margin: 50, size: "A4" });
+    const doc = new PDFDocument({ margin: 0, size: "A4" });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-    // ── ENCABEZADO ──────────────────────────────────────────────────────────
-    doc.fontSize(18).font("Helvetica-Bold").text("CONFIRMACIÓN DE EVENTO", { align: "center" });
-    doc.fontSize(11).font("Helvetica").text("Maran Suites & Towers", { align: "center" });
-    doc.fontSize(9).fillColor("#666666")
-      .text("Alameda de la Federación 698, Paraná, Entre Ríos  ·  +54 (0343) 503-8070  ·  recepcion@maran.com.ar", { align: "center" });
-    doc.fillColor("#000000");
-    doc.moveDown(0.5);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-    doc.moveDown(0.5);
+    const pageW    = 595;
+    const pageH    = 842;
+    const margin   = 40;
+    const contentW = pageW - margin * 2;
 
-    // ── DATOS DEL EVENTO ────────────────────────────────────────────────────
-    doc.fontSize(14).font("Helvetica-Bold").text(event.name);
-    doc.fontSize(10).font("Helvetica").fillColor("#444444").text(`Código de reserva: ${event.eventCode}`);
-    doc.fillColor("#000000");
-    doc.moveDown(0.5);
+    // ── HEADER ───────────────────────────────────────────────────────────────
+    const stripeEnd = pdfBrandedHeader(doc, pageW, "CONFIRMACIÓN DE EVENTO");
+    const titleY = stripeEnd + 14;
 
-    const row = (label: string, value: string) => {
-      const y = doc.y;
-      doc.fontSize(9).font("Helvetica-Bold").text(label, 50, y, { width: 130 });
-      doc.fontSize(9).font("Helvetica").text(value, 185, y, { width: 360 });
-      doc.moveDown(0.55);
-    };
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+      .text("CONFIRMACIÓN DE EVENTO", margin, titleY, { characterSpacing: 2 });
+    doc.fillColor("#1a1a1a").fontSize(17).font("Helvetica-Bold")
+      .text(HOTEL_NAME, margin, titleY + 11, { width: 300 });
+    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
+      .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 33);
 
-    row("Salón:", event.eventRoom?.name || "-");
-    row(
-      "Fecha:",
-      event.startDate === event.endDate
-        ? fmtDate(event.startDate)
-        : `${fmtDate(event.startDate)} al ${fmtDate(event.endDate)}`
-    );
-    if (event.startTime) {
-      row("Horario:", `${event.startTime}${event.endTime ? ` - ${event.endTime}` : ""}`);
-    }
-    row("Cantidad de personas:", desglosarAsistentes(event));
-    row("Tipo de evento:", eventTypeLabel(event.eventType));
-    row("Contacto:", event.contactName);
-    if (event.contactPhone) row("Teléfono:", event.contactPhone);
-    if (event.contactEmail) row("Email:", event.contactEmail);
-    if (event.company) row("Empresa:", (event.company as any).name || "-");
+    // Code box
+    const codeBoxW = 138;
+    const codeBoxX = pageW - margin - codeBoxW;
+    doc.roundedRect(codeBoxX, titleY, codeBoxW, 44, 5).fillAndStroke("#f8f4ef", ORANGE);
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+      .text("CÓDIGO DE EVENTO", codeBoxX, titleY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
+    doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
+      .text(event.eventCode, codeBoxX, titleY + 19, { width: codeBoxW, align: "center" });
+    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
+      .text(`Emitida: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, titleY + 33, { width: codeBoxW, align: "center" });
+    // Status badge
+    doc.roundedRect(codeBoxX + 16, titleY + 50, codeBoxW - 32, 15, 7).fillAndStroke("#e8f5e9", "#a5d6a7");
+    doc.fillColor("#2e7d32").fontSize(7).font("Helvetica-Bold")
+      .text("CONFIRMADO", codeBoxX + 16, titleY + 54, { width: codeBoxW - 32, align: "center", characterSpacing: 0.5 });
 
-    doc.moveDown(0.5);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#cccccc").stroke();
-    doc.moveDown(0.5);
+    let y = titleY + 56;
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+    y += 12;
 
-    // ── CARGOS CON PRECIOS ───────────────────────────────────────────────────
+    // ── EVENT NAME BLOCK ─────────────────────────────────────────────────────
+    doc.fillColor("#1a1a1a").fontSize(15).font("Helvetica-Bold").text(event.name, margin, y, { width: contentW - 160 });
+    y += 20;
+    doc.fillColor("#666666").fontSize(9).font("Helvetica")
+      .text(`${eventTypeLabel(event.eventType)}  ·  Cód. ${event.eventCode}`, margin, y);
+    y += 16;
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+    y += 12;
+
+    // ── KEY DATA GRID ────────────────────────────────────────────────────────
+    const gridCells: { label: string; value: string }[] = [
+      { label: "SALÓN",     value: event.eventRoom?.name || "—" },
+      { label: "FECHA",     value: event.startDate === event.endDate ? fmtDate(event.startDate) : `${fmtDate(event.startDate)} al ${fmtDate(event.endDate)}` },
+      { label: "HORARIO",   value: event.startTime ? `${event.startTime}${event.endTime ? ` — ${event.endTime}` : ""}` : "—" },
+      { label: "ASISTENTES",value: desglosarAsistentes(event) },
+    ];
+    const cellW = contentW / gridCells.length;
+    const gridH = 44;
+    doc.roundedRect(margin, y, contentW, gridH, 6).fillAndStroke("#ffffff", "#dddddd");
+    gridCells.forEach((cell, i) => {
+      const cx = margin + i * cellW;
+      if (i > 0) doc.moveTo(cx, y + 7).lineTo(cx, y + gridH - 7).strokeColor("#dddddd").lineWidth(0.5).stroke();
+      doc.fillColor("#999999").fontSize(7).font("Helvetica-Bold")
+        .text(cell.label, cx + 4, y + 9, { width: cellW - 8, align: "center", characterSpacing: 0.3 });
+      doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold")
+        .text(cell.value, cx + 4, y + 24, { width: cellW - 8, align: "center" });
+    });
+    y += gridH + 12;
+
+    // ── CONTACT BOX ──────────────────────────────────────────────────────────
+    const contactBoxH = 56;
+    doc.roundedRect(margin, y, contentW, contactBoxH, 6).fillAndStroke("#f8f9fa", "#eeeeee");
+    doc.fillColor("#888888").fontSize(7).font("Helvetica-Bold")
+      .text("DATOS DE CONTACTO", margin + 12, y + 10, { characterSpacing: 1 });
+    doc.moveTo(margin + 12, y + 21).lineTo(margin + 12 + 100, y + 21).strokeColor(ORANGE).lineWidth(2).stroke();
+
+    const colA = margin + 12;
+    const colB = margin + 12 + contentW / 2;
+    doc.fillColor("#1a1a1a").fontSize(11).font("Helvetica-Bold")
+      .text(event.contactName, colA, y + 27, { width: contentW / 2 - 20 });
+    if (event.contactPhone)
+      doc.fillColor("#555555").fontSize(9).font("Helvetica")
+        .text(`Tel: ${event.contactPhone}`, colA, y + 42, { width: contentW / 2 - 20 });
+    if (event.contactEmail)
+      doc.fillColor("#555555").fontSize(9).font("Helvetica")
+        .text(event.contactEmail, colB, y + 27, { width: contentW / 2 - 20 });
+    if (event.company)
+      doc.fillColor("#555555").fontSize(9).font("Helvetica")
+        .text(`Empresa: ${(event.company as any).name || "—"}`, colB, y + 42, { width: contentW / 2 - 20 });
+    y += contactBoxH + 12;
+
+    // ── SERVICIOS CON PRECIOS ─────────────────────────────────────────────────
     if (event.charges && event.charges.length > 0) {
-      doc.fontSize(12).font("Helvetica-Bold").text("Detalle de servicios");
-      doc.fontSize(8).font("Helvetica").fillColor("#666666").text("Precios con IVA (21%) incluido");
-      doc.fillColor("#000000");
-      doc.moveDown(0.4);
+      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Detalle de servicios", margin, y);
+      doc.fillColor("#888888").fontSize(8).font("Helvetica")
+        .text("Precios con IVA (21%) incluido", margin, y + 14);
+      y += 28;
 
-      const y0 = doc.y;
-      doc.rect(50, y0, 495, 18).fillColor("#f0f0f0").fill();
-      doc.fillColor("#000000");
-      doc.fontSize(9).font("Helvetica-Bold");
-      doc.text("Descripción", 55, y0 + 4, { width: 260 });
-      doc.text("Cantidad", 320, y0 + 4, { width: 60, align: "right" });
-      doc.text("Precio unit.", 385, y0 + 4, { width: 80, align: "right" });
-      doc.text("Total", 470, y0 + 4, { width: 70, align: "right" });
-      doc.moveDown(1.3);
+      // Table header
+      doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
+      doc.fillColor("white").fontSize(8).font("Helvetica-Bold");
+      const thY = y + 6;
+      doc.text("Descripción",  margin + 8,         thY, { width: 260 });
+      doc.text("Cant.",        margin + 8,         thY, { width: contentW * 0.55, align: "right" });
+      doc.text("P. Unit.",     margin + 8,         thY, { width: contentW * 0.75, align: "right" });
+      doc.text("Total",        margin + 8,         thY, { width: contentW - 8,   align: "right" });
+      y += 22;
 
       let totalConIva = 0;
       for (const charge of event.charges) {
-        const yc = doc.y;
         const total = parseFloat(String(charge.totalAmount) || "0");
         totalConIva += total;
-        doc.fontSize(9).font("Helvetica");
-        doc.text(charge.description, 55, yc, { width: 260 });
-        doc.text(String(charge.quantity), 320, yc, { width: 60, align: "right" });
-        doc.text(`$${fmtMoney(charge.unitPrice)}`, 385, yc, { width: 80, align: "right" });
-        doc.text(`$${fmtMoney(charge.totalAmount)}`, 470, yc, { width: 70, align: "right" });
-        doc.moveDown(0.6);
+        const rh = Math.max(20, doc.heightOfString(charge.description, { width: 260 }) + 8);
+        doc.rect(margin, y, contentW, rh).fill("#fafafa").stroke("#e8e8e8");
+        doc.fillColor("#1a1a1a").fontSize(9).font("Helvetica")
+          .text(charge.description, margin + 8, y + 5, { width: 260 });
+        doc.text(String(charge.quantity),               margin + 8, y + 5, { width: contentW * 0.55, align: "right" });
+        doc.text(`$ ${fmtMoney(charge.unitPrice)}`,     margin + 8, y + 5, { width: contentW * 0.75, align: "right" });
+        doc.font("Helvetica-Bold")
+          .text(`$ ${fmtMoney(charge.totalAmount)}`,    margin + 8, y + 5, { width: contentW - 8,   align: "right" });
+        y += rh;
       }
 
-      doc.moveDown(0.3);
-      doc.moveTo(320, doc.y).lineTo(545, doc.y).strokeColor("#000000").stroke();
-      doc.moveDown(0.4);
+      // Total row
+      doc.roundedRect(margin + contentW - 220, y + 6, 220, 22, 4).fill(NAVY);
+      doc.fillColor("white").fontSize(10).font("Helvetica-Bold")
+        .text("TOTAL (IVA incl.):", margin + 8, y + 11, { width: contentW * 0.72, align: "right" });
+      doc.text(`$ ${fmtMoney(totalConIva)}`, margin + 8, y + 11, { width: contentW - 8, align: "right" });
+      y += 36;
 
-      const yTot = doc.y;
-      doc.fontSize(10).font("Helvetica-Bold")
-        .text("TOTAL (con IVA incluido):", 320, yTot, { width: 145, align: "right" });
-      doc.text(`$${fmtMoney(totalConIva)}`, 470, yTot, { width: 70, align: "right" });
-      doc.moveDown(0.5);
-
-      doc.fontSize(8).font("Helvetica").fillColor("#666666")
-        .text("* IVA a aplicar según condición impositiva del cliente al momento de facturar.", 50, doc.y, { width: 495 });
-      doc.fillColor("#000000");
+      doc.fillColor("#888888").fontSize(7.5).font("Helvetica")
+        .text("* IVA a aplicar según condición impositiva del cliente al momento de facturar.", margin, y, { width: contentW });
+      y += 16;
     }
 
-    // ── FIRMA Y CONDICIONES ──────────────────────────────────────────────────
-    doc.moveDown(1.5);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-    doc.moveDown(0.8);
+    // ── FIRMA ────────────────────────────────────────────────────────────────
+    y += 12;
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+    y += 16;
+    doc.fillColor("#555555").fontSize(9).font("Helvetica")
+      .text("Firma y aclaración cliente:", margin, y);
+    doc.moveTo(margin + 180, y + 14).lineTo(margin + 360, y + 14).strokeColor("#333333").lineWidth(0.5).stroke();
+    doc.fillColor("#555555").fontSize(9).font("Helvetica")
+      .text("Fecha:", margin + contentW - 130, y);
+    doc.moveTo(margin + contentW - 80, y + 14).lineTo(margin + contentW, y + 14).strokeColor("#333333").lineWidth(0.5).stroke();
 
-    const ySig = doc.y;
-    doc.fontSize(9).font("Helvetica");
-    doc.text("Firma y aclaración cliente:", 50, ySig);
-    doc.moveTo(220, ySig + 12).lineTo(400, ySig + 12).stroke();
-    doc.text("Fecha:", 420, ySig);
-    doc.moveTo(455, ySig + 12).lineTo(545, ySig + 12).stroke();
-    doc.moveDown(2);
-
-    doc.fontSize(8).fillColor("#888888").text(
-      `Confirmación de Evento — Maran Suites & Towers — CUIT 33-68110008-9 — Generado el ${new Date().toLocaleDateString("es-AR")}`,
-      { align: "center" }
-    );
+    // ── FOOTER ───────────────────────────────────────────────────────────────
+    pdfBrandedFooter(doc, pageW, pageH, margin, contentW);
 
     doc.end();
   });
