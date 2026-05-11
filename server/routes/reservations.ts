@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { randomUUID } from "crypto";
+import fs from "fs";
+import path from "path";
 import { storage } from "../db-storage";
 import { db } from "../db";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes } from "@shared/schema";
@@ -1403,20 +1405,12 @@ async function handleConfirmationPdf(req: any, res: any) {
       ? await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId))
       : [null];
 
-    const activeCharges = await db
-      .select()
-      .from(charges)
-      .where(and(eq(charges.reservationId, reservation.id), eq(charges.isActive, true)));
-    const consumptionCharges = activeCharges.filter(c => c.category !== "payment" && c.category !== "accommodation");
-
-    const guestName = guest ? `${guest.lastName?.toUpperCase() || ""} ${guest.firstName || ""}`.trim() : "Huésped";
+    const guestName = guest
+      ? `${guest.lastName?.toUpperCase() || ""} ${guest.firstName || ""}`.trim()
+      : "Huésped";
     const nights = nightCount(reservation.checkInDate, reservation.checkOutDate);
-    const totalConExtras =
-      parseFloat(reservation.totalRoomAmount || "0") +
-      (reservation.earlyCheckIn ? parseFloat(String(reservation.earlyCheckInCharge || 0)) : 0) +
-      (reservation.lateCheckOut ? parseFloat(String(reservation.lateCheckOutCharge || 0)) : 0);
-    const totalServices = consumptionCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
-    const grandTotal = totalConExtras + totalServices;
+    const totalAlojamiento = parseFloat(reservation.totalRoomAmount || "0");
+    const ratePerNight = parseFloat(String(reservation.finalRatePerNight || 0));
 
     const doc = new PDFDocument({ margin: 0, size: "A4" });
     const filename = `Confirmacion-${reservation.reservationCode || reservation.id}.pdf`;
@@ -1425,146 +1419,234 @@ async function handleConfirmationPdf(req: any, res: any) {
     doc.pipe(res);
 
     const pageW = 595;
+    const pageH = 842;
     const margin = 40;
-    const contentW = pageW - margin * 2;
+    const contentW = pageW - margin * 2; // 515
+    const NAVY    = "#1a3a6c";
+    const ORANGE  = "#e8841a";
+    const FOOTER_BG = "#8b4513";
 
-    // ── HEADER BAND ────────────────────────────────────────────────────────
-    doc.rect(0, 0, pageW, 80).fill(PRIMARY_COLOR);
-    doc.fillColor("white")
-      .fontSize(20).font("Helvetica-Bold")
-      .text(HOTEL_NAME, margin, 20, { width: contentW });
-    doc.fontSize(8).font("Helvetica")
-      .text(`${HOTEL_ADDRESS}  ·  ${HOTEL_PHONE}  ·  ${HOTEL_EMAIL}  ·  CUIT ${HOTEL_CUIT}`, margin, 46, { width: contentW });
-
-    // Reservation code top-right
-    doc.fontSize(9).font("Helvetica-Bold")
-      .text(reservation.reservationCode || reservation.id, margin, 22, { width: contentW, align: "right" });
-    doc.fontSize(7).font("Helvetica").fillColor("#cde")
-      .text("CONFIRMACIÓN DE RESERVA", margin, 35, { width: contentW, align: "right" });
-
-    doc.fillColor("#000");
-    let y = 96;
-
-    // ── GUEST BLOCK ────────────────────────────────────────────────────────
-    doc.rect(margin, y, contentW, 48).fill("#f4f7fb").stroke("#dde6f0");
-    doc.fillColor("#6b7280").fontSize(7).font("Helvetica-Bold")
-      .text("HUÉSPED", margin + 10, y + 8);
-    doc.fillColor("#111").fontSize(13).font("Helvetica-Bold")
-      .text(guestName, margin + 10, y + 18);
-    if (guest?.email || guest?.phone) {
-      doc.fillColor("#555").fontSize(8).font("Helvetica")
-        .text([guest?.email, guest?.phone].filter(Boolean).join("  ·  "), margin + 10, y + 35);
+    // ── HEADER IMAGE ──────────────────────────────────────────────────────
+    const headerH = 148;
+    const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+    if (fs.existsSync(headerImgPath)) {
+      doc.image(headerImgPath, 0, 0, { width: pageW, height: headerH, cover: [pageW, headerH] });
+    } else {
+      doc.rect(0, 0, pageW, headerH).fill(NAVY);
     }
-    y += 60;
 
-    // ── KEY DATES GRID (5 cells) ───────────────────────────────────────────
-    const cells = [
-      { label: "CHECK-IN",    value: fmtDatePdf(reservation.checkInDate) },
-      { label: "CHECK-OUT",   value: fmtDatePdf(reservation.checkOutDate) },
-      { label: "NOCHES",      value: String(nights) },
-      { label: "HABITACIÓN",  value: room?.roomNumber || "—" },
-      { label: "HUÉSPEDES",   value: String(reservation.numberOfGuests || 1) },
+    // ── ORANGE STRIPE ─────────────────────────────────────────────────────
+    doc.rect(0, headerH, pageW, 5).fill(ORANGE);
+
+    let y = headerH + 16;
+
+    // ── TITLE ROW ─────────────────────────────────────────────────────────
+    // Left: label + hotel name + subtitle
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+      .text("CONFIRMACIÓN DE RESERVA", margin, y, { characterSpacing: 2 });
+    y += 11;
+    doc.fillColor("#1a1a1a").fontSize(17).font("Helvetica-Bold")
+      .text(HOTEL_NAME, margin, y, { width: 300 });
+    y += 22;
+    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
+      .text("Hotel & Spa · Paraná, Entre Ríos", margin, y);
+
+    // Right: reservation code box
+    const codeBoxW = 138;
+    const codeBoxX = pageW - margin - codeBoxW;
+    const codeBoxY = headerH + 16;
+    doc.roundedRect(codeBoxX, codeBoxY, codeBoxW, 44, 5)
+      .fillAndStroke("#f8f4ef", ORANGE);
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+      .text("N° DE RESERVA", codeBoxX, codeBoxY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.5 });
+    doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
+      .text(reservation.reservationCode || reservation.id, codeBoxX, codeBoxY + 19, { width: codeBoxW, align: "center" });
+    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
+      .text(`Emitida: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, codeBoxY + 33, { width: codeBoxW, align: "center" });
+
+    // Status badge
+    const badgeY = codeBoxY + 50;
+    doc.roundedRect(codeBoxX + 16, badgeY, codeBoxW - 32, 15, 7)
+      .fillAndStroke("#e8f5e9", "#a5d6a7");
+    doc.fillColor("#2e7d32").fontSize(7).font("Helvetica-Bold")
+      .text("CONFIRMADA", codeBoxX + 16, badgeY + 4, { width: codeBoxW - 32, align: "center", characterSpacing: 0.5 });
+
+    y += 20;
+
+    // ── SEPARATOR ─────────────────────────────────────────────────────────
+    doc.moveTo(margin, y).lineTo(margin + contentW, y)
+      .strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+    y += 12;
+
+    // ── DATES GRID (5 cells) ──────────────────────────────────────────────
+    const gridH = 46;
+    const cellW = contentW / 5;
+    const gridCells = [
+      { label: "CHECK-IN",   value: fmtDatePdf(reservation.checkInDate) },
+      { label: "CHECK-OUT",  value: fmtDatePdf(reservation.checkOutDate) },
+      { label: "NOCHES",     value: String(nights) },
+      { label: "HABITACIÓN", value: room?.roomNumber || "—" },
+      { label: "HUÉSPEDES",  value: String(reservation.numberOfGuests || 1) },
     ];
-    const cellW = contentW / cells.length;
-    cells.forEach((cell, i) => {
+    doc.roundedRect(margin, y, contentW, gridH, 6)
+      .fillAndStroke("#ffffff", "#dddddd");
+    gridCells.forEach((cell, i) => {
       const cx = margin + i * cellW;
-      doc.rect(cx, y, cellW, 44)
-        .fill(i % 2 === 0 ? "#ffffff" : "#f9fafb")
-        .stroke("#e5e7eb");
-      doc.fillColor("#9ca3af").fontSize(7).font("Helvetica-Bold")
-        .text(cell.label, cx + 6, y + 7, { width: cellW - 12, align: "center" });
-      doc.fillColor(PRIMARY_COLOR).fontSize(13).font("Helvetica-Bold")
-        .text(cell.value, cx + 6, y + 20, { width: cellW - 12, align: "center" });
-    });
-    y += 56;
-
-    // ── ROOM TYPE ──────────────────────────────────────────────────────────
-    if (roomType) {
-      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold")
-        .text("Tipo de habitación:", margin, y);
-      doc.fillColor("#111").font("Helvetica")
-        .text(roomType.name, margin + 120, y);
-      y += 18;
-    }
-
-    // ── EARLY CHECK-IN / LATE CHECK-OUT ────────────────────────────────────
-    if (reservation.earlyCheckIn && reservation.earlyCheckInTime) {
-      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Early Check-in:", margin, y);
-      doc.fillColor("#111").font("Helvetica")
-        .text(`${reservation.earlyCheckInTime} hs  (+${fmtMoneyPdf(reservation.earlyCheckInCharge)})`, margin + 120, y);
-      y += 16;
-    }
-    if (reservation.lateCheckOut && reservation.lateCheckOutTime) {
-      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Late Check-out:", margin, y);
-      doc.fillColor("#111").font("Helvetica")
-        .text(`${reservation.lateCheckOutTime} hs  (+${fmtMoneyPdf(reservation.lateCheckOutCharge)})`, margin + 120, y);
-      y += 16;
-    }
-    y += 10;
-
-    // ── PRICING TABLE ──────────────────────────────────────────────────────
-    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e5e7eb").stroke();
-    y += 10;
-    doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Detalle de tarifas", margin, y);
-    y += 14;
-
-    const drawRow = (label: string, value: string, bold = false, highlight = false) => {
-      if (highlight) {
-        doc.rect(margin, y - 2, contentW, 18).fill(PRIMARY_COLOR);
-        doc.fillColor("white").fontSize(10).font("Helvetica-Bold")
-          .text(label, margin + 6, y + 1, { width: contentW - 90 })
-          .text(value, margin + 6, y + 1, { width: contentW - 12, align: "right" });
-      } else {
-        doc.fillColor(bold ? "#111" : "#555").fontSize(9)
-          .font(bold ? "Helvetica-Bold" : "Helvetica")
-          .text(label, margin + 6, y, { width: contentW - 90 })
-          .text(value, margin + 6, y, { width: contentW - 12, align: "right" });
+      if (i > 0) {
+        doc.moveTo(cx, y + 7).lineTo(cx, y + gridH - 7)
+          .strokeColor("#dddddd").lineWidth(0.5).stroke();
       }
-      y += 18;
+      doc.fillColor("#999999").fontSize(7).font("Helvetica-Bold")
+        .text(cell.label, cx + 4, y + 9, { width: cellW - 8, align: "center", characterSpacing: 0.3 });
+      doc.fillColor(NAVY).fontSize(12).font("Helvetica-Bold")
+        .text(cell.value, cx + 4, y + 24, { width: cellW - 8, align: "center" });
+    });
+    y += gridH + 12;
+
+    // ── TWO COLUMNS: GUEST + ROOM ─────────────────────────────────────────
+    const colGap = 12;
+    const colW = (contentW - colGap) / 2;
+    const col2X = margin + colW + colGap;
+    const boxH = 90;
+
+    const drawColBox = (bx: number, by: number, bw: number, bh: number, title: string) => {
+      doc.roundedRect(bx, by, bw, bh, 6).fillAndStroke("#f8f9fa", "#eeeeee");
+      doc.fillColor("#888888").fontSize(7).font("Helvetica-Bold")
+        .text(title, bx + 12, by + 10, { characterSpacing: 1 });
+      doc.moveTo(bx + 12, by + 21).lineTo(bx + 12 + title.length * 5.2, by + 21)
+        .strokeColor(ORANGE).lineWidth(2).stroke();
     };
 
-    drawRow(
-      `Alojamiento — ${nights} noche${nights !== 1 ? "s" : ""} × ${fmtMoneyPdf(reservation.finalRatePerNight || 0)}`,
-      fmtMoneyPdf(reservation.totalRoomAmount || 0)
-    );
-    if (reservation.earlyCheckIn && parseFloat(String(reservation.earlyCheckInCharge || 0)) > 0) {
-      drawRow("Early Check-in", fmtMoneyPdf(reservation.earlyCheckInCharge));
+    // Guest box
+    drawColBox(margin, y, colW, boxH, "HUÉSPED PRINCIPAL");
+    doc.fillColor("#111111").fontSize(12).font("Helvetica-Bold")
+      .text(guestName, margin + 12, y + 27, { width: colW - 24 });
+    let guestInfoY = y + 43;
+    if (guest?.documentNumber) {
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text(`DNI: ${guest.documentNumber}`, margin + 12, guestInfoY);
+      guestInfoY += 12;
     }
-    if (reservation.lateCheckOut && parseFloat(String(reservation.lateCheckOutCharge || 0)) > 0) {
-      drawRow("Late Check-out", fmtMoneyPdf(reservation.lateCheckOutCharge));
+    if (guest?.email) {
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text(guest.email, margin + 12, guestInfoY, { width: colW - 24 });
+      guestInfoY += 12;
+    }
+    if (guest?.phone) {
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text(guest.phone, margin + 12, guestInfoY, { width: colW - 24 });
     }
 
-    if (consumptionCharges.length > 0) {
-      y += 4;
-      doc.fillColor("#6b7280").fontSize(8).font("Helvetica-Bold").text("SERVICIOS ADICIONALES", margin + 6, y);
-      y += 14;
-      for (const c of consumptionCharges) {
-        drawRow(c.description || "Servicio", fmtMoneyPdf(c.amount));
-      }
+    // Room box
+    drawColBox(col2X, y, colW, boxH, "TIPO DE HABITACIÓN");
+    doc.fillColor("#111111").fontSize(12).font("Helvetica-Bold")
+      .text(roomType?.name || room?.roomNumber || "—", col2X + 12, y + 27, { width: colW - 24 });
+
+    // Rate per night
+    doc.fillColor("#555555").fontSize(9).font("Helvetica")
+      .text("Tarifa por noche", col2X + 12, y + 50);
+    doc.fillColor("#333333").fontSize(9).font("Helvetica-Bold")
+      .text(fmtMoneyPdf(ratePerNight), col2X + 12, y + 50, { width: colW - 24, align: "right" });
+
+    // Divider + total
+    doc.moveTo(col2X + 12, y + 64).lineTo(col2X + colW - 12, y + 64)
+      .strokeColor("#dddddd").lineWidth(0.5).stroke();
+    doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold")
+      .text(`Total (${nights} noche${nights !== 1 ? "s" : ""})`, col2X + 12, y + 68);
+    doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold")
+      .text(fmtMoneyPdf(totalAlojamiento), col2X + 12, y + 68, { width: colW - 24, align: "right" });
+
+    // Early / Late extras
+    const extras: string[] = [];
+    if (reservation.earlyCheckIn && reservation.earlyCheckInTime)
+      extras.push(`Early Check-in ${reservation.earlyCheckInTime} hs (+${fmtMoneyPdf(reservation.earlyCheckInCharge)})`);
+    if (reservation.lateCheckOut && reservation.lateCheckOutTime)
+      extras.push(`Late Check-out ${reservation.lateCheckOutTime} hs (+${fmtMoneyPdf(reservation.lateCheckOutCharge)})`);
+    if (extras.length > 0) {
+      doc.fillColor("#888888").fontSize(7.5).font("Helvetica")
+        .text(extras.join("  ·  "), col2X + 12, y + 81, { width: colW - 24 });
     }
 
-    y += 4;
-    drawRow("TOTAL", fmtMoneyPdf(grandTotal), true, true);
-    y += 8;
+    y += boxH + 12;
 
-    // ── NOTES ──────────────────────────────────────────────────────────────
+    // ── OBSERVATIONS ─────────────────────────────────────────────────────
     if (reservation.notes) {
-      doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e5e7eb").stroke();
-      y += 10;
-      doc.fillColor("#374151").fontSize(9).font("Helvetica-Bold").text("Observaciones:", margin, y);
-      y += 14;
-      doc.fillColor("#555").fontSize(9).font("Helvetica")
-        .text(reservation.notes, margin, y, { width: contentW });
-      y += doc.heightOfString(reservation.notes, { width: contentW }) + 10;
+      const notesTextH = doc.heightOfString(reservation.notes, { width: contentW - 26 });
+      const notesBoxH = Math.max(42, notesTextH + 24);
+      doc.roundedRect(margin, y, contentW, notesBoxH, 6)
+        .fillAndStroke("#fffbf0", "#ffe0a0");
+      doc.fillColor("#b8860b").fontSize(7).font("Helvetica-Bold")
+        .text("OBSERVACIONES", margin + 12, y + 9, { characterSpacing: 1 });
+      doc.fillColor("#555555").fontSize(9).font("Helvetica")
+        .text(reservation.notes, margin + 12, y + 22, { width: contentW - 26 });
+      y += notesBoxH + 12;
     }
 
-    // ── FOOTER ─────────────────────────────────────────────────────────────
-    doc.rect(0, 810, pageW, 32).fill("#f3f4f6");
-    doc.fillColor("#9ca3af").fontSize(7).font("Helvetica")
-      .text(
-        `${HOTEL_NAME}  ·  ${HOTEL_WEB}  ·  CUIT ${HOTEL_CUIT}  ·  Generado el ${new Date().toLocaleDateString("es-AR")}`,
-        margin, 820, { width: contentW, align: "center" }
-      );
+    // ── TÉRMINOS Y CONDICIONES ────────────────────────────────────────────
+    const terminos = [
+      "La tarifa incluye desayuno buffet y gimnasio con turno previo.",
+      "La cochera tiene costo adicional. El mismo se encuentra detallado en la parte superior.",
+      "Nuestro horario de Check-in es a partir de las 15:00 hs y el Check-out es hasta las 10:00 hs.",
+      "Early Check-in o Late Check-out tienen costo adicional del 50% del valor de una noche.",
+      "Importante: En el momento de ingreso, deberá acreditar su identidad con su respectivo DNI / PASAPORTE / CÉDULA DE IDENTIDAD. En el caso de viajar con menores de edad deberá presentar su correspondiente identificación.",
+      "La entrega de la habitación queda condicionada al pago total del alojamiento al momento del check-in. Los comprobantes, constancias de transferencia, capturas de pantalla o avisos de pago no constituyen pago válido hasta la efectiva acreditación del importe en los medios de cobro habilitados por el hotel. Ante la falta de acreditación, el hotel podrá exigir el pago por otro medio aceptado y suspender el ingreso a la habitación hasta la regularización total del saldo correspondiente.",
+    ];
+
+    // Pre-calculate T&C body height
+    let tcBodyH = 10;
+    for (const t of terminos) {
+      tcBodyH += doc.heightOfString(t, { width: contentW - 30 }) + 6;
+    }
+    const tcH = 22 + tcBodyH + 8;
+
+    // Box border
+    doc.roundedRect(margin, y, contentW, tcH, 6).stroke("#e0e0e0");
+    // Navy header band
+    doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
+    doc.rect(margin, y + 12, contentW, 10).fill(NAVY); // fill bottom corners of header
+    doc.fillColor("#ffffff").fontSize(7.5).font("Helvetica-Bold")
+      .text("TÉRMINOS Y CONDICIONES", margin + 14, y + 8, { characterSpacing: 1.5, width: contentW - 28 });
+
+    let ty = y + 26;
+    terminos.forEach((t, i) => {
+      doc.fillColor("#333333").fontSize(8).font("Helvetica")
+        .text(`${i + 1}.  ${t}`, margin + 14, ty, { width: contentW - 28 });
+      ty += doc.heightOfString(t, { width: contentW - 28 }) + 6;
+    });
+    y = ty + 14;
+
+    // ── GREETING ─────────────────────────────────────────────────────────
+    if (y < pageH - 88) {
+      doc.fillColor("#666666").fontSize(9).font("Helvetica")
+        .text(
+          `Estimado/a ${guestName}, gracias por elegirnos. Le esperamos con mucho gusto en nuestro establecimiento.\nAnte cualquier consulta no dude en contactarnos.`,
+          margin, y, { width: contentW, align: "center" }
+        );
+    }
+
+    // ── FOOTER ───────────────────────────────────────────────────────────
+    const footerY = pageH - 72;
+    doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
+
+    // Logo
+    const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, margin, footerY + 14, { width: 95 });
+    }
+
+    // Center contact info
+    const centerX = margin + 100;
+    const centerW = contentW - 200;
+    doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+      .text(HOTEL_ADDRESS, centerX, footerY + 13, { width: centerW, align: "center" });
+    doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+      .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, centerX, footerY + 26, { width: centerW, align: "center" });
+    doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
+      .text(`CUIT ${HOTEL_CUIT} · Responsable Inscripto`, centerX, footerY + 40, { width: centerW, align: "center" });
+
+    // Website right
+    doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
+      .text(HOTEL_WEB, pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
 
     doc.end();
   } catch (e: any) {
