@@ -39,13 +39,12 @@ export function Confirmacion() {
   const navyBlue = "#1a3a6c";
 
   const terminos = [
-    "La reserva queda confirmada sujeta al pago del anticipo correspondiente dentro de las 48 horas de recibida esta confirmación.",
-    "El check-in se realiza a partir de las 14:00 hs. El check-out debe efectuarse antes de las 11:00 hs. Fuera de este horario podrán aplicarse cargos adicionales.",
-    "En caso de cancelación con más de 7 días de anticipación al arribo, se reintegrará el 100% del importe abonado. Con menos de 7 días, se retendrá el equivalente a 1 (una) noche de alojamiento.",
-    "El hotel no se responsabiliza por objetos de valor dejados fuera de la caja de seguridad habilitada en cada habitación.",
-    "Está estrictamente prohibido el ingreso de mascotas, así como el uso de estufas eléctricas u otros artefactos no provistos por el establecimiento.",
-    "Las tarifas incluyen IVA y desayuno continental buffet, salvo aclaración en contrario.",
-    "El establecimiento se reserva el derecho de admisión.",
+    "La tarifa incluye desayuno buffet y gimnasio con turno previo.",
+    "La cochera tiene costo adicional. El mismo se encuentra detallado en la parte superior.",
+    "Nuestro horario de Check-in es a partir de las 15:00 hs y el Check-out es hasta las 10:00 hs.",
+    "Early Check-in o Late Check-out tienen costo adicional del 50% del valor de una noche.",
+    "Importante: En el momento de ingreso, deberá acreditar su identidad con su respectivo DNI / PASAPORTE / CÉDULA DE IDENTIDAD. En el caso de viajar con menores de edad deberá presentar su correspondiente identificación.",
+    "La entrega de la habitación queda condicionada al pago total del alojamiento al momento del check-in. Los comprobantes, constancias de transferencia, capturas de pantalla o avisos de pago no constituyen pago válido hasta la efectiva acreditación del importe en los medios de cobro habilitados por el hotel. Ante la falta de acreditación, el hotel podrá exigir el pago por otro medio aceptado y suspender el ingreso a la habitación hasta la regularización total del saldo correspondiente.",
   ];
 
   return (
