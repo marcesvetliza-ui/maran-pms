@@ -934,7 +934,7 @@ export type OrderStatus = "open" | "in_progress" | "served" | "closed" | "cancel
 export type OrderType = "dine_in" | "room_service" | "takeaway";
 
 export type ReceiptType = "ticket" | "factura_a" | "factura_b" | "factura_c" | "nota_credito";
-export type RestaurantPaymentMethod = "efectivo" | "tarjeta_debito" | "tarjeta_credito" | "transferencia" | "cuenta_habitacion" | "mercadopago";
+export type RestaurantPaymentMethod = "efectivo" | "tarjeta_debito" | "tarjeta_credito" | "transferencia" | "cuenta_habitacion" | "mercadopago" | "pedidos_ya";
 
 export const restaurantOrders = pgTable("restaurant_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

@@ -198,6 +198,7 @@ export async function seedDatabase() {
   await db.insert(restaurantAreas).values([
     { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor", capacity: 72, hasTables: "true", isActive: "true", notes: "Mesas cuadradas" },
     { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor", capacity: 56, hasTables: "true", isActive: "true", notes: "Mesas redondas" },
+    { id: "area-terraza", name: "Terraza", areaType: "outdoor", capacity: 24, hasTables: "true", isActive: "true", notes: "Mesas exteriores - temporada verano" },
     { id: "area-rs", name: "Room Service", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
     { id: "area-delivery", name: "Delivery", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
     { id: "area-solarium", name: "Solarium", areaType: "outdoor", capacity: 0, hasTables: "false", isActive: "true", notes: null },
@@ -238,6 +239,12 @@ export async function seedDatabase() {
     { id: "t30", tableNumber: "30", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 2, positionY: 1, isActive: "true" },
     { id: "t31", tableNumber: "31", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 3, positionY: 1, isActive: "true" },
     { id: "t32", tableNumber: "32", areaId: "area2", capacity: 4, shape: "round", status: "available", positionX: 0, positionY: 1, isActive: "true" },
+    { id: "t33", tableNumber: "33", areaId: "area-terraza", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 0, isActive: "true" },
+    { id: "t34", tableNumber: "34", areaId: "area-terraza", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 0, isActive: "true" },
+    { id: "t35", tableNumber: "35", areaId: "area-terraza", capacity: 4, shape: "square", status: "available", positionX: 2, positionY: 0, isActive: "true" },
+    { id: "t36", tableNumber: "36", areaId: "area-terraza", capacity: 4, shape: "square", status: "available", positionX: 0, positionY: 1, isActive: "true" },
+    { id: "t37", tableNumber: "37", areaId: "area-terraza", capacity: 4, shape: "square", status: "available", positionX: 1, positionY: 1, isActive: "true" },
+    { id: "t38", tableNumber: "38", areaId: "area-terraza", capacity: 4, shape: "square", status: "available", positionX: 2, positionY: 1, isActive: "true" },
   ]);
 
   console.log("Seeding menu categories...");
@@ -247,6 +254,7 @@ export async function seedDatabase() {
     { id: "mc1", name: "Entradas", description: "Para comenzar", displayOrder: 3, isActive: "true" },
     { id: "mc2", name: "Platos Principales", description: "Carnes, pastas y pescados", displayOrder: 4, isActive: "true" },
     { id: "mc3", name: "Postres", description: "Dulces y helados", displayOrder: 5, isActive: "true" },
+    { id: "mc4", name: "Agasajos", description: "Celebraciones y detalles especiales", displayOrder: 6, isActive: "true" },
   ]);
 
   console.log("Seeding menu items...");
@@ -267,6 +275,14 @@ export async function seedDatabase() {
     { id: "mi13", categoryId: "mc6", name: "Copa de Vino Malbec", description: "Bodega Luigi Bosca", price: "3500.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 1 },
     { id: "mi14", categoryId: "mc6", name: "Cerveza Artesanal", description: "Pinta 500ml", price: "2800.00", preparationTime: 2, isAvailable: "true", isActive: "true", allergens: ["gluten"], displayOrder: 2 },
     { id: "mi16", categoryId: "mc6", name: "Fernet con Cola", description: "Branca con Coca-Cola", price: "3000.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
+    { id: "mi-ag1", categoryId: "mc4", name: "Postre Cumpleaños con Velita", description: "Postre especial presentado con velita encendida y dedicatoria", price: "4500.00", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: ["lacteos", "gluten"], displayOrder: 1 },
+    { id: "mi-ag2", categoryId: "mc4", name: "Torta de Cumpleaños (porción)", description: "Porción de torta decorada con vela y dedicatoria personalizada", price: "5500.00", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: ["lacteos", "gluten", "huevo"], displayOrder: 2 },
+    { id: "mi-ag3", categoryId: "mc4", name: "Brindis — Copa de Champán", description: "Copa de champán espumante para celebrar", price: "4000.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
+    { id: "mi-ag4", categoryId: "mc4", name: "Brindis — Botella de Champán", description: "Botella de espumante para la mesa (4 copas aprox.)", price: "14000.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 4 },
+    { id: "mi-ag5", categoryId: "mc4", name: "Desayuno Sorpresa", description: "Bandeja decorada con medialunas, jugo, café y tarjeta personalizada", price: "8500.00", preparationTime: 20, isAvailable: "true", isActive: "true", allergens: ["gluten", "lacteos"], displayOrder: 5 },
+    { id: "mi-ag6", categoryId: "mc4", name: "Globos y Decoración Mesa", description: "Arreglo de globos y decoración temática para la mesa", price: "3500.00", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 6 },
+    { id: "mi-ag7", categoryId: "mc4", name: "Pétalos de Rosa en Mesa", description: "Decoración romántica con pétalos de rosa y velas", price: "2500.00", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 7 },
+    { id: "mi-fuera-menu", categoryId: "mc4", name: "Fuera de Menú", description: "Ítem personalizado — completar descripción y precio al agregar", price: "0.00", preparationTime: 0, isAvailable: "true", isActive: "true", isEditable: "true", allergens: null, displayOrder: 99 },
   ]);
 
   console.log("Seeding inventory categories...");
@@ -770,6 +786,7 @@ export async function refreshRealData() {
     const realAreas = [
       { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor" as const, capacity: 72, hasTables: "true" as const, isActive: "true" as const },
       { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor" as const, capacity: 56, hasTables: "true" as const, isActive: "true" as const },
+      { id: "area-terraza", name: "Terraza", areaType: "outdoor" as const, capacity: 24, hasTables: "true" as const, isActive: "true" as const },
       { id: "area-rs", name: "Room Service", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
       { id: "area-delivery", name: "Delivery", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
       { id: "area-solarium", name: "Solarium", areaType: "outdoor" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
@@ -778,7 +795,6 @@ export async function refreshRealData() {
 
     const existingAreas = await db.select({ id: restaurantAreas.id }).from(restaurantAreas);
     const existingAreaIds = existingAreas.map(a => a.id);
-    const realAreaIds = realAreas.map(a => a.id);
 
     for (const area of realAreas) {
       if (!existingAreaIds.includes(area.id)) {
@@ -787,13 +803,8 @@ export async function refreshRealData() {
         await db.update(restaurantAreas).set({ name: area.name, areaType: area.areaType, capacity: area.capacity, hasTables: area.hasTables }).where(eq(restaurantAreas.id, area.id));
       }
     }
-
-    for (const extraId of existingAreaIds.filter(id => !realAreaIds.includes(id))) {
-      try {
-        await db.delete(restaurantTables).where(eq(restaurantTables.areaId, extraId));
-        await db.delete(restaurantAreas).where(eq(restaurantAreas.id, extraId));
-      } catch (e) {}
-    }
+    // NOTE: We do NOT delete areas not in realAreas — they may be user-created custom areas (e.g. custom event rooms).
+    // Only ensure required system areas exist; never wipe user-created ones.
 
     const existingTables = await db.select({ id: restaurantTables.id }).from(restaurantTables);
     const existingTableIds = existingTables.map(t => t.id);
@@ -804,14 +815,33 @@ export async function refreshRealData() {
     for (let i = 19; i <= 32; i++) {
       realTables.push({ id: `t${i}`, tableNumber: `${i}`, areaId: "area2", capacity: 4, shape: "round" as const, status: "available" as const });
     }
+    for (let i = 33; i <= 38; i++) {
+      realTables.push({ id: `t${i}`, tableNumber: `${i}`, areaId: "area-terraza", capacity: 4, shape: "square" as const, status: "available" as const });
+    }
 
     const missingTables = realTables.filter(t => !existingTableIds.includes(t.id));
     if (missingTables.length > 0) {
       await db.insert(restaurantTables).values(missingTables).onConflictDoNothing();
       console.log(`Inserted ${missingTables.length} missing tables`);
     }
+    // NOTE: We never update positionX/positionY of existing tables — positions are managed by hotel staff via the floor plan editor.
+    // NOTE: We do NOT delete user-created tables; only insert missing seed tables.
 
-    // Do NOT delete user-created tables (those with non-seed IDs); only insert missing seed tables
+    // Ensure Agasajos category and its items exist (safe for already-seeded databases)
+    await db.insert(menuCategories).values([
+      { id: "mc4", name: "Agasajos", description: "Celebraciones y detalles especiales", displayOrder: 6, isActive: "true" },
+    ]).onConflictDoNothing();
+
+    await db.insert(menuItems).values([
+      { id: "mi-ag1", categoryId: "mc4", name: "Postre Cumpleaños con Velita", description: "Postre especial presentado con velita encendida y dedicatoria", price: "4500.00", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: ["lacteos", "gluten"], displayOrder: 1 },
+      { id: "mi-ag2", categoryId: "mc4", name: "Torta de Cumpleaños (porción)", description: "Porción de torta decorada con vela y dedicatoria personalizada", price: "5500.00", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: ["lacteos", "gluten", "huevo"], displayOrder: 2 },
+      { id: "mi-ag3", categoryId: "mc4", name: "Brindis — Copa de Champán", description: "Copa de champán espumante para celebrar", price: "4000.00", preparationTime: 3, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 3 },
+      { id: "mi-ag4", categoryId: "mc4", name: "Brindis — Botella de Champán", description: "Botella de espumante para la mesa (4 copas aprox.)", price: "14000.00", preparationTime: 5, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 4 },
+      { id: "mi-ag5", categoryId: "mc4", name: "Desayuno Sorpresa", description: "Bandeja decorada con medialunas, jugo, café y tarjeta personalizada", price: "8500.00", preparationTime: 20, isAvailable: "true", isActive: "true", allergens: ["gluten", "lacteos"], displayOrder: 5 },
+      { id: "mi-ag6", categoryId: "mc4", name: "Globos y Decoración Mesa", description: "Arreglo de globos y decoración temática para la mesa", price: "3500.00", preparationTime: 15, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 6 },
+      { id: "mi-ag7", categoryId: "mc4", name: "Pétalos de Rosa en Mesa", description: "Decoración romántica con pétalos de rosa y velas", price: "2500.00", preparationTime: 10, isAvailable: "true", isActive: "true", allergens: null, displayOrder: 7 },
+      { id: "mi-fuera-menu", categoryId: "mc4", name: "Fuera de Menú", description: "Ítem personalizado — completar descripción y precio al agregar", price: "0.00", preparationTime: 0, isAvailable: "true", isActive: "true", isEditable: "true", allergens: null, displayOrder: 99 },
+    ]).onConflictDoNothing();
 
     const realEventRooms = [
       { id: "er1", name: "Salón Mitre", capacity: 100, status: "available" as const, description: "Salón principal para eventos grandes", isActive: "true" as const },

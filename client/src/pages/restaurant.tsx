@@ -254,6 +254,7 @@ const paymentMethodLabels: Record<string, string> = {
   transferencia: "Transferencia",
   cuenta_habitacion: "Cuenta Habitacion",
   mercadopago: "MercadoPago",
+  pedidos_ya: "Pedidos Ya",
 };
 
 const menuItemFormSchema = z.object({
@@ -2379,6 +2380,26 @@ export default function RestaurantPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={() => {
+                    const fueraItem = menuItems.find(i => i.id === "mi-fuera-menu");
+                    if (fueraItem) {
+                      setItemCourse(1);
+                      setPendingItem(fueraItem);
+                      setMenuSearch("");
+                      setSelectedCategory(null);
+                      setIsEditableItem(true);
+                      setCustomItemName("");
+                      setCustomItemPrice("");
+                    }
+                  }}
+                  className="border-orange-500 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950"
+                  data-testid="button-fuera-menu"
+                >
+                  + Fuera de Menú
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => setOrderView("delete")}
                   className="text-destructive border-destructive"
                   data-testid="button-delete-mode"
@@ -2735,6 +2756,7 @@ export default function RestaurantPage() {
                   const tablelessPaymentMethods: Record<string, string> = {
                     cuenta_habitacion: "Cuenta Habitacion",
                     efectivo: "Efectivo",
+                    pedidos_ya: "Pedidos Ya",
                   };
                   const activeReceiptTypes = isTableless ? tablelessReceiptTypes : receiptTypeLabels;
                   const activePaymentMethods = isTableless ? tablelessPaymentMethods : paymentMethodLabels;

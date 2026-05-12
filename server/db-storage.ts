@@ -3528,8 +3528,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getReportRestaurant(from: string, to: string): Promise<any> {
-    const orders = await db.select().from(restaurantOrders);
-    const items = await db.select().from(orderItems);
+    const orders = await db.select().from(restaurantOrders)
+      .where(and(
+        eq(restaurantOrders.status, "closed"),
+        sql`DATE(${restaurantOrders.closedAt}) >= ${from}`,
+        sql`DATE(${restaurantOrders.closedAt}) <= ${to}`
+      ));
+    const orderIds = orders.map(o => o.id);
+    const items = orderIds.length > 0
+      ? await db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds))
+      : [];
     const menuItemsList = await db.select().from(menuItems);
     const areas = await db.select().from(restaurantAreas);
 
