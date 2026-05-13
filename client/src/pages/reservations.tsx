@@ -881,26 +881,45 @@ export function ReservationFormDialog({
                     setSelectedPackageId(val);
                     const pkg = activePackages.find(p => p.id === val);
                     if (pkg) {
-                      const nights = pkg.nights || 1;
-                      const checkIn = formData.checkInDate || today;
-                      const d = new Date(checkIn + "T12:00:00");
-                      d.setDate(d.getDate() + nights);
-                      const newCheckOut = toArgentinaDateStr(d);
-                      const totalPrice = parseFloat(pkg.basePrice);
-                      const ratePerNight = (totalPrice / nights).toFixed(2);
-                      setFormData(prev => ({
-                        ...prev,
-                        checkOutDate: newCheckOut,
-                        nights,
-                        baseRatePerNight: ratePerNight,
-                        finalRatePerNight: ratePerNight,
-                        totalRoomAmount: totalPrice.toFixed(2),
-                        discountType: "none",
-                        discountValue: "0",
-                        notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
-                          ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
-                          : `[Paquete: ${pkg.name}]`,
-                      }));
+                      if (isEditing) {
+                        // En edición: solo actualiza precio y notas, NO cambia fechas
+                        const currentNights = Number(formData.nights) || 1;
+                        const totalPrice = parseFloat(pkg.basePrice);
+                        const ratePerNight = (totalPrice / currentNights).toFixed(2);
+                        setFormData(prev => ({
+                          ...prev,
+                          baseRatePerNight: ratePerNight,
+                          finalRatePerNight: ratePerNight,
+                          totalRoomAmount: (parseFloat(ratePerNight) * currentNights).toFixed(2),
+                          discountType: "none",
+                          discountValue: "0",
+                          notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
+                            ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
+                            : `[Paquete: ${pkg.name}]`,
+                        }));
+                      } else {
+                        // En creación: aplica fechas según duración del paquete
+                        const nights = pkg.nights || 1;
+                        const checkIn = formData.checkInDate || today;
+                        const d = new Date(checkIn + "T12:00:00");
+                        d.setDate(d.getDate() + nights);
+                        const newCheckOut = toArgentinaDateStr(d);
+                        const totalPrice = parseFloat(pkg.basePrice);
+                        const ratePerNight = (totalPrice / nights).toFixed(2);
+                        setFormData(prev => ({
+                          ...prev,
+                          checkOutDate: newCheckOut,
+                          nights,
+                          baseRatePerNight: ratePerNight,
+                          finalRatePerNight: ratePerNight,
+                          totalRoomAmount: totalPrice.toFixed(2),
+                          discountType: "none",
+                          discountValue: "0",
+                          notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
+                            ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
+                            : `[Paquete: ${pkg.name}]`,
+                        }));
+                      }
                     }
                   }}
                 >
@@ -4149,16 +4168,21 @@ export default function ReservationsPage() {
           const editingId = selectedReservation?.id;
           const savedReturnTo = editReturnTo;
           setEditReturnTo(null);
-          setSelectedReservation(undefined);
           if (editingId) {
             fetch(`/api/reservations/${editingId}`, { credentials: "include" })
-              .then(r => r.json())
+              .then(r => r.ok ? r.json() : null)
               .then(updated => {
-                setSelectedReservation(updated);
-                setDetailReturnTo(savedReturnTo);
-                setDetailDialogOpen(true);
+                if (updated) {
+                  setSelectedReservation(updated);
+                  setDetailReturnTo(savedReturnTo);
+                  setDetailDialogOpen(true);
+                } else {
+                  setSelectedReservation(undefined);
+                }
               })
-              .catch(() => {});
+              .catch(() => { setSelectedReservation(undefined); });
+          } else {
+            setSelectedReservation(undefined);
           }
         }}
       />
