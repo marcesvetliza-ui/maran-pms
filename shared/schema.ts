@@ -361,6 +361,8 @@ export type PlanningData = {
     groupId: string;
     groupName: string;
     groupCode: string;
+    groupColor: string;
+    roomTypeId: string;
     roomTypeName: string;
     quantity: number;
     assigned: number;

@@ -974,6 +974,8 @@ export class DatabaseStorage implements IStorage {
             groupId: group.id,
             groupName: group.name,
             groupCode: group.groupCode,
+            groupColor: group.color || "#6366f1",
+            roomTypeId: block.roomTypeId,
             roomTypeName: rt?.name || "Desconocido",
             quantity: block.quantity,
             assigned: assignedCount,

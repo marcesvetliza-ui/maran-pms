@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment, forwardRef } from "react";
+import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal, ShoppingCart, XCircle, TrendingUp, Palette, X } from "lucide-react";
@@ -1936,6 +1936,56 @@ export default function PlanningPage() {
     refetchInterval: 30000,
   });
 
+  // Pre-compute day index map for fast lookup
+  const dayIndexMap = useMemo(() => {
+    if (!data?.days) return {} as Record<string, number>;
+    const m: Record<string, number> = {};
+    data.days.forEach((d, i) => { m[d] = i; });
+    return m;
+  }, [data?.days]);
+
+  // Compute ghost overlay for unassigned group blocks
+  // For each block, pick the first N available rooms of that type and mark their cells
+  const groupBlockOverlay = useMemo(() => {
+    if (!data?.unassignedGroupBlocks || !data.rooms || !data.days) {
+      return {} as Record<string, Record<string, { groupId: string; groupName: string; groupColor: string }>>;
+    }
+    const overlay: Record<string, Record<string, { groupId: string; groupName: string; groupColor: string }>> = {};
+
+    for (const block of data.unassignedGroupBlocks) {
+      const unassignedCount = block.quantity - block.assigned;
+      if (unassignedCount <= 0) continue;
+
+      const blockDays = data.days.filter(d => d >= block.checkIn && d < block.checkOut);
+      if (blockDays.length === 0) continue;
+
+      const roomsOfType = data.rooms.filter(r => r.roomTypeId === block.roomTypeId);
+
+      // Find rooms that are fully available for the whole block period
+      const availableRooms = roomsOfType.filter(room => {
+        return blockDays.every(day => {
+          const idx = dayIndexMap[day];
+          if (idx === undefined) return false;
+          const status = data.occupancy[room.id]?.[idx];
+          return status === "available";
+        });
+      });
+
+      const targetRooms = availableRooms.slice(0, unassignedCount);
+      for (const room of targetRooms) {
+        if (!overlay[room.id]) overlay[room.id] = {};
+        for (const day of blockDays) {
+          overlay[room.id][day] = {
+            groupId: block.groupId,
+            groupName: block.groupName,
+            groupColor: block.groupColor,
+          };
+        }
+      }
+    }
+    return overlay;
+  }, [data?.unassignedGroupBlocks, data?.rooms, data?.days, data?.occupancy, dayIndexMap]);
+
   const [editingNoteDate, setEditingNoteDate] = useState<string | null>(null);
   const [editingNoteValue, setEditingNoteValue] = useState("");
 
@@ -2547,6 +2597,7 @@ export default function PlanningPage() {
                               const reservation = reservationId ? data.reservations[reservationId] : null;
                               const info = formatDate(day);
                               const isClickable = status === "available";
+                              const ghostBlock = (!reservation && status === "available") ? groupBlockOverlay[room.id]?.[day] : undefined;
 
                               return (
                                 <DroppableCell
@@ -2630,6 +2681,36 @@ export default function PlanningPage() {
                                         >
                                           <Sunset className="h-3 w-3 text-purple-400" />
                                         </div>
+                                      ) : ghostBlock ? (
+                                        <div
+                                          onClick={() => navigate(`/groups/${ghostBlock.groupId}`)}
+                                          className="h-8 rounded border-2 border-dashed flex items-center justify-center cursor-pointer transition-all hover:brightness-110 hover:scale-105"
+                                          style={(() => {
+                                            const hex = ghostBlock.groupColor.replace("#", "");
+                                            const r = parseInt(hex.substring(0, 2), 16);
+                                            const g = parseInt(hex.substring(2, 4), 16);
+                                            const b = parseInt(hex.substring(4, 6), 16);
+                                            return {
+                                              backgroundColor: `rgba(${r}, ${g}, ${b}, 0.12)`,
+                                              borderColor: `rgba(${r}, ${g}, ${b}, 0.5)`,
+                                            };
+                                          })()}
+                                          title={`Bloque sin asignar — ${ghostBlock.groupName}`}
+                                          data-testid={`cell-ghost-${room.id}-${day}`}
+                                        >
+                                          <span
+                                            className="text-[9px] font-semibold truncate px-1 max-w-[56px] opacity-70"
+                                            style={(() => {
+                                              const hex = ghostBlock.groupColor.replace("#", "");
+                                              const r = parseInt(hex.substring(0, 2), 16);
+                                              const g = parseInt(hex.substring(2, 4), 16);
+                                              const b = parseInt(hex.substring(4, 6), 16);
+                                              return { color: `rgb(${r}, ${g}, ${b})` };
+                                            })()}
+                                          >
+                                            {ghostBlock.groupName.substring(0, 5).toUpperCase()}
+                                          </span>
+                                        </div>
                                       ) : (
                                         <div
                                           onClick={() => handleCellClick(room, day, status, reservationId)}
@@ -2689,6 +2770,13 @@ export default function PlanningPage() {
                                             <div className="border-t pt-1 mt-1 text-primary">
                                               Clic para ver detalle
                                             </div>
+                                          </div>
+                                        ) : ghostBlock ? (
+                                          <div className="border-t pt-1 mt-1 space-y-0.5">
+                                            <div className="font-semibold" style={(() => { const hex = ghostBlock.groupColor.replace("#",""); const r=parseInt(hex.substring(0,2),16),g=parseInt(hex.substring(2,4),16),b=parseInt(hex.substring(4,6),16); return {color:`rgb(${r},${g},${b})`}; })()}>
+                                              Grupo: {ghostBlock.groupName}
+                                            </div>
+                                            <div className="text-muted-foreground text-[10px]">Bloque sin asignar — clic para ir al grupo y asignar habitación</div>
                                           </div>
                                         ) : isClickable ? (
                                           <div className="border-t pt-1 mt-1 text-primary">
