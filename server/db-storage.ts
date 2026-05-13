@@ -1740,10 +1740,15 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getRestaurantOrders(status?: OrderStatus): Promise<RestaurantOrderWithDetails[]> {
+  async getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]> {
+    const conditions = [];
+    if (status) conditions.push(eq(restaurantOrders.status, status));
+    if (from) conditions.push(gte(restaurantOrders.openedAt, new Date(from)));
+    if (to) conditions.push(lte(restaurantOrders.openedAt, new Date(to)));
+
     let orders: RestaurantOrder[];
-    if (status) {
-      orders = await db.select().from(restaurantOrders).where(eq(restaurantOrders.status, status));
+    if (conditions.length > 0) {
+      orders = await db.select().from(restaurantOrders).where(and(...conditions));
     } else {
       orders = await db.select().from(restaurantOrders);
     }

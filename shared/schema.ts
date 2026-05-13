@@ -953,6 +953,7 @@ export const restaurantOrders = pgTable("restaurant_orders", {
   tax: decimal("tax", { precision: 10, scale: 2 }).default("0"),
   total: decimal("total", { precision: 10, scale: 2 }).default("0"),
   notes: text("notes"),
+  cancellationReason: text("cancellation_reason"),
   openedAt: timestamp("opened_at").notNull(),
   closedAt: timestamp("closed_at"),
   chargedToRoom: text("charged_to_room").default("false"),

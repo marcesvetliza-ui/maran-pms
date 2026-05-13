@@ -159,7 +159,9 @@ export function registerRestaurantRoutes(app: Express) {
   app.get("/api/restaurant/orders", async (req, res) => {
     try {
       const status = req.query.status as string | undefined;
-      const orders = await storage.getRestaurantOrders(status as any);
+      const from = req.query.from as string | undefined;
+      const to = req.query.to as string | undefined;
+      const orders = await storage.getRestaurantOrders(status as any, from, to);
       const ordersWithSplits = await Promise.all(
         orders.map(async (order: any) => {
           const splits = await storage.getOrderSplits(order.id);
@@ -656,6 +658,34 @@ export function registerRestaurantRoutes(app: Express) {
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error cancelling split" });
+    }
+  });
+
+  // Cancel order
+  app.post("/api/restaurant/orders/:id/cancel", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Orden no encontrada" });
+      if (order.status === "closed") return res.status(400).json({ error: "La orden ya está cerrada" });
+      if (order.status === "cancelled") return res.status(400).json({ error: "La orden ya está cancelada" });
+
+      const { reason } = req.body;
+      if (!reason || !reason.trim()) return res.status(400).json({ error: "El motivo de cancelación es requerido" });
+
+      await storage.updateRestaurantOrder(req.params.id, {
+        status: "cancelled",
+        cancellationReason: reason.trim(),
+        closedAt: new Date(),
+      } as any);
+
+      if (order.tableId) {
+        await storage.updateRestaurantTable(order.tableId, { status: "available" });
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Error cancelling order:", error);
+      res.status(500).json({ error: "Error al cancelar la orden" });
     }
   });
 

@@ -353,6 +353,10 @@ export default function RestaurantPage() {
   const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
   const [transferTargetOrderId, setTransferTargetOrderId] = useState<string>("");
   const [transferNewWaiter, setTransferNewWaiter] = useState("");
+  const [editingCovers, setEditingCovers] = useState(false);
+  const [coversInput, setCoversInput] = useState(1);
+  const [showCancelOrderDialog, setShowCancelOrderDialog] = useState(false);
+  const [cancelOrderReason, setCancelOrderReason] = useState("");
   const [splitReceiptType, setSplitReceiptType] = useState("ticket");
   const [splitPayMethod, setSplitPayMethod] = useState("efectivo");
   const [splitPayMethods, setSplitPayMethods] = useState<Record<string, string>>({});
@@ -649,6 +653,36 @@ export default function RestaurantPage() {
       setIsSplitMode(false);
       toast({ title: "División cancelada" });
     },
+  });
+
+  const updateCoversMutation = useMutation({
+    mutationFn: async ({ orderId, covers }: { orderId: string; covers: number }) => {
+      const res = await apiRequest("PATCH", `/api/restaurant/orders/${orderId}`, { covers });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      setEditingCovers(false);
+      toast({ title: "Comensales actualizados" });
+    },
+    onError: () => toast({ title: "Error al actualizar comensales", variant: "destructive" }),
+  });
+
+  const cancelOrderMutation = useMutation({
+    mutationFn: async ({ orderId, reason }: { orderId: string; reason: string }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/cancel`, { reason });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+      setShowCancelOrderDialog(false);
+      setCancelOrderReason("");
+      setIsOrderDialogOpen(false);
+      setCurrentOrder(null);
+      toast({ title: "Ticket cancelado", description: "La mesa quedó disponible." });
+    },
+    onError: (e: any) => toast({ title: e?.message || "Error al cancelar", variant: "destructive" }),
   });
 
   const transferItemsMutation = useMutation({
@@ -2078,9 +2112,30 @@ export default function RestaurantPage() {
                 <DialogTitle>
                   {getUpdatedOrder()?.orderLabel || getUpdatedOrder()?.orderNumber} - {getUpdatedOrder()?.tableId ? `Mesa ${getUpdatedOrder()?.table?.tableNumber || selectedTable?.tableNumber}` : (areas.find(a => a.id === getUpdatedOrder()?.areaId)?.name || "")}
                 </DialogTitle>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Mozo: {getUpdatedOrder()?.waiterName || "—"} | Abierto: {currentOrder ? new Date(currentOrder.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : ""} | {getUpdatedOrder()?.covers} comensales
-                  {(getUpdatedOrder()?.activeCourse || 1) > 1 && ` | Curso: ${courseLabels[getUpdatedOrder()?.activeCourse || 1] || `Curso ${getUpdatedOrder()?.activeCourse}`}`}
+                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
+                  <span>Mozo: {getUpdatedOrder()?.waiterName || "—"}</span>
+                  <span>|</span>
+                  <span>Abierto: {currentOrder ? new Date(currentOrder.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+                  <span>|</span>
+                  {editingCovers ? (
+                    <span className="flex items-center gap-1">
+                      <button className="h-5 w-5 rounded border text-xs flex items-center justify-center hover:bg-muted" onClick={() => setCoversInput(c => Math.max(1, c - 1))}>−</button>
+                      <span className="min-w-[2ch] text-center font-medium text-foreground">{coversInput}</span>
+                      <button className="h-5 w-5 rounded border text-xs flex items-center justify-center hover:bg-muted" onClick={() => setCoversInput(c => c + 1)}>+</button>
+                      <button className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => { if (currentOrder) updateCoversMutation.mutate({ orderId: currentOrder.id, covers: coversInput }); }}>OK</button>
+                      <button className="text-[10px] px-1 py-0.5 rounded hover:bg-muted" onClick={() => setEditingCovers(false)}>✕</button>
+                    </span>
+                  ) : (
+                    <button
+                      className="flex items-center gap-0.5 hover:text-foreground transition-colors group"
+                      onClick={() => { setCoversInput(getUpdatedOrder()?.covers || 1); setEditingCovers(true); }}
+                      data-testid="button-edit-covers"
+                    >
+                      <span>{getUpdatedOrder()?.covers} comensal{(getUpdatedOrder()?.covers || 1) !== 1 ? "es" : ""}</span>
+                      <Pencil className="h-2.5 w-2.5 opacity-0 group-hover:opacity-60 ml-0.5" />
+                    </button>
+                  )}
+                  {(getUpdatedOrder()?.activeCourse || 1) > 1 && <><span>|</span><span>Curso: {courseLabels[getUpdatedOrder()?.activeCourse || 1] || `Curso ${getUpdatedOrder()?.activeCourse}`}</span></>}
                 </p>
               </div>
               <div className="flex items-center gap-1">
@@ -2117,6 +2172,16 @@ export default function RestaurantPage() {
                 >
                   <CircleDollarSign className="h-4 w-4 mr-1" />
                   Folio
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={() => { setCancelOrderReason(""); setShowCancelOrderDialog(true); }}
+                  data-testid="button-cancel-order"
+                >
+                  <XCircle className="h-4 w-4 mr-1" />
+                  Cancelar
                 </Button>
               </div>
             </div>
@@ -3339,6 +3404,44 @@ export default function RestaurantPage() {
                 </Button>
               );
             })()}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Order Confirmation Dialog */}
+      <Dialog open={showCancelOrderDialog} onOpenChange={(open) => { if (!open) { setShowCancelOrderDialog(false); setCancelOrderReason(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5" />
+              Cancelar Ticket
+            </DialogTitle>
+            <DialogDescription>
+              Se cancelará el ticket <strong>{getUpdatedOrder()?.orderLabel || getUpdatedOrder()?.orderNumber}</strong>. La mesa quedará disponible. Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className="text-sm font-medium">Motivo de cancelación <span className="text-destructive">*</span></label>
+            <Textarea
+              placeholder="Ej: Cliente se fue, pedido erróneo, error de apertura..."
+              value={cancelOrderReason}
+              onChange={(e) => setCancelOrderReason(e.target.value)}
+              rows={3}
+              data-testid="input-cancel-order-reason"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowCancelOrderDialog(false); setCancelOrderReason(""); }}>
+              Volver
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!cancelOrderReason.trim() || cancelOrderMutation.isPending}
+              onClick={() => { if (currentOrder) cancelOrderMutation.mutate({ orderId: currentOrder.id, reason: cancelOrderReason }); }}
+              data-testid="button-confirm-cancel-order"
+            >
+              {cancelOrderMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cancelando...</> : "Confirmar Cancelación"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

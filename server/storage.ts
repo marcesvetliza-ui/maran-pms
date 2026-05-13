@@ -428,7 +428,7 @@ export interface IStorage {
   deleteMenuItem(id: string): Promise<boolean>;
 
   // Restaurant Orders
-  getRestaurantOrders(status?: OrderStatus): Promise<RestaurantOrderWithDetails[]>;
+  getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]>;
   getRestaurantOrder(id: string): Promise<RestaurantOrderWithDetails | undefined>;
   getOrdersByTable(tableId: string): Promise<RestaurantOrder[]>;
   createRestaurantOrder(order: InsertRestaurantOrder): Promise<RestaurantOrder>;
@@ -3068,11 +3068,13 @@ export class MemStorage implements IStorage {
     return this.menuItems.delete(id);
   }
 
-  async getRestaurantOrders(status?: OrderStatus): Promise<RestaurantOrderWithDetails[]> {
+  async getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]> {
     let orders = Array.from(this.restaurantOrders.values());
     if (status) {
       orders = orders.filter(o => o.status === status);
     }
+    if (from) orders = orders.filter(o => new Date(o.openedAt) >= new Date(from));
+    if (to) orders = orders.filter(o => new Date(o.openedAt) <= new Date(to));
     return orders.map(order => {
       const table = order.tableId ? this.restaurantTables.get(order.tableId) : undefined;
       const tableArea = table ? this.restaurantAreas.get(table.areaId) : undefined;

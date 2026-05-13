@@ -1281,6 +1281,19 @@ function HistorialTab() {
     enabled: !!detailShiftId,
   });
 
+  const { data: cancelledOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/restaurant/orders/cancelled-in-shift", detailShiftId],
+    queryFn: async () => {
+      if (!shiftDetail) return [];
+      const from = shiftDetail.shift.openedAt;
+      const to = shiftDetail.shift.closedAt || new Date().toISOString();
+      const res = await fetch(`/api/restaurant/orders?status=cancelled&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!detailShiftId && !!shiftDetail,
+  });
+
   return (
     <div className="space-y-6 p-4">
       <Card>
@@ -1446,6 +1459,41 @@ function HistorialTab() {
                   </TableBody>
                 </Table>
               </div>
+
+              {cancelledOrders.length > 0 && (
+                <div>
+                  <h3 className="font-semibold mb-2 flex items-center gap-2 text-destructive">
+                    <XCircle className="h-4 w-4" />
+                    Tickets Cancelados ({cancelledOrders.length})
+                  </h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Hora</TableHead>
+                        <TableHead>Ticket</TableHead>
+                        <TableHead>Mesa</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead>Motivo</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {cancelledOrders.map((o: any) => (
+                        <TableRow key={o.id} className="opacity-75">
+                          <TableCell>{o.closedAt ? formatTime(o.closedAt) : "-"}</TableCell>
+                          <TableCell className="font-medium">{o.orderLabel || o.orderNumber}</TableCell>
+                          <TableCell>{o.table?.tableNumber ? `Mesa ${o.table.tableNumber}` : "—"}</TableCell>
+                          <TableCell className="text-right line-through text-muted-foreground">
+                            {formatCurrency(o.total || 0)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground italic max-w-[160px] truncate" title={o.cancellationReason}>
+                            {o.cancellationReason || "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
 
               <DialogFooter>
                 <Button
