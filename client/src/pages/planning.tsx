@@ -79,6 +79,7 @@ export const PLANNING_COLORS: Record<PlanningCellStatus, { bg: string; text: str
   early_blocked:  { bg: "bg-sky-100 dark:bg-sky-900/30",          text: "text-sky-800",                           label: "Early check-in",   border: "border-sky-200 dark:border-sky-700 border-dashed" },
   late_blocked:   { bg: "bg-pink-100 dark:bg-pink-900/30",        text: "text-pink-800",                          label: "Late check-out",   border: "border-pink-200 dark:border-pink-700 border-dashed" },
   inspected:      { bg: "bg-green-50 dark:bg-green-900/20",       text: "text-green-700",                         label: "Inspeccionada",    border: "border-green-200 dark:border-green-700" },
+  checked_out:    { bg: "bg-zinc-100 dark:bg-zinc-800/40",        text: "text-zinc-400 dark:text-zinc-500",       label: "Check-out realizado", border: "border-zinc-200 dark:border-zinc-700 border-dashed" },
 };
 
 function getStatusColor(status: PlanningCellStatus): string {
@@ -2513,7 +2514,19 @@ export default function PlanningPage() {
                                 >
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      {reservation && status !== "early_blocked" && status !== "late_blocked" ? (
+                                      {reservation && status === "checked_out" ? (
+                                        <div
+                                          onClick={() => handleCellClick(room, day, status, reservationId)}
+                                          className="h-8 rounded border border-dashed border-zinc-300 dark:border-zinc-600 flex items-center justify-center opacity-40 cursor-pointer hover:opacity-60 transition-opacity bg-zinc-100 dark:bg-zinc-800/40"
+                                          data-testid={`cell-${room.id}-${day}`}
+                                        >
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate px-1 max-w-[56px]">
+                                            {reservation.guestName === "Sin Asignar" || !reservation.guestName
+                                              ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
+                                              : reservation.guestName.split(" ")[0]}
+                                          </span>
+                                        </div>
+                                      ) : reservation && status !== "early_blocked" && status !== "late_blocked" ? (
                                         <DraggableReservationCell
                                           id={`drag-${reservationId}-${room.id}-${day}`}
                                           reservationId={reservationId!}

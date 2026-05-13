@@ -743,7 +743,6 @@ export class DatabaseStorage implements IStorage {
     const allReservations = await db.select().from(reservations).where(
       and(
         ne(reservations.status, "cancelled"),
-        ne(reservations.status, "checked_out"),
         ne(reservations.status, "pending"),
         sql`${reservations.checkInDate} <= ${endDate}`,
         sql`${reservations.checkOutDate} >= ${startDate}`
@@ -866,7 +865,9 @@ export class DatabaseStorage implements IStorage {
         if (reservation) {
           cellReservations[room.id][day] = reservation.id;
           const isGroupRes = groupReservationIds.has(reservation.id);
-          if (isGroupRes) {
+          if (reservation.status === "checked_out") {
+            occupancy[room.id].push("checked_out");
+          } else if (isGroupRes) {
             occupancy[room.id].push("group_blocked");
           } else if (reservation.status === "checked_in") {
             if (reservation.checkOutDate === todayStr) {
