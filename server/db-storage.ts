@@ -3755,10 +3755,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async _nextShiftNumber(area: string): Promise<number> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Argentina is always UTC-3 (no DST). We need "today midnight" in Argentina time.
+    // e.g. 23:00 Argentina = 02:00 UTC next day — so we must NOT use server local midnight (UTC).
+    const nowUTC = new Date();
+    // Shift the timestamp 3 hours back to get the "Argentina date"
+    const argDate = new Date(nowUTC.getTime() - 3 * 60 * 60 * 1000);
+    // Argentina midnight expressed in UTC = that date at 03:00 UTC
+    const todayArgMidnightUTC = new Date(
+      Date.UTC(argDate.getUTCFullYear(), argDate.getUTCMonth(), argDate.getUTCDate(), 3, 0, 0, 0)
+    );
     const rows = await db.select({ cnt: count() }).from(cashShifts)
-      .where(and(eq(cashShifts.area, area), gte(cashShifts.openedAt, today)));
+      .where(and(eq(cashShifts.area, area), gte(cashShifts.openedAt, todayArgMidnightUTC)));
     return (rows[0]?.cnt || 0) + 1;
   }
 
