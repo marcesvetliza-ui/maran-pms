@@ -47,6 +47,9 @@ import {
   Brush,
   UtensilsCrossed,
   Globe,
+  LogIn,
+  LogOut,
+  AlertCircle,
 } from "lucide-react";
 
 const COLORS = [
@@ -219,6 +222,21 @@ export default function ReportsPage() {
     enabled: activeTab === "billing",
   });
 
+  type ArrDepRow = { code: string; guest: string; room: string; roomType: string; checkIn: string; checkOut: string; nights: number; pax: number; status: string; total: number; paid: number; balance: number };
+  type ArrDepData = { arrivals: ArrDepRow[]; departures: ArrDepRow[] };
+
+  const arrDep = useQuery<ArrDepData>({
+    queryKey: ["/api/reports/arrivals-departures", from, to],
+    queryFn: () => fetchReport(`/api/reports/arrivals-departures?from=${from}&to=${to}`),
+    enabled: activeTab === "arrivals-departures",
+  });
+
+  const pendingBalances = useQuery<ArrDepRow[]>({
+    queryKey: ["/api/reports/pending-balances"],
+    queryFn: () => fetchReport("/api/reports/pending-balances"),
+    enabled: activeTab === "pending-balances",
+  });
+
   const handleExportCSV = () => {
     switch (activeTab) {
       case "occupancy":
@@ -304,6 +322,29 @@ export default function ReportsPage() {
               formatARS(parseFloat(p.amount || "0")), p.reference || ""
             ]),
             "facturacion"
+          );
+        }
+        break;
+      case "arrivals-departures": {
+        const cols = ["Código", "Huésped", "Hab.", "Tipo", "Check-in", "Check-out", "Noches", "Pax", "Estado", "Total", "Pagado", "Saldo"];
+        const toRow = (r: ArrDepRow) => [r.code, r.guest, r.room, r.roomType, r.checkIn, r.checkOut, String(r.nights), String(r.pax), r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)];
+        if (arrDep.data) {
+          const allRows = [
+            ["--- LLEGADAS ---", "", "", "", "", "", "", "", "", "", "", ""],
+            ...arrDep.data.arrivals.map(toRow),
+            ["--- SALIDAS ---", "", "", "", "", "", "", "", "", "", "", ""],
+            ...arrDep.data.departures.map(toRow),
+          ];
+          exportCSV(cols, allRows, "llegadas-salidas");
+        }
+        break;
+      }
+      case "pending-balances":
+        if (pendingBalances.data) {
+          exportCSV(
+            ["Código", "Huésped", "Hab.", "Tipo", "Check-in", "Check-out", "Noches", "Pax", "Estado", "Total", "Pagado", "Saldo"],
+            pendingBalances.data.map((r) => [r.code, r.guest, r.room, r.roomType, r.checkIn, r.checkOut, String(r.nights), String(r.pax), r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)]),
+            "saldos-pendientes"
           );
         }
         break;
@@ -405,6 +446,14 @@ export default function ReportsPage() {
           <TabsTrigger value="billing" data-testid="tab-billing">
             <CreditCard className="h-4 w-4 mr-1" />
             Facturación
+          </TabsTrigger>
+          <TabsTrigger value="arrivals-departures" data-testid="tab-arrivals-departures">
+            <LogIn className="h-4 w-4 mr-1" />
+            Llegadas / Salidas
+          </TabsTrigger>
+          <TabsTrigger value="pending-balances" data-testid="tab-pending-balances">
+            <AlertCircle className="h-4 w-4 mr-1" />
+            Saldos Pendientes
           </TabsTrigger>
         </TabsList>
 
@@ -1028,6 +1077,174 @@ export default function ReportsPage() {
               ) : (
                 <p className="text-muted-foreground text-center py-8">No hay datos de facturación para el período seleccionado</p>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="arrivals-departures" className="space-y-4 mt-4">
+          {arrDep.isLoading ? <Card><CardContent className="p-8"><LoadingSkeleton /></CardContent></Card> : arrDep.data ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <LogIn className="h-4 w-4 text-green-600" />
+                    Llegadas — {arrDep.data.arrivals.length} reservas · {arrDep.data.arrivals.reduce((s, r) => s + r.pax, 0)} pax
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-auto">
+                    <Table data-testid="table-arrivals">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Código</TableHead>
+                          <TableHead>Huésped</TableHead>
+                          <TableHead>Hab.</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <TableHead>Check-in</TableHead>
+                          <TableHead>Check-out</TableHead>
+                          <TableHead className="text-center">Noches</TableHead>
+                          <TableHead className="text-center">Pax</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                          <TableHead className="text-right">Pagado</TableHead>
+                          <TableHead className="text-right">Saldo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {arrDep.data.arrivals.length === 0 ? (
+                          <TableRow><TableCell colSpan={12} className="text-center text-muted-foreground py-6">Sin llegadas en el período</TableCell></TableRow>
+                        ) : arrDep.data.arrivals.map((r, i) => (
+                          <TableRow key={i} data-testid={`row-arrival-${i}`}>
+                            <TableCell className="font-mono text-xs">{r.code}</TableCell>
+                            <TableCell className="font-medium">{r.guest}</TableCell>
+                            <TableCell>{r.room}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
+                            <TableCell className="text-sm">{r.checkIn}</TableCell>
+                            <TableCell className="text-sm">{r.checkOut}</TableCell>
+                            <TableCell className="text-center">{r.nights}</TableCell>
+                            <TableCell className="text-center">{r.pax}</TableCell>
+                            <TableCell><Badge variant="outline" className="text-xs">{r.status}</Badge></TableCell>
+                            <TableCell className="text-right">{formatARS(r.total)}</TableCell>
+                            <TableCell className="text-right text-green-600">{formatARS(r.paid)}</TableCell>
+                            <TableCell className="text-right font-semibold" style={{ color: r.balance > 0 ? "var(--destructive)" : undefined }}>{formatARS(r.balance)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <LogOut className="h-4 w-4 text-orange-600" />
+                    Salidas — {arrDep.data.departures.length} reservas · {arrDep.data.departures.reduce((s, r) => s + r.pax, 0)} pax
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-auto">
+                    <Table data-testid="table-departures">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Código</TableHead>
+                          <TableHead>Huésped</TableHead>
+                          <TableHead>Hab.</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <TableHead>Check-in</TableHead>
+                          <TableHead>Check-out</TableHead>
+                          <TableHead className="text-center">Noches</TableHead>
+                          <TableHead className="text-center">Pax</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                          <TableHead className="text-right">Pagado</TableHead>
+                          <TableHead className="text-right">Saldo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {arrDep.data.departures.length === 0 ? (
+                          <TableRow><TableCell colSpan={12} className="text-center text-muted-foreground py-6">Sin salidas en el período</TableCell></TableRow>
+                        ) : arrDep.data.departures.map((r, i) => (
+                          <TableRow key={i} data-testid={`row-departure-${i}`}>
+                            <TableCell className="font-mono text-xs">{r.code}</TableCell>
+                            <TableCell className="font-medium">{r.guest}</TableCell>
+                            <TableCell>{r.room}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
+                            <TableCell className="text-sm">{r.checkIn}</TableCell>
+                            <TableCell className="text-sm">{r.checkOut}</TableCell>
+                            <TableCell className="text-center">{r.nights}</TableCell>
+                            <TableCell className="text-center">{r.pax}</TableCell>
+                            <TableCell><Badge variant="outline" className="text-xs">{r.status}</Badge></TableCell>
+                            <TableCell className="text-right">{formatARS(r.total)}</TableCell>
+                            <TableCell className="text-right text-green-600">{formatARS(r.paid)}</TableCell>
+                            <TableCell className="text-right font-semibold" style={{ color: r.balance > 0 ? "var(--destructive)" : undefined }}>{formatARS(r.balance)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : <p className="text-muted-foreground text-center py-8">No hay datos para el período seleccionado</p>}
+        </TabsContent>
+
+        <TabsContent value="pending-balances" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+                Saldos Pendientes
+                {pendingBalances.data && (
+                  <Badge variant="destructive" className="ml-2">
+                    {pendingBalances.data.length} reservas · {formatARS(pendingBalances.data.reduce((s, r) => s + r.balance, 0))} total
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pendingBalances.isLoading ? <LoadingSkeleton /> : pendingBalances.data && pendingBalances.data.length > 0 ? (
+                <div className="overflow-auto">
+                  <Table data-testid="table-pending-balances">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Código</TableHead>
+                        <TableHead>Huésped</TableHead>
+                        <TableHead>Hab.</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Check-in</TableHead>
+                        <TableHead>Check-out</TableHead>
+                        <TableHead className="text-center">Noches</TableHead>
+                        <TableHead className="text-center">Pax</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="text-right">Total cargos</TableHead>
+                        <TableHead className="text-right">Pagado</TableHead>
+                        <TableHead className="text-right">Saldo</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pendingBalances.data.map((r, i) => (
+                        <TableRow key={i} data-testid={`row-pending-${i}`}>
+                          <TableCell className="font-mono text-xs">{r.code}</TableCell>
+                          <TableCell className="font-medium">{r.guest}</TableCell>
+                          <TableCell>{r.room}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
+                          <TableCell className="text-sm">{r.checkIn}</TableCell>
+                          <TableCell className="text-sm">{r.checkOut}</TableCell>
+                          <TableCell className="text-center">{r.nights}</TableCell>
+                          <TableCell className="text-center">{r.pax}</TableCell>
+                          <TableCell><Badge variant="outline" className="text-xs">{r.status}</Badge></TableCell>
+                          <TableCell className="text-right">{formatARS(r.total)}</TableCell>
+                          <TableCell className="text-right text-green-600">{formatARS(r.paid)}</TableCell>
+                          <TableCell className="text-right font-bold text-destructive">{formatARS(r.balance)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : pendingBalances.data ? (
+                <p className="text-muted-foreground text-center py-8 flex items-center justify-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-green-600" /> No hay saldos pendientes
+                </p>
+              ) : null}
             </CardContent>
           </Card>
         </TabsContent>

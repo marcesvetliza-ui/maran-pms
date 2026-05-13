@@ -934,6 +934,94 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/reports/arrivals-departures", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      if (!from || !to) return res.status(400).json({ error: "from y to son requeridos" });
+
+      const rowMapper = (r: any) => ({
+        code: r.code,
+        guest: r.guest,
+        room: r.room,
+        roomType: r.room_type,
+        checkIn: r.check_in,
+        checkOut: r.check_out,
+        nights: Number(r.nights),
+        pax: Number(r.pax),
+        status: r.status,
+        total: Number(r.total),
+        paid: Number(r.paid),
+        balance: Number(r.total) - Number(r.paid),
+      });
+
+      const arrRows = await db.execute(sql`
+        SELECT r.reservation_code AS code,
+               g.first_name || ' ' || g.last_name AS guest,
+               ro.room_number AS room, rt.name AS room_type,
+               r.check_in_date AS check_in, r.check_out_date AS check_out,
+               r.nights, r.number_of_guests AS pax, r.status,
+               COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'active'), 0) AS total,
+               COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS paid
+        FROM reservations r
+        LEFT JOIN guests g ON r.guest_id = g.id
+        LEFT JOIN rooms ro ON r.room_id = ro.id
+        LEFT JOIN room_types rt ON r.room_type_id = rt.id
+        WHERE r.check_in_date BETWEEN ${from} AND ${to} AND r.status != 'cancelled'
+        ORDER BY r.check_in_date, ro.room_number
+      `);
+
+      const depRows = await db.execute(sql`
+        SELECT r.reservation_code AS code,
+               g.first_name || ' ' || g.last_name AS guest,
+               ro.room_number AS room, rt.name AS room_type,
+               r.check_in_date AS check_in, r.check_out_date AS check_out,
+               r.nights, r.number_of_guests AS pax, r.status,
+               COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'active'), 0) AS total,
+               COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS paid
+        FROM reservations r
+        LEFT JOIN guests g ON r.guest_id = g.id
+        LEFT JOIN rooms ro ON r.room_id = ro.id
+        LEFT JOIN room_types rt ON r.room_type_id = rt.id
+        WHERE r.check_out_date BETWEEN ${from} AND ${to} AND r.status != 'cancelled'
+        ORDER BY r.check_out_date, ro.room_number
+      `);
+
+      res.json({ arrivals: (arrRows.rows as any[]).map(rowMapper), departures: (depRows.rows as any[]).map(rowMapper) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/reports/pending-balances", requireAuth, async (req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT * FROM (
+          SELECT r.reservation_code AS code,
+                 g.first_name || ' ' || g.last_name AS guest,
+                 ro.room_number AS room, rt.name AS room_type,
+                 r.check_in_date AS check_in, r.check_out_date AS check_out,
+                 r.nights, r.number_of_guests AS pax, r.status,
+                 COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'active'), 0) AS total,
+                 COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS paid
+          FROM reservations r
+          LEFT JOIN guests g ON r.guest_id = g.id
+          LEFT JOIN rooms ro ON r.room_id = ro.id
+          LEFT JOIN room_types rt ON r.room_type_id = rt.id
+          WHERE r.status IN ('checked_in', 'confirmed', 'pending')
+        ) sub WHERE (total - paid) > 0.01
+        ORDER BY room
+      `);
+      res.json((rows.rows as any[]).map((r: any) => ({
+        code: r.code, guest: r.guest, room: r.room, roomType: r.room_type,
+        checkIn: r.check_in, checkOut: r.check_out,
+        nights: Number(r.nights), pax: Number(r.pax), status: r.status,
+        total: Number(r.total), paid: Number(r.paid), balance: Number(r.total) - Number(r.paid),
+      })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/reports/payments", requireAuth, async (req, res) => {
     try {
       const { from, to } = req.query as { from: string; to: string };
