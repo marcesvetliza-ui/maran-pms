@@ -1522,19 +1522,35 @@ function ReservationDetailModal({
             </Button>
           )}
           {reservation && reservation.status !== "checked_out" && reservation.status !== "cancelled" && onEdit && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                onEdit(reservation);
-                onOpenChange(false);
-              }}
-              className="w-full sm:w-auto"
-              data-testid="button-edit-reservation"
-            >
-              <ArrowLeftRight className="h-4 w-4 mr-2" />
-              Editar
-            </Button>
+            reservation.isGroup && reservation.groupId ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onOpenChange(false);
+                  onNavigate(`/groups/${reservation.groupId}`);
+                }}
+                className="w-full sm:w-auto"
+                data-testid="button-edit-group-reservation"
+              >
+                <Users className="h-4 w-4 mr-2" />
+                Ver en Grupo
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onEdit(reservation);
+                  onOpenChange(false);
+                }}
+                className="w-full sm:w-auto"
+                data-testid="button-edit-reservation"
+              >
+                <ArrowLeftRight className="h-4 w-4 mr-2" />
+                Editar
+              </Button>
+            )
           )}
           {canCheckIn && (
             <Button
@@ -2227,15 +2243,24 @@ export default function PlanningPage() {
                         className="flex items-center gap-1 w-full text-left font-medium text-orange-800 dark:text-orange-300 hover:underline focus:outline-none"
                         data-testid="button-toggle-unassigned-blocks"
                       >
-                        <span>Bloques sin asignar ({data.unassignedGroupBlocks.length})</span>
+                        <span>Bloques sin asignar ({data.unassignedGroupBlocks.length}) — clic en cada bloque para asignar habitaciones</span>
                         {blocksExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       </button>
                       {blocksExpanded && (
                         <div className="flex flex-wrap gap-2 mt-2">
                           {data.unassignedGroupBlocks.map((block, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs border-orange-400 text-orange-700 dark:text-orange-300" data-testid={`badge-unassigned-block-${idx}`}>
-                              {block.groupName}: {block.quantity - block.assigned} hab. {block.roomTypeName} ({block.checkIn} → {block.checkOut})
-                            </Badge>
+                            <button
+                              key={idx}
+                              onClick={() => navigate(`/groups/${block.groupId}`)}
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-orange-400 text-orange-700 dark:text-orange-300 text-xs hover:bg-orange-100 dark:hover:bg-orange-900/40 transition-colors"
+                              data-testid={`badge-unassigned-block-${idx}`}
+                            >
+                              <Users className="h-3 w-3" />
+                              <span className="font-medium">{block.groupName}</span>
+                              <span>·</span>
+                              <span>{block.quantity - block.assigned} hab. {block.roomTypeName}</span>
+                              <span className="text-orange-500">({block.checkIn} → {block.checkOut})</span>
+                            </button>
                           ))}
                         </div>
                       )}

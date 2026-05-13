@@ -3438,19 +3438,21 @@ export default function ReservationsPage() {
     const params = new URLSearchParams(searchParams);
     const viewId = params.get("view");
     const returnTo = params.get("returnTo");
-    if (viewId && reservations) {
-      const reservation = reservations.find(r => r.id === viewId);
-      if (reservation) {
-        setSelectedReservation(reservation);
-        setDetailReturnTo(returnTo);
-        setDetailDialogOpen(true);
-        navigate("/reservations", { replace: true });
-      } else if (dateMode !== "all") {
-        setDateMode("all");
-        setShowHistory(true);
-      }
-    }
-  }, [searchParams, reservations, navigate]);
+    if (!viewId) return;
+    // Clear URL immediately so the effect doesn't re-trigger
+    navigate("/reservations", { replace: true });
+    // Fetch the reservation directly — avoids date-range filter issues
+    fetch(`/api/reservations/${viewId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((res: ReservationWithDetails | null) => {
+        if (res) {
+          setSelectedReservation(res);
+          setDetailReturnTo(returnTo);
+          setDetailDialogOpen(true);
+        }
+      })
+      .catch(() => {});
+  }, [searchParams]);
 
   const { data: guests } = useQuery<Guest[]>({
     queryKey: ["/api/guests"],
