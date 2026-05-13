@@ -441,6 +441,7 @@ export interface IStorage {
   createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
   updateOrderItem(id: string, item: Partial<InsertOrderItem>): Promise<OrderItem | undefined>;
   deleteOrderItem(id: string): Promise<boolean>;
+  moveOrderItems(itemIds: string[], targetOrderId: string): Promise<void>;
 
   // Table Reservations
   getTableReservations(): Promise<TableReservationWithTable[]>;

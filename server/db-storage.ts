@@ -1846,6 +1846,11 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async moveOrderItems(itemIds: string[], targetOrderId: string): Promise<void> {
+    if (itemIds.length === 0) return;
+    await db.update(orderItems).set({ orderId: targetOrderId }).where(inArray(orderItems.id, itemIds));
+  }
+
   async getTableReservations(): Promise<TableReservationWithTable[]> {
     const res = await db.select().from(tableReservations);
     const tables = await db.select().from(restaurantTables);

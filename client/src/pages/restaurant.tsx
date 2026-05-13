@@ -55,6 +55,7 @@ import {
   ChevronLeft,
   CheckCircle2,
   Printer,
+  ArrowRightLeft,
 } from "lucide-react";
 
 type RestaurantArea = {
@@ -348,6 +349,10 @@ export default function RestaurantPage() {
   const [isEditableItem, setIsEditableItem] = useState(false);
   const [isSplitMode, setIsSplitMode] = useState(false);
   const [splitParts, setSplitParts] = useState(2);
+  const [isTransferMode, setIsTransferMode] = useState(false);
+  const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
+  const [transferTargetOrderId, setTransferTargetOrderId] = useState<string>("");
+  const [transferNewWaiter, setTransferNewWaiter] = useState("");
   const [splitReceiptType, setSplitReceiptType] = useState("ticket");
   const [splitPayMethod, setSplitPayMethod] = useState("efectivo");
   const [splitPayMethods, setSplitPayMethods] = useState<Record<string, string>>({});
@@ -644,6 +649,27 @@ export default function RestaurantPage() {
       setIsSplitMode(false);
       toast({ title: "División cancelada" });
     },
+  });
+
+  const transferItemsMutation = useMutation({
+    mutationFn: async (data: { orderId: string; itemIds: string[]; targetOrderId: string; newOrderData?: any }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/transfer-items`, {
+        itemIds: data.itemIds,
+        targetOrderId: data.targetOrderId,
+        newOrderData: data.newOrderData,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+      setIsTransferMode(false);
+      setTransferSelectedIds(new Set());
+      setTransferTargetOrderId("");
+      setTransferNewWaiter("");
+      toast({ title: "Ítems transferidos correctamente" });
+    },
+    onError: (e: any) => toast({ title: e?.message || "Error al transferir ítems", variant: "destructive" }),
   });
 
   const updateSplitAmountMutation = useMutation({
@@ -2098,7 +2124,33 @@ export default function RestaurantPage() {
 
           {orderView === "folio" && (
             <div className="flex-1 overflow-y-auto space-y-4">
-              <h3 className="font-semibold text-lg">Resumen de Consumos</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-lg">Resumen de Consumos</h3>
+                {!isTransferMode && getOrderItems().length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => { setIsTransferMode(true); setTransferSelectedIds(new Set()); setTransferTargetOrderId(""); setTransferNewWaiter(""); }}
+                    data-testid="button-transfer-items"
+                  >
+                    <ArrowRightLeft className="h-3.5 w-3.5" />
+                    Transferir ítems
+                  </Button>
+                )}
+                {isTransferMode && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setIsTransferMode(false)}>
+                    Cancelar
+                  </Button>
+                )}
+              </div>
+
+              {isTransferMode && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800 p-3 text-sm text-orange-800 dark:text-orange-300">
+                  Seleccioná los ítems a mover y elegí el destino
+                </div>
+              )}
+
               {getOrderItems().length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No hay items en este pedido</p>
               ) : (
@@ -2115,8 +2167,23 @@ export default function RestaurantPage() {
                           )}
                         </div>
                         {courseItems.map((item) => (
-                          <div key={item.id} className={`flex items-center justify-between p-3 border rounded-md mb-1 ${item.status === "waiting_course" ? "opacity-50 border-dashed" : ""}`}>
+                          <div
+                            key={item.id}
+                            className={`flex items-center justify-between p-3 border rounded-md mb-1 ${item.status === "waiting_course" ? "opacity-50 border-dashed" : ""} ${isTransferMode && transferSelectedIds.has(item.id) ? "border-orange-400 bg-orange-50 dark:bg-orange-950/20" : ""} ${isTransferMode ? "cursor-pointer" : ""}`}
+                            onClick={isTransferMode ? () => {
+                              setTransferSelectedIds(prev => {
+                                const next = new Set(prev);
+                                if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                                return next;
+                              });
+                            } : undefined}
+                          >
                             <div className="flex items-center gap-2">
+                              {isTransferMode && (
+                                <div className={`h-4 w-4 rounded border-2 flex items-center justify-center shrink-0 ${transferSelectedIds.has(item.id) ? "bg-orange-500 border-orange-500" : "border-muted-foreground"}`}>
+                                  {transferSelectedIds.has(item.id) && <Check className="h-2.5 w-2.5 text-white" />}
+                                </div>
+                              )}
                               <span className="font-medium">
                                 {item.notes?.startsWith("[") ? item.notes.match(/^\[(.+?)\]/)?.[1] || item.menuItem?.name || "Item" : item.menuItem?.name || "Item"}
                               </span>
@@ -2131,15 +2198,17 @@ export default function RestaurantPage() {
                               <span className="font-semibold">
                                 ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                               </span>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6 text-destructive hover:text-destructive"
-                                onClick={() => { if (currentOrder) deleteItemMutation.mutate({ orderId: currentOrder.id, itemId: item.id }); }}
-                                data-testid={`button-void-item-${item.id}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
+                              {!isTransferMode && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-destructive hover:text-destructive"
+                                  onClick={() => { if (currentOrder) deleteItemMutation.mutate({ orderId: currentOrder.id, itemId: item.id }); }}
+                                  data-testid={`button-void-item-${item.id}`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -2154,14 +2223,77 @@ export default function RestaurantPage() {
                   </div>
                 </div>
               )}
-              <Button
-                variant="outline"
-                onClick={() => setOrderView("menu")}
-                className="w-full"
-                data-testid="button-back-to-menu"
-              >
-                Volver al Menu
-              </Button>
+
+              {isTransferMode && (
+                <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+                  <p className="text-sm font-medium">Destino ({transferSelectedIds.size} ítem{transferSelectedIds.size !== 1 ? "s" : ""} seleccionado{transferSelectedIds.size !== 1 ? "s" : ""})</p>
+                  <select
+                    className="w-full h-9 text-sm border rounded-md px-2 bg-background"
+                    value={transferTargetOrderId}
+                    onChange={e => setTransferTargetOrderId(e.target.value)}
+                    data-testid="select-transfer-target"
+                  >
+                    <option value="">— Elegí el destino —</option>
+                    <option value="new">✦ Nuevo ticket (ticket separado)</option>
+                    {orders.filter(o => o.id !== currentOrder?.id && o.status === "open").map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.tableId
+                          ? `Mesa ${(o as any).table?.tableNumber || o.tableId}`
+                          : o.orderLabel || o.orderNumber} — #{o.orderNumber}
+                      </option>
+                    ))}
+                  </select>
+                  {transferTargetOrderId === "new" && (
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Mozo del nuevo ticket *</label>
+                      <Input
+                        className="h-8 text-sm"
+                        placeholder="Nombre del mozo"
+                        value={transferNewWaiter}
+                        onChange={e => setTransferNewWaiter(e.target.value)}
+                        data-testid="input-transfer-new-waiter"
+                      />
+                    </div>
+                  )}
+                  <Button
+                    className="w-full"
+                    disabled={
+                      transferSelectedIds.size === 0 ||
+                      !transferTargetOrderId ||
+                      (transferTargetOrderId === "new" && !transferNewWaiter.trim()) ||
+                      transferItemsMutation.isPending
+                    }
+                    onClick={() => {
+                      if (!currentOrder) return;
+                      transferItemsMutation.mutate({
+                        orderId: currentOrder.id,
+                        itemIds: Array.from(transferSelectedIds),
+                        targetOrderId: transferTargetOrderId,
+                        newOrderData: transferTargetOrderId === "new" ? {
+                          waiterName: transferNewWaiter.trim(),
+                          areaId: currentOrder.areaId,
+                          orderLabel: `Ticket separado`,
+                          covers: 1,
+                        } : undefined,
+                      });
+                    }}
+                    data-testid="button-confirm-transfer"
+                  >
+                    {transferItemsMutation.isPending ? "Transfiriendo..." : "Confirmar transferencia"}
+                  </Button>
+                </div>
+              )}
+
+              {!isTransferMode && (
+                <Button
+                  variant="outline"
+                  onClick={() => setOrderView("menu")}
+                  className="w-full"
+                  data-testid="button-back-to-menu"
+                >
+                  Volver al Menu
+                </Button>
+              )}
             </div>
           )}
 

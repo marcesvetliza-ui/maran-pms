@@ -659,6 +659,70 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  // Transfer items between orders
+  app.post("/api/restaurant/orders/:id/transfer-items", async (req, res) => {
+    try {
+      const sourceOrder = await storage.getRestaurantOrder(req.params.id);
+      if (!sourceOrder) return res.status(404).json({ error: "Orden origen no encontrada" });
+      if (sourceOrder.status === "closed") return res.status(400).json({ error: "La orden origen está cerrada" });
+
+      const { itemIds, targetOrderId, newOrderData } = req.body;
+      if (!itemIds || itemIds.length === 0) return res.status(400).json({ error: "Seleccioná al menos un ítem" });
+
+      let finalTargetOrderId = targetOrderId;
+
+      // If "new", create a new order first
+      if (targetOrderId === "new") {
+        if (!newOrderData?.waiterName) return res.status(400).json({ error: "Mozo requerido para nuevo ticket" });
+        const orderNumber = storage.generateOrderNumber();
+        const newOrder = await storage.createRestaurantOrder({
+          ...newOrderData,
+          orderNumber,
+          openedAt: new Date(),
+          status: "open",
+        });
+        if (newOrder.tableId) {
+          await storage.updateRestaurantTable(newOrder.tableId, { status: "occupied" });
+        }
+        finalTargetOrderId = newOrder.id;
+      } else {
+        const target = await storage.getRestaurantOrder(finalTargetOrderId);
+        if (!target) return res.status(404).json({ error: "Orden destino no encontrada" });
+        if (target.status === "closed") return res.status(400).json({ error: "La orden destino está cerrada" });
+      }
+
+      // Move items
+      await storage.moveOrderItems(itemIds, finalTargetOrderId);
+
+      // Recalculate source order total
+      const sourceItems = await storage.getOrderItems(req.params.id);
+      const sourceTotal = sourceItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
+      const sourceNeto = parseFloat((sourceTotal / 1.21).toFixed(2));
+      const sourceTax = parseFloat((sourceTotal - sourceNeto).toFixed(2));
+      await storage.updateRestaurantOrder(req.params.id, {
+        subtotal: sourceNeto.toFixed(2),
+        tax: sourceTax.toFixed(2),
+        total: sourceTotal.toFixed(2),
+      });
+
+      // Recalculate target order total
+      const targetItems = await storage.getOrderItems(finalTargetOrderId);
+      const targetTotal = targetItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
+      const targetNeto = parseFloat((targetTotal / 1.21).toFixed(2));
+      const targetTax = parseFloat((targetTotal - targetNeto).toFixed(2));
+      const updatedTarget = await storage.updateRestaurantOrder(finalTargetOrderId, {
+        subtotal: targetNeto.toFixed(2),
+        tax: targetTax.toFixed(2),
+        total: targetTotal.toFixed(2),
+      });
+
+      res.json({ targetOrderId: finalTargetOrderId, targetOrder: updatedTarget });
+    } catch (error) {
+      console.error("Error transferring items:", error);
+      res.status(500).json({ error: "Error al transferir ítems" });
+    }
+  });
+
   // Recipes
   app.get("/api/restaurant/recipes", async (req, res) => {
     try {
