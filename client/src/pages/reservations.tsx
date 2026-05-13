@@ -1032,7 +1032,6 @@ export function ReservationFormDialog({
                       <SelectItem value="tentative">Tentativa</SelectItem>
                       <SelectItem value="pending">Pendiente</SelectItem>
                       <SelectItem value="confirmed">Confirmada</SelectItem>
-                      <SelectItem value="cancelled">Cancelada</SelectItem>
                     </SelectContent>
                   </Select>
                 )}

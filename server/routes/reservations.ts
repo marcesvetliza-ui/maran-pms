@@ -210,7 +210,13 @@ export function registerReservationsRoutes(app: Express) {
       if (!req.body.roomId || req.body.roomId === "") delete req.body.roomId;
       if (!req.body.roomTypeId || req.body.roomTypeId === "") delete req.body.roomTypeId;
       if (!req.body.guestId || req.body.guestId === "") delete req.body.guestId;
-      const VALID_STATUSES = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled"];
+      // "cancelled" must go through POST /api/reservations/:id/cancel (requires reason + audit log)
+      if (req.body.status === "cancelled") {
+        return res.status(400).json({
+          error: "Para anular una reserva usá el botón 'Anular Reserva'. Eso requiere un motivo y queda registrado en el historial.",
+        });
+      }
+      const VALID_STATUSES = ["tentative", "pending", "confirmed", "checked_in", "checked_out"];
       if (req.body.status !== undefined && !VALID_STATUSES.includes(req.body.status)) delete req.body.status;
 
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
