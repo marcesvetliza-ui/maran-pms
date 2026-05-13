@@ -826,6 +826,7 @@ export class DatabaseStorage implements IStorage {
           lateCheckOutTime: res.lateCheckOutTime ?? null,
           prefSummary,
           isUpgrade: res.isUpgrade ?? false,
+          color: (res as any).color ?? null,
         };
       }
     }

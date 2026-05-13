@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal, ShoppingCart, XCircle, TrendingUp } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal, ShoppingCart, XCircle, TrendingUp, Palette, X } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -1602,6 +1602,7 @@ function DraggableReservationCell({
   className,
   style,
   onClick,
+  onContextMenu,
   "data-testid": testId,
 }: {
   id: string;
@@ -1611,6 +1612,7 @@ function DraggableReservationCell({
   className: string;
   style?: React.CSSProperties;
   onClick: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   "data-testid"?: string;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -1623,6 +1625,7 @@ function DraggableReservationCell({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      onContextMenu={onContextMenu}
       className={`${className} ${isDragging ? "opacity-40 ring-2 ring-primary" : ""}`}
       style={{ touchAction: "none", ...style }}
     >
@@ -1774,6 +1777,7 @@ export default function PlanningPage() {
   });
 
   const [dragActiveId, setDragActiveId] = useState<string | null>(null);
+  const [colorContextMenu, setColorContextMenu] = useState<{ x: number; y: number; reservationId: string } | null>(null);
   const [moveConfirm, setMoveConfirm] = useState<{
     reservationId: string;
     guestName: string;
@@ -1823,6 +1827,20 @@ export default function PlanningPage() {
     onError: (error: any) => {
       const msg = error?.message || "No se pudo mover la reserva.";
       toast({ title: "Error", description: msg, variant: "destructive" });
+    },
+  });
+
+  const updateReservationColorMutation = useMutation({
+    mutationFn: async ({ reservationId, color }: { reservationId: string; color: string | null }) => {
+      const res = await apiRequest("PATCH", `/api/reservations/${reservationId}`, { color });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      setColorContextMenu(null);
+    },
+    onError: () => {
+      toast({ title: "Error al guardar color", variant: "destructive" });
     },
   });
 
@@ -2532,12 +2550,25 @@ export default function PlanningPage() {
                                           reservationId={reservationId!}
                                           roomId={room.id}
                                           onClick={() => handleCellClick(room, day, status, reservationId)}
+                                          onContextMenu={(e: React.MouseEvent) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setColorContextMenu({ x: e.clientX, y: e.clientY, reservationId: reservationId! });
+                                          }}
                                           className={`h-8 rounded flex items-center justify-center transition-all cursor-grab active:cursor-grabbing ${
                                             reservation.isGroup
                                               ? "border"
-                                              : getPlanningCellClasses(status, reservation.source)
+                                              : reservation.color
+                                                ? "border"
+                                                : getPlanningCellClasses(status, reservation.source)
                                           } hover:ring-2 hover:ring-primary/50`}
-                                          style={reservation.isGroup ? getGroupCellStyle(reservation.groupColor) : undefined}
+                                          style={
+                                            reservation.isGroup
+                                              ? getGroupCellStyle(reservation.groupColor)
+                                              : reservation.color
+                                                ? getGroupCellStyle(reservation.color)
+                                                : undefined
+                                          }
                                           data-testid={`cell-${room.id}-${day}`}
                                         >
                                           <span className="text-[10px] font-medium truncate px-1 max-w-[56px] inline-flex items-center gap-0.5">
@@ -2833,6 +2864,53 @@ export default function PlanningPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Color context menu */}
+      {colorContextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[9998]"
+            onClick={() => setColorContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setColorContextMenu(null); }}
+          />
+          <div
+            className="fixed z-[9999] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl p-3 min-w-[200px]"
+            style={{ left: Math.min(colorContextMenu.x, window.innerWidth - 220), top: Math.min(colorContextMenu.y, window.innerHeight - 160) }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
+                <Palette className="h-3.5 w-3.5" />
+                Color de etiqueta
+              </span>
+              <button onClick={() => setColorContextMenu(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-6 gap-1.5 mb-2">
+              {[
+                "#ef4444", "#f97316", "#eab308", "#22c55e",
+                "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+                "#6b7280", "#78716c", "#0ea5e9", "#14b8a6",
+              ].map((color) => (
+                <button
+                  key={color}
+                  onClick={() => updateReservationColorMutation.mutate({ reservationId: colorContextMenu.reservationId, color })}
+                  className="w-7 h-7 rounded-full border-2 border-transparent hover:border-zinc-400 hover:scale-110 transition-all"
+                  style={{ backgroundColor: color }}
+                  title={color}
+                />
+              ))}
+            </div>
+            <button
+              onClick={() => updateReservationColorMutation.mutate({ reservationId: colorContextMenu.reservationId, color: null })}
+              className="w-full text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 flex items-center justify-center gap-1.5 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <X className="h-3 w-3" />
+              Sin color
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
