@@ -367,7 +367,7 @@ export default function RestaurantPage() {
   const [menuSearch, setMenuSearch] = useState("");
   const menuSearchRef = useRef<HTMLInputElement>(null);
   const [showItemNotes, setShowItemNotes] = useState(false);
-  const [reservationViewMode, setReservationViewMode] = useState<"day" | "all">("day");
+  const [reservationViewMode, setReservationViewMode] = useState<"day" | "all" | "past">("day");
   const [reservationDateFilter, setReservationDateFilter] = useState(
     new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
   );
@@ -3750,7 +3750,10 @@ export default function RestaurantPage() {
                 Por día
               </Button>
               <Button size="sm" variant={reservationViewMode === "all" ? "default" : "outline"} onClick={() => setReservationViewMode("all")}>
-                Todas
+                Próximas
+              </Button>
+              <Button size="sm" variant={reservationViewMode === "past" ? "default" : "outline"} onClick={() => setReservationViewMode("past")}>
+                Pasadas
               </Button>
               {reservationViewMode === "day" && (
                 <Input
@@ -3767,9 +3770,12 @@ export default function RestaurantPage() {
               onChange={(e) => setReservationSearchText(e.target.value)}
             />
             {(() => {
+              const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
               const filteredRes = reservations.filter(r => {
                 if (r.status === "cancelled") return false;
                 if (reservationViewMode === "day" && r.reservationDate !== reservationDateFilter) return false;
+                if (reservationViewMode === "all" && r.reservationDate < todayStr) return false;
+                if (reservationViewMode === "past" && r.reservationDate >= todayStr) return false;
                 if (reservationSearchText) {
                   const q = reservationSearchText.toLowerCase();
                   return (
@@ -3782,6 +3788,7 @@ export default function RestaurantPage() {
                 return true;
               }).sort((a, b) => {
                 if (reservationViewMode === "all") return a.reservationDate.localeCompare(b.reservationDate) || a.reservationTime.localeCompare(b.reservationTime);
+                if (reservationViewMode === "past") return b.reservationDate.localeCompare(a.reservationDate) || b.reservationTime.localeCompare(a.reservationTime);
                 return a.reservationTime.localeCompare(b.reservationTime);
               });
 
@@ -3826,16 +3833,23 @@ export default function RestaurantPage() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge className={reservationStatusColors[reservation.status]}>
-                            {reservationStatusLabels[reservation.status]}
-                          </Badge>
-                          {reservation.status === "pending" && (
-                            <Button size="sm" onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}>
-                              <Check className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
+                        {(() => {
+                          const todayStr2 = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          const isPast = reservation.reservationDate < todayStr2;
+                          const isFinished = isPast && (reservation.status === "confirmed" || reservation.status === "pending");
+                          return (
+                            <div className="flex items-center gap-2">
+                              <Badge className={isFinished ? "bg-gray-400/20 text-gray-600 dark:text-gray-400" : reservationStatusColors[reservation.status]}>
+                                {isFinished ? "Finalizada" : reservationStatusLabels[reservation.status]}
+                              </Badge>
+                              {reservation.status === "pending" && !isPast && (
+                                <Button size="sm" onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}>
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -4381,44 +4395,53 @@ export default function RestaurantPage() {
             <div className="border-t pt-4 space-y-3">
               <Label className="block font-medium">Agregar Ingrediente</Label>
 
-              {/* Buscador de artículo del inventario */}
+              {/* Buscador de artículo del inventario — dropdown inline (evita conflicto focus-trap del Dialog) */}
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
-                <Popover open={ingredientComboOpen} onOpenChange={setIngredientComboOpen}>
-                  <PopoverTrigger asChild>
+                <div className="relative">
+                  {!ingredientComboOpen ? (
                     <Button
+                      type="button"
                       variant="outline"
                       className="w-full justify-between font-normal"
                       data-testid="btn-ingredient-combo"
+                      onClick={() => { setIngredientComboOpen(true); setIngredientSearch(""); }}
                     >
                       <span className={newIngredientName ? "" : "text-muted-foreground"}>
                         {newIngredientName || "Buscar artículo..."}
                       </span>
                       <svg className="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
                     </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0 w-[420px]" align="start">
-                    <Command shouldFilter={false}>
-                      <CommandInput
-                        placeholder="Escribí el nombre del artículo..."
-                        value={ingredientSearch}
-                        onValueChange={setIngredientSearch}
-                        data-testid="input-ingredient-search"
-                      />
-                      <CommandList className="max-h-60">
-                        <CommandEmpty>
-                          <p className="text-sm text-muted-foreground py-2">No se encontraron artículos en el inventario</p>
-                        </CommandEmpty>
-                        {restaurantInventoryItems
-                          .filter((i: any) =>
+                  ) : (
+                    <div className="border rounded-md bg-background shadow-md">
+                      <div className="flex items-center border-b px-3 py-2 gap-2">
+                        <svg className="h-4 w-4 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
+                        <input
+                          autoFocus
+                          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                          placeholder="Escribí el nombre del artículo..."
+                          value={ingredientSearch}
+                          onChange={(e) => setIngredientSearch(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Escape") { setIngredientComboOpen(false); setIngredientSearch(""); } }}
+                          data-testid="input-ingredient-search"
+                        />
+                        <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}>✕</button>
+                      </div>
+                      <div className="max-h-52 overflow-y-auto">
+                        {(() => {
+                          const filtered = (restaurantInventoryItems as any[]).filter((i: any) =>
                             !ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
                             (i.sku && i.sku.toLowerCase().includes(ingredientSearch.toLowerCase()))
-                          )
-                          .map((item: any) => (
-                            <CommandItem
+                          );
+                          if (filtered.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos</p>;
+                          return filtered.map((item: any) => (
+                            <button
                               key={item.id}
-                              value={item.name}
-                              onSelect={() => {
+                              type="button"
+                              className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"
+                              data-testid={`combo-item-${item.id}`}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
                                 setNewIngredientInventoryId(item.id);
                                 setNewIngredientName(item.name);
                                 setNewIngredientUnit(item.unit);
@@ -4426,23 +4449,21 @@ export default function RestaurantPage() {
                                 setIngredientSearch("");
                                 setIngredientComboOpen(false);
                               }}
-                              data-testid={`combo-item-${item.id}`}
                             >
-                              <div className="flex flex-col py-0.5">
-                                <span className="font-medium">{item.name}{item.sku ? <span className="text-muted-foreground font-normal"> [{item.sku}]</span> : ""}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  Stock: {parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
-                                  {parseFloat(item.costPrice || "0") > 0
-                                    ? ` — Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}`
-                                    : " — Sin precio cargado"}
-                                </span>
-                              </div>
-                            </CommandItem>
-                          ))}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                              <span className="text-sm font-medium">{item.name}{item.sku ? <span className="text-muted-foreground font-normal"> [{item.sku}]</span> : ""}</span>
+                              <span className="text-xs text-muted-foreground">
+                                Stock: {parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
+                                {parseFloat(item.costPrice || "0") > 0
+                                  ? ` — Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}`
+                                  : " — Sin precio cargado"}
+                              </span>
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {newIngredientInventoryId
                   ? <p className="text-xs text-green-600">✓ Vinculado — el stock se descontará al cerrar la orden</p>
                   : <p className="text-xs text-muted-foreground">Seleccioná un artículo para vincular el stock automáticamente</p>
