@@ -411,7 +411,7 @@ export default function NewReservationPage() {
                         <SelectValue placeholder={selectedRoomTypeId ? "Seleccionar habitacion..." : "Primero seleccione tipo"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableRooms?.map((room) => (
+                        {availableRooms?.slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => (
                           <SelectItem key={room.id} value={room.id}>
                             Hab. {room.roomNumber} - Piso {room.floor}
                           </SelectItem>

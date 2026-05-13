@@ -721,7 +721,7 @@ export function ReservationFormDialog({
                     <SelectValue placeholder="Seleccionar habitación" />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableRooms.map((room) => {
+                    {availableRooms.slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => {
                       const roomType = isUpgrade ? roomTypes.find(t => t.id === room.roomTypeId) : null;
                       return (
                         <SelectItem key={room.id} value={room.id}>
