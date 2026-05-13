@@ -44,6 +44,7 @@ import {
   TrendingUp,
   Download,
 } from "lucide-react";
+import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1527,6 +1528,10 @@ function ReservationDetailDialog({
     onError: () => toast({ title: "Error al actualizar titular", variant: "destructive" }),
   });
 
+  // Factura desde folio
+  const [showFacturar, setShowFacturar] = useState(false);
+  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
+
   // Companions
   const [showAddCompanion, setShowAddCompanion] = useState(false);
   const [newCompanion, setNewCompanion] = useState({
@@ -2748,18 +2753,42 @@ function ReservationDetailDialog({
                   </span>
                 </div>
                 {balance > 0.01 && !showAddPayment && !isLocked && (
-                  <Button 
-                    size="sm" 
-                    className="w-full mt-2" 
-                    onClick={() => {
-                      setNewPayment({ amount: balance.toFixed(2), method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
-                      setPaymentRows([{ amount: balance.toFixed(2), method: "efectivo", reference: "", billingTarget: "guest" }]);
-                      setShowAddPayment(true);
-                    }}
-                    data-testid="button-pay-balance"
+                  <div className="flex flex-col gap-2 mt-2">
+                    <Button 
+                      size="sm" 
+                      className="w-full" 
+                      onClick={() => {
+                        setNewPayment({ amount: balance.toFixed(2), method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
+                        setPaymentRows([{ amount: balance.toFixed(2), method: "efectivo", reference: "", billingTarget: "guest" }]);
+                        setShowAddPayment(true);
+                      }}
+                      data-testid="button-pay-balance"
+                    >
+                      <DollarSign className="h-4 w-4 mr-1" />
+                      Pagar Saldo Pendiente (${balance.toFixed(2)})
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300"
+                      onClick={() => setShowFacturar(true)}
+                      data-testid="button-facturar-folio"
+                    >
+                      <FileText className="h-4 w-4 mr-1" />
+                      Facturar Saldo (${balance.toFixed(2)})
+                    </Button>
+                  </div>
+                )}
+                {balance <= 0.01 && !isLocked && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full mt-2 border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300"
+                    onClick={() => setShowFacturar(true)}
+                    data-testid="button-facturar-folio-saldado"
                   >
-                    <DollarSign className="h-4 w-4 mr-1" />
-                    Pagar Saldo Pendiente (${balance.toFixed(2)})
+                    <FileText className="h-4 w-4 mr-1" />
+                    Emitir Factura
                   </Button>
                 )}
               </div>
@@ -3188,6 +3217,34 @@ function ReservationDetailDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Factura desde folio */}
+      {showFacturar && (() => {
+        const guestName = [reservation.guest?.firstName, reservation.guest?.lastName].filter(Boolean).join(" ");
+        const companyName = (reservation.company as any)?.name || "";
+        const razonSocial = companyName || guestName;
+        const cuit = (reservation.company as any)?.cuilCuit || reservation.guest?.cuilCuit || "";
+        const dni = !cuit && reservation.guest?.documentNumber ? reservation.guest.documentNumber : "";
+        const condicionIva = cuit ? "Responsable Inscripto" : "Consumidor Final";
+        const roomNum = reservation.room?.roomNumber || "";
+        const desc = `Alojamiento Hab. ${roomNum} — ${reservation.checkInDate} al ${reservation.checkOutDate} (${reservation.nights} noche${reservation.nights !== 1 ? "s" : ""})`;
+        const amount = Math.max(parseFloat(String(reservation.totalRoomAmount || "0")), 0);
+        const initialValues: EmitirFacturaInitialValues = {
+          razonSocial,
+          cuit,
+          dni,
+          condicionIva,
+          items: [{ descripcion: desc, precioUnitario: amount }],
+        };
+        return (
+          <EmitirFacturaDialog
+            open={showFacturar}
+            onClose={() => setShowFacturar(false)}
+            config={billingConfig}
+            initialValues={initialValues}
+          />
+        );
+      })()}
     </Dialog>
   );
 }

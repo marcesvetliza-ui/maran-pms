@@ -282,7 +282,20 @@ type Item = {
   subtotal: number;
 };
 
-function EmitirFacturaDialog({ open, onClose, config }: { open: boolean; onClose: () => void; config: any }) {
+export type EmitirFacturaInitialValues = {
+  razonSocial?: string;
+  cuit?: string;
+  dni?: string;
+  condicionIva?: string;
+  items?: Array<{ descripcion: string; precioUnitario: number }>;
+};
+
+export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
+  open: boolean;
+  onClose: () => void;
+  config: any;
+  initialValues?: EmitirFacturaInitialValues;
+}) {
   const { toast } = useToast();
   const [tipo, setTipo] = useState<string>("FB");
   const [razonSocial, setRazonSocial] = useState("");
@@ -291,6 +304,24 @@ function EmitirFacturaDialog({ open, onClose, config }: { open: boolean; onClose
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
+
+  // Pre-fill fields when opening with initialValues
+  useEffect(() => {
+    if (open && initialValues) {
+      if (initialValues.razonSocial !== undefined) setRazonSocial(initialValues.razonSocial);
+      if (initialValues.cuit !== undefined) { setCuit(initialValues.cuit); if (initialValues.cuit) setTipo("FA"); }
+      if (initialValues.dni !== undefined) setDni(initialValues.dni);
+      if (initialValues.condicionIva !== undefined) setCondicionIva(initialValues.condicionIva);
+      if (initialValues.items && initialValues.items.length > 0) {
+        setItems(initialValues.items.map(it => {
+          const base = it.precioUnitario;
+          const neto = parseFloat((base / 1.21).toFixed(2));
+          return { descripcion: it.descripcion, cantidad: 1, precioUnitario: base, alicuotaIva: "21" as const, subtotalNeto: neto, subtotal: base };
+        }));
+      }
+    }
+    if (!open) resetForm();
+  }, [open]);
 
   function newItem(): Item {
     return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 };
