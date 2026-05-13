@@ -1306,7 +1306,9 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/reservations/:id/companions", requireAuth, async (req, res) => {
     try {
-      const parsed = insertReservationCompanionSchema.safeParse({ ...req.body, reservationId: req.params.id });
+      const body = { ...req.body, reservationId: req.params.id };
+      if (!body.dateOfBirth) delete body.dateOfBirth;
+      const parsed = insertReservationCompanionSchema.safeParse(body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
       const companion = await storage.addReservationCompanion(parsed.data);
       res.status(201).json(companion);

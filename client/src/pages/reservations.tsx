@@ -1486,6 +1486,29 @@ function ReservationDetailDialog({
     { amount: "", method: "efectivo", reference: "", billingTarget: "guest" },
   ]);
 
+  // Edit titular (guest)
+  const [editingGuest, setEditingGuest] = useState(false);
+  const [guestEditData, setGuestEditData] = useState({
+    firstName: reservation.guest?.firstName || "",
+    lastName: reservation.guest?.lastName || "",
+    email: reservation.guest?.email || "",
+    phone: reservation.guest?.phone || "",
+    documentType: reservation.guest?.documentType || "DNI",
+    documentNumber: reservation.guest?.documentNumber || "",
+    nationality: reservation.guest?.nationality || "",
+    localidad: reservation.guest?.localidad || "",
+  });
+  const updateGuestMutation = useMutation({
+    mutationFn: async (data: typeof guestEditData) =>
+      apiRequest("PATCH", `/api/guests/${reservation.guest?.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      setEditingGuest(false);
+      toast({ title: "Datos del titular actualizados" });
+    },
+    onError: () => toast({ title: "Error al actualizar titular", variant: "destructive" }),
+  });
+
   // Companions
   const [showAddCompanion, setShowAddCompanion] = useState(false);
   const [newCompanion, setNewCompanion] = useState({
@@ -1826,21 +1849,116 @@ function ReservationDetailDialog({
           </TabsList>
 
           <TabsContent value="datos" className="space-y-4 mt-4">
-            <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-lg">
-                {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
+            {!editingGuest ? (
+              <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-lg">
+                  {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-lg" data-testid="text-guest-name">
+                    {reservation.guest?.lastName} {reservation.guest?.firstName}
+                  </p>
+                  <p className="text-sm text-muted-foreground">{reservation.guest?.email}</p>
+                  {reservation.guest?.phone && (
+                    <p className="text-sm text-muted-foreground">{reservation.guest?.phone}</p>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <Badge variant="outline">{reservation.source}</Badge>
+                  {!isLocked && reservation.guest?.id && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => {
+                        setGuestEditData({
+                          firstName: reservation.guest?.firstName || "",
+                          lastName: reservation.guest?.lastName || "",
+                          email: reservation.guest?.email || "",
+                          phone: reservation.guest?.phone || "",
+                          documentType: reservation.guest?.documentType || "DNI",
+                          documentNumber: reservation.guest?.documentNumber || "",
+                          nationality: reservation.guest?.nationality || "",
+                          localidad: reservation.guest?.localidad || "",
+                        });
+                        setEditingGuest(true);
+                      }}
+                      data-testid="button-edit-titular"
+                    >
+                      <Pencil className="h-3 w-3" />
+                      Editar titular
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="flex-1">
-                <p className="font-semibold text-lg" data-testid="text-guest-name">
-                  {reservation.guest?.lastName} {reservation.guest?.firstName}
-                </p>
-                <p className="text-sm text-muted-foreground">{reservation.guest?.email}</p>
-                {reservation.guest?.phone && (
-                  <p className="text-sm text-muted-foreground">{reservation.guest?.phone}</p>
-                )}
+            ) : (
+              <div className="border rounded-lg p-4 space-y-3">
+                <p className="text-sm font-medium text-muted-foreground">Editar datos del titular</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
+                    <Input className="h-8 text-sm" value={guestEditData.firstName} onChange={e => setGuestEditData(p => ({ ...p, firstName: e.target.value }))} data-testid="input-edit-firstname" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                    <Input className="h-8 text-sm" value={guestEditData.lastName} onChange={e => setGuestEditData(p => ({ ...p, lastName: e.target.value }))} data-testid="input-edit-lastname" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Email</label>
+                    <Input className="h-8 text-sm" type="email" value={guestEditData.email} onChange={e => setGuestEditData(p => ({ ...p, email: e.target.value }))} data-testid="input-edit-email" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Teléfono</label>
+                    <Input className="h-8 text-sm" value={guestEditData.phone} onChange={e => setGuestEditData(p => ({ ...p, phone: e.target.value }))} data-testid="input-edit-phone" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Tipo doc.</label>
+                    <select
+                      value={guestEditData.documentType}
+                      onChange={e => setGuestEditData(p => ({ ...p, documentType: e.target.value }))}
+                      className="w-full h-8 text-sm border rounded-md px-2 bg-background"
+                      data-testid="select-edit-doctype"
+                    >
+                      <option value="DNI">DNI</option>
+                      <option value="Pasaporte">Pasaporte</option>
+                      <option value="LC">LC</option>
+                      <option value="LE">LE</option>
+                      <option value="CI">CI (extranjero)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Nº documento</label>
+                    <Input className="h-8 text-sm" value={guestEditData.documentNumber} onChange={e => setGuestEditData(p => ({ ...p, documentNumber: e.target.value }))} data-testid="input-edit-docnumber" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</label>
+                    <Input className="h-8 text-sm" value={guestEditData.nationality} onChange={e => setGuestEditData(p => ({ ...p, nationality: e.target.value }))} data-testid="input-edit-nationality" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Ciudad</label>
+                    <Input className="h-8 text-sm" value={guestEditData.localidad} onChange={e => setGuestEditData(p => ({ ...p, localidad: e.target.value }))} data-testid="input-edit-localidad" />
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingGuest(false)}>Cancelar</Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={!guestEditData.firstName || !guestEditData.lastName || updateGuestMutation.isPending}
+                    onClick={() => updateGuestMutation.mutate(guestEditData)}
+                    data-testid="button-save-titular"
+                  >
+                    {updateGuestMutation.isPending ? "Guardando..." : "Guardar cambios"}
+                  </Button>
+                </div>
               </div>
-              <Badge variant="outline">{reservation.source}</Badge>
-            </div>
+            )}
 
             {reservation.guest?.localidad && (
               <div className="p-3 border rounded-lg">
