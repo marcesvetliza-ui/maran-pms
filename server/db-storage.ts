@@ -722,6 +722,21 @@ export class DatabaseStorage implements IStorage {
     );
     const pendingReservations = pendingResult[0]?.cnt ?? 0;
 
+    // Desayunos mañana = total pax alojados esta noche
+    // (checkIn <= hoy AND checkOut > hoy, status checked_in o confirmed/pending)
+    const tonightRows = await db.select({
+      pax: sql<number>`COALESCE(SUM(${reservations.numberOfGuests}), 0)`,
+      rooms: sql<number>`COUNT(*)`,
+    }).from(reservations).where(
+      and(
+        lte(reservations.checkInDate, today),
+        gt(reservations.checkOutDate, today),
+        inArray(reservations.status, ["checked_in", "confirmed", "pending"] as any)
+      )
+    );
+    const breakfastsTomorrow = Number(tonightRows[0]?.pax ?? 0);
+    const roomsTonight = Number(tonightRows[0]?.rooms ?? 0);
+
     return {
       totalRooms,
       availableRooms,
@@ -735,6 +750,8 @@ export class DatabaseStorage implements IStorage {
       occupancyRate,
       totalGuests: Number(totalGuests),
       pendingReservations: Number(pendingReservations),
+      breakfastsTomorrow,
+      roomsTonight,
     };
   }
 

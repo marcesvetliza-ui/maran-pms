@@ -11,6 +11,7 @@ import {
   LogIn,
   LogOut,
   XCircle,
+  Coffee,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,8 @@ type DashboardStats = {
   occupancyRate: number;
   totalGuests: number;
   pendingReservations: number;
+  breakfastsTomorrow: number;
+  roomsTonight: number;
 };
 
 function StatCard({
@@ -243,10 +246,10 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
         {statsLoading ? (
           <>
-            {[...Array(4)].map((_, i) => (
+            {[...Array(5)].map((_, i) => (
               <Card key={i}>
                 <CardHeader className="pb-2">
                   <Skeleton className="h-4 w-24" />
@@ -289,6 +292,13 @@ export default function Dashboard() {
               description="registrados en el sistema"
               icon={Users}
               testId="stat-active-guests"
+            />
+            <StatCard
+              title="Desayunos Mañana"
+              value={stats.breakfastsTomorrow}
+              description={`${stats.roomsTonight} hab. esta noche`}
+              icon={Coffee}
+              testId="stat-breakfasts-tomorrow"
             />
           </>
         ) : null}
