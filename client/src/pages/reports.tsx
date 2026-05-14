@@ -1081,6 +1081,13 @@ export default function ReportsPage() {
           </Card>
         </TabsContent>
         <TabsContent value="arrivals-departures" className="space-y-4 mt-4">
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              @page { size: A4 landscape; margin: 1cm; }
+              body { zoom: 0.8; -webkit-print-color-adjust: exact; }
+              .print-hide { display: none !important; }
+            }
+          ` }} />
           {arrDep.isLoading ? <Card><CardContent className="p-8"><LoadingSkeleton /></CardContent></Card> : arrDep.data ? (
             <>
               <Card>
@@ -1095,7 +1102,6 @@ export default function ReportsPage() {
                     <Table data-testid="table-arrivals">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Código</TableHead>
                           <TableHead>Huésped</TableHead>
                           <TableHead>Hab.</TableHead>
                           <TableHead>Tipo</TableHead>
@@ -1103,7 +1109,6 @@ export default function ReportsPage() {
                           <TableHead>Check-out</TableHead>
                           <TableHead className="text-center">Noches</TableHead>
                           <TableHead className="text-center">Pax</TableHead>
-                          <TableHead>Estado</TableHead>
                           <TableHead className="text-right">Total</TableHead>
                           <TableHead className="text-right">Pagado</TableHead>
                           <TableHead className="text-right">Saldo</TableHead>
@@ -1111,10 +1116,9 @@ export default function ReportsPage() {
                       </TableHeader>
                       <TableBody>
                         {arrDep.data.arrivals.length === 0 ? (
-                          <TableRow><TableCell colSpan={12} className="text-center text-muted-foreground py-6">Sin llegadas en el período</TableCell></TableRow>
+                          <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-6">Sin llegadas en el período</TableCell></TableRow>
                         ) : arrDep.data.arrivals.map((r, i) => (
                           <TableRow key={i} data-testid={`row-arrival-${i}`}>
-                            <TableCell className="font-mono text-xs">{r.code}</TableCell>
                             <TableCell className="font-medium">{r.guest}</TableCell>
                             <TableCell>{r.room}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
@@ -1122,7 +1126,6 @@ export default function ReportsPage() {
                             <TableCell className="text-sm">{r.checkOut}</TableCell>
                             <TableCell className="text-center">{r.nights}</TableCell>
                             <TableCell className="text-center">{r.pax}</TableCell>
-                            <TableCell><Badge variant="outline" className="text-xs">{r.status}</Badge></TableCell>
                             <TableCell className="text-right">{formatARS(r.total)}</TableCell>
                             <TableCell className="text-right text-green-600">{formatARS(r.paid)}</TableCell>
                             <TableCell className="text-right font-semibold" style={{ color: r.balance > 0 ? "var(--destructive)" : undefined }}>{formatARS(r.balance)}</TableCell>
@@ -1145,7 +1148,6 @@ export default function ReportsPage() {
                     <Table data-testid="table-departures">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Código</TableHead>
                           <TableHead>Huésped</TableHead>
                           <TableHead>Hab.</TableHead>
                           <TableHead>Tipo</TableHead>
@@ -1153,7 +1155,6 @@ export default function ReportsPage() {
                           <TableHead>Check-out</TableHead>
                           <TableHead className="text-center">Noches</TableHead>
                           <TableHead className="text-center">Pax</TableHead>
-                          <TableHead>Estado</TableHead>
                           <TableHead className="text-right">Total</TableHead>
                           <TableHead className="text-right">Pagado</TableHead>
                           <TableHead className="text-right">Saldo</TableHead>
@@ -1161,10 +1162,9 @@ export default function ReportsPage() {
                       </TableHeader>
                       <TableBody>
                         {arrDep.data.departures.length === 0 ? (
-                          <TableRow><TableCell colSpan={12} className="text-center text-muted-foreground py-6">Sin salidas en el período</TableCell></TableRow>
+                          <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-6">Sin salidas en el período</TableCell></TableRow>
                         ) : arrDep.data.departures.map((r, i) => (
                           <TableRow key={i} data-testid={`row-departure-${i}`}>
-                            <TableCell className="font-mono text-xs">{r.code}</TableCell>
                             <TableCell className="font-medium">{r.guest}</TableCell>
                             <TableCell>{r.room}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
@@ -1172,7 +1172,6 @@ export default function ReportsPage() {
                             <TableCell className="text-sm">{r.checkOut}</TableCell>
                             <TableCell className="text-center">{r.nights}</TableCell>
                             <TableCell className="text-center">{r.pax}</TableCell>
-                            <TableCell><Badge variant="outline" className="text-xs">{r.status}</Badge></TableCell>
                             <TableCell className="text-right">{formatARS(r.total)}</TableCell>
                             <TableCell className="text-right text-green-600">{formatARS(r.paid)}</TableCell>
                             <TableCell className="text-right font-semibold" style={{ color: r.balance > 0 ? "var(--destructive)" : undefined }}>{formatARS(r.balance)}</TableCell>
