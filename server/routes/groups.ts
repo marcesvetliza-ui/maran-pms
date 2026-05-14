@@ -36,6 +36,13 @@ export function registerGroupsRoutes(app: Express) {
       if (!name || !checkInDate || !checkOutDate) {
         return res.status(400).json({ error: "Name, checkInDate, and checkOutDate are required" });
       }
+      const today = getArgentinaToday();
+      if (checkInDate < today) {
+        return res.status(400).json({ error: "La fecha de check-in no puede ser anterior a hoy." });
+      }
+      if (checkOutDate <= checkInDate) {
+        return res.status(400).json({ error: "La fecha de check-out debe ser posterior al check-in." });
+      }
 
       const groupCode = storage.generateGroupCode();
       const group = await storage.createGroup({

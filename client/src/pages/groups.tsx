@@ -171,6 +171,14 @@ function GroupFormDialog({
       toast({ title: "Complete los campos obligatorios", variant: "destructive" });
       return;
     }
+    if (!group && formData.checkInDate < today) {
+      toast({ title: "Fecha inválida", description: "La fecha de check-in no puede ser anterior a hoy.", variant: "destructive" });
+      return;
+    }
+    if (formData.checkOutDate <= formData.checkInDate) {
+      toast({ title: "Fecha inválida", description: "El check-out debe ser posterior al check-in.", variant: "destructive" });
+      return;
+    }
     setStep(2);
   };
 
@@ -403,6 +411,7 @@ function GroupFormDialog({
                   id="checkInDate"
                   type="date"
                   value={formData.checkInDate}
+                  min={!group ? today : undefined}
                   onChange={(e) => setFormData({ ...formData, checkInDate: e.target.value })}
                   required
                   data-testid="input-group-checkin"
@@ -415,6 +424,7 @@ function GroupFormDialog({
                   id="checkOutDate"
                   type="date"
                   value={formData.checkOutDate}
+                  min={!group ? (formData.checkInDate || today) : undefined}
                   onChange={(e) => setFormData({ ...formData, checkOutDate: e.target.value })}
                   required
                   data-testid="input-group-checkout"
