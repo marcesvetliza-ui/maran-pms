@@ -1711,23 +1711,19 @@ export default function PlanningPage() {
   const planningRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const toggleFullscreen = async () => {
-    if (!document.fullscreenElement) {
-      await planningRef.current?.requestFullscreen();
-      setIsFullscreen(true);
-    } else {
-      await document.exitFullscreen();
-      setIsFullscreen(false);
-    }
+  const toggleFullscreen = () => {
+    setIsFullscreen(prev => !prev);
   };
 
+  // Close CSS-fullscreen on Escape key
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+    if (!isFullscreen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
     };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isFullscreen]);
 
   const [dateRange, setDateRange] = useState(() => {
     const todayStr = getLocalToday();
@@ -2162,7 +2158,7 @@ export default function PlanningPage() {
   });
 
   return (
-    <div ref={planningRef} className={`flex flex-col gap-4 p-6 ${isFullscreen ? "bg-background overflow-auto" : ""}`}>
+    <div ref={planningRef} className={`flex flex-col gap-4 p-6 ${isFullscreen ? "fixed inset-0 z-[60] bg-background overflow-auto" : ""}`}>
       {/* ── HEADER ─────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3">
         {/* Top bar: title + navigation + collapse button — always visible */}
