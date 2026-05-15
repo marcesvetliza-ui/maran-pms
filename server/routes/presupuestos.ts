@@ -219,12 +219,6 @@ export function registerPresupuestosRoutes(app: Express) {
       }
       y += infoBoxH + 8;
 
-      if (pres.notas) {
-        doc.fillColor(MUTED).fontSize(8).font("Helvetica")
-          .text(pres.notas, margin, y, { width: contentW });
-        y += doc.heightOfString(pres.notas, { width: contentW }) + 8;
-      }
-
       // ── TABLE ────────────────────────────────────────────────
       const cols = {
         sector: margin,
