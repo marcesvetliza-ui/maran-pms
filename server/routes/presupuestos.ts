@@ -173,19 +173,6 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
         .text(`Emitida: ${formatFecha(pres.fechaEmision)}`, codeBoxX, titleY + 33, { width: codeBoxW, align: "center" });
 
-      // Status badge
-      const statusMap: Record<string, { bg: string; bd: string; tx: string; lb: string }> = {
-        borrador:  { bg: "#f5f5f5", bd: "#cccccc", tx: "#666666", lb: "BORRADOR"  },
-        enviado:   { bg: "#e3f2fd", bd: "#90caf9", tx: "#1565c0", lb: "ENVIADO"   },
-        aceptado:  { bg: "#e8f5e9", bd: "#a5d6a7", tx: "#2e7d32", lb: "ACEPTADO"  },
-        vencido:   { bg: "#fff3e0", bd: "#ffcc80", tx: "#e65100", lb: "VENCIDO"   },
-        cancelado: { bg: "#fce4ec", bd: "#f48fb1", tx: "#c62828", lb: "CANCELADO" },
-      };
-      const st = statusMap[pres.estado || "borrador"] || statusMap.borrador;
-      doc.roundedRect(codeBoxX + 16, titleY + 50, codeBoxW - 32, 15, 7).fillAndStroke(st.bg, st.bd);
-      doc.fillColor(st.tx).fontSize(7).font("Helvetica-Bold")
-        .text(st.lb, codeBoxX + 16, titleY + 54, { width: codeBoxW - 32, align: "center", characterSpacing: 0.5 });
-
       // Separator
       let y = titleY + 56;
       doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
@@ -220,23 +207,25 @@ export function registerPresupuestosRoutes(app: Express) {
       y += infoBoxH + 8;
 
       // ── TABLE ────────────────────────────────────────────────
+      // col positions (x) and widths designed for wide Argentine prices
       const cols = {
-        sector: margin,
-        desc:   margin + 60,
-        cant:   margin + 288,
-        precio: margin + 328,
-        dto:    margin + 378,
-        sub:    margin + 428,
+        sector: margin,           // 40
+        desc:   margin + 62,      // 102
+        cant:   margin + 264,     // 304
+        precio: margin + 300,     // 340
+        dto:    margin + 388,     // 428
+        sub:    margin + 428,     // 468
       };
+      const W = { sector: 58, desc: 198, cant: 32, precio: 84, dto: 36, sub: 82 };
       doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
       doc.fillColor("white").fontSize(8).font("Helvetica-Bold");
       const thY = y + 6;
-      doc.text("SECTOR",      cols.sector + 6, thY, { width: 55 });
-      doc.text("DESCRIPCIÓN", cols.desc,       thY, { width: 220 });
-      doc.text("CANT",        cols.cant,        thY, { width: 35, align: "right" });
-      doc.text("PRECIO",      cols.precio,      thY, { width: 45, align: "right" });
-      doc.text("DTO%",        cols.dto,         thY, { width: 40, align: "right" });
-      doc.text("SUBTOTAL",    cols.sub,         thY, { width: 75, align: "right" });
+      doc.text("SECTOR",      cols.sector + 6, thY, { width: W.sector });
+      doc.text("DESCRIPCIÓN", cols.desc,       thY, { width: W.desc });
+      doc.text("CANT",        cols.cant,        thY, { width: W.cant,   align: "right" });
+      doc.text("PRECIO",      cols.precio,      thY, { width: W.precio, align: "right" });
+      doc.text("DTO%",        cols.dto,         thY, { width: W.dto,    align: "right" });
+      doc.text("SUBTOTAL",    cols.sub,         thY, { width: W.sub,    align: "right" });
       y += 22;
 
       const SECTOR_LABELS: Record<string, string> = {
@@ -244,24 +233,24 @@ export function registerPresupuestosRoutes(app: Express) {
         spa: "SPA", evento: "Evento", otro: "Otro",
       };
       items.forEach((item, idx) => {
-        const rowH = Math.max(22, doc.heightOfString(item.descripcion, { width: 220 }) + 12);
+        const rowH = Math.max(22, doc.heightOfString(item.descripcion, { width: W.desc }) + 12);
         if (y + rowH > pageH - 90) { doc.addPage(); y = 40; }
         doc.rect(margin, y, contentW, rowH)
           .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
         doc.fillColor(DARK).fontSize(8).font("Helvetica");
         const cellY = y + 6;
-        doc.text(SECTOR_LABELS[item.sector] || item.sector, cols.sector + 6, cellY, { width: 55 });
-        doc.font("Helvetica-Bold").text(item.descripcion, cols.desc, cellY, { width: 220 });
+        doc.text(SECTOR_LABELS[item.sector] || item.sector, cols.sector + 6, cellY, { width: W.sector });
+        doc.font("Helvetica-Bold").text(item.descripcion, cols.desc, cellY, { width: W.desc });
         if (item.detalle) {
           doc.font("Helvetica").fillColor(MUTED).fontSize(7)
-            .text(item.detalle, cols.desc, cellY + 11, { width: 220 });
+            .text(item.detalle, cols.desc, cellY + 11, { width: W.desc });
         }
         doc.font("Helvetica").fillColor(DARK).fontSize(8);
-        doc.text(formatNum(item.cantidad),           cols.cant,  cellY, { width: 35, align: "right" });
-        doc.text(`$ ${formatMoney(item.precioUnitario)}`, cols.precio, cellY, { width: 45, align: "right" });
-        doc.text(`${formatNum(item.descuento)}%`,    cols.dto,   cellY, { width: 40, align: "right" });
+        doc.text(formatNum(item.cantidad),                cols.cant,  cellY, { width: W.cant,   align: "right" });
+        doc.text(`$ ${formatMoney(item.precioUnitario)}`, cols.precio, cellY, { width: W.precio, align: "right" });
+        doc.text(`${formatNum(item.descuento)}%`,         cols.dto,   cellY, { width: W.dto,    align: "right" });
         doc.font("Helvetica-Bold")
-          .text(`$ ${formatMoney(item.subtotal)}`,   cols.sub,   cellY, { width: 75, align: "right" });
+          .text(`$ ${formatMoney(item.subtotal)}`,        cols.sub,   cellY, { width: W.sub,    align: "right" });
         y = y + rowH;
       });
       y += 8;

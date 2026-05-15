@@ -56,12 +56,21 @@ const ESTADO_CONFIG: Record<PresupuestoEstado, { label: string; icon: typeof Che
   cancelado: { label: "Cancelado",icon: XCircle,       cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
 };
 
-const DEFAULT_CONDICIONES = `• Las tarifas incluyen IVA y todos los impuestos vigentes.
-• Este presupuesto tiene validez hasta la fecha de vencimiento indicada. Pasada dicha fecha las tarifas pueden variar.
-• Para confirmar la reserva se requiere un depósito del 50% del total.
-• La cancelación dentro de las 48 hs previas al evento/check-in no da derecho a devolución.
-• Las tarifas de alojamiento no incluyen consumos extras (minibar, lavandería, etc.) salvo indicación contraria.
-• Precios en pesos argentinos (ARS).`;
+const DEFAULT_CONDICIONES = `CONDICIONES DE CONTRATACIÓN:
+
+• El presente presupuesto no implica bloqueo de habitaciones.
+
+• El camaje detallado no puede modificarse.
+
+• El pago del alojamiento y servicios adicionales contratados deberá ser realizado desde la organización y no por huésped alojado o asistente al evento.
+
+• Para garantizar la reservación, solicitamos el pago del 30% del monto final.
+
+• La tarifa no incluye servicios adicionales a excepción de aquellos detallados.
+
+• La cancelación sin penalización será de 15 días previos al comienzo de la estadía.
+
+• El rooming definitivo debe entregarse 1 semana antes del Check in solicitado. A partir de esa fecha, las habitaciones estarán sujetas a disponibilidad del hotel.`;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const toNum = (v: string) => parseFloat(v.replace(",", ".")) || 0;
