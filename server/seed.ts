@@ -1171,8 +1171,7 @@ export async function refreshRealData() {
           check_in_date = ${todayStr},
           check_out_date = ${in2Str},
           nights = 2,
-          status = 'checked_in',
-          updated_at = NOW()
+          status = 'checked_in'
         WHERE id = 'res1'
       `);
       await db.execute(sql`
@@ -1180,8 +1179,7 @@ export async function refreshRealData() {
           check_in_date = ${in2Str},
           check_out_date = ${in5Str},
           nights = 3,
-          status = 'confirmed',
-          updated_at = NOW()
+          status = 'confirmed'
         WHERE id = 'res2'
       `);
       await db.execute(sql`
@@ -1189,8 +1187,7 @@ export async function refreshRealData() {
           check_in_date = ${in5Str},
           check_out_date = ${in7Str},
           nights = 2,
-          status = 'confirmed',
-          updated_at = NOW()
+          status = 'confirmed'
         WHERE id = 'res3'
       `);
       console.log("Demo reservations refreshed to current dates.");

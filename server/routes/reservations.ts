@@ -1434,17 +1434,19 @@ async function handleConfirmationPdf(req: any, res: any) {
     const ORANGE  = "#e8841a";
     const FOOTER_BG = "#8b4513";
 
-    // ── HEADER IMAGE ──────────────────────────────────────────────────────
-    const headerH = 148;
+    // ── FULL PAGE TEMPLATE BACKGROUND ─────────────────────────────────────
+    // The template image includes the skyline header, orange stripe, white content
+    // area, and footer with the white Maran logo. We use it as a full-page background
+    // so all branding elements appear correctly without needing to draw them manually.
+    const headerH = 165;
     const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
     if (fs.existsSync(headerImgPath)) {
-      doc.image(headerImgPath, 0, 0, { width: pageW, height: headerH, cover: [pageW, headerH] });
+      doc.image(headerImgPath, 0, 0, { width: pageW, height: pageH });
     } else {
       doc.rect(0, 0, pageW, headerH).fill(NAVY);
+      doc.rect(0, headerH - 6, pageW, 6).fill(ORANGE);
+      doc.rect(0, pageH - 90, pageW, 90).fill(FOOTER_BG);
     }
-
-    // ── ORANGE STRIPE ─────────────────────────────────────────────────────
-    doc.rect(0, headerH, pageW, 5).fill(ORANGE);
 
     let y = headerH + 16;
 
@@ -1631,30 +1633,6 @@ async function handleConfirmationPdf(req: any, res: any) {
           margin, y, { width: contentW, align: "center" }
         );
     }
-
-    // ── FOOTER ───────────────────────────────────────────────────────────
-    const footerY = pageH - 72;
-    doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
-
-    // Logo
-    const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, margin, footerY + 14, { width: 95 });
-    }
-
-    // Center contact info
-    const centerX = margin + 100;
-    const centerW = contentW - 200;
-    doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
-      .text(HOTEL_ADDRESS, centerX, footerY + 13, { width: centerW, align: "center" });
-    doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
-      .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, centerX, footerY + 26, { width: centerW, align: "center" });
-    doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
-      .text(`CUIT ${HOTEL_CUIT} · Responsable Inscripto`, centerX, footerY + 40, { width: centerW, align: "center" });
-
-    // Website right
-    doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
-      .text(HOTEL_WEB, pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
 
     doc.end();
   } catch (e: any) {
