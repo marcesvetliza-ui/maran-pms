@@ -87,63 +87,83 @@ const fmtMoney = (v: string | number) =>
 
 export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<Buffer> {
   return new Promise((resolve) => {
-    const doc = new PDFDocument({ margin: 0, size: "A4" });
+    const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("end",  () => resolve(Buffer.concat(chunks)));
 
     const pageW    = 595;
     const pageH    = 842;
-    const margin   = 40;
+    const margin   = 36;
     const contentW = pageW - margin * 2;
     const col1     = margin;
-    const col2     = margin + 150;
-    const col3     = margin + 270;
-    const col4     = margin + 410;
+    const col2     = margin + 140;
+    const col3     = margin + 268;
+    const col4     = margin + 398;
+    const FOOTER_H = 72;
+    const safeBottom = pageH - FOOTER_H - 10; // content must stay above this
 
-    // ── HEADER ──────────────────────────────────────────────────────────────
+    // ── Helper: compact header for continuation pages ─────────────────────
+    const drawContinuationHeader = () => {
+      doc.rect(0, 0, pageW, 28).fill(NAVY);
+      doc.rect(0, 28, pageW, 3).fill(ORANGE);
+      doc.fillColor("#ffffff").fontSize(8).font("Helvetica-Bold")
+        .text(`HOJA DE FUNCIÓN — ${event.name} (${event.eventCode}) — continuación`, margin, 9, { width: contentW });
+      return 31 + 8; // returns y after header
+    };
+
+    // ── Helper: check overflow and add page if needed ─────────────────────
+    const checkOverflow = (neededHeight: number) => {
+      if (y + neededHeight > safeBottom) {
+        pdfBrandedFooter(doc, pageW, pageH, margin, contentW);
+        doc.addPage();
+        y = drawContinuationHeader();
+      }
+    };
+
+    // ── PAGE 1 HEADER ────────────────────────────────────────────────────
     const stripeEnd = pdfBrandedHeader(doc, pageW, "HOJA DE FUNCIÓN");
-    const titleY = stripeEnd + 14;
-    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+    const titleY = stripeEnd + 10;
+    doc.fillColor("#888888").fontSize(6.5).font("Helvetica")
       .text("HOJA DE FUNCIÓN — USO INTERNO", margin, titleY, { characterSpacing: 2 });
-    doc.fillColor("#1a1a1a").fontSize(17).font("Helvetica-Bold")
-      .text(HOTEL_NAME, margin, titleY + 11, { width: 340 });
-    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
-      .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 33);
+    doc.fillColor("#1a1a1a").fontSize(15).font("Helvetica-Bold")
+      .text(HOTEL_NAME, margin, titleY + 10, { width: 340 });
+    doc.fillColor("#666666").fontSize(8).font("Helvetica")
+      .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 28);
 
     // Code box
-    const codeBoxW = 138;
+    const codeBoxW = 130;
     const codeBoxX = pageW - margin - codeBoxW;
-    doc.roundedRect(codeBoxX, titleY, codeBoxW, 44, 5).fillAndStroke("#f8f4ef", ORANGE);
-    doc.fillColor("#888888").fontSize(7).font("Helvetica")
-      .text("CÓDIGO DE EVENTO", codeBoxX, titleY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
+    doc.roundedRect(codeBoxX, titleY, codeBoxW, 40, 5).fillAndStroke("#f8f4ef", ORANGE);
+    doc.fillColor("#888888").fontSize(6.5).font("Helvetica")
+      .text("CÓDIGO DE EVENTO", codeBoxX, titleY + 6, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
     doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
-      .text(event.eventCode, codeBoxX, titleY + 19, { width: codeBoxW, align: "center" });
-    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
-      .text(`Generado: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, titleY + 33, { width: codeBoxW, align: "center" });
+      .text(event.eventCode, codeBoxX, titleY + 17, { width: codeBoxW, align: "center" });
+    doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
+      .text(`Generado: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
 
-    let y = titleY + 54;
+    let y = titleY + 48;
     doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
-    y += 10;
+    y += 8;
 
-    // ── EVENT NAME + DETAILS ─────────────────────────────────────────────────
-    doc.fillColor("#1a1a1a").fontSize(14).font("Helvetica-Bold")
-      .text(event.name, margin, y);
-    y += 20;
-    doc.fillColor("#666666").fontSize(9).font("Helvetica")
+    // ── EVENT NAME + DETAILS ─────────────────────────────────────────────
+    doc.fillColor("#1a1a1a").fontSize(13).font("Helvetica-Bold").text(event.name, margin, y);
+    y += 17;
+    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
       .text(`Tipo: ${eventTypeLabel(event.eventType)}`, margin, y);
-    y += 14;
+    y += 12;
 
-    // Data grid
+    // Data grid — compact rows
     const row = (label1: string, val1: string, label2?: string, val2?: string) => {
+      checkOverflow(13);
       const ry = y;
-      doc.fontSize(9).font("Helvetica-Bold").fillColor("#555555").text(label1, col1, ry, { width: 110 });
-      doc.fontSize(9).font("Helvetica").fillColor("#1a1a1a").text(val1, col2, ry, { width: 110 });
+      doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#555555").text(label1, col1, ry, { width: 126 });
+      doc.fontSize(8.5).font("Helvetica").fillColor("#1a1a1a").text(val1, col2, ry, { width: 120 });
       if (label2 && val2) {
-        doc.fontSize(9).font("Helvetica-Bold").fillColor("#555555").text(label2, col3, ry, { width: 110 });
-        doc.fontSize(9).font("Helvetica").fillColor("#1a1a1a").text(val2, col4, ry, { width: 110 });
+        doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#555555").text(label2, col3, ry, { width: 120 });
+        doc.fontSize(8.5).font("Helvetica").fillColor("#1a1a1a").text(val2, col4, ry, { width: 110 });
       }
-      y += 16;
+      y += 13;
     };
 
     row("Salón:", event.eventRoom?.name || "—", "Asistentes:", desglosarAsistentes(event));
@@ -158,44 +178,51 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
     row("Contacto:", event.contactName, "Teléfono:", event.contactPhone || "—");
     if (event.contactEmail) row("Email:", event.contactEmail, "", "");
     if (event.company)      row("Empresa:", (event.company as any).name || "—", "", "");
-    y += 6;
+    y += 4;
 
     doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
-    y += 10;
+    y += 8;
 
-    // ── SERVICIOS ────────────────────────────────────────────────────────────
+    // ── SERVICIOS ────────────────────────────────────────────────────────
     if (event.charges && event.charges.length > 0) {
-      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Servicios contratados", margin, y);
-      y += 18;
-      doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
-      doc.fillColor("white").fontSize(8).font("Helvetica-Bold")
-        .text("Descripción", margin + 8, y + 6, { width: 360 });
-      doc.text("Cantidad", margin + 8, y + 6, { width: contentW - 16, align: "right" });
-      y += 22;
+      checkOverflow(46);
+      doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text("Servicios contratados", margin, y);
+      y += 14;
+      doc.roundedRect(margin, y, contentW, 18, 4).fill(NAVY);
+      doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold")
+        .text("Descripción", margin + 6, y + 5, { width: 360 });
+      doc.text("Cantidad", margin + 6, y + 5, { width: contentW - 12, align: "right" });
+      y += 20;
       for (const charge of event.charges) {
-        const rh = Math.max(18, doc.heightOfString(charge.description, { width: 360 }) + 8);
+        const descH = doc.heightOfString(charge.description, { width: 350 });
+        const notesH = charge.notes ? doc.heightOfString(charge.notes, { width: 350 }) + 4 : 0;
+        const rh = Math.max(16, descH + notesH + 6);
+        checkOverflow(rh);
         doc.rect(margin, y, contentW, rh).fill("#fafafa").stroke("#e8e8e8");
-        doc.fillColor("#1a1a1a").fontSize(9).font("Helvetica")
-          .text(charge.description, margin + 8, y + 5, { width: 360 });
-        doc.text(String(charge.quantity), margin + 8, y + 5, { width: contentW - 16, align: "right" });
+        doc.fillColor("#1a1a1a").fontSize(8.5).font("Helvetica")
+          .text(charge.description, margin + 6, y + 4, { width: 350 });
+        doc.text(String(charge.quantity), margin + 6, y + 4, { width: contentW - 12, align: "right" });
         if (charge.notes) {
-          doc.fillColor("#666666").fontSize(7.5).font("Helvetica")
-            .text(charge.notes, margin + 8, y + 18, { width: 360 });
+          doc.fillColor("#666666").fontSize(7).font("Helvetica")
+            .text(charge.notes, margin + 6, y + descH + 6, { width: 350 });
         }
         y += rh;
       }
-      y += 10;
+      y += 8;
     }
 
-    // ── NOTAS + ÁREAS ────────────────────────────────────────────────────────
+    // ── NOTAS + ÁREAS ────────────────────────────────────────────────────
     if (event.notes) {
+      checkOverflow(40);
       doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
-      y += 8;
-      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Notas / Instrucciones operativas", margin, y);
-      y += 16;
-      doc.fillColor("#444444").fontSize(9).font("Helvetica")
+      y += 6;
+      doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text("Notas / Instrucciones operativas", margin, y);
+      y += 13;
+      const notesH = doc.heightOfString(event.notes, { width: contentW });
+      checkOverflow(notesH + 6);
+      doc.fillColor("#444444").fontSize(8.5).font("Helvetica")
         .text(event.notes, margin, y, { width: contentW });
-      y += doc.heightOfString(event.notes, { width: contentW }) + 10;
+      y += notesH + 8;
     }
 
     const areas = [
@@ -206,20 +233,23 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
     ].filter((a) => a.value);
 
     if (areas.length > 0) {
+      checkOverflow(30);
       doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
-      y += 8;
-      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Coordinación por Área", margin, y);
-      y += 16;
+      y += 6;
+      doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text("Coordinación por Área", margin, y);
+      y += 13;
       for (const area of areas) {
-        doc.fillColor("#333333").fontSize(10).font("Helvetica-Bold").text(`${area.label}:`, margin, y);
-        y += 14;
-        doc.fillColor("#444444").fontSize(9).font("Helvetica")
-          .text(area.value!, margin + 10, y, { width: contentW - 10 });
-        y += doc.heightOfString(area.value!, { width: contentW - 10 }) + 8;
+        const areaTextH = doc.heightOfString(area.value!, { width: contentW - 8 });
+        checkOverflow(areaTextH + 20);
+        doc.fillColor("#333333").fontSize(9).font("Helvetica-Bold").text(`${area.label}:`, margin, y);
+        y += 12;
+        doc.fillColor("#444444").fontSize(8.5).font("Helvetica")
+          .text(area.value!, margin + 8, y, { width: contentW - 8 });
+        y += areaTextH + 6;
       }
     }
 
-    // ── FOOTER ───────────────────────────────────────────────────────────────
+    // ── FOOTER (last page) ───────────────────────────────────────────────
     pdfBrandedFooter(doc, pageW, pageH, margin, contentW);
 
     doc.end();
