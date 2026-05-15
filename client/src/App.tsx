@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, createContext, useContext, useCallback, lazy, Suspense } from "react";
 import { Switch, Route, useRoute } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -8,60 +8,64 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import NotFound from "@/pages/not-found";
-import Dashboard from "@/pages/dashboard";
-import OperacionesPage from "@/pages/operaciones";
-import PlanningPage from "@/pages/planning";
-import RoomsPage from "@/pages/rooms";
-import ReservationsPage from "@/pages/reservations";
-import GuestsPage from "@/pages/guests";
-import CheckInPage from "@/pages/check-in";
-import CheckOutPage from "@/pages/check-out";
-import RatePlansPage from "@/pages/rate-plans";
-import OTAChannelsPage from "@/pages/ota-channels";
-import NewReservationPage from "@/pages/new-reservation";
-import GroupsPage from "@/pages/groups";
-import GroupDetailPage from "@/pages/group-detail";
-import ReviewsPage from "@/pages/reviews";
-import HousekeepingPage from "@/pages/housekeeping";
-import RestaurantPage from "@/pages/restaurant";
-import InventoryPage from "@/pages/inventory";
-import SpaPage from "@/pages/spa";
-import EventsPage from "@/pages/events";
-import MaintenancePage from "@/pages/maintenance";
-import AdministrationPage from "@/pages/administration";
-import PackagesPage from "@/pages/packages";
-import CompaniesPage from "@/pages/companies";
-import AgenciesPage from "@/pages/agencies";
-import WebCheckinPublicPage from "@/pages/web-checkin-public";
-import ChatbotDashboardPage from "@/pages/chatbot-dashboard";
-import HospitalityPage from "@/pages/hospitality";
-import ReportsPage from "@/pages/reports";
-import DashboardExecutivePage from "@/pages/dashboard-executive";
-import CashRegisterPage from "@/pages/cash-register";
-import SourceCodePage from "@/pages/source-code";
-import AdminPage from "@/pages/admin";
-import SpaClientsPage from "@/pages/spa-clients";
-import PresupuestosPage from "@/pages/presupuestos";
-import AccountingSuppliersPage from "@/pages/accounting-suppliers";
-import PurchaseInvoicesPage from "@/pages/purchase-invoices";
-import AdminConsultasPage from "@/pages/admin-consultas";
-import AdminCajaPage, { AdminCajaConfigPage } from "@/pages/admin-caja";
-import BillingPage from "@/pages/billing";
-import AdminReportesPage from "@/pages/admin-reportes";
-import AdminCuentasPage from "@/pages/admin-cuentas";
-import CcHuespedesPage from "@/pages/cc-huespedes";
-import AdminDeudaHuespedesPage from "@/pages/admin-deuda-huespedes";
-import ReservarPage from "@/pages/reservar";
-import AdminBookingPage from "@/pages/admin-booking-engine";
-import AdminFoliosPage from "@/pages/admin-folios";
-import EmailConfigPage from "@/pages/email-config";
-import SurveyPage from "@/pages/survey";
-import LoginPage from "@/pages/login";
-import HelpChat from "@/components/help-chat";
 import { ErrorBoundary } from "@/components/error-boundary";
+import NotFound from "@/pages/not-found";
+import LoginPage from "@/pages/login";
 import { LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const OperacionesPage = lazy(() => import("@/pages/operaciones"));
+const PlanningPage = lazy(() => import("@/pages/planning"));
+const RoomsPage = lazy(() => import("@/pages/rooms"));
+const ReservationsPage = lazy(() => import("@/pages/reservations"));
+const GuestsPage = lazy(() => import("@/pages/guests"));
+const CheckInPage = lazy(() => import("@/pages/check-in"));
+const CheckOutPage = lazy(() => import("@/pages/check-out"));
+const RatePlansPage = lazy(() => import("@/pages/rate-plans"));
+const OTAChannelsPage = lazy(() => import("@/pages/ota-channels"));
+const NewReservationPage = lazy(() => import("@/pages/new-reservation"));
+const GroupsPage = lazy(() => import("@/pages/groups"));
+const GroupDetailPage = lazy(() => import("@/pages/group-detail"));
+const ReviewsPage = lazy(() => import("@/pages/reviews"));
+const HousekeepingPage = lazy(() => import("@/pages/housekeeping"));
+const RestaurantPage = lazy(() => import("@/pages/restaurant"));
+const InventoryPage = lazy(() => import("@/pages/inventory"));
+const SpaPage = lazy(() => import("@/pages/spa"));
+const EventsPage = lazy(() => import("@/pages/events"));
+const MaintenancePage = lazy(() => import("@/pages/maintenance"));
+const AdministrationPage = lazy(() => import("@/pages/administration"));
+const PackagesPage = lazy(() => import("@/pages/packages"));
+const CompaniesPage = lazy(() => import("@/pages/companies"));
+const AgenciesPage = lazy(() => import("@/pages/agencies"));
+const WebCheckinPublicPage = lazy(() => import("@/pages/web-checkin-public"));
+const ChatbotDashboardPage = lazy(() => import("@/pages/chatbot-dashboard"));
+const HospitalityPage = lazy(() => import("@/pages/hospitality"));
+const ReportsPage = lazy(() => import("@/pages/reports"));
+const DashboardExecutivePage = lazy(() => import("@/pages/dashboard-executive"));
+const CashRegisterPage = lazy(() => import("@/pages/cash-register"));
+const SourceCodePage = lazy(() => import("@/pages/source-code"));
+const AdminPage = lazy(() => import("@/pages/admin"));
+const SpaClientsPage = lazy(() => import("@/pages/spa-clients"));
+const PresupuestosPage = lazy(() => import("@/pages/presupuestos"));
+const AccountingSuppliersPage = lazy(() => import("@/pages/accounting-suppliers"));
+const PurchaseInvoicesPage = lazy(() => import("@/pages/purchase-invoices"));
+const AdminConsultasPage = lazy(() => import("@/pages/admin-consultas"));
+const AdminCajaPage = lazy(() => import("@/pages/admin-caja"));
+const AdminCajaConfigPage = lazy(() =>
+  import("@/pages/admin-caja").then((m) => ({ default: m.AdminCajaConfigPage }))
+);
+const BillingPage = lazy(() => import("@/pages/billing"));
+const AdminReportesPage = lazy(() => import("@/pages/admin-reportes"));
+const AdminCuentasPage = lazy(() => import("@/pages/admin-cuentas"));
+const CcHuespedesPage = lazy(() => import("@/pages/cc-huespedes"));
+const AdminDeudaHuespedesPage = lazy(() => import("@/pages/admin-deuda-huespedes"));
+const ReservarPage = lazy(() => import("@/pages/reservar"));
+const AdminBookingPage = lazy(() => import("@/pages/admin-booking-engine"));
+const AdminFoliosPage = lazy(() => import("@/pages/admin-folios"));
+const EmailConfigPage = lazy(() => import("@/pages/email-config"));
+const SurveyPage = lazy(() => import("@/pages/survey"));
+const HelpChat = lazy(() => import("@/components/help-chat"));
 
 interface AuthUser {
   id: string;
@@ -83,58 +87,68 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
+
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/operaciones" component={OperacionesPage} />
-      <Route path="/planning" component={PlanningPage} />
-      <Route path="/rooms" component={RoomsPage} />
-      <Route path="/reservations" component={ReservationsPage} />
-      <Route path="/new-reservation" component={NewReservationPage} />
-      <Route path="/guests" component={GuestsPage} />
-      <Route path="/groups" component={GroupsPage} />
-      <Route path="/groups/:id" component={GroupDetailPage} />
-      <Route path="/check-in" component={CheckInPage} />
-      <Route path="/check-out" component={CheckOutPage} />
-      <Route path="/rate-plans" component={RatePlansPage} />
-      <Route path="/ota-channels" component={OTAChannelsPage} />
-      <Route path="/reviews" component={ReviewsPage} />
-      <Route path="/housekeeping" component={HousekeepingPage} />
-      <Route path="/presupuestos" component={PresupuestosPage} />
-      <Route path="/restaurant" component={RestaurantPage} />
-      <Route path="/inventory" component={InventoryPage} />
-      <Route path="/spa" component={SpaPage} />
-      <Route path="/spa-clients" component={SpaClientsPage} />
-      <Route path="/events" component={EventsPage} />
-      <Route path="/maintenance" component={MaintenancePage} />
-      <Route path="/administration" component={AdministrationPage} />
-      <Route path="/packages" component={PackagesPage} />
-      <Route path="/companies" component={CompaniesPage} />
-      <Route path="/agencies" component={AgenciesPage} />
-      <Route path="/chatbot" component={ChatbotDashboardPage} />
-      <Route path="/hospitality" component={HospitalityPage} />
-      <Route path="/reports" component={ReportsPage} />
-      <Route path="/executive" component={DashboardExecutivePage} />
-      <Route path="/cash-register" component={CashRegisterPage} />
-      <Route path="/admin" component={AdminPage} />
-      <Route path="/source-code" component={SourceCodePage} />
-      <Route path="/accounting-suppliers" component={AccountingSuppliersPage} />
-      <Route path="/purchase-invoices" component={PurchaseInvoicesPage} />
-      <Route path="/admin/consultas" component={AdminConsultasPage} />
-      <Route path="/admin/caja" component={AdminCajaPage} />
-      <Route path="/admin/caja/configuracion" component={AdminCajaConfigPage} />
-      <Route path="/billing" component={BillingPage} />
-      <Route path="/admin/reportes" component={AdminReportesPage} />
-      <Route path="/admin/cuentas" component={AdminCuentasPage} />
-      <Route path="/admin/cc-huespedes" component={CcHuespedesPage} />
-      <Route path="/admin/deuda-huespedes" component={AdminDeudaHuespedesPage} />
-      <Route path="/admin/folios" component={AdminFoliosPage} />
-      <Route path="/admin/booking-engine" component={AdminBookingPage} />
-      <Route path="/email-config" component={EmailConfigPage} />
-      <Route path="/encuesta/:token" component={SurveyPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<PageLoader />}>
+      <Switch>
+        <Route path="/" component={Dashboard} />
+        <Route path="/operaciones" component={OperacionesPage} />
+        <Route path="/planning" component={PlanningPage} />
+        <Route path="/rooms" component={RoomsPage} />
+        <Route path="/reservations" component={ReservationsPage} />
+        <Route path="/new-reservation" component={NewReservationPage} />
+        <Route path="/guests" component={GuestsPage} />
+        <Route path="/groups" component={GroupsPage} />
+        <Route path="/groups/:id" component={GroupDetailPage} />
+        <Route path="/check-in" component={CheckInPage} />
+        <Route path="/check-out" component={CheckOutPage} />
+        <Route path="/rate-plans" component={RatePlansPage} />
+        <Route path="/ota-channels" component={OTAChannelsPage} />
+        <Route path="/reviews" component={ReviewsPage} />
+        <Route path="/housekeeping" component={HousekeepingPage} />
+        <Route path="/presupuestos" component={PresupuestosPage} />
+        <Route path="/restaurant" component={RestaurantPage} />
+        <Route path="/inventory" component={InventoryPage} />
+        <Route path="/spa" component={SpaPage} />
+        <Route path="/spa-clients" component={SpaClientsPage} />
+        <Route path="/events" component={EventsPage} />
+        <Route path="/maintenance" component={MaintenancePage} />
+        <Route path="/administration" component={AdministrationPage} />
+        <Route path="/packages" component={PackagesPage} />
+        <Route path="/companies" component={CompaniesPage} />
+        <Route path="/agencies" component={AgenciesPage} />
+        <Route path="/chatbot" component={ChatbotDashboardPage} />
+        <Route path="/hospitality" component={HospitalityPage} />
+        <Route path="/reports" component={ReportsPage} />
+        <Route path="/executive" component={DashboardExecutivePage} />
+        <Route path="/cash-register" component={CashRegisterPage} />
+        <Route path="/admin" component={AdminPage} />
+        <Route path="/source-code" component={SourceCodePage} />
+        <Route path="/accounting-suppliers" component={AccountingSuppliersPage} />
+        <Route path="/purchase-invoices" component={PurchaseInvoicesPage} />
+        <Route path="/admin/consultas" component={AdminConsultasPage} />
+        <Route path="/admin/caja" component={AdminCajaPage} />
+        <Route path="/admin/caja/configuracion" component={AdminCajaConfigPage} />
+        <Route path="/billing" component={BillingPage} />
+        <Route path="/admin/reportes" component={AdminReportesPage} />
+        <Route path="/admin/cuentas" component={AdminCuentasPage} />
+        <Route path="/admin/cc-huespedes" component={CcHuespedesPage} />
+        <Route path="/admin/deuda-huespedes" component={AdminDeudaHuespedesPage} />
+        <Route path="/admin/folios" component={AdminFoliosPage} />
+        <Route path="/admin/booking-engine" component={AdminBookingPage} />
+        <Route path="/email-config" component={EmailConfigPage} />
+        <Route path="/encuesta/:token" component={SurveyPage} />
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
 
@@ -179,6 +193,9 @@ function AppLayout() {
           </main>
         </div>
       </div>
+      <Suspense fallback={null}>
+        <HelpChat />
+      </Suspense>
     </SidebarProvider>
   );
 }
@@ -237,7 +254,6 @@ function AuthenticatedApp() {
   return (
     <AuthContext.Provider value={{ user, logout: handleLogout }}>
       <AppLayout />
-      <HelpChat />
     </AuthContext.Provider>
   );
 }
@@ -252,11 +268,17 @@ function App() {
       <ThemeProvider defaultTheme="light" storageKey="hotel-ui-theme">
         <TooltipProvider>
           {isWebCheckin ? (
-            <WebCheckinPublicPage />
+            <Suspense fallback={<PageLoader />}>
+              <WebCheckinPublicPage />
+            </Suspense>
           ) : isReservar ? (
-            <ReservarPage />
+            <Suspense fallback={<PageLoader />}>
+              <ReservarPage />
+            </Suspense>
           ) : isSurvey ? (
-            <SurveyPage />
+            <Suspense fallback={<PageLoader />}>
+              <SurveyPage />
+            </Suspense>
           ) : (
             <AuthenticatedApp />
           )}

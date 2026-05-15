@@ -7,6 +7,16 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { logger } from "./logger";
 
+const REQUIRED_ENV_VARS = ["DATABASE_URL", "SESSION_SECRET"];
+const missingVars = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
+if (missingVars.length > 0) {
+  console.error(
+    `[ERROR DE INICIO] Variables de entorno requeridas no configuradas: ${missingVars.join(", ")}\n` +
+    `El servidor no puede iniciar sin estas variables. Configurelas en el panel de Secretos de Replit.`
+  );
+  process.exit(1);
+}
+
 const app = express();
 app.set("trust proxy", 1);
 

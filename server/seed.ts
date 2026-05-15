@@ -1144,6 +1144,58 @@ export async function refreshRealData() {
       `);
     }
 
+    // Ensure there are always active demo reservations for the system to work with.
+    // If all reservations are checked_out or cancelled (e.g. after time passes),
+    // refresh the seed reservations to current dates.
+    const activeCount = await db.execute(sql`
+      SELECT COUNT(*) as count FROM reservations
+      WHERE status IN ('confirmed', 'checked_in')
+    `);
+    const count = parseInt((activeCount.rows[0] as any).count, 10);
+
+    if (count === 0) {
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const in2Days = new Date();
+      in2Days.setDate(in2Days.getDate() + 2);
+      const in2Str = in2Days.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const in5Days = new Date();
+      in5Days.setDate(in5Days.getDate() + 5);
+      const in5Str = in5Days.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const in7Days = new Date();
+      in7Days.setDate(in7Days.getDate() + 7);
+      const in7Str = in7Days.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+      // Refresh demo reservations res1/res2/res3 to current dates if they exist
+      await db.execute(sql`
+        UPDATE reservations SET
+          check_in_date = ${todayStr},
+          check_out_date = ${in2Str},
+          nights = 2,
+          status = 'checked_in',
+          updated_at = NOW()
+        WHERE id = 'res1'
+      `);
+      await db.execute(sql`
+        UPDATE reservations SET
+          check_in_date = ${in2Str},
+          check_out_date = ${in5Str},
+          nights = 3,
+          status = 'confirmed',
+          updated_at = NOW()
+        WHERE id = 'res2'
+      `);
+      await db.execute(sql`
+        UPDATE reservations SET
+          check_in_date = ${in5Str},
+          check_out_date = ${in7Str},
+          nights = 2,
+          status = 'confirmed',
+          updated_at = NOW()
+        WHERE id = 'res3'
+      `);
+      console.log("Demo reservations refreshed to current dates.");
+    }
+
     console.log("Real hotel data refreshed successfully!");
   } catch (error) {
     console.error("Error refreshing real data:", error);
