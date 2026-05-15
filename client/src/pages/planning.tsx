@@ -176,6 +176,14 @@ const bedConfigLabels: Record<string, string> = {
   MAT_CC_EXTRA: "Matrimonial + CC + Extra",
 };
 
+const ROOM_STATUS_OPTIONS: { value: string; label: string; dot: string }[] = [
+  { value: "available",    label: "Libre limpia",    dot: "bg-green-500" },
+  { value: "dirty",        label: "Libre sucia",     dot: "bg-orange-500" },
+  { value: "cleaning",     label: "En limpieza",     dot: "bg-yellow-400" },
+  { value: "inspected",    label: "Inspeccionada",   dot: "bg-blue-500" },
+  { value: "maintenance",  label: "Mantenimiento",   dot: "bg-red-500" },
+];
+
 function Legend({ activeStatuses }: { activeStatuses?: Set<PlanningCellStatus> }) {
   const allStatuses = Object.entries(PLANNING_COLORS) as [PlanningCellStatus, typeof PLANNING_COLORS[PlanningCellStatus]][];
   const visibleStatuses = allStatuses.filter(([status]) =>
@@ -1747,6 +1755,7 @@ export default function PlanningPage() {
   const [newReservationDefaults, setNewReservationDefaults] = useState<{ roomId?: string; roomTypeId?: string; checkInDate?: string } | null>(null);
 
   const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string } | null>(null);
+  const [roomPopoverOpen, setRoomPopoverOpen] = useState<string | null>(null);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [blocksExpanded, setBlocksExpanded] = useState(false);
   const [showRevenue, setShowRevenue] = useState(() => localStorage.getItem("planning_revenue") === "true");
@@ -1785,6 +1794,23 @@ export default function PlanningPage() {
     },
     onError: () => {
       toast({ title: "Error al actualizar camaje", variant: "destructive" });
+    },
+  });
+
+  const updateRoomStatusMutation = useMutation({
+    mutationFn: async ({ roomId, status }: { roomId: string; status: string }) => {
+      const res = await apiRequest("PATCH", `/api/rooms/${roomId}`, { status });
+      return res.json();
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setRoomPopoverOpen(null);
+      const opt = ROOM_STATUS_OPTIONS.find(o => o.value === vars.status);
+      toast({ title: `Estado actualizado: ${opt?.label ?? vars.status}` });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar estado", variant: "destructive" });
     },
   });
 
@@ -2512,80 +2538,95 @@ export default function PlanningPage() {
                         </tr>
                         {groupedRooms[floor]?.map((room) => (
                           <DroppableRoomRow key={room.id} roomId={room.id} className="hover:bg-muted/20" data-testid={`row-room-${room.id}`}>
-                            <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="flex flex-col cursor-default" data-testid={`room-header-${room.id}`}>
-                                    <div className="flex items-center gap-1">
-                                      <span className="font-medium text-sm">{room.roomNumber}</span>
-                                      {room.status === "dirty" && (
-                                        <span title="Sucia"><AlertCircle className="h-3 w-3 text-orange-500" /></span>
-                                      )}
-                                      {room.status === "cleaning" && (
-                                        <span title="En limpieza"><RefreshCw className="h-3 w-3 text-yellow-500" /></span>
-                                      )}
-                                      {room.status === "inspected" && (
-                                        <span title="Inspeccionada"><CheckCircle2 className="h-3 w-3 text-green-500" /></span>
-                                      )}
-                                      {room.status === "maintenance" && (
-                                        <span title="Mantenimiento"><Wrench className="h-3 w-3 text-red-500" /></span>
-                                      )}
-                                      {room.status !== "maintenance" && maintenanceAlertRoomIds.has(room.id) && (
-                                        <span title="Orden de mantenimiento pendiente"><Wrench className="h-3 w-3 text-orange-400" /></span>
-                                      )}
-                                    </div>
-                                    <span className="text-xs text-muted-foreground">{room.roomType?.name ?? ""}</span>
-                                    {room.bedConfig && (
-                                      <span
-                                        className="text-[10px] text-muted-foreground underline decoration-dotted cursor-pointer hover:text-foreground"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setEditingBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "" });
-                                        }}
-                                        title="Click para cambiar camaje"
-                                        data-testid={`button-edit-bedconfig-${room.id}`}
-                                      >
-                                        {bedConfigLabels[room.bedConfig] || room.bedConfig}
-                                      </span>
+                            <td className="sticky left-0 z-10 bg-background px-2 py-1 border-r">
+                              <Popover
+                                open={roomPopoverOpen === room.id}
+                                onOpenChange={(o) => setRoomPopoverOpen(o ? room.id : null)}
+                              >
+                                <PopoverTrigger asChild>
+                                  <div
+                                    className="flex items-center gap-1 cursor-pointer rounded px-1 py-0.5 hover:bg-muted/60 select-none"
+                                    data-testid={`room-header-${room.id}`}
+                                  >
+                                    <span className="font-medium text-sm leading-none">{room.roomNumber}</span>
+                                    {room.status === "dirty" && (
+                                      <span title="Sucia"><AlertCircle className="h-3 w-3 text-orange-500 shrink-0" /></span>
                                     )}
-                                    {room.features && room.features.length > 0 && (
-                                      <div className="flex flex-row items-center gap-0.5 mt-0.5">
-                                        {room.features.map((feature) => {
-                                          const mapped = featureIconMap[feature];
-                                          if (!mapped) return null;
-                                          const IconComp = mapped.icon;
-                                          return <span key={feature} title={mapped.label}><IconComp className="h-3 w-3 text-muted-foreground" /></span>;
-                                        })}
-                                      </div>
+                                    {room.status === "cleaning" && (
+                                      <span title="En limpieza"><RefreshCw className="h-3 w-3 text-yellow-500 shrink-0" /></span>
                                     )}
+                                    {room.status === "inspected" && (
+                                      <span title="Inspeccionada"><CheckCircle2 className="h-3 w-3 text-blue-500 shrink-0" /></span>
+                                    )}
+                                    {room.status === "maintenance" && (
+                                      <span title="Mantenimiento"><Wrench className="h-3 w-3 text-red-500 shrink-0" /></span>
+                                    )}
+                                    {room.status !== "maintenance" && maintenanceAlertRoomIds.has(room.id) && (
+                                      <span title="Orden de mantenimiento pendiente"><Wrench className="h-3 w-3 text-orange-400 shrink-0" /></span>
+                                    )}
+                                    {room.features && room.features.slice(0, 2).map((feature) => {
+                                      const mapped = featureIconMap[feature];
+                                      if (!mapped) return null;
+                                      const IconComp = mapped.icon;
+                                      return <span key={feature} title={mapped.label}><IconComp className="h-3 w-3 text-muted-foreground shrink-0" /></span>;
+                                    })}
                                   </div>
-                                </TooltipTrigger>
-                                <TooltipContent side="right" className="max-w-[220px]">
-                                  <div className="text-xs space-y-1">
-                                    <div className="font-semibold">{room.roomNumber} - {room.roomType?.name ?? ""}</div>
-                                    <div>Piso: {room.floor}</div>
+                                </PopoverTrigger>
+                                <PopoverContent side="right" align="start" className="w-60 p-0 shadow-lg" data-testid={`popover-room-${room.id}`}>
+                                  {/* ── Header ── */}
+                                  <div className="px-3 py-2 border-b bg-muted/40">
+                                    <p className="font-semibold text-sm">{room.roomNumber} — {room.roomType?.name ?? ""}</p>
+                                    <p className="text-xs text-muted-foreground">Piso {room.floor}{room.maxOccupancy ? ` · máx. ${room.maxOccupancy} pers.` : ""}</p>
                                     {room.bedConfig && (
-                                      <div>Camaje: {bedConfigLabels[room.bedConfig] || room.bedConfig}</div>
-                                    )}
-                                    {room.maxOccupancy && (
-                                      <div>Ocupación máx: {room.maxOccupancy} personas</div>
-                                    )}
-                                    {room.features && room.features.length > 0 && (
-                                      <div>
-                                        <span className="font-medium">Características:</span>
-                                        <ul className="list-disc pl-3 mt-0.5">
-                                          {room.features.map((f) => (
-                                            <li key={f}>{featureIconMap[f]?.label || f}</li>
-                                          ))}
-                                        </ul>
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <span className="text-xs text-muted-foreground">{bedConfigLabels[room.bedConfig] || room.bedConfig}</span>
+                                        <button
+                                          className="text-[10px] text-primary underline decoration-dotted hover:no-underline ml-1"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setRoomPopoverOpen(null);
+                                            setEditingBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "" });
+                                          }}
+                                          data-testid={`button-edit-bedconfig-${room.id}`}
+                                        >
+                                          Cambiar
+                                        </button>
                                       </div>
                                     )}
                                     {room.notes && (
-                                      <div className="border-t pt-1 mt-1 text-muted-foreground">{room.notes}</div>
+                                      <p className="text-xs text-muted-foreground mt-1 italic">{room.notes}</p>
                                     )}
                                   </div>
-                                </TooltipContent>
-                              </Tooltip>
+                                  {/* ── Estado rápido ── */}
+                                  <div className="px-3 py-2">
+                                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Estado de habitación</p>
+                                    <div className="flex flex-col gap-1">
+                                      {ROOM_STATUS_OPTIONS.map((opt) => {
+                                        const isActive = room.status === opt.value;
+                                        return (
+                                          <button
+                                            key={opt.value}
+                                            className={`flex items-center gap-2 text-xs px-2 py-1 rounded transition-colors text-left ${isActive ? "bg-primary/10 font-semibold" : "hover:bg-muted/60"}`}
+                                            onClick={() => {
+                                              if (!isActive) {
+                                                updateRoomStatusMutation.mutate({ roomId: room.id, status: opt.value });
+                                              } else {
+                                                setRoomPopoverOpen(null);
+                                              }
+                                            }}
+                                            disabled={updateRoomStatusMutation.isPending}
+                                            data-testid={`button-status-${opt.value}-${room.id}`}
+                                          >
+                                            <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dot}`} />
+                                            {opt.label}
+                                            {isActive && <span className="ml-auto text-primary">✓</span>}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
                             </td>
                             {data.days.map((day, dayIndex) => {
                               const status = data.occupancy[room.id]?.[dayIndex] || "available";
