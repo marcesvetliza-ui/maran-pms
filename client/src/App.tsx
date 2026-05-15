@@ -59,6 +59,7 @@ import EmailConfigPage from "@/pages/email-config";
 import SurveyPage from "@/pages/survey";
 import LoginPage from "@/pages/login";
 import HelpChat from "@/components/help-chat";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -172,7 +173,9 @@ function AppLayout() {
             </div>
           </header>
           <main className="flex-1 overflow-y-auto">
-            <Router />
+            <ErrorBoundary>
+              <Router />
+            </ErrorBoundary>
           </main>
         </div>
       </div>

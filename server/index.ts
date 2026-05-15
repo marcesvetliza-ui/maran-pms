@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { setupAuth } from "./auth";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import { logger } from "./logger";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -101,6 +102,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const { runMigrations } = await import("./migrate");
+  await runMigrations();
+
   const { seedDatabase, refreshRealData } = await import("./seed");
   try {
     await seedDatabase();
@@ -216,12 +220,13 @@ app.use((req, res, next) => {
     console.error("Night audit scheduler error (non-blocking):", err.message);
   }
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
+    if (status >= 500) {
+      logger.error("Unhandled API error", err, { method: req.method, path: req.path, status });
+    }
     res.status(status).json({ message });
-    throw err;
   });
 
   // importantly only setup vite in development and after
