@@ -3877,8 +3877,11 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    // Crear automáticamente el siguiente turno
-    const nextNum = await this._nextShiftNumber(shift.area);
+    // Crear automáticamente el siguiente turno.
+    // Usamos shiftNumber + 1 del turno que se cierra para evitar el bug de
+    // medianoche: si el turno se cierra después de las 00:00 Argentina,
+    // _nextShiftNumber contaría 0 turnos del "nuevo día" y volvería a 1.
+    const nextNum = updatedShift.shiftNumber + 1;
     const [turnoNuevo] = await db.insert(cashShifts).values({
       id: randomUUID(),
       area: shift.area,
