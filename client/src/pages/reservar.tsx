@@ -177,6 +177,21 @@ export default function ReservarPage() {
   const [checkIn, setCheckIn] = useState(today());
   const [checkOut, setCheckOut] = useState(tomorrow());
   const [adults, setAdults] = useState(2);
+  const [children, setChildren] = useState(0);
+  const [childrenAges, setChildrenAges] = useState<number[]>([]);
+
+  function handleChildrenChange(count: number) {
+    setChildren(count);
+    setChildrenAges(prev => {
+      if (count > prev.length) return [...prev, ...Array(count - prev.length).fill(5)];
+      return prev.slice(0, count);
+    });
+  }
+
+  const totalGuests = adults + children;
+  const guestSummary = children > 0
+    ? `${adults} adulto${adults !== 1 ? "s" : ""}, ${children} niño${children !== 1 ? "s" : ""}`
+    : `${adults} adulto${adults !== 1 ? "s" : ""}`;
 
   // Step 1: room type
   const [selectedRoomType, setSelectedRoomType] = useState<RoomTypeResult | null>(null);
@@ -200,9 +215,9 @@ export default function ReservarPage() {
 
   const { data: availability, isLoading: loadingAvail, refetch: refetchAvail, isError: availError } =
     useQuery<AvailabilityResponse>({
-      queryKey: ["/api/public/booking/availability", checkIn, checkOut, adults],
+      queryKey: ["/api/public/booking/availability", checkIn, checkOut, totalGuests],
       queryFn: () => fetch(
-        `/api/public/booking/availability?checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}`
+        `/api/public/booking/availability?checkIn=${checkIn}&checkOut=${checkOut}&adults=${totalGuests}`
       ).then(r => r.json()),
       enabled: false,
     });
@@ -242,7 +257,7 @@ export default function ReservarPage() {
     if (!firstName || !lastName || !email) return;
     if (!selectedRoomType) return;
     confirmMutation.mutate({
-      checkIn, checkOut, adults,
+      checkIn, checkOut, adults, children, childrenAges,
       roomTypeId: selectedRoomType.roomTypeId,
       ratePlanId: selectedRoomType.ratePlanId,
       firstName, lastName, email, phone,
@@ -288,18 +303,70 @@ export default function ReservarPage() {
           </div>
         )}
 
-        <div className="space-y-1.5">
+        <div className="space-y-3">
           <Label className="text-sm font-medium flex items-center gap-2"><Users className="h-4 w-4" />Huéspedes</Label>
-          <Select value={String(adults)} onValueChange={v => setAdults(parseInt(v))}>
-            <SelectTrigger data-testid="select-adults">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[1, 2, 3, 4, 5, 6].map(n => (
-                <SelectItem key={n} value={String(n)}>{n} persona{n !== 1 ? "s" : ""}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-gray-500">Adultos</Label>
+              <Select value={String(adults)} onValueChange={v => setAdults(parseInt(v))}>
+                <SelectTrigger data-testid="select-adults">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4, 5, 6].map(n => (
+                    <SelectItem key={n} value={String(n)}>{n} adulto{n !== 1 ? "s" : ""}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-gray-500">Niños (hasta 12 años)</Label>
+              <Select value={String(children)} onValueChange={v => handleChildrenChange(parseInt(v))}>
+                <SelectTrigger data-testid="select-children">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[0, 1, 2, 3, 4].map(n => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n === 0 ? "Sin niños" : `${n} niño${n !== 1 ? "s" : ""}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {children > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-950/30 rounded-xl p-3 space-y-2">
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-300">Edad de los niños</p>
+              <div className="grid grid-cols-2 gap-2">
+                {childrenAges.map((age, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <Label className="text-xs text-gray-500">Niño {idx + 1}</Label>
+                    <Select
+                      value={String(age)}
+                      onValueChange={v => {
+                        const updated = [...childrenAges];
+                        updated[idx] = parseInt(v);
+                        setChildrenAges(updated);
+                      }}
+                    >
+                      <SelectTrigger data-testid={`select-child-age-${idx}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 13 }, (_, i) => (
+                          <SelectItem key={i} value={String(i)}>
+                            {i === 0 ? "Menos de 1 año" : `${i} año${i !== 1 ? "s" : ""}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {hotelInfo && (
@@ -328,7 +395,7 @@ export default function ReservarPage() {
             <ChevronLeft className="h-4 w-4" /> Cambiar fechas
           </button>
           <div className="text-sm text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full">
-            {fmtDate(checkIn)} → {fmtDate(checkOut)} · {adults} pax
+            {fmtDate(checkIn)} → {fmtDate(checkOut)} · {guestSummary}
           </div>
         </div>
 
@@ -393,7 +460,7 @@ export default function ReservarPage() {
           <div className="bg-blue-50 dark:bg-blue-950/40 rounded-xl p-3 mb-5 text-sm">
             <div className="font-semibold text-blue-800 dark:text-blue-200">{selectedRoomType.name}</div>
             <div className="text-blue-700 dark:text-blue-300 text-xs mt-0.5">
-              {fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights} noche{nights !== 1 ? "s" : ""} · {adults} pax
+              {fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights} noche{nights !== 1 ? "s" : ""} · {guestSummary}
             </div>
             <div className="text-blue-800 dark:text-blue-200 font-bold mt-1">
               Total: {fmt(selectedRoomType.totalPrice, selectedRoomType.currency)}
