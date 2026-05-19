@@ -1248,17 +1248,33 @@ export function ReservationFormDialog({
               </div>
             )}
 
-            <div className="p-4 bg-muted rounded-lg">
+            <div className="p-4 bg-muted rounded-lg space-y-2">
               <div className="flex justify-between items-center">
                 <div>
                   <p className="text-sm text-muted-foreground">Tarifa Final/Noche</p>
                   <p className="text-lg font-semibold">${formData.finalRatePerNight || "0.00"}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-muted-foreground">Total Habitación</p>
-                  <p className="text-2xl font-bold text-primary">${formData.totalRoomAmount || "0.00"}</p>
+                  <p className="text-sm text-muted-foreground">Total Alojamiento</p>
+                  <p className="text-lg font-semibold">${formData.totalRoomAmount || "0.00"}</p>
                 </div>
               </div>
+              {pendingCharges.length > 0 && (() => {
+                const chargesTotal = pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0);
+                const roomTotal = parseFloat(formData.totalRoomAmount || "0");
+                const grandTotal = (roomTotal + chargesTotal).toFixed(2);
+                return (
+                  <div className="border-t pt-2 flex justify-between items-center">
+                    <p className="text-sm font-semibold text-foreground">Total General</p>
+                    <p className="text-2xl font-bold text-primary">${grandTotal}</p>
+                  </div>
+                );
+              })()}
+              {pendingCharges.length === 0 && (
+                <div className="border-t pt-2 flex justify-end">
+                  <p className="text-2xl font-bold text-primary">${formData.totalRoomAmount || "0.00"}</p>
+                </div>
+              )}
             </div>
 
             <div className="grid gap-3 border rounded-lg p-3">
@@ -1419,51 +1435,7 @@ function ReservationDetailDialog({
   });
 
   const printConfirmation = () => {
-    const guest = reservation.guest;
-    const room = reservation.room;
-    const guestName = `${(guest?.lastName || "").toUpperCase()} ${guest?.firstName || ""}`.trim();
-    const formatShort = (dateStr: string) => {
-      const [y, m, d] = dateStr.split("-");
-      return `${d}/${m}/${y}`;
-    };
-    const checkIn = formatShort(reservation.checkInDate);
-    const checkOut = formatShort(reservation.checkOutDate);
-    const nights = Math.round(
-      (new Date(reservation.checkOutDate).getTime() - new Date(reservation.checkInDate).getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const roomTypeName = (room as any)?.roomType?.name || "Habitación";
-    const dailyRate = reservation.finalRatePerNight
-      ? `$${Number(reservation.finalRatePerNight).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
-      : "$0.00";
-    const totalRate = reservation.totalRoomAmount
-      ? `$${Number(reservation.totalRoomAmount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
-      : "$0.00";
-    const pax = reservation.numberOfGuests || 1;
-    const reservationCode = reservation.reservationCode || reservation.id;
-    const company = (reservation as any).company?.razonSocial || (reservation as any).company?.nombreFantasia || "";
-    const earlyCheckIn = reservation.earlyCheckIn;
-    const earlyCheckInTime = reservation.earlyCheckInTime || "";
-    const earlyCheckInCharge = reservation.earlyCheckInCharge ? parseFloat(String(reservation.earlyCheckInCharge)) : 0;
-    const lateCheckOut = reservation.lateCheckOut;
-    const lateCheckOutTime = reservation.lateCheckOutTime || "";
-    const lateCheckOutCharge = reservation.lateCheckOutCharge ? parseFloat(String(reservation.lateCheckOutCharge)) : 0;
-    const formatMoney = (n: number) => `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
-    const totalConExtras = parseFloat(reservation.totalRoomAmount || "0") + (earlyCheckIn ? earlyCheckInCharge : 0) + (lateCheckOut ? lateCheckOutCharge : 0);
-    const activeChargesForPrint = (activeConsumptionCharges || []).filter(c => c.category !== "payment");
-    const totalChargesForPrint = activeChargesForPrint.reduce((sum, c) => sum + parseFloat(c.amount), 0);
-    const grandTotal = totalConExtras + totalChargesForPrint;
-    const hasCochera = activeChargesForPrint.some(c => (c.description || "").toLowerCase().includes("cochera"));
-    const extrasHtml = activeChargesForPrint.length > 0
-      ? `<div class="extras-section"><div class="extras-title">Servicios Adicionales / Additional Services</div><table class="extras-table">${activeChargesForPrint.map(c => `<tr><td class="extras-desc">${c.description || ""}</td><td class="extras-amount">$${parseFloat(c.amount).toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>`).join("")}<tr class="extras-total-row"><td class="extras-desc" style="font-weight:bold;color:#444;">Subtotal servicios</td><td class="extras-amount" style="font-weight:bold;color:#111;">$${totalChargesForPrint.toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr></table></div>`
-      : "";
-
-    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Confirmación de Reserva - ${guestName}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:12px;color:#333;background:white;}.page{max-width:780px;margin:0 auto;padding:0;}.header-photo{width:100%;height:180px;background:linear-gradient(180deg,#2c5f8a 0%,#1a3a5c 60%,#0d2035 100%);display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.3);font-size:13px;letter-spacing:2px;text-transform:uppercase;}.logo-bar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:2px solid #c8a97e;background:#fff;}.logo-left{display:flex;align-items:center;gap:14px;}.logo-circle{width:56px;height:56px;border-radius:50%;border:2px solid #c8a97e;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:bold;color:#c8a97e;text-align:center;line-height:1.3;letter-spacing:0.5px;text-transform:uppercase;padding:6px;}.logo-name{font-size:20px;font-weight:bold;color:#8b5e2a;font-family:Georgia,serif;line-height:1.1;}.logo-name span{display:block;font-size:11px;font-weight:normal;color:#999;letter-spacing:2px;text-transform:uppercase;font-family:Arial,sans-serif;}.logo-badge{text-align:center;font-size:8px;color:#888;border:1px solid #ccc;border-radius:4px;padding:6px 10px;line-height:1.5;}.logo-badge strong{display:block;font-size:10px;color:#c8a97e;}.content{padding:20px 28px;}.reservation-header{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0;border:1px solid #ccc;margin-bottom:18px;}.reservation-header .cell{padding:6px 10px;border-right:1px solid #ccc;}.reservation-header .cell:last-child{border-right:none;}.reservation-header .cell-label{font-size:8px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;}.reservation-header .cell-value{font-size:12px;font-weight:bold;color:#111;}.greeting{font-size:12px;color:#444;line-height:1.6;margin-bottom:18px;}.details-table{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:11px;}.details-table td{padding:5px 10px;border:1px solid #ddd;vertical-align:middle;}.details-table .label-col{background:#f5f5f5;font-weight:bold;color:#555;width:45%;}.details-table .value-col{color:#111;font-size:12px;}.rates-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #ddd;margin-bottom:4px;}.rates-grid .rate-cell{padding:5px 10px;border-right:1px solid #ddd;border-bottom:1px solid #ddd;font-size:11px;}.rates-grid .rate-cell:nth-child(even){border-right:none;}.rates-grid .rate-label{font-weight:bold;color:#555;background:#f5f5f5;font-size:10px;}.rates-grid .rate-value{color:#111;}.total-box{border:2px solid #333;text-align:center;padding:6px;font-size:13px;font-weight:bold;margin-bottom:18px;color:#111;}.total-box span{font-size:10px;font-weight:normal;color:#555;margin-right:8px;}.conditions{font-size:10px;color:#444;line-height:1.7;margin-bottom:20px;}.conditions p{margin-bottom:3px;}.conditions p::before{content:"» ";color:#888;}.sustainable{font-size:10px;color:#4a7c59;font-style:italic;margin-bottom:20px;}.footer{border-top:2px solid #c8a97e;padding:12px 0 0;display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#555;}.footer-left{line-height:1.8;}.footer-right{font-size:13px;font-weight:bold;color:#8b5e2a;letter-spacing:1px;text-transform:uppercase;}@media print{body{margin:0;}.page{max-width:100%;}}.extras-section{margin-bottom:14px;border:1px solid #ddd;border-radius:3px;overflow:hidden;}.extras-title{font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#666;padding:5px 10px;background:#f9f9f9;border-bottom:1px solid #ddd;font-weight:bold;}.extras-table{width:100%;border-collapse:collapse;font-size:11px;}.extras-table tr{border-bottom:1px solid #eee;}.extras-table td{padding:4px 10px;}.extras-desc{color:#333;}.extras-amount{text-align:right;font-weight:bold;color:#111;width:120px;}.extras-total-row td{background:#f5f5f5;border-top:1px solid #ccc;}</style></head><body><div class="page"><div class="header-photo">MARAN SUITES &amp; TOWERS · PARANÁ</div><div class="logo-bar"><div class="logo-left"><div class="logo-circle">Hotel<br>&amp; Spa<br>MARAN<br>SUITES<br>&amp; Towers</div><div class="logo-name">MARAN SUITES &amp; TOWERS<span>Hotel &amp; Spa · Paraná, Entre Ríos</span></div></div><div class="logo-badge"><strong>PLATA</strong>CERTIFICACIÓN<br>EN SOSTENIBILIDAD<br>HOTELES MÁS VERDES</div></div><div class="content"><div class="reservation-header"><div class="cell"><div class="cell-label">Apellido y Nombre / Last Name and Name</div><div class="cell-value">${guestName}</div></div><div class="cell"><div class="cell-label">Check In</div><div class="cell-value">${checkIn}</div></div><div class="cell"><div class="cell-label">Check Out</div><div class="cell-value">${checkOut}</div></div><div class="cell"><div class="cell-label">Cant. de Pax</div><div class="cell-value">${pax}</div></div><div class="cell"><div class="cell-label">Nº de Reserva</div><div class="cell-value">${reservationCode}</div></div></div>${company ? `<div class="reservation-header" style="margin-top:-14px;"><div class="cell" style="grid-column:span 5;border-right:none;"><div class="cell-label">Empresa / Company</div><div class="cell-value">${company}</div></div></div>` : ""}<div class="greeting"><strong>Estimado/a,</strong><br>Gracias por efectuar su reserva, será un placer recibirlo en nuestra casa. A continuación detallamos la información correspondiente a la misma.</div><table class="details-table"><tr><td class="label-col">Cantidad de noches / Number of nights</td><td class="value-col">${nights}</td></tr><tr><td class="label-col">Categoría de Habitación / Type of Room</td><td class="value-col">${roomTypeName}</td></tr></table><div class="rates-grid"><div class="rate-cell rate-label">Tarifa diaria / Daily rate</div><div class="rate-cell rate-value">${dailyRate}</div><div class="rate-cell rate-label">Total Alojamiento / Total room rate</div><div class="rate-cell rate-value">${totalRate}</div>${earlyCheckIn ? `<div class="rate-cell rate-label" style="color:#b45309;">Early Check-in${earlyCheckInTime ? ` (${earlyCheckInTime} hs)` : ""}</div><div class="rate-cell rate-value" style="color:#b45309;">${formatMoney(earlyCheckInCharge)}</div>` : ""}${lateCheckOut ? `<div class="rate-cell rate-label" style="color:#7c3aed;">Late Check-out${lateCheckOutTime ? ` (${lateCheckOutTime} hs)` : ""}</div><div class="rate-cell rate-value" style="color:#7c3aed;">${formatMoney(lateCheckOutCharge)}</div>` : ""}</div>${extrasHtml}<div class="total-box"><span>Total General / Grand Total:</span>$${grandTotal.toLocaleString("es-AR",{minimumFractionDigits:2})}</div><div class="conditions"><p>La tarifa incluye desayuno buffet y gimnasio con turno previo.</p>${hasCochera ? "" : "<p>La cochera tiene costo adicional.</p>"}<p>Nuestro horario de Check in es a partir de las ${earlyCheckIn && earlyCheckInTime ? earlyCheckInTime : "15:00"} Hs y el Check out es hasta las ${lateCheckOut && lateCheckOutTime ? lateCheckOutTime : "10:00"} Hs.</p><p>Early Check in o Late Check out tienen costo adicional del 50% del valor de una noche.</p><p>Importante: En el momento de ingreso, deberá acreditar su identidad con su respectivo DNI.</p></div><div class="sustainable">Somos un hotel certificado en acciones sustentables, por lo que no es necesario que se imprima esta confirmación de reserva, la misma es válida en formato digital.</div><div class="footer"><div class="footer-left">Alameda de la Federación y Mitre, Paraná (3100) Entre Ríos, Argentina<br>✉ reservas@maran.com.ar &nbsp;|&nbsp; +54 9 343 503 8070 &nbsp;|&nbsp; ☎ +54 (0343) 423 5444</div><div class="footer-right">maran.com.ar</div></div></div></div><script>window.onload=function(){window.print();};</script></body></html>`;
-
-    const printWindow = window.open("", "_blank");
-    if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-    }
+    window.open(`/api/reservations/${reservation.id}/confirmation-pdf`, "_blank");
   };
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [transferringChargeId, setTransferringChargeId] = useState<string | null>(null);
