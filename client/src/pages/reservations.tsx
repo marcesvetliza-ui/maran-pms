@@ -3407,7 +3407,7 @@ export default function ReservationsPage() {
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | undefined>();
 
   const todayStr = getLocalToday();
-  const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created" | "anuladas">("upcoming");
+  const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created" | "anuladas">("today");
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState("");
   const [createdFrom, setCreatedFrom] = useState(todayStr);
