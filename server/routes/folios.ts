@@ -42,14 +42,14 @@ const PAYMENT_LABELS: Record<string, string> = {
 
 function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50, size: "A4" });
+    const doc = new PDFDocument({ margin: 0, size: "A4" });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
     const fmtCurrency = (n: string | number) =>
-      `$${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      `$ ${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const fmtDate = (iso: string) => {
       try {
         const d = new Date(iso);
@@ -57,102 +57,172 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<B
       } catch { return iso; }
     };
 
-    const W = 495; // usable width
-    const blue = "#1a4a7a";
-    const gold = "#c8a97e";
-    const gray = "#666666";
-    const lightGray = "#f5f5f5";
+    const L = 45;          // left margin
+    const R = 550;         // right edge
+    const W = R - L;       // usable width = 505
+    const navy   = "#1a3a5c";
+    const gold   = "#b8963e";
+    const slate  = "#4a5568";
+    const lightBg = "#f7f9fc";
+    const rowAlt  = "#edf2f7";
+    const green  = "#276749";
+    const red    = "#9b2335";
+    const orange = "#c05621";
 
-    // ── Header ──────────────────────────────────────────────────────────
-    doc.rect(50, 50, W, 70).fill(blue);
-    doc.fillColor("white").font("Helvetica-Bold").fontSize(18)
-       .text("MARAN SUITES & TORRES", 70, 65);
-    doc.font("Helvetica").fontSize(10)
-       .text("Av. Urquiza 1220 | Paraná, Entre Ríos | Tel: (343) 400-0000", 70, 87);
-    doc.font("Helvetica-Bold").fontSize(11)
-       .text("ESTADO DE CUENTA — FOLIO", 70, 103, { align: "right" });
+    // ── Header band ─────────────────────────────────────────────────────
+    doc.rect(0, 0, 595, 90).fill(navy);
 
-    // ── Folio info ───────────────────────────────────────────────────────
-    doc.fillColor(blue).font("Helvetica-Bold").fontSize(14)
-       .text(folio.codigo, 370, 130, { align: "right" });
+    // Hotel name
+    doc.fillColor("white").font("Helvetica-Bold").fontSize(22)
+       .text("MARAN SUITES & TORRES", L, 18, { width: 320 });
+    doc.font("Helvetica").fontSize(9).fillColor("#aac4e0")
+       .text("Av. Urquiza 1220  |  Paraná, Entre Ríos  |  Tel: (343) 400-0000", L, 46);
 
-    doc.rect(50, 130, W, 50).fill(lightGray);
-    doc.fillColor(gray).font("Helvetica").fontSize(9);
-    doc.text("Tipo:", 60, 140);
-    doc.fillColor("black").text(ENTITY_LABELS[folio.entityType] ?? folio.entityType, 110, 140);
-    if (entityLabel) {
-      doc.fillColor(gray).text("Referencia:", 60, 154);
-      doc.fillColor("black").text(entityLabel, 110, 154);
+    // Folio badge — right side
+    doc.font("Helvetica").fontSize(9).fillColor("#aac4e0")
+       .text("FOLIO", R - 110, 20, { width: 110, align: "right" });
+    doc.font("Helvetica-Bold").fontSize(18).fillColor("white")
+       .text(folio.codigo, R - 140, 34, { width: 140, align: "right" });
+    const statusLabel = folio.status === "open" ? "ABIERTO" : folio.status === "closed" ? "CERRADO" : "FACTURADO";
+    const statusColor = folio.status === "open" ? "#68d391" : folio.status === "closed" ? "#90cdf4" : "#fbd38d";
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(statusColor)
+       .text(statusLabel, R - 140, 58, { width: 140, align: "right" });
+
+    // ── Info bar ────────────────────────────────────────────────────────
+    doc.rect(0, 90, 595, 44).fill(lightBg);
+    doc.moveTo(0, 134).lineTo(595, 134).strokeColor(gold).lineWidth(1.5).stroke();
+
+    const infoY = 100;
+    const col = (i: number) => L + i * 155;
+
+    doc.font("Helvetica").fontSize(8).fillColor(slate).text("Tipo de cuenta", col(0), infoY);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c")
+       .text(ENTITY_LABELS[folio.entityType] ?? folio.entityType, col(0), infoY + 12);
+
+    doc.font("Helvetica").fontSize(8).fillColor(slate).text("Fecha apertura", col(1), infoY);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c")
+       .text(fmtDate(folio.openedAt ?? ""), col(1), infoY + 12);
+
+    if (folio.closedAt) {
+      doc.font("Helvetica").fontSize(8).fillColor(slate).text("Fecha cierre", col(2), infoY);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c")
+         .text(fmtDate(folio.closedAt), col(2), infoY + 12);
     }
-    doc.fillColor(gray).text("Estado:", 300, 140);
-    const statusLabel = folio.status === "open" ? "Abierto" : folio.status === "closed" ? "Cerrado" : "Facturado";
-    doc.fillColor("black").text(statusLabel, 350, 140);
-    doc.fillColor(gray).text("Apertura:", 300, 154);
-    doc.fillColor("black").text(fmtDate(folio.openedAt ?? ""), 350, 154);
 
-    // ── Movements table header ───────────────────────────────────────────
-    let y = 200;
-    doc.rect(50, y, W, 18).fill(blue);
-    doc.fillColor("white").font("Helvetica-Bold").fontSize(8);
-    doc.text("Fecha / Hora", 55, y + 5);
-    doc.text("Descripción", 170, y + 5);
-    doc.text("Tipo", 360, y + 5);
-    doc.text("Importe", 440, y + 5, { width: 50, align: "right" });
-    y += 18;
+    // ── Reference block ─────────────────────────────────────────────────
+    let y = 146;
+    if (entityLabel) {
+      doc.rect(L, y, W, 26).fill("#fffbeb");
+      doc.rect(L, y, 3, 26).fill(gold);
+      doc.font("Helvetica").fontSize(8).fillColor(slate).text("Referencia:", L + 10, y + 5);
+      const refText = entityLabel.length > 90 ? entityLabel.slice(0, 90) + "…" : entityLabel;
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c").text(refText, L + 72, y + 5);
+      y += 34;
+    } else {
+      y += 10;
+    }
 
-    // ── Movements rows ───────────────────────────────────────────────────
-    let runningBalance = 0;
-    for (let i = 0; i < folio.movements.length; i++) {
-      const m = folio.movements[i];
-      const isDebit = ["charge", "transfer_in"].includes(m.type);
-      const sign = isDebit ? 1 : -1;
-      runningBalance += sign * parseFloat(m.amount);
-      const bg = i % 2 === 0 ? "white" : lightGray;
-      doc.rect(50, y, W, 16).fill(bg);
-      doc.fillColor(gray).font("Helvetica").fontSize(8).text(fmtDate(m.createdAt ?? ""), 55, y + 4);
-      const desc = m.description.length > 35 ? m.description.slice(0, 35) + "…" : m.description;
-      doc.fillColor("black").text(desc, 170, y + 4);
-      doc.fillColor(gray).text(MOVEMENT_LABELS[m.type] ?? m.type, 360, y + 4);
-      const payLabel = m.paymentMethod ? ` (${PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod})` : "";
-      doc.fillColor(isDebit ? "#c0392b" : "#27ae60").font("Helvetica-Bold")
-         .text(fmtCurrency(m.amount), 440, y + 4, { width: 50, align: "right" });
-      y += 16;
-      if (y > 720) {
-        doc.addPage();
-        y = 60;
+    // ── Section title ────────────────────────────────────────────────────
+    doc.font("Helvetica-Bold").fontSize(10).fillColor(navy)
+       .text("DETALLE DE MOVIMIENTOS", L, y);
+    doc.moveTo(L, y + 14).lineTo(R, y + 14).strokeColor(navy).lineWidth(0.5).stroke();
+    y += 20;
+
+    // ── Table header ─────────────────────────────────────────────────────
+    const COL = { date: L, type: L + 100, method: L + 190, desc: L + 295, amt: R };
+    const ROW_H = 18;
+
+    doc.rect(L, y, W, ROW_H).fill(navy);
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("white");
+    doc.text("Fecha / Hora",  COL.date   + 4, y + 5);
+    doc.text("Tipo",          COL.type   + 4, y + 5);
+    doc.text("Método pago",   COL.method + 4, y + 5);
+    doc.text("Descripción",   COL.desc   + 4, y + 5);
+    doc.text("Importe",       COL.amt - 55,   y + 5, { width: 55, align: "right" });
+    y += ROW_H;
+
+    // ── Rows ─────────────────────────────────────────────────────────────
+    if (folio.movements.length === 0) {
+      doc.rect(L, y, W, 28).fill(lightBg);
+      doc.font("Helvetica").fontSize(9).fillColor(slate)
+         .text("Sin movimientos registrados.", L + 10, y + 9);
+      y += 28;
+    } else {
+      for (let i = 0; i < folio.movements.length; i++) {
+        const m = folio.movements[i];
+        const isDebit = ["charge", "transfer_in"].includes(m.type);
+        const rowBg = i % 2 === 0 ? "white" : rowAlt;
+        doc.rect(L, y, W, ROW_H).fill(rowBg);
+
+        doc.font("Helvetica").fontSize(8).fillColor(slate)
+           .text(fmtDate(m.createdAt ?? ""), COL.date + 4, y + 5, { width: 92 });
+        doc.fillColor("#1a202c")
+           .text(MOVEMENT_LABELS[m.type] ?? m.type, COL.type + 4, y + 5, { width: 90 });
+        const payLabel = m.paymentMethod ? (PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod) : "—";
+        doc.fillColor(slate)
+           .text(payLabel, COL.method + 4, y + 5, { width: 100 });
+        const desc = m.description && m.description.length > 28 ? m.description.slice(0, 28) + "…" : (m.description || "—");
+        doc.fillColor("#1a202c")
+           .text(desc, COL.desc + 4, y + 5, { width: 98 });
+        doc.font("Helvetica-Bold").fontSize(8)
+           .fillColor(isDebit ? red : green)
+           .text(fmtCurrency(m.amount), COL.amt - 55, y + 5, { width: 55, align: "right" });
+
+        y += ROW_H;
+        if (y > 730) {
+          doc.addPage();
+          y = 40;
+          // Re-draw table header on new page
+          doc.rect(L, y, W, ROW_H).fill(navy);
+          doc.font("Helvetica-Bold").fontSize(8).fillColor("white");
+          doc.text("Fecha / Hora",  COL.date   + 4, y + 5);
+          doc.text("Tipo",          COL.type   + 4, y + 5);
+          doc.text("Método pago",   COL.method + 4, y + 5);
+          doc.text("Descripción",   COL.desc   + 4, y + 5);
+          doc.text("Importe",       COL.amt - 55,   y + 5, { width: 55, align: "right" });
+          y += ROW_H;
+        }
       }
     }
 
-    if (folio.movements.length === 0) {
-      doc.rect(50, y, W, 24).fill(lightGray);
-      doc.fillColor(gray).font("Helvetica").fontSize(9)
-         .text("Sin movimientos registrados", 55, y + 7);
-      y += 24;
-    }
+    // ── Totals panel ─────────────────────────────────────────────────────
+    y += 14;
+    doc.moveTo(L, y).lineTo(R, y).strokeColor(gold).lineWidth(1.2).stroke();
+    y += 12;
 
-    // ── Totals ───────────────────────────────────────────────────────────
-    y += 10;
-    doc.moveTo(50, y).lineTo(545, y).strokeColor(gold).lineWidth(1).stroke();
-    y += 10;
+    const totalPanelX = R - 200;
+    const balance = parseFloat(folio.balance ?? "0");
 
     const totals = [
-      { label: "Total Cargos:", value: folio.totalCharges ?? "0", color: "#c0392b" },
-      { label: "Total Pagado:", value: folio.totalPayments ?? "0", color: "#27ae60" },
-      { label: "SALDO PENDIENTE:", value: folio.balance ?? "0", color: parseFloat(folio.balance ?? "0") > 0 ? "#e67e22" : "#2980b9" },
+      { label: "Total Cargos",  value: folio.totalCharges ?? "0",  color: red },
+      { label: "Total Pagado",  value: folio.totalPayments ?? "0", color: green },
     ];
     for (const t of totals) {
-      doc.fillColor(gray).font("Helvetica").fontSize(9).text(t.label, 360, y);
-      doc.fillColor(t.color).font("Helvetica-Bold").fontSize(t.label.startsWith("SALDO") ? 11 : 9)
-         .text(fmtCurrency(t.value), 440, y, { width: 50, align: "right" });
-      y += t.label.startsWith("SALDO") ? 16 : 13;
+      doc.font("Helvetica").fontSize(9).fillColor(slate)
+         .text(t.label, totalPanelX, y, { width: 100 });
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(t.color)
+         .text(fmtCurrency(t.value), totalPanelX + 104, y, { width: 92, align: "right" });
+      y += 15;
     }
 
+    // Saldo final — highlighted box
+    y += 4;
+    const saldoColor = balance > 0 ? orange : balance < 0 ? "#2b6cb0" : green;
+    const saldoLabel = balance > 0 ? "SALDO PENDIENTE" : balance < 0 ? "SALDO A FAVOR" : "SALDO SALDADO";
+    doc.rect(totalPanelX - 6, y - 5, 202, 26).fill(balance > 0 ? "#fff5e6" : balance < 0 ? "#ebf4ff" : "#f0fff4")
+       .rect(totalPanelX - 6, y - 5, 3, 26).fill(saldoColor);
+    doc.font("Helvetica-Bold").fontSize(10).fillColor(saldoColor)
+       .text(saldoLabel, totalPanelX, y, { width: 100 });
+    doc.font("Helvetica-Bold").fontSize(12).fillColor(saldoColor)
+       .text(fmtCurrency(balance), totalPanelX + 100, y - 1, { width: 96, align: "right" });
+    y += 30;
+
     // ── Footer ───────────────────────────────────────────────────────────
-    doc.moveTo(50, y + 10).lineTo(545, y + 10).strokeColor(lightGray).lineWidth(0.5).stroke();
-    doc.fillColor(gray).font("Helvetica").fontSize(7)
+    doc.moveTo(L, y + 6).lineTo(R, y + 6).strokeColor("#e2e8f0").lineWidth(0.5).stroke();
+    doc.font("Helvetica").fontSize(7.5).fillColor("#718096")
        .text(
-         `Emitido el ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })} — Maran Suite System`,
-         50, y + 15, { align: "center", width: W }
+         `Documento emitido el ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}  |  Maran Suite System  |  Maran Suites & Torres — Paraná, Entre Ríos`,
+         L, y + 12, { align: "center", width: W }
        );
 
     doc.end();

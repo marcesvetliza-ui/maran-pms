@@ -55,6 +55,8 @@ import {
   Building2,
   Plane,
   User,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -146,6 +148,17 @@ function formatTime(dateStr: string): string {
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString("es-AR");
+}
+
+function formatDateTime(dateStr: string): string {
+  if (!dateStr) return "-";
+  const d = new Date(dateStr);
+  const isCurrentYear = d.getFullYear() === new Date().getFullYear();
+  const datepart = isCurrentYear
+    ? d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })
+    : d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const timepart = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  return `${datepart} ${timepart}`;
 }
 
 function buildSummaryFromMovements(movements: CashMovement[]) {
@@ -352,8 +365,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [closedBy, setClosedBy] = useState("");
   const [closeNotes, setCloseNotes] = useState("");
   const [operadorSiguiente, setOperadorSiguiente] = useState("");
-  const [enviarAdmin, setEnviarAdmin] = useState(true);
-  const [conteoFinalizado, setConteoFinalizado] = useState(false);
+  const [expandedMovId, setExpandedMovId] = useState<number | null>(null);
   const [billetes20000, setBilletes20000] = useState(0);
   const [billetes10000, setBilletes10000] = useState(0);
   const [billetes2000, setBilletes2000] = useState(0);
@@ -389,8 +401,6 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     setClosedBy("");
     setCloseNotes("");
     setOperadorSiguiente("");
-    setEnviarAdmin(true);
-    setConteoFinalizado(false);
     setBilletes20000(0); setBilletes10000(0); setBilletes2000(0);
     setBilletes1000(0); setBilletes500(0); setBilletes200(0);
     setBilletes100(0); setBilletes50(0); setBilletes20(0); setBilletes10(0);
@@ -541,7 +551,6 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         closedBy,
         efectivoContado,
         operadorSiguiente: operadorSiguiente.trim() || null,
-        enviarAAdministracion: enviarAdmin,
         notes: closeNotes || undefined,
       });
     },
@@ -674,19 +683,20 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Hora</TableHead>
+                      <TableHead>Fecha / Hora</TableHead>
                       <TableHead>Origen</TableHead>
                       <TableHead>Descripción</TableHead>
                       <TableHead>Método de pago</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead className="text-right">Monto</TableHead>
-                      <TableHead className="w-8"></TableHead>
+                      <TableHead className="w-14"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {movements.map((m) => (
-                      <TableRow key={m.id} data-testid={`movement-row-${m.id}`} className={m.anulado ? "opacity-40" : ""}>
-                        <TableCell className={m.anulado ? "line-through text-muted-foreground" : ""}>{formatTime(m.createdAt)}</TableCell>
+                      <>
+                      <TableRow key={m.id} data-testid={`movement-row-${m.id}`} className={`${m.anulado ? "opacity-40" : ""} cursor-pointer hover:bg-muted/40`} onClick={() => setExpandedMovId(expandedMovId === m.id ? null : m.id)}>
+                        <TableCell className={`text-xs tabular-nums ${m.anulado ? "line-through text-muted-foreground" : ""}`}>{formatDateTime(m.createdAt)}</TableCell>
                         <TableCell>
                           {m.anulado ? (
                             <Badge variant="destructive" className="text-xs">ANULADO</Badge>
@@ -711,20 +721,50 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                         </TableCell>
                         <TableCell className={`text-right font-medium ${m.anulado ? "line-through text-muted-foreground" : ""}`}>{formatCurrency(m.amount)}</TableCell>
                         <TableCell className="text-right">
-                          {!m.anulado && (m.sourceType === "manual" || isAdmin) && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-6 w-6"
-                              onClick={() => { setAnularMovTarget(m.id); setAnularMovMotivo(""); setAnularMovForce(false); }}
-                              title={m.sourceType !== "manual" ? "Anular movimiento (admin)" : "Anular movimiento"}
-                              data-testid={`button-anular-movement-${m.id}`}
-                            >
-                              <Ban className="h-3 w-3 text-destructive" />
+                          <div className="flex items-center justify-end gap-1">
+                            {!m.anulado && (m.sourceType === "manual" || isAdmin) && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                onClick={(e) => { e.stopPropagation(); setAnularMovTarget(m.id); setAnularMovMotivo(""); setAnularMovForce(false); }}
+                                title={m.sourceType !== "manual" ? "Anular movimiento (admin)" : "Anular movimiento"}
+                                data-testid={`button-anular-movement-${m.id}`}
+                              >
+                                <Ban className="h-3 w-3 text-destructive" />
+                              </Button>
+                            )}
+                            <Button size="icon" variant="ghost" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setExpandedMovId(expandedMovId === m.id ? null : m.id); }} data-testid={`button-expand-movement-${m.id}`}>
+                              {expandedMovId === m.id
+                                ? <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                                : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
                             </Button>
-                          )}
+                          </div>
                         </TableCell>
                       </TableRow>
+                      {expandedMovId === m.id && (
+                        <TableRow key={`${m.id}-detail`} className="bg-muted/20 hover:bg-muted/20">
+                          <TableCell colSpan={7} className="py-2 px-4">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                              <div><span className="font-medium text-foreground">ID movimiento:</span> #{m.id}</div>
+                              {m.sourceType && m.sourceType !== "manual" && (
+                                <div><span className="font-medium text-foreground">Origen:</span> {m.sourceType === "cobro_cc" ? "Cobro CC" : m.sourceType === "reservation" ? "Reserva" : m.sourceType === "restaurant" ? "Restaurant" : m.sourceType === "spa" ? "SPA" : m.sourceType === "event" ? "Evento" : m.sourceType}</div>
+                              )}
+                              {m.sourceLabel && m.sourceLabel !== m.description && (
+                                <div><span className="font-medium text-foreground">Referencia:</span> {m.sourceLabel}</div>
+                              )}
+                              {(m as any).receiptType && (
+                                <div><span className="font-medium text-foreground">Comprobante:</span> {(m as any).receiptType}</div>
+                              )}
+                              {(m as any).motivoAnulacion && (
+                                <div className="col-span-2 text-destructive"><span className="font-medium">Motivo anulación:</span> {(m as any).motivoAnulacion}</div>
+                              )}
+                              <div><span className="font-medium text-foreground">Registrado:</span> {formatDateTime(m.createdAt)}</div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      </>
                     ))}
                   </TableBody>
                 </Table>
@@ -1063,59 +1103,21 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                   <span>${efectivoContado.toLocaleString("es-AR")}</span>
                 </div>
 
-                {/* Blind drop: show system total only after operator finalizes count */}
-                {!conteoFinalizado ? (
-                  <div className="flex items-center justify-between gap-3 py-2 px-3 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
-                    <span className="text-xs text-amber-700 dark:text-amber-300 flex-1">
-                      Confirmá el conteo antes de ver el total del sistema (blind drop)
-                    </span>
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-amber-800 dark:text-amber-200 underline hover:no-underline shrink-0"
-                      onClick={() => setConteoFinalizado(true)}
-                      data-testid="btn-confirmar-conteo"
-                    >
-                      Confirmar conteo
-                    </button>
+                <div className={`flex justify-between text-sm ${diferencia !== 0 ? "text-red-600" : "text-green-600"}`}>
+                  <span>Sistema (efectivo):</span>
+                  <span>${efectivoSistema.toLocaleString("es-AR")}</span>
+                </div>
+                {diferencia !== 0 ? (
+                  <div className="flex justify-between text-sm font-semibold text-red-600 bg-red-50 dark:bg-red-950/20 px-2 py-1 rounded border border-red-200 dark:border-red-800">
+                    <span>Diferencia:</span>
+                    <span>{diferencia > 0 ? "+" : ""}{diferencia.toLocaleString("es-AR")}</span>
                   </div>
                 ) : (
-                  <>
-                    <div className={`flex justify-between text-sm ${diferencia !== 0 ? "text-red-600" : "text-green-600"}`}>
-                      <span>Sistema (efectivo):</span>
-                      <span>${efectivoSistema.toLocaleString("es-AR")}</span>
-                    </div>
-                    {diferencia !== 0 ? (
-                      <div className="flex justify-between text-sm font-semibold text-red-600 bg-red-50 dark:bg-red-950/20 px-2 py-1 rounded border border-red-200 dark:border-red-800">
-                        <span>Diferencia:</span>
-                        <span>{diferencia > 0 ? "+" : ""}{diferencia.toLocaleString("es-AR")}</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 font-medium">
-                        <span>✓</span>
-                        <span>Efectivo cuadra con el sistema</span>
-                      </div>
-                    )}
-                  </>
+                  <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 font-medium">
+                    <span>✓</span>
+                    <span>Efectivo cuadra con el sistema</span>
+                  </div>
                 )}
-              </div>
-
-              <div className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${enviarAdmin ? "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800" : "bg-muted/30 border-muted"}`}>
-                <input type="checkbox" id={`enviar-admin-${area}`} checked={enviarAdmin} onChange={e => setEnviarAdmin(e.target.checked)} className="w-4 h-4 shrink-0" data-testid={`check-enviar-admin-${area}`} />
-                <div className="flex-1 min-w-0">
-                  <label htmlFor={`enviar-admin-${area}`} className="text-sm font-medium cursor-pointer">
-                    Enviar efectivo a Caja Administración
-                  </label>
-                  {enviarAdmin && efectivoContado > 0 && (
-                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
-                      Se registrará automáticamente un ingreso de <strong>${efectivoContado.toLocaleString("es-AR")}</strong> en Caja Adm. como rendición de {config.areaLabel}
-                    </p>
-                  )}
-                  {enviarAdmin && efectivoContado === 0 && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Ingresá el efectivo contado para habilitar la transferencia
-                    </p>
-                  )}
-                </div>
               </div>
 
               <div>
@@ -1138,7 +1140,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               <div className="border rounded-lg p-4 bg-muted/20 space-y-1">
                 <p className="text-sm font-semibold">Próximo turno</p>
                 <p className="text-xs text-muted-foreground">El sistema abrirá automáticamente el siguiente turno con saldo inicial $0.</p>
-                <p className="text-xs text-muted-foreground mt-1">Efectivo contado: <strong>${efectivoContado.toLocaleString("es-AR")}</strong> {enviarAdmin ? "(se registrará en Caja Adm.)" : ""}</p>
+                <p className="text-xs text-muted-foreground mt-1">Efectivo contado: <strong>${efectivoContado.toLocaleString("es-AR")}</strong></p>
               </div>
               <div>
                 <label className="text-sm font-medium">¿Quién toma el siguiente turno? <span className="text-muted-foreground font-normal">(opcional)</span></label>
@@ -1459,8 +1461,8 @@ function HistorialTab() {
                 </Badge>
                 <span className="text-sm">Turno #{shiftDetail.shift.shiftNumber}</span>
                 <span className="text-sm text-muted-foreground">
-                  {shiftDetail.shift.openedBy} - {formatTime(shiftDetail.shift.openedAt)}
-                  {shiftDetail.shift.closedAt && ` / ${shiftDetail.shift.closedBy} - ${formatTime(shiftDetail.shift.closedAt)}`}
+                  {shiftDetail.shift.openedBy} — {formatDateTime(shiftDetail.shift.openedAt)}
+                  {shiftDetail.shift.closedAt && ` / ${shiftDetail.shift.closedBy} — ${formatDateTime(shiftDetail.shift.closedAt)}`}
                 </span>
               </div>
 
@@ -1484,7 +1486,7 @@ function HistorialTab() {
                   <TableBody>
                     {shiftDetail.movements.map((m) => (
                       <TableRow key={m.id}>
-                        <TableCell>{formatTime(m.createdAt)}</TableCell>
+                        <TableCell className="text-xs tabular-nums">{formatDateTime(m.createdAt)}</TableCell>
                         <TableCell>{m.description || m.sourceLabel || "-"}</TableCell>
                         <TableCell>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
                         <TableCell>
