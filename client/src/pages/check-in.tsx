@@ -94,6 +94,7 @@ export default function CheckInPage() {
   const [webCheckinReservation, setWebCheckinReservation] = useState<ReservationWithDetails | null>(null);
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [webCheckinDetailId, setWebCheckinDetailId] = useState<string | null>(null);
+  const [webCheckinDateFrom, setWebCheckinDateFrom] = useState<string>(() => getLocalToday());
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations/check-in"],
@@ -125,9 +126,13 @@ export default function CheckInPage() {
     enabled: activeTab === "webcheckin",
   });
 
-  const webCheckinReservations = allReservations?.filter(
-    (r) => r.status === "confirmed" || r.status === "pending"
-  );
+  const webCheckinReservations = allReservations
+    ?.filter(
+      (r) =>
+        (r.status === "confirmed" || r.status === "pending") &&
+        r.checkInDate >= webCheckinDateFrom
+    )
+    .sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
 
   const { data: webCheckinList } = useQuery<WebCheckinListItem[]>({
     queryKey: ["/api/web-checkin/list"],
@@ -743,8 +748,31 @@ export default function CheckInPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Generar Link de Web Check-in</CardTitle>
-              <CardDescription>Seleccioná una reserva confirmada para generar el enlace</CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-lg">Generar Link de Web Check-in</CardTitle>
+                  <CardDescription>Reservas confirmadas o pendientes desde la fecha seleccionada</CardDescription>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Label className="text-xs text-muted-foreground whitespace-nowrap">Desde</Label>
+                  <Input
+                    type="date"
+                    value={webCheckinDateFrom}
+                    onChange={(e) => setWebCheckinDateFrom(e.target.value)}
+                    className="h-8 text-sm w-36"
+                    data-testid="input-webcheckin-date-from"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setWebCheckinDateFrom(getLocalToday())}
+                    data-testid="button-webcheckin-today"
+                  >
+                    Hoy
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               {webCheckinReservations && webCheckinReservations.length > 0 ? (
