@@ -1,8 +1,15 @@
 import type { Express } from "express";
 import PDFDocument from "pdfkit";
+import path from "path";
+import fs from "fs";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import type { FolioEntityType, FolioStatus, FolioWithMovements } from "@shared/schema";
+
+const HOTEL_NAME    = "Maran Suites & Towers";
+const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
+const HOTEL_PHONE   = "+54 (0343) 503-8070";
+const HOTEL_EMAIL   = "recepcion@maran.com.ar";
 
 const ENTITY_LABELS: Record<string, string> = {
   reservation: "Reserva",
@@ -57,82 +64,95 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<B
       } catch { return iso; }
     };
 
-    const L = 45;          // left margin
-    const R = 550;         // right edge
-    const W = R - L;       // usable width = 505
-    const navy   = "#1a3a5c";
-    const gold   = "#b8963e";
-    const slate  = "#4a5568";
+    const pageW   = 595;
+    const pageH   = 842;
+    const margin  = 40;
+    const cW      = pageW - margin * 2;   // content width = 515
+    const L       = margin;
+    const R       = pageW - margin;
+    const NAVY    = "#1a3a6c";
+    const ORANGE  = "#e8841a";
+    const FOOTER_BG = "#8b4513";
+    const DARK    = "#1a1a1a";
+    const MUTED   = "#6b6b6b";
+    const slate   = "#4a5568";
     const lightBg = "#f7f9fc";
     const rowAlt  = "#edf2f7";
-    const green  = "#276749";
-    const red    = "#9b2335";
-    const orange = "#c05621";
+    const green   = "#276749";
+    const red     = "#9b2335";
+    const balOrange = "#c05621";
 
-    // ── Header band ─────────────────────────────────────────────────────
-    doc.rect(0, 0, 595, 90).fill(navy);
+    // ── HEADER IMAGE (mismo que presupuestos) ────────────────────────────
+    const headerH = 148;
+    const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+    if (fs.existsSync(headerImgPath)) {
+      doc.image(headerImgPath, 0, 0, { width: pageW, height: headerH, cover: [pageW, headerH] });
+    } else {
+      doc.rect(0, 0, pageW, headerH).fill(NAVY);
+    }
+    doc.rect(0, headerH, pageW, 5).fill(ORANGE);
 
-    // Hotel name
-    doc.fillColor("white").font("Helvetica-Bold").fontSize(22)
-       .text("MARAN SUITES & TORRES", L, 18, { width: 320 });
-    doc.font("Helvetica").fontSize(9).fillColor("#aac4e0")
-       .text("Av. Urquiza 1220  |  Paraná, Entre Ríos  |  Tel: (343) 400-0000", L, 46);
+    // ── TÍTULO + CÓDIGO FOLIO ────────────────────────────────────────────
+    const titleY = headerH + 16;
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+       .text("ESTADO DE CUENTA", margin, titleY, { characterSpacing: 2 });
+    doc.fillColor(DARK).fontSize(17).font("Helvetica-Bold")
+       .text(HOTEL_NAME, margin, titleY + 11, { width: 300 });
+    doc.fillColor(MUTED).fontSize(8.5).font("Helvetica")
+       .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 33);
 
-    // Folio badge — right side
-    doc.font("Helvetica").fontSize(9).fillColor("#aac4e0")
-       .text("FOLIO", R - 110, 20, { width: 110, align: "right" });
-    doc.font("Helvetica-Bold").fontSize(18).fillColor("white")
-       .text(folio.codigo, R - 140, 34, { width: 140, align: "right" });
+    // Code box (right) — folio código + estado
     const statusLabel = folio.status === "open" ? "ABIERTO" : folio.status === "closed" ? "CERRADO" : "FACTURADO";
-    const statusColor = folio.status === "open" ? "#68d391" : folio.status === "closed" ? "#90cdf4" : "#fbd38d";
-    doc.font("Helvetica-Bold").fontSize(8).fillColor(statusColor)
-       .text(statusLabel, R - 140, 58, { width: 140, align: "right" });
+    const codeBoxW = 138;
+    const codeBoxX = pageW - margin - codeBoxW;
+    doc.roundedRect(codeBoxX, titleY, codeBoxW, 44, 5).fillAndStroke("#f8f4ef", ORANGE);
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+       .text("FOLIO", codeBoxX, titleY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
+    doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
+       .text(folio.codigo, codeBoxX, titleY + 19, { width: codeBoxW, align: "center" });
+    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
+       .text(statusLabel, codeBoxX, titleY + 33, { width: codeBoxW, align: "center" });
 
-    // ── Info bar ────────────────────────────────────────────────────────
-    doc.rect(0, 90, 595, 44).fill(lightBg);
-    doc.moveTo(0, 134).lineTo(595, 134).strokeColor(gold).lineWidth(1.5).stroke();
+    // ── INFO BAR ─────────────────────────────────────────────────────────
+    let y = titleY + 56;
+    doc.moveTo(margin, y).lineTo(R, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+    y += 10;
 
-    const infoY = 100;
-    const col = (i: number) => L + i * 155;
+    doc.font("Helvetica").fontSize(8).fillColor(MUTED).text("Tipo de cuenta", L, y);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(DARK)
+       .text(ENTITY_LABELS[folio.entityType] ?? folio.entityType, L, y + 11);
 
-    doc.font("Helvetica").fontSize(8).fillColor(slate).text("Tipo de cuenta", col(0), infoY);
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c")
-       .text(ENTITY_LABELS[folio.entityType] ?? folio.entityType, col(0), infoY + 12);
-
-    doc.font("Helvetica").fontSize(8).fillColor(slate).text("Fecha apertura", col(1), infoY);
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c")
-       .text(fmtDate(folio.openedAt ?? ""), col(1), infoY + 12);
+    doc.font("Helvetica").fontSize(8).fillColor(MUTED).text("Fecha apertura", L + 155, y);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(DARK)
+       .text(fmtDate(folio.openedAt ?? ""), L + 155, y + 11);
 
     if (folio.closedAt) {
-      doc.font("Helvetica").fontSize(8).fillColor(slate).text("Fecha cierre", col(2), infoY);
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c")
-         .text(fmtDate(folio.closedAt), col(2), infoY + 12);
+      doc.font("Helvetica").fontSize(8).fillColor(MUTED).text("Fecha cierre", L + 310, y);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(DARK)
+         .text(fmtDate(folio.closedAt), L + 310, y + 11);
     }
 
-    // ── Reference block ─────────────────────────────────────────────────
-    let y = 146;
+    y += 28;
+    doc.moveTo(margin, y).lineTo(R, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+    y += 10;
+
+    // ── REFERENCIA ───────────────────────────────────────────────────────
     if (entityLabel) {
-      doc.rect(L, y, W, 26).fill("#fffbeb");
-      doc.rect(L, y, 3, 26).fill(gold);
-      doc.font("Helvetica").fontSize(8).fillColor(slate).text("Referencia:", L + 10, y + 5);
-      const refText = entityLabel.length > 90 ? entityLabel.slice(0, 90) + "…" : entityLabel;
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#1a202c").text(refText, L + 72, y + 5);
-      y += 34;
+      doc.roundedRect(L, y, cW, 24, 4).fillAndStroke("#fffbf0", ORANGE);
+      doc.font("Helvetica").fontSize(8).fillColor(MUTED).text("Referencia:", L + 8, y + 5);
+      const refText = entityLabel.length > 92 ? entityLabel.slice(0, 92) + "…" : entityLabel;
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(DARK).text(refText, L + 72, y + 5, { width: cW - 80 });
+      y += 32;
     } else {
-      y += 10;
+      y += 4;
     }
 
-    // ── Section title ────────────────────────────────────────────────────
-    doc.font("Helvetica-Bold").fontSize(10).fillColor(navy)
-       .text("DETALLE DE MOVIMIENTOS", L, y);
-    doc.moveTo(L, y + 14).lineTo(R, y + 14).strokeColor(navy).lineWidth(0.5).stroke();
-    y += 20;
-
-    // ── Table header ─────────────────────────────────────────────────────
+    // ── TABLA: header ────────────────────────────────────────────────────
+    y += 6;
     const COL = { date: L, type: L + 100, method: L + 190, desc: L + 295, amt: R };
     const ROW_H = 18;
 
-    doc.rect(L, y, W, ROW_H).fill(navy);
+    doc.roundedRect(L, y, cW, ROW_H, 3).fill(NAVY);
     doc.font("Helvetica-Bold").fontSize(8).fillColor("white");
     doc.text("Fecha / Hora",  COL.date   + 4, y + 5);
     doc.text("Tipo",          COL.type   + 4, y + 5);
@@ -141,39 +161,38 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<B
     doc.text("Importe",       COL.amt - 55,   y + 5, { width: 55, align: "right" });
     y += ROW_H;
 
-    // ── Rows ─────────────────────────────────────────────────────────────
+    // ── TABLA: rows ───────────────────────────────────────────────────────
     if (folio.movements.length === 0) {
-      doc.rect(L, y, W, 28).fill(lightBg);
-      doc.font("Helvetica").fontSize(9).fillColor(slate)
+      doc.rect(L, y, cW, 28).fill(lightBg);
+      doc.font("Helvetica").fontSize(9).fillColor(MUTED)
          .text("Sin movimientos registrados.", L + 10, y + 9);
       y += 28;
     } else {
       for (let i = 0; i < folio.movements.length; i++) {
         const m = folio.movements[i];
         const isDebit = ["charge", "transfer_in"].includes(m.type);
-        const rowBg = i % 2 === 0 ? "white" : rowAlt;
-        doc.rect(L, y, W, ROW_H).fill(rowBg);
+        const rowBg = i % 2 === 0 ? "#ffffff" : "#fafafa";
+        doc.rect(L, y, cW, ROW_H).fill(rowBg).stroke("#eeeeee");
 
-        doc.font("Helvetica").fontSize(8).fillColor(slate)
+        doc.font("Helvetica").fontSize(8).fillColor(MUTED)
            .text(fmtDate(m.createdAt ?? ""), COL.date + 4, y + 5, { width: 92 });
-        doc.fillColor("#1a202c")
+        doc.fillColor(DARK)
            .text(MOVEMENT_LABELS[m.type] ?? m.type, COL.type + 4, y + 5, { width: 90 });
         const payLabel = m.paymentMethod ? (PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod) : "—";
-        doc.fillColor(slate)
+        doc.fillColor(MUTED)
            .text(payLabel, COL.method + 4, y + 5, { width: 100 });
         const desc = m.description && m.description.length > 28 ? m.description.slice(0, 28) + "…" : (m.description || "—");
-        doc.fillColor("#1a202c")
+        doc.fillColor(DARK)
            .text(desc, COL.desc + 4, y + 5, { width: 98 });
         doc.font("Helvetica-Bold").fontSize(8)
            .fillColor(isDebit ? red : green)
            .text(fmtCurrency(m.amount), COL.amt - 55, y + 5, { width: 55, align: "right" });
 
         y += ROW_H;
-        if (y > 730) {
+        if (y > pageH - 100) {
           doc.addPage();
           y = 40;
-          // Re-draw table header on new page
-          doc.rect(L, y, W, ROW_H).fill(navy);
+          doc.roundedRect(L, y, cW, ROW_H, 3).fill(NAVY);
           doc.font("Helvetica-Bold").fontSize(8).fillColor("white");
           doc.text("Fecha / Hora",  COL.date   + 4, y + 5);
           doc.text("Tipo",          COL.type   + 4, y + 5);
@@ -185,9 +204,9 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<B
       }
     }
 
-    // ── Totals panel ─────────────────────────────────────────────────────
+    // ── TOTALES ───────────────────────────────────────────────────────────
     y += 14;
-    doc.moveTo(L, y).lineTo(R, y).strokeColor(gold).lineWidth(1.2).stroke();
+    doc.moveTo(L, y).lineTo(R, y).strokeColor(ORANGE).lineWidth(1).stroke();
     y += 12;
 
     const totalPanelX = R - 200;
@@ -198,32 +217,42 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<B
       { label: "Total Pagado",  value: folio.totalPayments ?? "0", color: green },
     ];
     for (const t of totals) {
-      doc.font("Helvetica").fontSize(9).fillColor(slate)
+      doc.font("Helvetica").fontSize(9).fillColor(MUTED)
          .text(t.label, totalPanelX, y, { width: 100 });
       doc.font("Helvetica-Bold").fontSize(9).fillColor(t.color)
          .text(fmtCurrency(t.value), totalPanelX + 104, y, { width: 92, align: "right" });
       y += 15;
     }
 
-    // Saldo final — highlighted box
+    // Saldo final
     y += 4;
-    const saldoColor = balance > 0 ? orange : balance < 0 ? "#2b6cb0" : green;
+    const saldoColor = balance > 0 ? balOrange : balance < 0 ? "#2b6cb0" : green;
     const saldoLabel = balance > 0 ? "SALDO PENDIENTE" : balance < 0 ? "SALDO A FAVOR" : "SALDO SALDADO";
-    doc.rect(totalPanelX - 6, y - 5, 202, 26).fill(balance > 0 ? "#fff5e6" : balance < 0 ? "#ebf4ff" : "#f0fff4")
-       .rect(totalPanelX - 6, y - 5, 3, 26).fill(saldoColor);
+    doc.roundedRect(totalPanelX - 6, y - 5, 202, 28, 4)
+       .fill(balance > 0 ? "#fff5e6" : balance < 0 ? "#ebf4ff" : "#f0fff4");
+    doc.rect(totalPanelX - 6, y - 5, 3, 28).fill(saldoColor);
     doc.font("Helvetica-Bold").fontSize(10).fillColor(saldoColor)
        .text(saldoLabel, totalPanelX, y, { width: 100 });
     doc.font("Helvetica-Bold").fontSize(12).fillColor(saldoColor)
        .text(fmtCurrency(balance), totalPanelX + 100, y - 1, { width: 96, align: "right" });
-    y += 30;
 
-    // ── Footer ───────────────────────────────────────────────────────────
-    doc.moveTo(L, y + 6).lineTo(R, y + 6).strokeColor("#e2e8f0").lineWidth(0.5).stroke();
-    doc.font("Helvetica").fontSize(7.5).fillColor("#718096")
-       .text(
-         `Documento emitido el ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}  |  Maran Suite System  |  Maran Suites & Torres — Paraná, Entre Ríos`,
-         L, y + 12, { align: "center", width: W }
-       );
+    // ── FOOTER (mismo que presupuestos) ───────────────────────────────────
+    const footerY = pageH - 72;
+    doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
+    const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, margin, footerY + 14, { width: 95 });
+    }
+    const cx = margin + 100;
+    const cw = cW - 200;
+    doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+       .text(HOTEL_ADDRESS, cx, footerY + 13, { width: cw, align: "center" });
+    doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
+       .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, cx, footerY + 26, { width: cw, align: "center" });
+    doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
+       .text("CUIT 33-68110008-9 · Responsable Inscripto", cx, footerY + 40, { width: cw, align: "center" });
+    doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
+       .text("MARAN.COM.AR", pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
 
     doc.end();
   });
