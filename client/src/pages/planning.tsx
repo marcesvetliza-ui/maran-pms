@@ -57,6 +57,12 @@ import {
 import { QuickReservationDialog } from "@/components/planning-quick-reservation";
 import type { QuickReservationData } from "@/components/planning-quick-reservation";
 import { ReservationDetailModal } from "@/components/planning-reservation-detail";
+import {
+  PlanningMoveConfirmDialog,
+  PlanningBedConfigDialog,
+  PlanningColorContextMenu,
+  type MoveConfirmData,
+} from "@/components/planning-dialogs";
 
 function DraggableReservationCell({
   id,
@@ -1342,165 +1348,38 @@ export default function PlanningPage() {
         />
       )}
 
-      <Dialog open={!!moveConfirm} onOpenChange={(open) => !open && setMoveConfirm(null)}>
-        <DialogContent className="max-w-md" data-testid="dialog-move-reservation">
-          <DialogHeader>
-            <DialogTitle>
-              <Move className="h-5 w-5 inline mr-2" />
-              Mover Reserva
-            </DialogTitle>
-            <DialogDescription>
-              ¿Confirmar el cambio de habitación para esta reserva?
-            </DialogDescription>
-          </DialogHeader>
-          {moveConfirm && (
-            <div className="space-y-3 py-2">
-              <div className="flex items-center gap-2">
-                <User className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">{moveConfirm.guestName}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="text-sm" data-testid="badge-from-room">
-                  Hab. {moveConfirm.fromRoomNumber}
-                </Badge>
-                <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
-                <Badge className="text-sm bg-primary" data-testid="badge-to-room">
-                  Hab. {moveConfirm.toRoomNumber}
-                </Badge>
-              </div>
-              {moveConfirm.dateChanged && (
-                <div className="flex items-center gap-3 text-sm">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-muted-foreground">Nuevas fechas:</span>
-                  <Badge variant="outline" className="text-orange-600 border-orange-300">
-                    {moveConfirm.newCheckIn} → {moveConfirm.newCheckOut}
-                  </Badge>
-                </div>
-              )}
-              <p className="text-sm text-muted-foreground">
-                Tipo: {moveConfirm.toRoomType}
-              </p>
-            </div>
-          )}
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setMoveConfirm(null)}
-              data-testid="button-cancel-move"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => {
-                if (moveConfirm) {
-                  moveReservationMutation.mutate({
-                    reservationId: moveConfirm.reservationId,
-                    roomId: moveConfirm.toRoomId,
-                    checkInDate: moveConfirm.newCheckIn,
-                    checkOutDate: moveConfirm.newCheckOut,
-                  });
-                }
-              }}
-              disabled={moveReservationMutation.isPending}
-              data-testid="button-confirm-move"
-            >
-              {moveReservationMutation.isPending ? "Moviendo..." : "Confirmar Movimiento"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PlanningMoveConfirmDialog
+        moveConfirm={moveConfirm}
+        isPending={moveReservationMutation.isPending}
+        onConfirm={(data) => {
+          moveReservationMutation.mutate({
+            reservationId: data.reservationId,
+            roomId: data.toRoomId,
+            checkInDate: data.newCheckIn,
+            checkOutDate: data.newCheckOut,
+          });
+        }}
+        onCancel={() => setMoveConfirm(null)}
+      />
 
-      <Dialog open={!!editingBedConfig} onOpenChange={(open) => !open && setEditingBedConfig(null)}>
-        <DialogContent className="max-w-xs">
-          <DialogHeader>
-            <DialogTitle>Cambiar Camaje — Hab. {editingBedConfig?.roomNumber}</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <Label className="text-sm mb-2 block">Configuración de camas</Label>
-            <Select
-              value={editingBedConfig?.current || ""}
-              onValueChange={(value) => setEditingBedConfig(prev => prev ? { ...prev, current: value } : null)}
-            >
-              <SelectTrigger data-testid="select-bedconfig">
-                <SelectValue placeholder="Seleccionar" />
-              </SelectTrigger>
-              <SelectContent>
-                {[
-                  { value: "MAT", label: "Matrimonial" },
-                  { value: "TWIN", label: "Twin (2 camas)" },
-                  { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
-                  { value: "TWIN_CC", label: "Twin + Cama cuna" },
-                  { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
-                  { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
-                ].map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingBedConfig(null)}>Cancelar</Button>
-            <Button
-              onClick={() => {
-                if (editingBedConfig) {
-                  updateBedConfigMutation.mutate({ roomId: editingBedConfig.roomId, bedConfig: editingBedConfig.current });
-                }
-              }}
-              disabled={updateBedConfigMutation.isPending}
-              data-testid="button-confirm-bedconfig"
-            >
-              {updateBedConfigMutation.isPending ? "Guardando..." : "Guardar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PlanningBedConfigDialog
+        editingBedConfig={editingBedConfig}
+        isPending={updateBedConfigMutation.isPending}
+        onChange={(value) => setEditingBedConfig(prev => prev ? { ...prev, current: value } : null)}
+        onConfirm={() => {
+          if (editingBedConfig) {
+            updateBedConfigMutation.mutate({ roomId: editingBedConfig.roomId, bedConfig: editingBedConfig.current });
+          }
+        }}
+        onCancel={() => setEditingBedConfig(null)}
+      />
 
-      {/* Color context menu */}
-      {colorContextMenu && (
-        <>
-          <div
-            className="fixed inset-0 z-[9998]"
-            onClick={() => setColorContextMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setColorContextMenu(null); }}
-          />
-          <div
-            className="fixed z-[9999] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl p-3 min-w-[200px]"
-            style={{ left: Math.min(colorContextMenu.x, window.innerWidth - 220), top: Math.min(colorContextMenu.y, window.innerHeight - 160) }}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
-                <Palette className="h-3.5 w-3.5" />
-                Color de etiqueta
-              </span>
-              <button onClick={() => setColorContextMenu(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="grid grid-cols-6 gap-1.5 mb-2">
-              {[
-                "#ef4444", "#f97316", "#eab308", "#22c55e",
-                "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
-                "#6b7280", "#78716c", "#0ea5e9", "#14b8a6",
-              ].map((color) => (
-                <button
-                  key={color}
-                  onClick={() => updateReservationColorMutation.mutate({ reservationId: colorContextMenu.reservationId, color })}
-                  className="w-7 h-7 rounded-full border-2 border-transparent hover:border-zinc-400 hover:scale-110 transition-all"
-                  style={{ backgroundColor: color }}
-                  title={color}
-                />
-              ))}
-            </div>
-            <button
-              onClick={() => updateReservationColorMutation.mutate({ reservationId: colorContextMenu.reservationId, color: null })}
-              className="w-full text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 flex items-center justify-center gap-1.5 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-            >
-              <X className="h-3 w-3" />
-              Sin color
-            </button>
-          </div>
-        </>
-      )}
+      <PlanningColorContextMenu
+        colorContextMenu={colorContextMenu}
+        isPending={updateReservationColorMutation.isPending}
+        onSelectColor={(reservationId, color) => updateReservationColorMutation.mutate({ reservationId, color })}
+        onClose={() => setColorContextMenu(null)}
+      />
     </div>
   );
 }

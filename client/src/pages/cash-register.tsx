@@ -353,6 +353,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [closeNotes, setCloseNotes] = useState("");
   const [operadorSiguiente, setOperadorSiguiente] = useState("");
   const [enviarAdmin, setEnviarAdmin] = useState(true);
+  const [conteoFinalizado, setConteoFinalizado] = useState(false);
   const [billetes20000, setBilletes20000] = useState(0);
   const [billetes10000, setBilletes10000] = useState(0);
   const [billetes2000, setBilletes2000] = useState(0);
@@ -389,6 +390,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     setCloseNotes("");
     setOperadorSiguiente("");
     setEnviarAdmin(true);
+    setConteoFinalizado(false);
     setBilletes20000(0); setBilletes10000(0); setBilletes2000(0);
     setBilletes1000(0); setBilletes500(0); setBilletes200(0);
     setBilletes100(0); setBilletes50(0); setBilletes20(0); setBilletes10(0);
@@ -1060,21 +1062,60 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                   <span>Total contado:</span>
                   <span>${efectivoContado.toLocaleString("es-AR")}</span>
                 </div>
-                <div className={`flex justify-between text-sm ${diferencia !== 0 ? "text-red-600" : "text-green-600"}`}>
-                  <span>Sistema (efectivo):</span>
-                  <span>${efectivoSistema.toLocaleString("es-AR")}</span>
-                </div>
-                {diferencia !== 0 && (
-                  <div className="flex justify-between text-sm font-semibold text-red-600">
-                    <span>Diferencia:</span>
-                    <span>{diferencia > 0 ? "+" : ""}{diferencia.toLocaleString("es-AR")}</span>
+
+                {/* Blind drop: show system total only after operator finalizes count */}
+                {!conteoFinalizado ? (
+                  <div className="flex items-center justify-between gap-3 py-2 px-3 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
+                    <span className="text-xs text-amber-700 dark:text-amber-300 flex-1">
+                      Confirmá el conteo antes de ver el total del sistema (blind drop)
+                    </span>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-amber-800 dark:text-amber-200 underline hover:no-underline shrink-0"
+                      onClick={() => setConteoFinalizado(true)}
+                      data-testid="btn-confirmar-conteo"
+                    >
+                      Confirmar conteo
+                    </button>
                   </div>
+                ) : (
+                  <>
+                    <div className={`flex justify-between text-sm ${diferencia !== 0 ? "text-red-600" : "text-green-600"}`}>
+                      <span>Sistema (efectivo):</span>
+                      <span>${efectivoSistema.toLocaleString("es-AR")}</span>
+                    </div>
+                    {diferencia !== 0 ? (
+                      <div className="flex justify-between text-sm font-semibold text-red-600 bg-red-50 dark:bg-red-950/20 px-2 py-1 rounded border border-red-200 dark:border-red-800">
+                        <span>Diferencia:</span>
+                        <span>{diferencia > 0 ? "+" : ""}{diferencia.toLocaleString("es-AR")}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 font-medium">
+                        <span>✓</span>
+                        <span>Efectivo cuadra con el sistema</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id={`enviar-admin-${area}`} checked={enviarAdmin} onChange={e => setEnviarAdmin(e.target.checked)} className="w-4 h-4" />
-                <label htmlFor={`enviar-admin-${area}`} className="text-sm">Enviar efectivo a Caja Administración</label>
+              <div className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${enviarAdmin ? "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800" : "bg-muted/30 border-muted"}`}>
+                <input type="checkbox" id={`enviar-admin-${area}`} checked={enviarAdmin} onChange={e => setEnviarAdmin(e.target.checked)} className="w-4 h-4 shrink-0" data-testid={`check-enviar-admin-${area}`} />
+                <div className="flex-1 min-w-0">
+                  <label htmlFor={`enviar-admin-${area}`} className="text-sm font-medium cursor-pointer">
+                    Enviar efectivo a Caja Administración
+                  </label>
+                  {enviarAdmin && efectivoContado > 0 && (
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                      Se registrará automáticamente un ingreso de <strong>${efectivoContado.toLocaleString("es-AR")}</strong> en Caja Adm. como rendición de {config.areaLabel}
+                    </p>
+                  )}
+                  {enviarAdmin && efectivoContado === 0 && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Ingresá el efectivo contado para habilitar la transferencia
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div>

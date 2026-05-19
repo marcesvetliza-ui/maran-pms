@@ -20,6 +20,7 @@ import {
   ExternalLink,
   ChevronRight,
   Printer,
+  Clock,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -398,6 +399,140 @@ function EntityMovementsInline({
         </tfoot>
       </table>
     </div>
+  );
+}
+
+// ─── Aging Report Section ────────────────────────────────────────────────────
+// Calcula cuántos días tiene el saldo deudor más antiguo de cada entidad
+// basado en los movimientos inline ya cargados.
+// Como los movimientos se cargan lazy (EntityMovementsInline), usamos el
+// endpoint /api/account-movements/report sin filtro de fechas para calcular
+// la antigüedad global.
+
+type AgingBucket = { label: string; days: [number, number]; color: string; bg: string };
+const AGING_BUCKETS: AgingBucket[] = [
+  { label: "0–30 días",  days: [0, 30],   color: "text-green-700 dark:text-green-400",  bg: "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"  },
+  { label: "31–60 días", days: [31, 60],  color: "text-amber-700 dark:text-amber-400",  bg: "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800"  },
+  { label: "61–90 días", days: [61, 90],  color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800" },
+  { label: "+90 días",   days: [91, Infinity], color: "text-red-700 dark:text-red-400", bg: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800" },
+];
+
+function AgingReportSection({ accountSummary }: {
+  accountSummary: { companies: { id: string; name: string; balance: number }[]; agencies: { id: string; name: string; balance: number }[]; guests: { id: string; name: string; balance: number }[] }
+}) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Aggregate all debtors from the summary (only those with positive balance = debt)
+  const allDebtors = [
+    ...accountSummary.companies.filter(e => e.balance > 0).map(e => ({ ...e, type: "Empresa" })),
+    ...accountSummary.agencies.filter(e => e.balance > 0).map(e => ({ ...e, type: "Agencia" })),
+    ...(accountSummary.guests ?? []).filter(e => e.balance > 0).map(e => ({ ...e, type: "Cliente" })),
+  ];
+
+  // Fetch all movements without date filter to calculate aging from oldest unpaid charge
+  const { data: allMovements = [], isLoading } = useQuery<AccountMovement[]>({
+    queryKey: ["/api/account-movements/report-aging"],
+    queryFn: async () => {
+      const from = "2000-01-01";
+      const to = new Date().toISOString().split("T")[0];
+      const res = await fetch(`/api/account-movements/report?from=${from}&to=${to}`);
+      return res.json();
+    },
+  });
+
+  // For each debtor, find the oldest outstanding charge date
+  function getOldestChargeAge(entityId: string): number {
+    const charges = allMovements
+      .filter(m => m.entityId === entityId && parseFloat(m.amount) > 0)
+      .map(m => new Date(m.date).getTime());
+    if (charges.length === 0) return 0;
+    const oldest = Math.min(...charges);
+    return Math.floor((today.getTime() - oldest) / (1000 * 60 * 60 * 24));
+  }
+
+  // Bucket debtors by age of oldest charge
+  const bucketed = AGING_BUCKETS.map(bucket => ({
+    ...bucket,
+    debtors: allDebtors.filter(d => {
+      const age = getOldestChargeAge(d.id);
+      return age >= bucket.days[0] && age <= bucket.days[1];
+    }),
+    total: 0 as number,
+  }));
+  bucketed.forEach(b => { b.total = b.debtors.reduce((s, d) => s + d.balance, 0); });
+
+  const hasAnyAging = bucketed.some(b => b.debtors.length > 0);
+
+  return (
+    <Card data-testid="card-aging-report">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-base">Antigüedad de Deuda</CardTitle>
+        </div>
+        <CardDescription className="text-xs">
+          Clasificación por tiempo transcurrido desde el cargo más antiguo sin saldar
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pb-4">
+        {isLoading ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[1,2,3,4].map(i => <Skeleton key={i} className="h-20 rounded-lg" />)}
+          </div>
+        ) : !hasAnyAging ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Sin datos suficientes para calcular antigüedad</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              {bucketed.map(bucket => (
+                <div key={bucket.label} className={`rounded-lg border p-3 text-center ${bucket.bg}`}>
+                  <p className={`text-xs font-semibold mb-1 ${bucket.color}`}>{bucket.label}</p>
+                  <p className={`text-xl font-bold tabular-nums ${bucket.color}`}>
+                    {bucket.debtors.length}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {bucket.debtors.length === 1 ? "deudor" : "deudores"}
+                  </p>
+                  {bucket.total > 0 && (
+                    <p className={`text-xs font-semibold mt-1 tabular-nums ${bucket.color}`}>
+                      ${bucket.total.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Detail rows for critical buckets (61+ days) */}
+            {bucketed.filter(b => b.days[0] >= 61 && b.debtors.length > 0).map(bucket => (
+              <div key={bucket.label} className="mb-3">
+                <p className={`text-xs font-semibold mb-1.5 ${bucket.color}`}>
+                  ⚠ {bucket.label} — deudores críticos
+                </p>
+                <div className="space-y-1">
+                  {bucket.debtors.slice(0, 5).map(d => (
+                    <div key={d.id} className={`flex items-center justify-between text-xs px-2.5 py-1.5 rounded border ${bucket.bg}`} data-testid={`aging-row-${d.id}`}>
+                      <span className="font-medium truncate mr-2">{d.name}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-muted-foreground">{d.type}</span>
+                        <span className={`font-bold tabular-nums ${bucket.color}`}>
+                          ${d.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {bucket.debtors.length > 5 && (
+                    <p className="text-xs text-muted-foreground pl-2">
+                      +{bucket.debtors.length - 5} más...
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -874,6 +1009,11 @@ export default function AdminCuentasPage() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Reporte de Antigüedad de Deuda */}
+      {accountSummary && (totalCompaniesDebt > 0 || totalAgenciesDebt > 0 || totalGuestsDebt > 0) && (
+        <AgingReportSection accountSummary={accountSummary} />
+      )}
 
       {/* Reconciliación de pagos CC existentes */}
       <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10">

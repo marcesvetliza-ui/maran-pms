@@ -528,13 +528,26 @@ export default function FolioViewer({ entityType, entityId }: Props) {
           <p className="text-xs text-muted-foreground mb-1">Pagado</p>
           <p className="font-bold text-green-600 dark:text-green-400">{formatCurrency(paymentsTotal)}</p>
         </div>
-        <div className={`rounded-lg border p-3 text-center ${balance > 0 ? "bg-orange-50 dark:bg-orange-950/20" : "bg-blue-50 dark:bg-blue-950/20"}`}>
+        <div className={`rounded-lg border p-3 text-center ${balance > 0 ? "bg-orange-50 dark:bg-orange-950/20" : balance < 0 ? "bg-purple-50 dark:bg-purple-950/20" : "bg-blue-50 dark:bg-blue-950/20"}`}>
           <p className="text-xs text-muted-foreground mb-1">Saldo</p>
-          <p className={`font-bold ${balance > 0 ? "text-orange-600 dark:text-orange-400" : "text-blue-600 dark:text-blue-400"}`}>
+          <p className={`font-bold text-lg ${balance > 0 ? "text-orange-600 dark:text-orange-400" : balance < 0 ? "text-purple-600 dark:text-purple-400" : "text-blue-600 dark:text-blue-400"}`}>
             {formatCurrency(balance)}
           </p>
+          {balance > 0 && <p className="text-[10px] text-orange-500 dark:text-orange-400 mt-0.5 font-medium">PENDIENTE</p>}
+          {balance < 0 && <p className="text-[10px] text-purple-500 dark:text-purple-400 mt-0.5 font-medium">A FAVOR</p>}
+          {balance === 0 && charges > 0 && <p className="text-[10px] text-blue-500 dark:text-blue-400 mt-0.5 font-medium">SALDADO</p>}
         </div>
       </div>
+
+      {/* IVA breakdown — solo si hay cargos */}
+      {charges > 0 && (
+        <div className="rounded-lg border border-dashed bg-muted/20 px-3 py-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Composición IVA (21%)</span>
+          <span>Neto: <strong className="text-foreground">{formatCurrency(charges / 1.21)}</strong></span>
+          <span>IVA 21%: <strong className="text-foreground">{formatCurrency(charges - charges / 1.21)}</strong></span>
+          <span>Total c/IVA: <strong className="text-foreground">{formatCurrency(charges)}</strong></span>
+        </div>
+      )}
 
       {/* ── Source entity detail ──────────────────────────────────────── */}
       {(entityType === "restaurant_order" || entityType === "reservation") && (
