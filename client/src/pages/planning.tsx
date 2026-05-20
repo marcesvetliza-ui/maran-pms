@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, AlertCircle, RefreshCw, CheckCircle2, Wrench, SlidersHorizontal, ShoppingCart, XCircle, TrendingUp, Palette, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -31,13 +31,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -52,7 +45,7 @@ import { getLocalToday, toArgentinaDateStr } from "@/lib/utils";
 import {
   formatDate, PLANNING_COLORS, getStatusColor, getStatusLabel,
   getSourceColor, getSourceBg, getPlanningCellClasses, getGroupCellStyle, getSourceLabel,
-  featureIconMap, bedConfigLabels, ROOM_STATUS_OPTIONS, Legend,
+  ROOM_STATUS_OPTIONS, Legend,
 } from "@/lib/planning-utils";
 import { QuickReservationDialog } from "@/components/planning-quick-reservation";
 import type { QuickReservationData } from "@/components/planning-quick-reservation";
@@ -63,6 +56,8 @@ import {
   PlanningColorContextMenu,
   type MoveConfirmData,
 } from "@/components/planning-dialogs";
+import { RoomPopover } from "@/components/planning-room-popover";
+import { PlanningFiltersPanel, type PlanningFilter, DEFAULT_PLANNING_FILTER } from "@/components/planning-filters-panel";
 
 function DraggableReservationCell({
   id,
@@ -212,20 +207,7 @@ export default function PlanningPage() {
     return next;
   });
 
-  type PlanningFilter = {
-    showEmpty: boolean;
-    showOccupied: boolean;
-    roomTypeIds: string[];
-    floorFilter: string;
-    statusFilter: PlanningCellStatus | "";
-  };
-  const [filters, setFilters] = useState<PlanningFilter>({
-    showEmpty: true,
-    showOccupied: true,
-    roomTypeIds: [],
-    floorFilter: "",
-    statusFilter: "",
-  });
+  const [filters, setFilters] = useState<PlanningFilter>(DEFAULT_PLANNING_FILTER);
 
   const updateBedConfigMutation = useMutation({
     mutationFn: async ({ roomId, bedConfig }: { roomId: string; bedConfig: string }) => {
@@ -689,66 +671,12 @@ export default function PlanningPage() {
             <Legend activeStatuses={activeStatuses} />
 
             {/* Filtros */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <div className="flex items-center gap-1.5">
-                <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-xs font-medium text-muted-foreground">Filtros:</span>
-              </div>
-              <button
-                onClick={() => setFilters(f => ({ ...f, showOccupied: !f.showOccupied }))}
-                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${filters.showOccupied ? "bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-800 dark:text-blue-200" : "bg-muted border-border text-muted-foreground"}`}
-                data-testid="filter-show-occupied"
-              >
-                Con reservas
-              </button>
-              <button
-                onClick={() => setFilters(f => ({ ...f, showEmpty: !f.showEmpty }))}
-                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${filters.showEmpty ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-300 text-zinc-700 dark:text-zinc-300" : "bg-muted border-border text-muted-foreground"}`}
-                data-testid="filter-show-empty"
-              >
-                Sin reservas
-              </button>
-              <Select value={filters.floorFilter || "__all__"} onValueChange={v => setFilters(f => ({ ...f, floorFilter: v === "__all__" ? "" : v }))}>
-                <SelectTrigger className="h-7 text-xs w-28" data-testid="filter-floor">
-                  <SelectValue placeholder="Piso" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">Todos los pisos</SelectItem>
-                  {availableFloors.map(fl => <SelectItem key={fl} value={fl}>Piso {fl}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {availableRoomTypes.length > 1 && (
-                <Select value={filters.roomTypeIds[0] || "__all__"} onValueChange={v => setFilters(f => ({ ...f, roomTypeIds: v === "__all__" ? [] : [v] }))}>
-                  <SelectTrigger className="h-7 text-xs w-36" data-testid="filter-roomtype">
-                    <SelectValue placeholder="Categoría" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">Todas las categorías</SelectItem>
-                    {availableRoomTypes.map(rt => <SelectItem key={rt.id} value={rt.id}>{rt.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              )}
-              <Select value={filters.statusFilter || "__all__"} onValueChange={v => setFilters(f => ({ ...f, statusFilter: v === "__all__" ? "" : v as PlanningCellStatus }))}>
-                <SelectTrigger className="h-7 text-xs w-36" data-testid="filter-status">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">Todos los estados</SelectItem>
-                  {(Object.keys(PLANNING_COLORS) as PlanningCellStatus[]).map(s => (
-                    <SelectItem key={s} value={s}>{PLANNING_COLORS[s].label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {(filters.floorFilter || filters.roomTypeIds.length > 0 || filters.statusFilter || !filters.showEmpty || !filters.showOccupied) && (
-                <button
-                  onClick={() => setFilters({ showEmpty: true, showOccupied: true, roomTypeIds: [], floorFilter: "", statusFilter: "" })}
-                  className="text-xs text-muted-foreground underline"
-                  data-testid="filter-reset"
-                >
-                  Limpiar filtros
-                </button>
-              )}
-            </div>
+            <PlanningFiltersPanel
+              filters={filters}
+              setFilters={setFilters}
+              availableFloors={availableFloors}
+              availableRoomTypes={availableRoomTypes}
+            />
 
             {data?.unassignedGroupBlocks && data.unassignedGroupBlocks.length > 0 && (
               <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-700">
@@ -985,94 +913,15 @@ export default function PlanningPage() {
                         {groupedRooms[floor]?.map((room) => (
                           <DroppableRoomRow key={room.id} roomId={room.id} className="hover:bg-muted/20" data-testid={`row-room-${room.id}`}>
                             <td className="sticky left-0 z-10 bg-background px-2 py-1 border-r">
-                              <Popover
+                              <RoomPopover
+                                room={room}
                                 open={roomPopoverOpen === room.id}
                                 onOpenChange={(o) => setRoomPopoverOpen(o ? room.id : null)}
-                              >
-                                <PopoverTrigger asChild>
-                                  <div
-                                    className="flex items-center gap-1 cursor-pointer rounded px-1 py-0.5 hover:bg-muted/60 select-none"
-                                    data-testid={`room-header-${room.id}`}
-                                  >
-                                    <span className="font-medium text-sm leading-none">{room.roomNumber}</span>
-                                    {room.status === "dirty" && (
-                                      <span title="Sucia"><AlertCircle className="h-3 w-3 text-orange-500 shrink-0" /></span>
-                                    )}
-                                    {room.status === "cleaning" && (
-                                      <span title="En limpieza"><RefreshCw className="h-3 w-3 text-yellow-500 shrink-0" /></span>
-                                    )}
-                                    {room.status === "inspected" && (
-                                      <span title="Inspeccionada"><CheckCircle2 className="h-3 w-3 text-blue-500 shrink-0" /></span>
-                                    )}
-                                    {room.status === "maintenance" && (
-                                      <span title="Mantenimiento"><Wrench className="h-3 w-3 text-red-500 shrink-0" /></span>
-                                    )}
-                                    {room.status !== "maintenance" && maintenanceAlertRoomIds.has(room.id) && (
-                                      <span title="Orden de mantenimiento pendiente"><Wrench className="h-3 w-3 text-orange-400 shrink-0" /></span>
-                                    )}
-                                    {room.features && room.features.slice(0, 2).map((feature) => {
-                                      const mapped = featureIconMap[feature];
-                                      if (!mapped) return null;
-                                      const IconComp = mapped.icon;
-                                      return <span key={feature} title={mapped.label}><IconComp className="h-3 w-3 text-muted-foreground shrink-0" /></span>;
-                                    })}
-                                  </div>
-                                </PopoverTrigger>
-                                <PopoverContent side="right" align="start" className="w-60 p-0 shadow-lg" data-testid={`popover-room-${room.id}`}>
-                                  {/* ── Header ── */}
-                                  <div className="px-3 py-2 border-b bg-muted/40">
-                                    <p className="font-semibold text-sm">{room.roomNumber} — {room.roomType?.name ?? ""}</p>
-                                    <p className="text-xs text-muted-foreground">Piso {room.floor}{room.maxOccupancy ? ` · máx. ${room.maxOccupancy} pers.` : ""}</p>
-                                    {room.bedConfig && (
-                                      <div className="flex items-center gap-1 mt-1">
-                                        <span className="text-xs text-muted-foreground">{bedConfigLabels[room.bedConfig] || room.bedConfig}</span>
-                                        <button
-                                          className="text-[10px] text-primary underline decoration-dotted hover:no-underline ml-1"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setRoomPopoverOpen(null);
-                                            setEditingBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "" });
-                                          }}
-                                          data-testid={`button-edit-bedconfig-${room.id}`}
-                                        >
-                                          Cambiar
-                                        </button>
-                                      </div>
-                                    )}
-                                    {room.notes && (
-                                      <p className="text-xs text-muted-foreground mt-1 italic">{room.notes}</p>
-                                    )}
-                                  </div>
-                                  {/* ── Estado rápido ── */}
-                                  <div className="px-3 py-2">
-                                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Estado de habitación</p>
-                                    <div className="flex flex-col gap-1">
-                                      {ROOM_STATUS_OPTIONS.map((opt) => {
-                                        const isActive = room.status === opt.value;
-                                        return (
-                                          <button
-                                            key={opt.value}
-                                            className={`flex items-center gap-2 text-xs px-2 py-1 rounded transition-colors text-left ${isActive ? "bg-primary/10 font-semibold" : "hover:bg-muted/60"}`}
-                                            onClick={() => {
-                                              if (!isActive) {
-                                                updateRoomStatusMutation.mutate({ roomId: room.id, status: opt.value });
-                                              } else {
-                                                setRoomPopoverOpen(null);
-                                              }
-                                            }}
-                                            disabled={updateRoomStatusMutation.isPending}
-                                            data-testid={`button-status-${opt.value}-${room.id}`}
-                                          >
-                                            <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dot}`} />
-                                            {opt.label}
-                                            {isActive && <span className="ml-auto text-primary">✓</span>}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                                onEditBedConfig={setEditingBedConfig}
+                                onUpdateStatus={({ roomId, status }) => updateRoomStatusMutation.mutate({ roomId, status })}
+                                isPendingStatusUpdate={updateRoomStatusMutation.isPending}
+                                maintenanceAlertRoomIds={maintenanceAlertRoomIds}
+                              />
                             </td>
                             {data.days.map((day, dayIndex) => {
                               const status = data.occupancy[room.id]?.[dayIndex] || "available";

@@ -1622,6 +1622,7 @@ export type PackageWithDetails = Package & {
 export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert";
 export type NotificationArea = "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "all";
 export type NotificationPriority = "low" | "normal" | "high" | "urgent";
+export type NotificationStatus = "pendiente" | "en_proceso" | "completado" | "rechazado";
 
 export const systemNotifications = pgTable("system_notifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1635,6 +1636,10 @@ export const systemNotifications = pgTable("system_notifications", {
   readAt: timestamp("read_at"),
   readBy: text("read_by"),
   priority: text("priority").$type<NotificationPriority>().notNull().default("normal"),
+  status: text("status").$type<NotificationStatus>().notNull().default("pendiente"),
+  staffNote: text("staff_note"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: text("resolved_by"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
