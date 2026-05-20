@@ -50,4 +50,3 @@ integrations = ["javascript_openai_ai_integrations:2.0.0"]
 
 [userenv.shared]
 CHATBOT_WEBHOOK_SECRET = "maran-chatbot-secret-2026"
-MARA_BASE_URL = "Https://repl-creator—marcesvetliza.replit.app"
