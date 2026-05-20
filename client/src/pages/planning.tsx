@@ -590,6 +590,18 @@ export default function PlanningPage() {
     if (!filters.showEmpty && !hasReservation) return false;
     if (!filters.showOccupied && hasReservation) return false;
     if (filters.statusFilter && !roomOcc.includes(filters.statusFilter as PlanningCellStatus)) return false;
+    // Filter by room number
+    if (filters.roomNumberSearch && !room.roomNumber.toLowerCase().includes(filters.roomNumberSearch.toLowerCase())) return false;
+    // Filter by guest name — check all reservations assigned to this room in the visible period
+    if (filters.guestSearch) {
+      const cellRes = data?.cellReservations[room.id] ?? {};
+      const resIds = Array.from(new Set(Object.values(cellRes)));
+      const hasMatch = resIds.some(resId => {
+        const res = data?.reservations[resId];
+        return res?.guestName?.toLowerCase().includes(filters.guestSearch.toLowerCase());
+      });
+      if (!hasMatch) return false;
+    }
     return true;
   });
 
