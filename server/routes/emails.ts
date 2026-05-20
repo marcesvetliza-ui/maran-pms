@@ -8,33 +8,44 @@ import { eq, desc, and, gte } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { runReminderScheduler } from "../email-service";
 
+const HOTEL_BASE_URL_ROUTES =
+  process.env.REPLIT_DEPLOYMENT_URL ||
+  process.env.SITE_BASE_URL ||
+  "https://hotelier-pro--marcesvetliza.replit.app";
+
+const BORDO_R = "#8B1535";
+const BORDO_DARK_R = "#6B1028";
+
 function buildTestHtml(): string {
+  const logoUrl = `${HOTEL_BASE_URL_ROUTES}/hotel-logo.jpeg`;
   return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f9;padding:32px 0;">
+<body style="margin:0;padding:0;background-color:#f0ebe8;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0ebe8;padding:32px 0;">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:6px;overflow:hidden;box-shadow:0 4px 16px rgba(139,21,53,0.12);">
+        <tr><td style="background:${BORDO_DARK_R};height:8px;font-size:0;line-height:0;">&nbsp;</td></tr>
         <tr>
-          <td style="background:linear-gradient(135deg,#0f2d5c 0%,#1a56a7 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:1px;">MARAN SUITES &amp; TOWERS</p>
-            <p style="margin:0;font-size:12px;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Hotel &amp; Residencias</p>
+          <td style="background:#ffffff;padding:28px 40px 24px;text-align:center;border-bottom:3px solid ${BORDO_R};">
+            <img src="${logoUrl}" alt="Maran Suites &amp; Towers" width="260" style="display:block;margin:0 auto;max-width:260px;height:auto;" />
           </td>
         </tr>
         <tr>
-          <td style="padding:36px 40px;color:#1e293b;font-size:15px;">
-            <p style="margin:0 0 16px 0;line-height:1.6;">Si recibiste este mensaje, el sistema de emails está funcionando correctamente.</p>
-            <p style="margin:0 0 16px 0;line-height:1.6;">Los correos automáticos (confirmación, recordatorio, post-checkout) se enviarán con este diseño.</p>
+          <td style="padding:36px 44px 28px;color:#2c1a1f;font-size:15px;line-height:1.7;">
+            <p style="margin:0 0 16px 0;">Si recibiste este mensaje, el sistema de emails está funcionando correctamente.</p>
+            <p style="margin:0 0 16px 0;">Los correos automáticos (confirmación, recordatorio, post-checkout) se enviarán con este diseño.</p>
           </td>
         </tr>
-        <tr><td style="padding:0 40px;"><hr style="border:none;border-top:1px solid #e8edf3;margin:0;"></td></tr>
+        <tr><td style="padding:0 44px;"><hr style="border:none;border-top:1px solid #e8dfe2;margin:0;"></td></tr>
         <tr>
-          <td style="padding:24px 40px;text-align:center;color:#94a3b8;font-size:12px;line-height:1.6;">
-            <p style="margin:0 0 6px 0;font-weight:600;color:#64748b;">Maran Suites &amp; Towers</p>
+          <td style="padding:20px 44px 24px;text-align:center;color:#9e8087;font-size:12px;line-height:1.6;">
+            <p style="margin:0 0 4px 0;font-weight:700;color:${BORDO_R};font-size:13px;letter-spacing:0.5px;">Maran Suites &amp; Towers — Hotel &amp; Spa</p>
             <p style="margin:0;">Este mensaje fue generado automáticamente. Por favor no responda a este correo.</p>
+            <p style="margin:4px 0 0 0;">Para consultas comuníquese directamente con la recepción del hotel.</p>
           </td>
         </tr>
+        <tr><td style="background:${BORDO_DARK_R};height:5px;font-size:0;line-height:0;">&nbsp;</td></tr>
       </table>
     </td></tr>
   </table>
