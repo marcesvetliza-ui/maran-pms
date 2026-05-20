@@ -706,7 +706,14 @@ export default function NewReservationPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Total</p>
-              <p className="font-medium text-lg">${totalAmount}</p>
+              <p className="font-medium text-lg">
+                ${(parseFloat(totalAmount) + pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount || "0") * c.quantity, 0)).toFixed(2)}
+              </p>
+              {pendingCharges.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Hab. ${totalAmount} + cargos ${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount || "0") * c.quantity, 0).toFixed(2)}
+                </p>
+              )}
             </div>
           </div>
           <div className="mt-4 flex justify-end gap-2">
