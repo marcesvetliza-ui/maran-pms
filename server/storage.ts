@@ -685,6 +685,7 @@ export interface IStorage {
   markNotificationRead(id: string): Promise<SystemNotification | undefined>;
   markAllNotificationsRead(area?: NotificationArea): Promise<number>;
   getUnreadNotificationCount(area?: NotificationArea): Promise<number>;
+  updateNotificationStatus(id: string, status: string, staffNote?: string, resolvedBy?: string): Promise<SystemNotification | undefined>;
 
   // Web Check-in
   createWebCheckin(data: InsertWebCheckin): Promise<WebCheckin>;

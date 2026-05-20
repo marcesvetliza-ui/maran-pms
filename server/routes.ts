@@ -537,6 +537,19 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/notifications/:id/status", requireAuth, async (req, res) => {
+    try {
+      const { status, staffNote } = req.body;
+      if (!status) return res.status(400).json({ error: "status requerido" });
+      const resolvedBy = (req.user as any)?.fullName || (req.user as any)?.username;
+      const notification = await storage.updateNotificationStatus(req.params.id, status, staffNote, resolvedBy);
+      if (!notification) return res.status(404).json({ error: "Notification not found" });
+      res.json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating notification status" });
+    }
+  });
+
   app.patch("/api/notifications/read-all", async (req, res) => {
     try {
       const area = req.query.area as string | undefined;

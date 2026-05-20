@@ -3150,6 +3150,18 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async updateNotificationStatus(id: string, status: string, staffNote?: string, resolvedBy?: string): Promise<SystemNotification | undefined> {
+    const isResolved = status === "completado" || status === "rechazado";
+    const [updated] = await db.update(systemNotifications).set({
+      status: status as any,
+      isRead: true,
+      readAt: new Date(),
+      ...(staffNote !== undefined ? { staffNote } : {}),
+      ...(isResolved ? { resolvedAt: new Date(), resolvedBy: resolvedBy ?? null } : {}),
+    }).where(eq(systemNotifications.id, id)).returning();
+    return updated;
+  }
+
   async markAllNotificationsRead(area?: NotificationArea): Promise<number> {
     let condition;
     if (area) {
