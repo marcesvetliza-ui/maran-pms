@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -57,7 +57,7 @@ import {
   type MoveConfirmData,
 } from "@/components/planning-dialogs";
 import { RoomPopover } from "@/components/planning-room-popover";
-import { PlanningFiltersPanel, type PlanningFilter, DEFAULT_PLANNING_FILTER } from "@/components/planning-filters-panel";
+import { PlanningFiltersPanel, type PlanningFilter, DEFAULT_PLANNING_FILTER, countActiveFilters } from "@/components/planning-filters-panel";
 
 function DraggableReservationCell({
   id,
@@ -198,6 +198,7 @@ export default function PlanningPage() {
   const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string } | null>(null);
   const [roomPopoverOpen, setRoomPopoverOpen] = useState<string | null>(null);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [blocksExpanded, setBlocksExpanded] = useState(false);
   const [showRevenue, setShowRevenue] = useState(() => localStorage.getItem("planning_revenue") === "true");
 
@@ -656,6 +657,37 @@ export default function PlanningPage() {
             <Button variant="outline" size="icon" onClick={() => navigateDays("next")} data-testid="button-next-week">
               <ChevronRight className="h-4 w-4" />
             </Button>
+            <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={countActiveFilters(filters) > 0 ? "default" : "outline"}
+                  size="sm"
+                  className="gap-1.5"
+                  data-testid="button-open-filters"
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Filtrar
+                  {countActiveFilters(filters) > 0 && (
+                    <Badge variant="secondary" className="h-4 px-1 text-[10px] leading-none ml-0.5">
+                      {countActiveFilters(filters)}
+                    </Badge>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-4" align="end">
+                <div className="mb-3">
+                  <h4 className="font-semibold text-sm">Filtros</h4>
+                  <p className="text-xs text-muted-foreground">Reducí la vista del planning</p>
+                </div>
+                <PlanningFiltersPanel
+                  filters={filters}
+                  setFilters={setFilters}
+                  availableFloors={availableFloors}
+                  availableRoomTypes={availableRoomTypes}
+                  onClose={() => setFiltersOpen(false)}
+                />
+              </PopoverContent>
+            </Popover>
             <Button
               variant="outline"
               size="icon"
@@ -681,14 +713,6 @@ export default function PlanningPage() {
         {!headerCollapsed && (
           <>
             <Legend activeStatuses={activeStatuses} />
-
-            {/* Filtros */}
-            <PlanningFiltersPanel
-              filters={filters}
-              setFilters={setFilters}
-              availableFloors={availableFloors}
-              availableRoomTypes={availableRoomTypes}
-            />
 
             {data?.unassignedGroupBlocks && data.unassignedGroupBlocks.length > 0 && (
               <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-700">
