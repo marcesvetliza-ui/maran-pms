@@ -127,8 +127,9 @@ export default function NewReservationPage() {
     return diff > 0 ? diff : 0;
   }, [checkInDate, checkOutDate]);
 
-  const availableRooms = rooms?.filter((room) => 
-    room.status === "available" && 
+  const availableRooms = rooms?.filter((room) =>
+    room.status !== "maintenance" &&
+    room.status !== "out_of_order" &&
     (selectedRoomTypeId ? room.roomTypeId === selectedRoomTypeId : true)
   );
 
@@ -381,7 +382,7 @@ export default function NewReservationPage() {
                     <SelectContent>
                       {roomTypes?.map((rt) => (
                         <SelectItem key={rt.id} value={rt.id}>
-                          {rt.name} - {rt.maxOccupancy} pax
+                          {rt.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -411,15 +412,28 @@ export default function NewReservationPage() {
                         <SelectValue placeholder={selectedRoomTypeId ? "Seleccionar habitacion..." : "Primero seleccione tipo"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableRooms?.slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => (
-                          <SelectItem key={room.id} value={room.id}>
-                            Hab. {room.roomNumber} - Piso {room.floor}
-                          </SelectItem>
-                        ))}
+                        {availableRooms?.slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => {
+                          const statusLabel: Record<string, string> = {
+                            available: "✓ Libre",
+                            occupied: "Ocupada",
+                            cleaning: "Limpieza",
+                            checkout: "Check-out hoy",
+                          };
+                          const label = statusLabel[room.status] || room.status;
+                          const isCurrentlyFree = room.status === "available";
+                          return (
+                            <SelectItem key={room.id} value={room.id}>
+                              <span>Hab. {room.roomNumber} — Piso {room.floor}</span>
+                              <span className={`ml-2 text-xs ${isCurrentlyFree ? "text-green-600" : "text-amber-600"}`}>
+                                ({label})
+                              </span>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                     {selectedRoomTypeId && availableRooms?.length === 0 && (
-                      <p className="text-sm text-destructive">No hay habitaciones disponibles de este tipo</p>
+                      <p className="text-sm text-destructive">Todas las habitaciones de este tipo están en mantenimiento</p>
                     )}
                   </>
                 )}
