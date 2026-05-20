@@ -1640,6 +1640,8 @@ export const systemNotifications = pgTable("system_notifications", {
   staffNote: text("staff_note"),
   resolvedAt: timestamp("resolved_at"),
   resolvedBy: text("resolved_by"),
+  sessionId: text("session_id"),
+  guestName: text("guest_name"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

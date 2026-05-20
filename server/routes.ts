@@ -544,6 +544,27 @@ export async function registerRoutes(
       const resolvedBy = (req.user as any)?.fullName || (req.user as any)?.username;
       const notification = await storage.updateNotificationStatus(req.params.id, status, staffNote, resolvedBy);
       if (!notification) return res.status(404).json({ error: "Notification not found" });
+
+      // Send confirmation back to guest via MARA if sessionId is available
+      const maraBaseUrl = process.env.MARA_BASE_URL;
+      const maraSecret = process.env.CHATBOT_WEBHOOK_SECRET;
+      if (maraBaseUrl && maraSecret && (notification as any).sessionId) {
+        const guestName = (notification as any).guestName || "Huésped";
+        const maraMessages: Record<string, string> = {
+          en_proceso: `¡Hola ${guestName}! 👋 Tu solicitud fue recibida por nuestro equipo y ya está siendo atendida. Te avisamos en cuanto esté lista.`,
+          completado: `¡Hola ${guestName}! ✅ Tu solicitud fue completada. Si necesitás algo más, escribinos cuando quieras.`,
+          rechazado: `Hola ${guestName}, lamentablemente no podemos atender tu solicitud en este momento. Por favor acercate a recepción y con gusto te ayudamos. 🙏`,
+        };
+        const maraMessage = maraMessages[status];
+        if (maraMessage) {
+          fetch(`${maraBaseUrl}/api/send-message`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Chatbot-Secret": maraSecret },
+            body: JSON.stringify({ sessionId: (notification as any).sessionId, message: maraMessage }),
+          }).catch((err) => console.error("[MARA] Error sending confirmation:", err));
+        }
+      }
+
       res.json(notification);
     } catch (error) {
       res.status(500).json({ error: "Error updating notification status" });
@@ -588,7 +609,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Invalid or missing webhook secret" });
       }
 
-      const { eventType, area, priority, guestName, roomNumber, reservationId, message, timestamp } = req.body;
+      const { eventType, area, priority, guestName, roomNumber, reservationId, message, timestamp, sessionId } = req.body;
 
       const validAreas = ["housekeeping", "maintenance", "restaurant", "spa", "reception", "all"];
       const validPriorities = ["normal", "high", "urgent"];
@@ -629,7 +650,9 @@ export async function registerRoutes(
         relatedEntityType: reservationId ? "reservation" : "room",
         relatedEntityId: reservationId ? String(reservationId) : roomNumber,
         priority: priority || "normal",
-      });
+        sessionId: sessionId || null,
+        guestName: guestName || null,
+      } as any);
 
       if (area === "housekeeping" && roomNumber) {
         const rooms = await storage.getRooms();
