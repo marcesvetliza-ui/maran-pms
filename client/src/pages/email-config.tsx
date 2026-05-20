@@ -38,6 +38,7 @@ function Stars({ value }: { value: number }) {
 const VARS_COMMON = [
   "{nombre_huesped}", "{numero_habitacion}", "{fecha_checkin}", "{fecha_checkout}", "{codigo_reserva}",
 ];
+const VARS_REMINDER = [...VARS_COMMON, "{link_webcheckin}"];
 const VARS_CHECKOUT = [...VARS_COMMON, "{link_encuesta}", "{link_google_maps}"];
 
 function VarChips({ vars }: { vars: string[] }) {
@@ -202,7 +203,7 @@ export default function EmailConfigPage() {
               enabledField: "reminderEnabled",
               subjectField: "reminderSubject",
               bodyField: "reminderBody",
-              vars: VARS_COMMON,
+              vars: VARS_REMINDER,
             },
             {
               key: "checkout",

@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms } from "@shared/schema";
+import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms, webCheckins } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
@@ -18,6 +18,83 @@ function fmtDate(d: string | null | undefined): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HTML email template — branded hotel layout
+// ─────────────────────────────────────────────────────────────────────────────
+function buildHtmlEmail(bodyText: string, subject: string): string {
+  // Convert plain text paragraphs to HTML, and convert URLs to links
+  const bodyHtml = bodyText
+    .split(/\n\n+/)
+    .map(para => {
+      const lines = para
+        .split(/\n/)
+        .map(line =>
+          line.replace(
+            /(https?:\/\/[^\s]+)/g,
+            `<a href="$1" style="color:#1a56a7;text-decoration:underline;">$1</a>`,
+          )
+        )
+        .join("<br>");
+      return `<p style="margin:0 0 16px 0;line-height:1.6;">${lines}</p>`;
+    })
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${subject}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f9;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+          <!-- HEADER -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#0f2d5c 0%,#1a56a7 100%);padding:32px 40px;text-align:center;">
+              <p style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:1px;">
+                MARAN SUITES &amp; TOWERS
+              </p>
+              <p style="margin:0;font-size:12px;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">
+                Hotel &amp; Residencias
+              </p>
+            </td>
+          </tr>
+
+          <!-- BODY -->
+          <tr>
+            <td style="padding:36px 40px;color:#1e293b;font-size:15px;">
+              ${bodyHtml}
+            </td>
+          </tr>
+
+          <!-- DIVIDER -->
+          <tr>
+            <td style="padding:0 40px;">
+              <hr style="border:none;border-top:1px solid #e8edf3;margin:0;">
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding:24px 40px;text-align:center;color:#94a3b8;font-size:12px;line-height:1.6;">
+              <p style="margin:0 0 6px 0;font-weight:600;color:#64748b;">Maran Suites &amp; Towers</p>
+              <p style="margin:0;">Este mensaje fue generado automáticamente. Por favor no responda a este correo.</p>
+              <p style="margin:6px 0 0 0;">Para consultas comuníquese directamente con la recepción del hotel.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Get config
 // ─────────────────────────────────────────────────────────────────────────────
 async function getConfig() {
@@ -26,7 +103,7 @@ async function getConfig() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Send via Resend REST API
+// Send via Resend REST API (supports HTML)
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendViaResend(opts: {
   apiKey: string;
@@ -34,6 +111,7 @@ async function sendViaResend(opts: {
   to: string;
   subject: string;
   text: string;
+  html: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -42,7 +120,13 @@ async function sendViaResend(opts: {
         "Authorization": `Bearer ${opts.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from: opts.from, to: [opts.to], subject: opts.subject, text: opts.text }),
+      body: JSON.stringify({
+        from: opts.from,
+        to: [opts.to],
+        subject: opts.subject,
+        text: opts.text,
+        html: opts.html,
+      }),
     });
     if (!res.ok) {
       const err = await res.text();
@@ -55,7 +139,7 @@ async function sendViaResend(opts: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Send via SMTP (Gmail / cualquier servidor)
+// Send via SMTP (Gmail / cualquier servidor) — supports HTML
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendViaSmtp(opts: {
   host: string;
@@ -67,6 +151,7 @@ async function sendViaSmtp(opts: {
   to: string;
   subject: string;
   text: string;
+  html: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const transporter = nodemailer.createTransport({
@@ -80,6 +165,7 @@ async function sendViaSmtp(opts: {
       to: opts.to,
       subject: opts.subject,
       text: opts.text,
+      html: opts.html,
     });
     return { ok: true };
   } catch (e: any) {
@@ -107,7 +193,7 @@ async function logEmail(opts: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core send function — routes to Resend or SMTP based on provider config
+// Core send function — routes to Resend or SMTP, always sends HTML + text
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendEmail(opts: {
   reservationId: string;
@@ -124,10 +210,10 @@ async function sendEmail(opts: {
   }
 
   const from = `${cfg.fromName} <${cfg.fromEmail}>`;
+  const html = buildHtmlEmail(opts.body, opts.subject);
   let result: { ok: boolean; error?: string };
 
   if (cfg.provider === "smtp") {
-    // Gmail SMTP or any SMTP server
     if (!cfg.smtpUser || !cfg.smtpPass) {
       await logEmail({ ...opts, status: "skipped", recipientEmail: opts.to, errorMessage: "SMTP: usuario o contraseña no configurados" });
       return;
@@ -142,14 +228,14 @@ async function sendEmail(opts: {
       to: opts.to,
       subject: opts.subject,
       text: opts.body,
+      html,
     });
   } else {
-    // Resend API (default)
     if (!cfg.apiKey) {
       await logEmail({ ...opts, status: "skipped", recipientEmail: opts.to, errorMessage: "Resend: API key no configurada" });
       return;
     }
-    result = await sendViaResend({ apiKey: cfg.apiKey, from, to: opts.to, subject: opts.subject, text: opts.body });
+    result = await sendViaResend({ apiKey: cfg.apiKey, from, to: opts.to, subject: opts.subject, text: opts.body, html });
   }
 
   if (result.ok) {
@@ -168,6 +254,20 @@ async function getReservationData(reservationId: string) {
   const [guest] = res.guestId ? await db.select().from(guests).where(eq(guests.id, res.guestId)) : [null];
   const [room] = res.roomId ? await db.select().from(rooms).where(eq(rooms.id, res.roomId)) : [null];
   return { reservation: res, guest, room };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Get or create web check-in token for a reservation
+// ─────────────────────────────────────────────────────────────────────────────
+async function getOrCreateWebCheckinToken(reservationId: string): Promise<string> {
+  const [existing] = await db.select().from(webCheckins).where(eq(webCheckins.reservationId, reservationId));
+  if (existing) return existing.token;
+
+  const token = crypto.randomUUID();
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 3); // valid for 3 days (arrives in 2 days)
+  await db.insert(webCheckins).values({ reservationId, token, status: "pending", expiresAt });
+  return token;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -255,6 +355,7 @@ export async function sendCheckoutEmail(reservationId: string, baseUrl: string):
 // ─────────────────────────────────────────────────────────────────────────────
 // Public: Reminder scheduler — call daily (from night-audit or own scheduler)
 // Sends reminder to guests with check-in in exactly 2 days
+// Includes web check-in link automatically
 // ─────────────────────────────────────────────────────────────────────────────
 export async function runReminderScheduler(baseUrl: string): Promise<{ sent: number; skipped: number; failed: number }> {
   const stats = { sent: 0, skipped: 0, failed: 0 };
@@ -270,7 +371,7 @@ export async function runReminderScheduler(baseUrl: string): Promise<{ sent: num
     target.setDate(target.getDate() + 2);
     const targetStr = target.toISOString().split("T")[0];
 
-    // Find reservations with check-in on target date (confirmed / checked_in)
+    // Find reservations with check-in on target date (confirmed)
     const { sql: sqlFn } = await import("drizzle-orm");
     const pendingRes = await db.execute(sqlFn`
       SELECT r.id, r.guest_id, r.room_id, r.check_in_date, r.check_out_date, r.reservation_code
@@ -295,13 +396,25 @@ export async function runReminderScheduler(baseUrl: string): Promise<{ sent: num
         stats.skipped++;
         continue;
       }
-      const vars = {
+
+      // Generate or retrieve web check-in token
+      let webCheckinLink = "";
+      try {
+        const token = await getOrCreateWebCheckinToken(reservationId);
+        webCheckinLink = `${baseUrl}/web-checkin/${token}`;
+      } catch (e) {
+        console.error("[email] Error generating web check-in token:", e);
+      }
+
+      const vars: Record<string, string> = {
         nombre_huesped: `${guest.firstName} ${guest.lastName}`,
         numero_habitacion: room?.roomNumber ?? "-",
         fecha_checkin: fmtDate(row.check_in_date),
         fecha_checkout: fmtDate(row.check_out_date),
         codigo_reserva: row.reservation_code ?? reservationId,
+        link_webcheckin: webCheckinLink,
       };
+
       await sendEmail({
         reservationId,
         type: "reminder",

@@ -8,6 +8,40 @@ import { eq, desc, and, gte } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { runReminderScheduler } from "../email-service";
 
+function buildTestHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f9;padding:32px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#0f2d5c 0%,#1a56a7 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:1px;">MARAN SUITES &amp; TOWERS</p>
+            <p style="margin:0;font-size:12px;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Hotel &amp; Residencias</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:36px 40px;color:#1e293b;font-size:15px;">
+            <p style="margin:0 0 16px 0;line-height:1.6;">Si recibiste este mensaje, el sistema de emails está funcionando correctamente.</p>
+            <p style="margin:0 0 16px 0;line-height:1.6;">Los correos automáticos (confirmación, recordatorio, post-checkout) se enviarán con este diseño.</p>
+          </td>
+        </tr>
+        <tr><td style="padding:0 40px;"><hr style="border:none;border-top:1px solid #e8edf3;margin:0;"></td></tr>
+        <tr>
+          <td style="padding:24px 40px;text-align:center;color:#94a3b8;font-size:12px;line-height:1.6;">
+            <p style="margin:0 0 6px 0;font-weight:600;color:#64748b;">Maran Suites &amp; Towers</p>
+            <p style="margin:0;">Este mensaje fue generado automáticamente. Por favor no responda a este correo.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
 export function registerEmailRoutes(app: Express) {
   // ──────────────────────────────────────────────────────────────────────────
   // GET /api/email/config
@@ -122,6 +156,7 @@ export function registerEmailRoutes(app: Express) {
       const from = `${cfg.fromName} <${cfg.fromEmail}>`;
       const subject = "Email de prueba — Maran Suites & Towers";
       const text = "Si recibiste este mensaje, el sistema de emails está funcionando correctamente.";
+      const html = buildTestHtml();
 
       if (cfg.provider === "smtp") {
         if (!cfg.smtpUser || !cfg.smtpPass) return res.status(400).json({ error: "SMTP: usuario o contraseña no configurados" });
@@ -132,13 +167,13 @@ export function registerEmailRoutes(app: Express) {
           secure: cfg.smtpSecure ?? false,
           auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
         });
-        await transporter.sendMail({ from, to, subject, text });
+        await transporter.sendMail({ from, to, subject, text, html });
       } else {
         if (!cfg.apiKey) return res.status(400).json({ error: "API key de Resend no configurada" });
         const r = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { "Authorization": `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from, to: [to], subject, text }),
+          body: JSON.stringify({ from, to: [to], subject, text, html }),
         });
         if (!r.ok) {
           const err = await r.text();
