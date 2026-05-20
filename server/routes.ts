@@ -150,6 +150,11 @@ export async function registerRoutes(
       return next();
     }
 
+    // Survey routes are public — guests access them from email links without login
+    if (req.path.startsWith("/api/survey/")) {
+      return next();
+    }
+
     requireAuth(req, res, next);
   });
 
