@@ -168,17 +168,26 @@ export function ReservationDetailModal({
   });
 
   const cancelReservationMutation = useMutation({
-    mutationFn: async () => apiRequest("PATCH", `/api/reservations/${reservationId}`, { status: "cancelled" }),
+    mutationFn: async () => apiRequest("POST", `/api/reservations/${reservationId}/cancel`, {
+      reason: "Anulado desde Planning",
+      cancelledBy: "Recepción",
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      toast({ title: "Reserva cancelada" });
+      queryClient.invalidateQueries({ queryKey: ["/api/cancelled-reservations"], exact: false });
+      toast({ title: "Reserva anulada" });
       onOpenChange(false);
     },
     onError: (error: any) => {
-      toast({ title: "Error", description: error?.message || "No se pudo cancelar", variant: "destructive" });
+      let description = "No se pudo anular la reserva.";
+      try {
+        const body = JSON.parse(error.message.replace(/^\d+:\s*/, ""));
+        if (body.error) description = body.error;
+      } catch {}
+      toast({ title: "Error", description, variant: "destructive" });
     },
   });
 

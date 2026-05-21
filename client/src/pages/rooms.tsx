@@ -65,7 +65,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { RoomWithType, RoomType, InsertRoom, RoomStatus, ChargeType } from "@shared/schema";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 function RoomStatusBadge({ status }: { status: RoomStatus }) {
   const statusConfig: Record<RoomStatus, { label: string; className: string }> = {
@@ -822,20 +821,20 @@ export default function RoomsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Sheet: Cargos en Habitaciones ─────────────────────────────────── */}
-      <Sheet open={chargesSheetOpen} onOpenChange={setChargesSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-lg flex flex-col">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
+      {/* ── Dialog: Cargos en Habitaciones ────────────────────────────────── */}
+      <Dialog open={chargesSheetOpen} onOpenChange={v => { setChargesSheetOpen(v); if (!v) setCtFormOpen(false); }}>
+        <DialogContent className="max-w-lg flex flex-col max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
               <ReceiptText className="h-5 w-5 text-primary" />
               Cargos en habitaciones
-            </SheetTitle>
-            <p className="text-sm text-muted-foreground">
-              Estos son los cargos predefinidos que aparecen al agregar consumos a una reserva.
-            </p>
-          </SheetHeader>
+            </DialogTitle>
+            <DialogDescription>
+              Cargos predefinidos que aparecen al agregar consumos a una reserva.
+            </DialogDescription>
+          </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto mt-4 space-y-3">
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
             {chargeTypesList.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-8">Sin cargos configurados</p>
             )}
@@ -873,7 +872,7 @@ export default function RoomsPage() {
 
           {/* Inline form to create / edit */}
           {ctFormOpen ? (
-            <div className="border-t pt-4 mt-2 space-y-3">
+            <div className="border-t pt-4 space-y-3">
               <p className="text-sm font-semibold">{editingCT ? "Editar cargo" : "Nuevo cargo"}</p>
               <div className="space-y-1.5">
                 <Label htmlFor="ct-label">Nombre visible</Label>
@@ -911,15 +910,15 @@ export default function RoomsPage() {
               </div>
             </div>
           ) : (
-            <div className="border-t pt-4 mt-2">
+            <div className="border-t pt-4">
               <Button className="w-full" variant="outline" onClick={openNewCT} data-testid="btn-new-ct">
                 <Plus className="mr-2 h-4 w-4" />
                 Agregar nuevo cargo
               </Button>
             </div>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
