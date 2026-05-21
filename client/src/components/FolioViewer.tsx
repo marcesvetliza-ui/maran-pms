@@ -1,17 +1,11 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -29,7 +23,6 @@ import {
   Users,
   Building2,
   Briefcase,
-  PlusCircle,
 } from "lucide-react";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -458,47 +451,8 @@ interface Props {
   entityId: string;
 }
 
-const CHARGE_CATEGORIES: { value: string; label: string }[] = [
-  { value: "minibar", label: "Minibar" },
-  { value: "restaurant", label: "Restaurant" },
-  { value: "spa", label: "SPA" },
-  { value: "room", label: "Habitación / Alojamiento" },
-  { value: "otros", label: "Otros" },
-  { value: "adjustment", label: "Ajuste / Corrección" },
-];
-
 export default function FolioViewer({ entityType, entityId }: Props) {
-  const { toast } = useToast();
   const [showSourceDetail, setShowSourceDetail] = useState(true);
-  const [showAddCharge, setShowAddCharge] = useState(false);
-  const [chargeDesc, setChargeDesc] = useState("");
-  const [chargeAmt, setChargeAmt] = useState("");
-  const [chargeCategory, setChargeCategory] = useState("otros");
-  const [chargeDate, setChargeDate] = useState(() => new Date().toISOString().slice(0, 10));
-
-  const addChargeMutation = useMutation({
-    mutationFn: () =>
-      apiRequest("POST", "/api/charges", {
-        reservationId: entityId,
-        description: chargeDesc.trim(),
-        amount: parseFloat(chargeAmt),
-        date: chargeDate,
-        category: chargeCategory,
-      }),
-    onSuccess: () => {
-      toast({ title: "Cargo agregado correctamente" });
-      queryClient.invalidateQueries({ queryKey: ["/api/folios", entityType, entityId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      setShowAddCharge(false);
-      setChargeDesc("");
-      setChargeAmt("");
-      setChargeCategory("otros");
-      setChargeDate(new Date().toISOString().slice(0, 10));
-    },
-    onError: (err: any) => {
-      toast({ title: "Error al agregar cargo", description: err?.message, variant: "destructive" });
-    },
-  });
 
   const { data: folio, isLoading } = useQuery<FolioData | null>({
     queryKey: ["/api/folios", entityType, entityId],
@@ -552,16 +506,6 @@ export default function FolioViewer({ entityType, entityId }: Props) {
             <span className="text-xs text-muted-foreground">
               Abierto {formatDate(folio.openedAt)}
             </span>
-          )}
-          {entityType === "reservation" && folio.status === "open" && (
-            <Button
-              variant="outline" size="sm" className="h-7 gap-1 text-xs"
-              data-testid="button-add-charge"
-              onClick={() => setShowAddCharge(true)}
-            >
-              <PlusCircle className="h-3 w-3" />
-              Cargo
-            </Button>
           )}
           <Button
             variant="outline" size="sm" className="h-7 gap-1 text-xs"
@@ -654,84 +598,6 @@ export default function FolioViewer({ entityType, entityId }: Props) {
           Cerrado {formatDate(folio.closedAt)}
         </div>
       )}
-
-      {/* ── Dialog: Agregar Cargo Extra ────────────────────────────────── */}
-      <Dialog open={showAddCharge} onOpenChange={setShowAddCharge}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <PlusCircle className="h-4 w-4 text-primary" />
-              Agregar cargo extra
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-1">
-            <div className="space-y-1.5">
-              <Label htmlFor="charge-desc">Descripción</Label>
-              <Input
-                id="charge-desc"
-                placeholder="Ej: Minibar consumido, lavandería, etc."
-                value={chargeDesc}
-                onChange={e => setChargeDesc(e.target.value)}
-                data-testid="input-charge-desc"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="charge-category">Categoría</Label>
-              <Select value={chargeCategory} onValueChange={setChargeCategory}>
-                <SelectTrigger id="charge-category" data-testid="select-charge-category">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CHARGE_CATEGORIES.map(c => (
-                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="charge-amount">Importe ($)</Label>
-                <Input
-                  id="charge-amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={chargeAmt}
-                  onChange={e => setChargeAmt(e.target.value)}
-                  data-testid="input-charge-amount"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="charge-date">Fecha</Label>
-                <Input
-                  id="charge-date"
-                  type="date"
-                  value={chargeDate}
-                  onChange={e => setChargeDate(e.target.value)}
-                  data-testid="input-charge-date"
-                />
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddCharge(false)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => addChargeMutation.mutate()}
-              disabled={!chargeDesc.trim() || !chargeAmt || parseFloat(chargeAmt) <= 0 || addChargeMutation.isPending}
-              data-testid="button-confirm-add-charge"
-            >
-              {addChargeMutation.isPending ? "Guardando…" : "Agregar cargo"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
