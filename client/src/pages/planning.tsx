@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -495,12 +495,12 @@ export default function PlanningPage() {
 
   const dragActiveReservation = dragActiveId && data ? data.reservations[dragActiveId] : null;
 
-  const navigateDays = (direction: "prev" | "next") => {
-    const days = direction === "prev" ? -7 : 7;
+  const navigateDays = (direction: "prev" | "next", days = 1) => {
+    const delta = direction === "prev" ? -days : days;
     const newStart = new Date(dateRange.start);
     const newEnd = new Date(dateRange.end);
-    newStart.setDate(newStart.getDate() + days);
-    newEnd.setDate(newEnd.getDate() + days);
+    newStart.setDate(newStart.getDate() + delta);
+    newEnd.setDate(newEnd.getDate() + delta);
     setDateRange({
       start: toArgentinaDateStr(newStart),
       end: toArgentinaDateStr(newEnd),
@@ -639,7 +639,10 @@ export default function PlanningPage() {
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Button variant="outline" size="icon" onClick={() => navigateDays("prev")} data-testid="button-prev-week">
+            <Button variant="outline" size="icon" onClick={() => navigateDays("prev", 7)} title="Semana anterior" data-testid="button-prev-week">
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => navigateDays("prev", 1)} title="Día anterior" data-testid="button-prev-day">
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <Button variant="outline" onClick={goToToday} data-testid="button-today">Hoy</Button>
@@ -654,8 +657,11 @@ export default function PlanningPage() {
                 <CalendarPicker mode="single" selected={new Date(dateRange.start + "T12:00:00")} onSelect={goToDate} initialFocus />
               </PopoverContent>
             </Popover>
-            <Button variant="outline" size="icon" onClick={() => navigateDays("next")} data-testid="button-next-week">
+            <Button variant="outline" size="icon" onClick={() => navigateDays("next", 1)} title="Día siguiente" data-testid="button-next-day">
               <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => navigateDays("next", 7)} title="Semana siguiente" data-testid="button-next-week">
+              <ChevronsRight className="h-4 w-4" />
             </Button>
             <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
               <PopoverTrigger asChild>
