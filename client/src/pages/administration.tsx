@@ -98,7 +98,10 @@ const categoryLabels: Record<string, string> = {
   reservations: "Reservas",
   billing: "Facturacion",
   amenities: "Amenidades",
+  documentos: "Documentos",
 };
+
+const TEXTAREA_KEYS = ["confirmation_terms"];
 
 // IncidenciasTab moved to maintenance.tsx
 // NightAuditTab moved to cash-register.tsx
@@ -1394,7 +1397,11 @@ export default function AdministrationPage() {
                       {categorySettings.map((setting) => (
                         <TableRow key={setting.id} data-testid={`row-setting-${setting.id}`}>
                           <TableCell className="font-mono text-sm">{setting.key}</TableCell>
-                          <TableCell className="font-medium">{setting.value}</TableCell>
+                          <TableCell className="font-medium max-w-[220px] truncate">
+                            {TEXTAREA_KEYS.includes(setting.key)
+                              ? `${setting.value.split("\n").filter(l => l.trim()).length} cláusulas`
+                              : setting.value}
+                          </TableCell>
                           <TableCell className="text-muted-foreground">
                             {setting.description || "-"}
                           </TableCell>
@@ -1882,7 +1889,7 @@ export default function AdministrationPage() {
       </Dialog>
 
       <Dialog open={isSettingDialogOpen} onOpenChange={setIsSettingDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={TEXTAREA_KEYS.includes(settingForm.watch("key")) ? "max-w-2xl" : "max-w-md"}>
           <DialogHeader>
             <DialogTitle>
               {editingSetting ? "Editar Configuracion" : "Nueva Configuracion"}
@@ -1916,8 +1923,23 @@ export default function AdministrationPage() {
                   <FormItem>
                     <FormLabel>Valor</FormLabel>
                     <FormControl>
-                      <Input {...field} placeholder="valor" data-testid="input-setting-value" />
+                      {TEXTAREA_KEYS.includes(settingForm.watch("key")) ? (
+                        <Textarea
+                          {...field}
+                          placeholder="Una cláusula por línea..."
+                          rows={10}
+                          className="font-sans text-sm resize-y"
+                          data-testid="textarea-setting-value"
+                        />
+                      ) : (
+                        <Input {...field} placeholder="valor" data-testid="input-setting-value" />
+                      )}
                     </FormControl>
+                    {TEXTAREA_KEYS.includes(settingForm.watch("key")) && (
+                      <p className="text-xs text-muted-foreground">
+                        Cada línea es una cláusula numerada. Se muestran en el PDF de confirmación.
+                      </p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}

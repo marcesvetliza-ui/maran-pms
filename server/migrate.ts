@@ -63,6 +63,34 @@ export async function runMigrations() {
     logger.warn("Migración incremental charge_types: " + e.message);
   }
 
+  // Confirmation terms seed (editable via system settings)
+  try {
+    const existing = await db.execute(sql`SELECT COUNT(*) FROM system_settings WHERE key = 'confirmation_terms'`);
+    const count = parseInt((existing.rows[0] as any)?.count ?? "0");
+    if (count === 0) {
+      await db.execute(sql`
+        INSERT INTO system_settings (id, key, value, category, description, updated_at, updated_by)
+        VALUES (
+          gen_random_uuid(),
+          'confirmation_terms',
+          'La tarifa incluye desayuno buffet y gimnasio con turno previo.
+La cochera tiene costo adicional. El mismo se encuentra detallado en la parte superior.
+Nuestro horario de Check-in es a partir de las 15:00 hs y el Check-out es hasta las 10:00 hs.
+Early Check-in o Late Check-out tienen costo adicional del 50% del valor de una noche.
+Importante: En el momento de ingreso, deberá acreditar su identidad con su respectivo DNI / PASAPORTE / CÉDULA DE IDENTIDAD. En el caso de viajar con menores de edad deberá presentar su correspondiente identificación.
+La entrega de la habitación queda condicionada al pago total del alojamiento al momento del check-in. Los comprobantes, constancias de transferencia, capturas de pantalla o avisos de pago no constituyen pago válido hasta la efectiva acreditación del importe en los medios de cobro habilitados por el hotel. Ante la falta de acreditación, el hotel podrá exigir el pago por otro medio aceptado y suspender el ingreso a la habitación hasta la regularización total del saldo correspondiente.',
+          'documentos',
+          'Términos y condiciones que aparecen en la confirmación de reserva (PDF). Una cláusula por línea.',
+          now(),
+          'system'
+        )
+      `);
+      logger.info("confirmation_terms seeded in system_settings.");
+    }
+  } catch (e: any) {
+    logger.warn("Migración incremental confirmation_terms: " + e.message);
+  }
+
   // Loan items tables
   try {
     await db.execute(sql`

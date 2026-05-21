@@ -1642,7 +1642,7 @@ async function handleConfirmationPdf(req: any, res: any) {
     }
 
     // ── TÉRMINOS Y CONDICIONES ────────────────────────────────────────────
-    const terminos = [
+    const DEFAULT_TERMINOS = [
       "La tarifa incluye desayuno buffet y gimnasio con turno previo.",
       "La cochera tiene costo adicional. El mismo se encuentra detallado en la parte superior.",
       "Nuestro horario de Check-in es a partir de las 15:00 hs y el Check-out es hasta las 10:00 hs.",
@@ -1650,6 +1650,16 @@ async function handleConfirmationPdf(req: any, res: any) {
       "Importante: En el momento de ingreso, deberá acreditar su identidad con su respectivo DNI / PASAPORTE / CÉDULA DE IDENTIDAD. En el caso de viajar con menores de edad deberá presentar su correspondiente identificación.",
       "La entrega de la habitación queda condicionada al pago total del alojamiento al momento del check-in. Los comprobantes, constancias de transferencia, capturas de pantalla o avisos de pago no constituyen pago válido hasta la efectiva acreditación del importe en los medios de cobro habilitados por el hotel. Ante la falta de acreditación, el hotel podrá exigir el pago por otro medio aceptado y suspender el ingreso a la habitación hasta la regularización total del saldo correspondiente.",
     ];
+    let terminos = DEFAULT_TERMINOS;
+    try {
+      const termSetting = await storage.getSystemSetting("confirmation_terms");
+      if (termSetting?.value) {
+        const lines = termSetting.value.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+        if (lines.length > 0) terminos = lines;
+      }
+    } catch (_) {
+      // fallback to default
+    }
 
     // Pre-calculate T&C body height
     let tcBodyH = 10;
