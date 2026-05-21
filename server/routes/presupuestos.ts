@@ -139,19 +139,22 @@ export function registerPresupuestosRoutes(app: Express) {
       const contentW = pageW - margin * 2;
       const NAVY    = "#1a3a6c";
       const ORANGE  = "#e8841a";
-      const FOOTER_BG = "#8b4513";
       const DARK    = "#1a1a1a";
       const MUTED   = "#6b6b6b";
 
-      // ── HEADER IMAGE ────────────────────────────────────────
+      // ── FULL PAGE BACKGROUND (header + footer baked in) ─────
       const headerH = 148;
       const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
-      if (fs.existsSync(headerImgPath)) {
-        doc.image(headerImgPath, 0, 0, { width: pageW, height: headerH, cover: [pageW, headerH] });
-      } else {
-        doc.rect(0, 0, pageW, headerH).fill(NAVY);
-      }
-      doc.rect(0, headerH, pageW, 5).fill(ORANGE);
+      const drawPageBackground = () => {
+        if (fs.existsSync(headerImgPath)) {
+          doc.image(headerImgPath, 0, 0, { width: pageW, height: pageH });
+        } else {
+          doc.rect(0, 0, pageW, headerH).fill(NAVY);
+          doc.rect(0, headerH, pageW, 5).fill(ORANGE);
+          doc.rect(0, pageH - 90, pageW, 90).fill("#8b4513");
+        }
+      };
+      drawPageBackground();
 
       // ── TITLE ROW ───────────────────────────────────────────
       const titleY = headerH + 16;
@@ -234,7 +237,7 @@ export function registerPresupuestosRoutes(app: Express) {
       };
       items.forEach((item, idx) => {
         const rowH = Math.max(22, doc.heightOfString(item.descripcion, { width: W.desc }) + 12);
-        if (y + rowH > pageH - 90) { doc.addPage(); y = 40; }
+        if (y + rowH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
         doc.rect(margin, y, contentW, rowH)
           .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
         doc.fillColor(DARK).fontSize(8).font("Helvetica");
@@ -288,24 +291,6 @@ export function registerPresupuestosRoutes(app: Express) {
           .text(pres.condiciones, margin + 14, y + 26, { width: contentW - 28 });
         y += condBoxH + 10;
       }
-
-      // ── FOOTER ───────────────────────────────────────────────
-      const footerY = pageH - 72;
-      doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
-      const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
-      if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, margin, footerY + 14, { width: 95 });
-      }
-      const cx = margin + 100;
-      const cw = contentW - 200;
-      doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
-        .text(HOTEL_ADDRESS, cx, footerY + 13, { width: cw, align: "center" });
-      doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
-        .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, cx, footerY + 26, { width: cw, align: "center" });
-      doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
-        .text("CUIT 33-68110008-9 · Responsable Inscripto", cx, footerY + 40, { width: cw, align: "center" });
-      doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
-        .text("MARAN.COM.AR", pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
 
       doc.end();
     } catch (e: any) {
