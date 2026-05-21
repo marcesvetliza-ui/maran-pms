@@ -766,7 +766,7 @@ export default function CheckOutPage() {
         </div>
       ) : filteredReservations && filteredReservations.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredReservations.map((reservation) => (
+          {filteredReservations.slice().sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0")).map((reservation) => (
             <Card
               key={reservation.id}
               className="hover-elevate"
