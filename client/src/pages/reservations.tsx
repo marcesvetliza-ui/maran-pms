@@ -1422,6 +1422,10 @@ function ReservationDetailDialog({
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
 
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+    queryKey: ["/api/charge-types"],
+  });
+
   const earlyCheckoutMutation = useMutation({
     mutationFn: async () => {
       return apiRequest("PATCH", `/api/reservations/${reservation.id}`, { status: "checked_out" });
