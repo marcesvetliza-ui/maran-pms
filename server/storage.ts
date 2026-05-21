@@ -22,6 +22,11 @@ import {
   type InsertCharge,
   type ChargeType,
   type InsertChargeType,
+  type LoanItem,
+  type InsertLoanItem,
+  type ItemLoan,
+  type InsertItemLoan,
+  type ItemLoanWithItem,
   type Payment,
   type InsertPayment,
   type ReservationCompanion,
@@ -285,6 +290,15 @@ export interface IStorage {
   createChargeType(ct: InsertChargeType): Promise<ChargeType>;
   updateChargeType(id: string, ct: Partial<InsertChargeType>): Promise<ChargeType | undefined>;
   deleteChargeType(id: string): Promise<boolean>;
+
+  // Loan Items (Elementos prestados)
+  getLoanItems(): Promise<LoanItem[]>;
+  createLoanItem(item: InsertLoanItem): Promise<LoanItem>;
+  updateLoanItem(id: string, item: Partial<InsertLoanItem>): Promise<LoanItem | undefined>;
+  deleteLoanItem(id: string): Promise<boolean>;
+  getActiveItemLoans(): Promise<ItemLoanWithItem[]>;
+  createItemLoan(loan: InsertItemLoan): Promise<ItemLoan>;
+  returnItemLoan(id: string): Promise<ItemLoan | undefined>;
 
   // Companions
   getReservationCompanions(reservationId: string): Promise<ReservationCompanion[]>;

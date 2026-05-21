@@ -62,4 +62,48 @@ export async function runMigrations() {
   } catch (e: any) {
     logger.warn("Migración incremental charge_types: " + e.message);
   }
+
+  // Loan items tables
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS loan_items (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        name text NOT NULL,
+        description text,
+        total_quantity integer NOT NULL DEFAULT 1,
+        active boolean NOT NULL DEFAULT true,
+        sort_order integer NOT NULL DEFAULT 0
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS item_loans (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        loan_item_id varchar NOT NULL REFERENCES loan_items(id),
+        room_number text NOT NULL,
+        quantity integer NOT NULL DEFAULT 1,
+        lent_at timestamp DEFAULT now(),
+        returned_at timestamp,
+        notes text,
+        registered_by text
+      )
+    `);
+    const existing = await db.execute(sql`SELECT COUNT(*) FROM loan_items`);
+    const count = parseInt((existing.rows[0] as any)?.count ?? "0");
+    if (count === 0) {
+      await db.execute(sql`
+        INSERT INTO loan_items (name, description, total_quantity, sort_order) VALUES
+        ('Plancha', 'Plancha de ropa', 3, 1),
+        ('Tabla de planchar', 'Tabla de planchar plegable', 2, 2),
+        ('Secador de pelo', 'Secador de pelo 1800W', 4, 3),
+        ('Catre adicional', 'Catre plegable con colchón', 3, 4),
+        ('Almohadas extra', 'Almohadas adicionales', 10, 5),
+        ('Adaptador eléctrico', 'Adaptador universal de enchufes', 5, 6),
+        ('Cuna', 'Cuna de viaje para bebé', 2, 7),
+        ('Toallas extra', 'Toallas adicionales (juego)', 8, 8)
+      `);
+      logger.info("Loan items seeded with default presets.");
+    }
+  } catch (e: any) {
+    logger.warn("Migración incremental loan_items: " + e.message);
+  }
 }

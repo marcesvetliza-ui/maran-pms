@@ -2462,3 +2462,31 @@ export const reservationCompanions = pgTable("reservation_companions", {
 export const insertReservationCompanionSchema = createInsertSchema(reservationCompanions).omit({ id: true, createdAt: true });
 export type InsertReservationCompanion = z.infer<typeof insertReservationCompanionSchema>;
 export type ReservationCompanion = typeof reservationCompanions.$inferSelect;
+
+// ==================== ELEMENTOS PRESTADOS ====================
+export const loanItems = pgTable("loan_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  totalQuantity: integer("total_quantity").notNull().default(1),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+export const insertLoanItemSchema = createInsertSchema(loanItems).omit({ id: true });
+export type InsertLoanItem = z.infer<typeof insertLoanItemSchema>;
+export type LoanItem = typeof loanItems.$inferSelect;
+
+export const itemLoans = pgTable("item_loans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  loanItemId: varchar("loan_item_id").notNull().references(() => loanItems.id),
+  roomNumber: text("room_number").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  lentAt: timestamp("lent_at").defaultNow(),
+  returnedAt: timestamp("returned_at"),
+  notes: text("notes"),
+  registeredBy: text("registered_by"),
+});
+export const insertItemLoanSchema = createInsertSchema(itemLoans).omit({ id: true, lentAt: true, returnedAt: true });
+export type InsertItemLoan = z.infer<typeof insertItemLoanSchema>;
+export type ItemLoan = typeof itemLoans.$inferSelect;
+export type ItemLoanWithItem = ItemLoan & { loanItem: LoanItem };

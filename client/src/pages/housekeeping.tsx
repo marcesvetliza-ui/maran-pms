@@ -25,6 +25,10 @@ import {
   Star,
   Timer,
   StopCircle,
+  Boxes,
+  RotateCcw,
+  CheckCheck,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,7 +75,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest } from "@shared/schema";
+import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest, LoanItem, ItemLoanWithItem } from "@shared/schema";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "inspected";
@@ -1217,6 +1221,83 @@ export default function Housekeeping() {
   });
   const lostFoundCount = lostFoundActive.length;
 
+  // ── Elementos Prestados ────────────────────────────────────────────────
+  const [loansDialogOpen, setLoansDialogOpen] = useState(false);
+  const [loansCatalogOpen, setLoansCatalogOpen] = useState(false);
+  const [newLoanOpen, setNewLoanOpen] = useState(false);
+  const [newLoanItemId, setNewLoanItemId] = useState("");
+  const [newLoanRoom, setNewLoanRoom] = useState("");
+  const [newLoanQty, setNewLoanQty] = useState("1");
+  const [newLoanNotes, setNewLoanNotes] = useState("");
+  const [editingLoanItem, setEditingLoanItem] = useState<LoanItem | null>(null);
+  const [loanItemName, setLoanItemName] = useState("");
+  const [loanItemDesc, setLoanItemDesc] = useState("");
+  const [loanItemQty, setLoanItemQty] = useState("1");
+
+  const { data: loanItemsList = [] } = useQuery<LoanItem[]>({ queryKey: ["/api/loan-items"] });
+  const { data: activeLoans = [] } = useQuery<ItemLoanWithItem[]>({ queryKey: ["/api/item-loans"] });
+
+  const createLoanMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/item-loans", {
+      loanItemId: newLoanItemId, roomNumber: newLoanRoom,
+      quantity: parseInt(newLoanQty) || 1, notes: newLoanNotes || null,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/item-loans"] });
+      toast({ title: "Préstamo registrado" });
+      setNewLoanOpen(false); setNewLoanItemId(""); setNewLoanRoom(""); setNewLoanQty("1"); setNewLoanNotes("");
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo registrar el préstamo", variant: "destructive" }),
+  });
+
+  const returnLoanMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("PATCH", `/api/item-loans/${id}/return`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/item-loans"] });
+      toast({ title: "Devolución registrada" });
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo registrar la devolución", variant: "destructive" }),
+  });
+
+  const saveLoanItemMutation = useMutation({
+    mutationFn: () => {
+      const payload = { name: loanItemName.trim(), description: loanItemDesc || null, totalQuantity: parseInt(loanItemQty) || 1 };
+      if (editingLoanItem) return apiRequest("PATCH", `/api/loan-items/${editingLoanItem.id}`, payload);
+      return apiRequest("POST", "/api/loan-items", payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/loan-items"] });
+      toast({ title: editingLoanItem ? "Elemento actualizado" : "Elemento creado" });
+      setEditingLoanItem(null); setLoanItemName(""); setLoanItemDesc(""); setLoanItemQty("1");
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo guardar", variant: "destructive" }),
+  });
+
+  const deleteLoanItemMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/loan-items/${id}`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/loan-items"] });
+      toast({ title: "Elemento eliminado" });
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo eliminar", variant: "destructive" }),
+  });
+
+  const openEditLoanItem = (item: LoanItem) => {
+    setEditingLoanItem(item);
+    setLoanItemName(item.name);
+    setLoanItemDesc(item.description || "");
+    setLoanItemQty(String(item.totalQuantity));
+  };
+
+  // Group active loans by item name for summary
+  const loanSummary = activeLoans.reduce<Record<string, { name: string; rooms: string[] }>>((acc, loan) => {
+    const key = loan.loanItemId;
+    if (!acc[key]) acc[key] = { name: loan.loanItem?.name || "Desconocido", rooms: [] };
+    const qty = loan.quantity > 1 ? `Hab. ${loan.roomNumber} (×${loan.quantity})` : `Hab. ${loan.roomNumber}`;
+    acc[key].rooms.push(qty);
+    return acc;
+  }, {});
+
   const startTaskMutation = useMutation({
     mutationFn: (taskId: string) => apiRequest("POST", `/api/housekeeping/${taskId}/start`),
     onSuccess: () => {
@@ -1429,6 +1510,15 @@ export default function Housekeeping() {
             {lostFoundCount > 0 && (
               <Badge className="ml-1 h-5 min-w-5 px-1 text-xs bg-amber-500 text-white border-0 flex items-center justify-center">
                 {lostFoundCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="elementos-prestados" data-testid="tab-elementos-prestados" className="gap-1">
+            <Boxes className="h-4 w-4" />
+            Elementos Prestados
+            {activeLoans.length > 0 && (
+              <Badge className="ml-1 h-5 min-w-5 px-1 text-xs bg-blue-500 text-white border-0 flex items-center justify-center">
+                {activeLoans.length}
               </Badge>
             )}
           </TabsTrigger>
@@ -1672,7 +1762,221 @@ export default function Housekeeping() {
         <TabsContent value="lost-found">
           <LostFoundTab />
         </TabsContent>
+
+        <TabsContent value="elementos-prestados">
+          <div className="space-y-4 mt-2">
+            {/* Header con acciones */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h2 className="text-lg font-semibold">Elementos Prestados</h2>
+                <p className="text-sm text-muted-foreground">
+                  {activeLoans.length === 0 ? "Sin préstamos activos" : `${activeLoans.length} préstamo${activeLoans.length !== 1 ? "s" : ""} activo${activeLoans.length !== 1 ? "s" : ""}`}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => { setLoansCatalogOpen(true); setEditingLoanItem(null); setLoanItemName(""); setLoanItemDesc(""); setLoanItemQty("1"); }} data-testid="button-open-catalog">
+                  <Pencil className="h-4 w-4 mr-1.5" />
+                  Editar catálogo
+                </Button>
+                <Button size="sm" onClick={() => { setNewLoanOpen(true); setNewLoanItemId(""); setNewLoanRoom(""); setNewLoanQty("1"); setNewLoanNotes(""); }} data-testid="button-new-loan">
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Registrar préstamo
+                </Button>
+              </div>
+            </div>
+
+            {/* Resumen por tipo */}
+            {Object.values(loanSummary).length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {Object.values(loanSummary).map(({ name, rooms: roomList }) => (
+                  <div key={name} className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <div className="p-1.5 rounded-md bg-blue-100 dark:bg-blue-900/40 shrink-0">
+                      <Boxes className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">{name}s prestadas: {roomList.length}</p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400 truncate">{roomList.join(" · ")}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Lista de préstamos activos */}
+            {activeLoans.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <Boxes className="h-12 w-12 mx-auto mb-3 opacity-25" />
+                <p className="text-muted-foreground">No hay elementos prestados actualmente</p>
+                <Button size="sm" variant="outline" className="mt-4" onClick={() => setNewLoanOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1.5" />Registrar primer préstamo
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {activeLoans.map(loan => (
+                  <div key={loan.id} className="flex items-center gap-4 p-3 border rounded-lg bg-card hover:bg-muted/30 transition-colors" data-testid={`loan-row-${loan.id}`}>
+                    <div className="p-2 rounded-md bg-muted shrink-0">
+                      <Boxes className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">{loan.loanItem?.name}</span>
+                        {loan.quantity > 1 && <Badge variant="secondary" className="text-xs">×{loan.quantity}</Badge>}
+                        <Badge variant="outline" className="text-xs font-bold">Hab. {loan.roomNumber}</Badge>
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(loan.lentAt!).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        {loan.notes && <p className="text-xs text-muted-foreground italic truncate max-w-[200px]">{loan.notes}</p>}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 text-green-600 border-green-300 hover:bg-green-50 dark:border-green-700 dark:hover:bg-green-950/30"
+                      onClick={() => returnLoanMutation.mutate(loan.id)}
+                      disabled={returnLoanMutation.isPending}
+                      data-testid={`button-return-loan-${loan.id}`}
+                    >
+                      <CheckCheck className="h-4 w-4 mr-1.5" />
+                      Devuelto
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
+
+      {/* ── Dialog: Registrar préstamo ─────────────────────────────────────── */}
+      <Dialog open={newLoanOpen} onOpenChange={v => { setNewLoanOpen(v); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Registrar préstamo</DialogTitle>
+            <DialogDescription>Indicá el elemento, cantidad y habitación destino.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="space-y-1.5">
+              <Label>Elemento</Label>
+              <Select value={newLoanItemId} onValueChange={setNewLoanItemId}>
+                <SelectTrigger data-testid="select-loan-item">
+                  <SelectValue placeholder="Seleccionar elemento…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {loanItemsList.map(item => (
+                    <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Habitación</Label>
+                <Select value={newLoanRoom} onValueChange={setNewLoanRoom}>
+                  <SelectTrigger data-testid="select-loan-room">
+                    <SelectValue placeholder="Hab…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(rooms || []).slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map(r => (
+                      <SelectItem key={r.id} value={r.roomNumber}>Hab. {r.roomNumber}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Cantidad</Label>
+                <Input type="number" min="1" max="20" value={newLoanQty} onChange={e => setNewLoanQty(e.target.value)} data-testid="input-loan-qty" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notas <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+              <Input value={newLoanNotes} onChange={e => setNewLoanNotes(e.target.value)} placeholder="Ej: marca específica, estado…" data-testid="input-loan-notes" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewLoanOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!newLoanItemId || !newLoanRoom || createLoanMutation.isPending}
+              onClick={() => createLoanMutation.mutate()}
+              data-testid="button-save-loan"
+            >
+              {createLoanMutation.isPending ? "Guardando…" : "Registrar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Catálogo de elementos ──────────────────────────────────── */}
+      <Dialog open={loansCatalogOpen} onOpenChange={v => { setLoansCatalogOpen(v); if (!v) { setEditingLoanItem(null); setLoanItemName(""); setLoanItemDesc(""); setLoanItemQty("1"); } }}>
+        <DialogContent className="max-w-md flex flex-col max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Boxes className="h-5 w-5 text-primary" />
+              Catálogo de elementos prestables
+            </DialogTitle>
+            <DialogDescription>Administrá los elementos que el hotel puede prestar a las habitaciones.</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+            {loanItemsList.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-6">Sin elementos configurados</p>
+            )}
+            {loanItemsList.map(item => (
+              <div key={item.id} className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${editingLoanItem?.id === item.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"}`}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{item.name}</p>
+                  <p className="text-xs text-muted-foreground">Stock: {item.totalQuantity} {item.description ? `— ${item.description}` : ""}</p>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditLoanItem(item)} data-testid={`button-edit-loanitem-${item.id}`}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => { if (window.confirm(`¿Eliminar "${item.name}"?`)) deleteLoanItemMutation.mutate(item.id); }} data-testid={`button-delete-loanitem-${item.id}`}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Form inline */}
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-sm font-semibold">{editingLoanItem ? `Editando: ${editingLoanItem.name}` : "Nuevo elemento"}</p>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2 space-y-1">
+                <Label className="text-xs">Nombre</Label>
+                <Input value={loanItemName} onChange={e => setLoanItemName(e.target.value)} placeholder="Ej: Plancha" data-testid="input-loanitem-name" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Stock total</Label>
+                <Input type="number" min="1" value={loanItemQty} onChange={e => setLoanItemQty(e.target.value)} data-testid="input-loanitem-qty" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Descripción <span className="text-muted-foreground">(opcional)</span></Label>
+              <Input value={loanItemDesc} onChange={e => setLoanItemDesc(e.target.value)} placeholder="Ej: Plancha de ropa 1200W" data-testid="input-loanitem-desc" />
+            </div>
+            <div className="flex gap-2">
+              {editingLoanItem && (
+                <Button variant="outline" size="sm" className="flex-none" onClick={() => { setEditingLoanItem(null); setLoanItemName(""); setLoanItemDesc(""); setLoanItemQty("1"); }}>
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" />Cancelar
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="flex-1"
+                disabled={!loanItemName.trim() || saveLoanItemMutation.isPending}
+                onClick={() => saveLoanItemMutation.mutate()}
+                data-testid="button-save-loanitem"
+              >
+                {saveLoanItemMutation.isPending ? "Guardando…" : editingLoanItem ? "Guardar cambios" : "Agregar elemento"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createTaskDialogOpen} onOpenChange={setCreateTaskDialogOpen}>
         <DialogContent>

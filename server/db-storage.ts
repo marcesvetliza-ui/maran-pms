@@ -18,6 +18,8 @@ import {
   type Reservation, type InsertReservation,
   type Charge, type InsertCharge,
   type ChargeType, type InsertChargeType, chargeTypes,
+  type LoanItem, type InsertLoanItem, loanItems,
+  type ItemLoan, type InsertItemLoan, type ItemLoanWithItem, itemLoans,
   type Payment, type InsertPayment,
   type CancelledReservationLog, type InsertCancelledReservationLog,
   type OTAChannel, type InsertOTAChannel, type OTAChannelWithStats,
@@ -647,6 +649,47 @@ export class DatabaseStorage implements IStorage {
   async deleteChargeType(id: string): Promise<boolean> {
     const result = await db.delete(chargeTypes).where(eq(chargeTypes.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async getLoanItems(): Promise<LoanItem[]> {
+    return db.select().from(loanItems).where(eq(loanItems.active, true)).orderBy(loanItems.sortOrder);
+  }
+
+  async createLoanItem(item: InsertLoanItem): Promise<LoanItem> {
+    const [created] = await db.insert(loanItems).values(item as any).returning();
+    return created;
+  }
+
+  async updateLoanItem(id: string, item: Partial<InsertLoanItem>): Promise<LoanItem | undefined> {
+    const [updated] = await db.update(loanItems).set(item as any).where(eq(loanItems.id, id)).returning();
+    return updated;
+  }
+
+  async deleteLoanItem(id: string): Promise<boolean> {
+    const result = await db.delete(loanItems).where(eq(loanItems.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getActiveItemLoans(): Promise<ItemLoanWithItem[]> {
+    const loans = await db.select().from(itemLoans)
+      .where(isNull(itemLoans.returnedAt))
+      .orderBy(desc(itemLoans.lentAt));
+    const items = await db.select().from(loanItems);
+    const itemsMap = new Map(items.map(i => [i.id, i]));
+    return loans.map(l => ({ ...l, loanItem: itemsMap.get(l.loanItemId)! }));
+  }
+
+  async createItemLoan(loan: InsertItemLoan): Promise<ItemLoan> {
+    const [created] = await db.insert(itemLoans).values(loan as any).returning();
+    return created;
+  }
+
+  async returnItemLoan(id: string): Promise<ItemLoan | undefined> {
+    const [updated] = await db.update(itemLoans)
+      .set({ returnedAt: new Date() })
+      .where(eq(itemLoans.id, id))
+      .returning();
+    return updated;
   }
 
   async getPayments(reservationId: string): Promise<Payment[]> {

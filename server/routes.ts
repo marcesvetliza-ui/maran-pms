@@ -2485,5 +2485,57 @@ export async function registerRoutes(
     }
   });
 
+  // ── Elementos Prestados ──────────────────────────────────────────────────
+  app.get("/api/loan-items", requireAuth, async (req, res) => {
+    try {
+      res.json(await storage.getLoanItems());
+    } catch { res.status(500).json({ error: "Error al obtener elementos" }); }
+  });
+
+  app.post("/api/loan-items", requireAuth, async (req, res) => {
+    try {
+      const { name, description, totalQuantity, sortOrder } = req.body;
+      if (!name?.trim()) return res.status(400).json({ error: "Nombre requerido" });
+      res.json(await storage.createLoanItem({ name: name.trim(), description: description || null, totalQuantity: totalQuantity ?? 1, active: true, sortOrder: sortOrder ?? 0 }));
+    } catch { res.status(500).json({ error: "Error al crear elemento" }); }
+  });
+
+  app.patch("/api/loan-items/:id", requireAuth, async (req, res) => {
+    try {
+      const item = await storage.updateLoanItem(req.params.id, req.body);
+      if (!item) return res.status(404).json({ error: "No encontrado" });
+      res.json(item);
+    } catch { res.status(500).json({ error: "Error al actualizar elemento" }); }
+  });
+
+  app.delete("/api/loan-items/:id", requireAuth, async (req, res) => {
+    try {
+      await storage.deleteLoanItem(req.params.id);
+      res.json({ success: true });
+    } catch { res.status(500).json({ error: "Error al eliminar elemento" }); }
+  });
+
+  app.get("/api/item-loans", requireAuth, async (req, res) => {
+    try {
+      res.json(await storage.getActiveItemLoans());
+    } catch { res.status(500).json({ error: "Error al obtener préstamos" }); }
+  });
+
+  app.post("/api/item-loans", requireAuth, async (req, res) => {
+    try {
+      const { loanItemId, roomNumber, quantity, notes, registeredBy } = req.body;
+      if (!loanItemId || !roomNumber?.trim()) return res.status(400).json({ error: "Elemento y habitación requeridos" });
+      res.json(await storage.createItemLoan({ loanItemId, roomNumber: roomNumber.trim(), quantity: quantity ?? 1, notes: notes || null, registeredBy: registeredBy || null }));
+    } catch { res.status(500).json({ error: "Error al registrar préstamo" }); }
+  });
+
+  app.patch("/api/item-loans/:id/return", requireAuth, async (req, res) => {
+    try {
+      const loan = await storage.returnItemLoan(req.params.id);
+      if (!loan) return res.status(404).json({ error: "Préstamo no encontrado" });
+      res.json(loan);
+    } catch { res.status(500).json({ error: "Error al registrar devolución" }); }
+  });
+
   return httpServer;
 }
