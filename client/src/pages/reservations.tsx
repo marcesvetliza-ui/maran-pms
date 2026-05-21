@@ -43,6 +43,7 @@ import {
   UserCheck,
   TrendingUp,
   Download,
+  Phone,
 } from "lucide-react";
 import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -231,6 +232,8 @@ export function ReservationFormDialog({
     lateCheckOutTime: reservation?.lateCheckOutTime || "",
     lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
     notes: reservation?.notes || "",
+    contactName: reservation?.contactName || "",
+    contactPhone: reservation?.contactPhone || "",
     voucherCode: reservation?.voucherCode || "",
     voucherNotes: reservation?.voucherNotes || "",
     isUpgrade: reservation?.isUpgrade || false,
@@ -279,6 +282,8 @@ export function ReservationFormDialog({
         lateCheckOutTime: reservation?.lateCheckOutTime || "",
         lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
         notes: reservation?.notes || "",
+        contactName: reservation?.contactName || "",
+        contactPhone: reservation?.contactPhone || "",
         voucherCode: reservation?.voucherCode || "",
         voucherNotes: reservation?.voucherNotes || "",
         isUpgrade: reservation?.isUpgrade || false,
@@ -1380,6 +1385,35 @@ export function ReservationFormDialog({
                 data-testid="input-reservation-notes"
               />
             </div>
+
+            <div className="rounded-lg border border-dashed p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contacto de la Reserva</p>
+              <p className="text-xs text-muted-foreground">Para cuando la reserva no la gestiona el huésped principal</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="contactName" className="text-xs">Nombre del contacto</Label>
+                  <Input
+                    id="contactName"
+                    value={formData.contactName || ""}
+                    onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
+                    placeholder="Ej: María González"
+                    className="h-8 text-sm"
+                    data-testid="input-contact-name"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="contactPhone" className="text-xs">Teléfono del contacto</Label>
+                  <Input
+                    id="contactPhone"
+                    value={formData.contactPhone || ""}
+                    onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
+                    placeholder="Ej: 3446-123456"
+                    className="h-8 text-sm"
+                    data-testid="input-contact-phone"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -2155,6 +2189,26 @@ function ReservationDetailDialog({
                 </ul>
               )}
             </div>
+
+            {(reservation.contactName || reservation.contactPhone) && (
+              <div className="rounded-lg border border-dashed p-3 space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contacto de la Reserva</p>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  {reservation.contactName && (
+                    <span className="flex items-center gap-1.5">
+                      <User className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="font-medium">{reservation.contactName}</span>
+                    </span>
+                  )}
+                  {reservation.contactPhone && (
+                    <span className="flex items-center gap-1.5">
+                      <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span>{reservation.contactPhone}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="folio" className="space-y-4 mt-4">
