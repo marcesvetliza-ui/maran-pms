@@ -1,6 +1,7 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
+import { sql } from "drizzle-orm";
 
 export async function runMigrations() {
   try {
@@ -18,5 +19,12 @@ export async function runMigrations() {
       // Don't crash the server for migration errors in development
       if (process.env.NODE_ENV === "production") throw err;
     }
+  }
+
+  // Incremental schema additions (idempotent, safe to run on every startup)
+  try {
+    await db.execute(sql`ALTER TABLE cash_shifts ADD COLUMN IF NOT EXISTS turno_tipo text`);
+  } catch (e: any) {
+    logger.warn("Migración incremental cash_shifts.turno_tipo: " + e.message);
   }
 }

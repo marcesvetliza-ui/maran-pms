@@ -1772,6 +1772,7 @@ export const cashShifts = pgTable("cash_shifts", {
   createdAt: timestamp("created_at").defaultNow(),
   autoCreado: boolean("auto_creado").default(false),
   turnoAnteriorId: varchar("turno_anterior_id"),
+  turnoTipo: text("turno_tipo"), // "mañana" | "tarde" | "noche"
 });
 
 export const insertCashShiftSchema = createInsertSchema(cashShifts).omit({ id: true, closedBy: true, closedAt: true, status: true, createdAt: true });

@@ -3814,6 +3814,7 @@ export class DatabaseStorage implements IStorage {
       status: "open",
       autoCreado: (data as any).autoCreado ?? false,
       turnoAnteriorId: (data as any).turnoAnteriorId ?? null,
+      turnoTipo: (data as any).turnoTipo ?? null,
     }).returning();
     return shift;
   }
@@ -3952,9 +3953,11 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async tomarTurno(shiftId: string, operador: string): Promise<CashShift> {
+  async tomarTurno(shiftId: string, operador: string, turnoTipo?: string | null): Promise<CashShift> {
+    const setValues: Record<string, any> = { openedBy: operador, autoCreado: false };
+    if (turnoTipo) setValues.turnoTipo = turnoTipo;
     const [shift] = await db.update(cashShifts)
-      .set({ openedBy: operador, autoCreado: false })
+      .set(setValues)
       .where(and(eq(cashShifts.id, shiftId), eq(cashShifts.status, "open")))
       .returning();
     if (!shift) throw new Error("Turno no encontrado o ya cerrado");

@@ -80,6 +80,7 @@ type CashShift = {
   status: string;
   autoCreado?: boolean;
   turnoAnteriorId?: string | null;
+  turnoTipo?: string | null;
 };
 
 type CashMovement = {
@@ -135,6 +136,23 @@ const AREA_LABEL_MAP: Record<string, string> = {
   spa: "SPA",
   events: "Eventos",
 };
+
+const DIAS_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+const TURNO_TIPO_OPTIONS = [
+  { value: "mañana", label: "Mañana", hours: "06:00 – 14:00" },
+  { value: "tarde",  label: "Tarde",  hours: "14:00 – 22:00" },
+  { value: "noche",  label: "Noche",  hours: "22:00 – 06:00" },
+];
+
+function formatShiftLabel(shift: CashShift): string {
+  const d = new Date(shift.openedAt);
+  const day = DIAS_SEMANA[d.getDay()];
+  if (shift.turnoTipo) {
+    const tipo = TURNO_TIPO_OPTIONS.find(t => t.value === shift.turnoTipo);
+    return `${day} ${tipo ? tipo.label : shift.turnoTipo}`;
+  }
+  return `Turno #${shift.shiftNumber}`;
+}
 
 function formatCurrency(value: number): string {
   return "$ " + Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -314,7 +332,7 @@ function printClosingSummary(
 <div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #333">
   <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Maran Suites & Towers</div>
   <div style="font-size:20px;font-weight:bold;margin:4px 0">Cierre de Turno</div>
-  <div style="font-size:14px;color:#555">${areaLabel} — Turno #${shift.shiftNumber}</div>
+  <div style="font-size:14px;color:#555">${areaLabel} — ${shift.turnoTipo ? formatShiftLabel(shift) : `Turno #${shift.shiftNumber}`}</div>
 </div>
 
 <div style="display:flex;justify-content:space-between;margin-bottom:16px;font-size:12px;gap:16px">
@@ -362,6 +380,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [tomarTurnoDialog, setTomarTurnoDialog] = useState(false);
   const [openedBy, setOpenedBy] = useState("");
   const [openNotes, setOpenNotes] = useState("");
+  const [turnoTipoOpen, setTurnoTipoOpen] = useState("tarde");
+  const [turnoTipoTomar, setTurnoTipoTomar] = useState("tarde");
   const [closedBy, setClosedBy] = useState("");
   const [closeNotes, setCloseNotes] = useState("");
   const [operadorSiguiente, setOperadorSiguiente] = useState("");
@@ -467,11 +487,13 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         area,
         openedBy,
         notes: openNotes || undefined,
+        turnoTipo: turnoTipoOpen || undefined,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
-      toast({ title: "Turno abierto", description: `Turno abierto para ${config.areaLabel}` });
+      const tipoLabel = TURNO_TIPO_OPTIONS.find(t => t.value === turnoTipoOpen)?.label || turnoTipoOpen;
+      toast({ title: "Turno abierto", description: `Turno ${tipoLabel} abierto para ${config.areaLabel}` });
       setOpenShiftDialog(false);
       setOpenedBy("");
       setOpenNotes("");
@@ -571,8 +593,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   });
 
   const tomarTurnoMutation = useMutation({
-    mutationFn: async (operador: string) => {
-      return apiRequest("PATCH", `/api/cash/shifts/${currentShift!.id}/tomar`, { operador });
+    mutationFn: async ({ operador, turnoTipo }: { operador: string; turnoTipo: string }) => {
+      return apiRequest("PATCH", `/api/cash/shifts/${currentShift!.id}/tomar`, { operador, turnoTipo });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
@@ -580,6 +602,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       toast({ title: "Turno tomado", description: "El operador fue asignado al turno activo." });
       setTomarTurnoDialog(false);
       setOpenedBy("");
+      setTurnoTipoTomar("tarde");
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -635,8 +658,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 {formatTime(currentShift.openedAt)}
                 {currentShift.openedBy ? ` — ${currentShift.openedBy}` : ""}
               </span>
-              <span className="text-sm" data-testid={`text-shift-info-${area}`}>
-                Turno #{currentShift.shiftNumber}
+              <span className="text-sm font-medium" data-testid={`text-shift-info-${area}`}>
+                {formatShiftLabel(currentShift)}
+                <span className="ml-1 text-xs text-muted-foreground font-normal">#{currentShift.shiftNumber}</span>
               </span>
               {(!currentShift.openedBy || currentShift.autoCreado) && (
                 <Button
@@ -797,9 +821,25 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       <Dialog open={openShiftDialog} onOpenChange={setOpenShiftDialog}>
         <DialogContent className="w-[95vw] max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Abrir Turno - {config.areaLabel}</DialogTitle>
+            <DialogTitle>Abrir Turno — {config.areaLabel}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Tipo de turno *</label>
+              <div className="grid grid-cols-3 gap-2 mt-1.5">
+                {TURNO_TIPO_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTurnoTipoOpen(opt.value)}
+                    className={`flex flex-col items-center gap-0.5 py-2.5 px-2 rounded-md border text-sm font-medium transition-colors ${turnoTipoOpen === opt.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}
+                    data-testid={`btn-turno-tipo-${opt.value}-${area}`}
+                  >
+                    <span>{opt.label}</span>
+                    <span className={`text-[10px] font-normal ${turnoTipoOpen === opt.value ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{opt.hours}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <div>
               <label className="text-sm font-medium">Responsable *</label>
               <Input
@@ -807,6 +847,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 onChange={(e) => setOpenedBy(e.target.value)}
                 placeholder="Nombre del responsable"
                 data-testid={`input-opened-by-${area}`}
+                autoFocus
               />
             </div>
             <div>
@@ -1039,7 +1080,11 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           <DialogHeader className="shrink-0">
             <DialogTitle>
               Cerrar Turno — {config.areaLabel}
-              {currentShift && <span className="ml-2 text-sm font-normal text-muted-foreground">Turno #{currentShift.shiftNumber}</span>}
+              {currentShift && (
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  {formatShiftLabel(currentShift)} <span className="text-xs">#{currentShift.shiftNumber}</span>
+                </span>
+              )}
             </DialogTitle>
           </DialogHeader>
 
@@ -1135,7 +1180,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
             <div className="space-y-4 pb-2">
               <div className="flex items-center gap-2 text-green-700">
                 <span className="text-lg">✓</span>
-                <span className="font-medium">Turno #{currentShift?.shiftNumber} listo para cerrarse</span>
+                <span className="font-medium">{currentShift ? formatShiftLabel(currentShift) : ""} listo para cerrarse</span>
               </div>
               <div className="border rounded-lg p-4 bg-muted/20 space-y-1">
                 <p className="text-sm font-semibold">Próximo turno</p>
@@ -1173,12 +1218,35 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           <DialogHeader>
             <DialogTitle>Tomar turno — {config.areaLabel}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Este turno fue creado automáticamente. Ingresá tu nombre para tomarlo.</p>
-            <Input value={openedBy} onChange={e => setOpenedBy(e.target.value)} placeholder="Tu nombre" data-testid={`input-tomar-turno-operador-${area}`} autoFocus />
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Este turno fue creado automáticamente. Seleccioná el tipo e ingresá tu nombre para tomarlo.</p>
+            <div>
+              <label className="text-sm font-medium">Tipo de turno *</label>
+              <div className="grid grid-cols-3 gap-2 mt-1.5">
+                {TURNO_TIPO_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTurnoTipoTomar(opt.value)}
+                    className={`flex flex-col items-center gap-0.5 py-2.5 px-2 rounded-md border text-sm font-medium transition-colors ${turnoTipoTomar === opt.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}
+                    data-testid={`btn-turno-tipo-tomar-${opt.value}-${area}`}
+                  >
+                    <span>{opt.label}</span>
+                    <span className={`text-[10px] font-normal ${turnoTipoTomar === opt.value ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{opt.hours}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Tu nombre *</label>
+              <Input value={openedBy} onChange={e => setOpenedBy(e.target.value)} placeholder="Tu nombre" data-testid={`input-tomar-turno-operador-${area}`} autoFocus />
+            </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => tomarTurnoMutation.mutate(openedBy)} disabled={!openedBy.trim() || tomarTurnoMutation.isPending} data-testid={`btn-confirm-tomar-turno-${area}`}>
+            <Button
+              onClick={() => tomarTurnoMutation.mutate({ operador: openedBy, turnoTipo: turnoTipoTomar })}
+              disabled={!openedBy.trim() || tomarTurnoMutation.isPending}
+              data-testid={`btn-confirm-tomar-turno-${area}`}
+            >
               {tomarTurnoMutation.isPending ? "Guardando..." : "Tomar turno"}
             </Button>
           </DialogFooter>
@@ -1415,7 +1483,15 @@ function HistorialTab() {
                         {AREA_LABEL_MAP[row.area] || row.area}
                       </Badge>
                     </TableCell>
-                    <TableCell>{row.shift?.shiftNumber || "-"}</TableCell>
+                    <TableCell>
+                      {row.shift ? (
+                        <span className="text-sm">
+                          {row.shift.turnoTipo
+                            ? formatShiftLabel(row.shift)
+                            : `#${row.shift.shiftNumber}`}
+                        </span>
+                      ) : "-"}
+                    </TableCell>
                     <TableCell>{row.shift?.openedBy || "-"}</TableCell>
                     <TableCell>{row.shift?.closedBy || row.closedBy || "-"}</TableCell>
                     <TableCell>{row.shift ? formatTime(row.shift.openedAt) : "-"}</TableCell>
@@ -1459,7 +1535,10 @@ function HistorialTab() {
                 <Badge className={AREA_COLORS[shiftDetail.shift.area] || ""}>
                   {AREA_LABEL_MAP[shiftDetail.shift.area] || shiftDetail.shift.area}
                 </Badge>
-                <span className="text-sm">Turno #{shiftDetail.shift.shiftNumber}</span>
+                <span className="text-sm font-medium">
+                  {formatShiftLabel(shiftDetail.shift)}
+                  <span className="ml-1 text-xs text-muted-foreground font-normal">#{shiftDetail.shift.shiftNumber}</span>
+                </span>
                 <span className="text-sm text-muted-foreground">
                   {shiftDetail.shift.openedBy} — {formatDateTime(shiftDetail.shift.openedAt)}
                   {shiftDetail.shift.closedAt && ` / ${shiftDetail.shift.closedBy} — ${formatDateTime(shiftDetail.shift.closedAt)}`}

@@ -1370,9 +1370,9 @@ export async function registerRoutes(
 
   app.patch("/api/cash/shifts/:id/tomar", requireAuth, async (req, res) => {
     try {
-      const { operador } = req.body;
+      const { operador, turnoTipo } = req.body;
       if (!operador?.trim()) return res.status(400).json({ error: "operador is required" });
-      const shift = await storage.tomarTurno(req.params.id, operador.trim());
+      const shift = await storage.tomarTurno(req.params.id, operador.trim(), turnoTipo || null);
       res.json(shift);
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Error al tomar turno" });
