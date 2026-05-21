@@ -178,17 +178,12 @@ export function ReservationFormDialog({
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || defaultValues?.roomTypeId || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
-  // Cargos adicionales al crear
+  // Cargos adicionales al crear — cargados desde la BD
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+    queryKey: ["/api/charge-types"],
+  });
   const newResChargePresets = [
-    { label: "Cochera (por día)", description: "Cochera", amount: "2500", category: "otros" as const },
-    { label: "Media Pensión", description: "Media Pensión", amount: "4500", category: "restaurant" as const },
-    { label: "Pensión Completa", description: "Pensión Completa", amount: "8000", category: "restaurant" as const },
-    { label: "Desayuno adicional", description: "Desayuno adicional", amount: "1800", category: "restaurant" as const },
-    { label: "Cena", description: "Cena", amount: "3500", category: "restaurant" as const },
-    { label: "Frigobar", description: "Frigobar", amount: "1200", category: "minibar" as const },
-    { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" as const },
-    { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" as const },
-    { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" as const },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any })),
     { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const },
   ];
   const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
@@ -1453,15 +1448,7 @@ function ReservationDetailDialog({
     category: "otros" as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
   });
   const chargePresets = [
-    { label: "Cochera (por día)", description: "Cochera", amount: "2500", category: "otros" as const },
-    { label: "Media Pensión", description: "Media Pensión", amount: "4500", category: "restaurant" as const },
-    { label: "Pensión Completa", description: "Pensión Completa", amount: "8000", category: "restaurant" as const },
-    { label: "Desayuno adicional", description: "Desayuno adicional", amount: "1800", category: "restaurant" as const },
-    { label: "Cena", description: "Cena", amount: "3500", category: "restaurant" as const },
-    { label: "Frigobar", description: "Frigobar", amount: "1200", category: "minibar" as const },
-    { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" as const },
-    { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" as const },
-    { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" as const },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any })),
     { label: "Cargo editable", description: "", amount: "", category: "otros" as const },
   ];
   const [chargeQty, setChargeQty] = useState(1);

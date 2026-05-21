@@ -247,6 +247,20 @@ export const insertChargeSchema = createInsertSchema(charges).omit({ id: true })
 export type InsertCharge = z.infer<typeof insertChargeSchema>;
 export type Charge = typeof charges.$inferSelect;
 
+// Charge Types — predefined charge presets managed from Habitaciones
+export const chargeTypes = pgTable("charge_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  label: text("label").notNull(),
+  description: text("description").notNull(),
+  defaultAmount: decimal("default_amount", { precision: 10, scale: 2 }).notNull(),
+  category: text("category").$type<ChargeCategory>().notNull().default("otros"),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+export const insertChargeTypeSchema = createInsertSchema(chargeTypes).omit({ id: true });
+export type InsertChargeType = z.infer<typeof insertChargeTypeSchema>;
+export type ChargeType = typeof chargeTypes.$inferSelect;
+
 // Payment methods
 export type PaymentMethod = "efectivo" | "tarjeta_debito" | "tarjeta_credito" | "transferencia" | "mercadopago" | "cuenta_corriente";
 

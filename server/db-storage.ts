@@ -17,6 +17,7 @@ import {
   type BedType, type InsertBedType,
   type Reservation, type InsertReservation,
   type Charge, type InsertCharge,
+  type ChargeType, type InsertChargeType, chargeTypes,
   type Payment, type InsertPayment,
   type CancelledReservationLog, type InsertCancelledReservationLog,
   type OTAChannel, type InsertOTAChannel, type OTAChannelWithStats,
@@ -627,6 +628,25 @@ export class DatabaseStorage implements IStorage {
       and(eq(charges.reservationId, reservationId), or(isNull(charges.status), eq(charges.status, "active")))
     );
     return parseFloat(result[0]?.total || "0");
+  }
+
+  async getChargeTypes(): Promise<ChargeType[]> {
+    return db.select().from(chargeTypes).where(eq(chargeTypes.active, true)).orderBy(chargeTypes.sortOrder);
+  }
+
+  async createChargeType(ct: InsertChargeType): Promise<ChargeType> {
+    const [created] = await db.insert(chargeTypes).values(ct as any).returning();
+    return created;
+  }
+
+  async updateChargeType(id: string, ct: Partial<InsertChargeType>): Promise<ChargeType | undefined> {
+    const [updated] = await db.update(chargeTypes).set(ct as any).where(eq(chargeTypes.id, id)).returning();
+    return updated;
+  }
+
+  async deleteChargeType(id: string): Promise<boolean> {
+    const result = await db.delete(chargeTypes).where(eq(chargeTypes.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getPayments(reservationId: string): Promise<Payment[]> {

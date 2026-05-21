@@ -75,16 +75,11 @@ export default function NewReservationPage() {
     { value: "MAT_CC_EXTRA", label: "Matrimonial + CC + Extra" },
   ];
 
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+    queryKey: ["/api/charge-types"],
+  });
   const nrChargePresets = [
-    { label: "Cochera (por día)", description: "Cochera", amount: "2500", category: "otros" },
-    { label: "Media Pensión", description: "Media Pensión", amount: "4500", category: "restaurant" },
-    { label: "Pensión Completa", description: "Pensión Completa", amount: "8000", category: "restaurant" },
-    { label: "Desayuno adicional", description: "Desayuno adicional", amount: "1800", category: "restaurant" },
-    { label: "Cena", description: "Cena", amount: "3500", category: "restaurant" },
-    { label: "Frigobar", description: "Frigobar", amount: "1200", category: "minibar" },
-    { label: "Lavandería", description: "Lavandería", amount: "2000", category: "otros" },
-    { label: "Traslado", description: "Traslado", amount: "3000", category: "otros" },
-    { label: "SPA / Masaje", description: "SPA / Masaje", amount: "5000", category: "spa" },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category })),
     { label: "Cargo personalizado", description: "", amount: "", category: "otros" },
   ];
   const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);

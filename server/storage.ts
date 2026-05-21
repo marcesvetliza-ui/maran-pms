@@ -20,6 +20,8 @@ import {
   type InsertReservation,
   type Charge,
   type InsertCharge,
+  type ChargeType,
+  type InsertChargeType,
   type Payment,
   type InsertPayment,
   type ReservationCompanion,
@@ -277,6 +279,12 @@ export interface IStorage {
   updateCharge(id: string, charge: Partial<InsertCharge>): Promise<Charge | undefined>;
   deleteCharge(id: string): Promise<boolean>;
   getChargesTotal(reservationId: string): Promise<number>;
+
+  // Charge Types
+  getChargeTypes(): Promise<ChargeType[]>;
+  createChargeType(ct: InsertChargeType): Promise<ChargeType>;
+  updateChargeType(id: string, ct: Partial<InsertChargeType>): Promise<ChargeType | undefined>;
+  deleteChargeType(id: string): Promise<boolean>;
 
   // Companions
   getReservationCompanions(reservationId: string): Promise<ReservationCompanion[]>;

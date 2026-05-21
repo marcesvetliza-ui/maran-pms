@@ -930,6 +930,55 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // ── Charge Types (presets gestionables desde Habitaciones) ─────────────────
+  app.get("/api/charge-types", requireAuth, async (_req, res) => {
+    try {
+      const types = await storage.getChargeTypes();
+      res.json(types);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/charge-types", requireAuth, async (req, res) => {
+    try {
+      const { label, description, defaultAmount, category, sortOrder } = req.body;
+      if (!label || !description || !defaultAmount) return res.status(400).json({ error: "label, description y defaultAmount son requeridos" });
+      const ct = await storage.createChargeType({ label, description, defaultAmount: String(defaultAmount), category: category || "otros", active: true, sortOrder: sortOrder ?? 0 });
+      res.status(201).json(ct);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/charge-types/:id", requireAuth, async (req, res) => {
+    try {
+      const { label, description, defaultAmount, category, sortOrder, active } = req.body;
+      const updated = await storage.updateChargeType(req.params.id, {
+        ...(label !== undefined && { label }),
+        ...(description !== undefined && { description }),
+        ...(defaultAmount !== undefined && { defaultAmount: String(defaultAmount) }),
+        ...(category !== undefined && { category }),
+        ...(sortOrder !== undefined && { sortOrder }),
+        ...(active !== undefined && { active }),
+      });
+      if (!updated) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/charge-types/:id", requireAuth, async (req, res) => {
+    try {
+      const ok = await storage.deleteChargeType(req.params.id);
+      if (!ok) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
+      res.status(204).send();
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.delete("/api/charges/:id", async (req, res) => {
     console.warn(`[DEPRECADO] DELETE /api/charges/${req.params.id} — usar PATCH /anular`);
     try {

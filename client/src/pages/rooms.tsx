@@ -20,6 +20,8 @@ import {
   Users,
   Home,
   AlertTriangle,
+  ReceiptText,
+  X,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -62,7 +64,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { RoomWithType, RoomType, InsertRoom, RoomStatus } from "@shared/schema";
+import type { RoomWithType, RoomType, InsertRoom, RoomStatus, ChargeType } from "@shared/schema";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 function RoomStatusBadge({ status }: { status: RoomStatus }) {
   const statusConfig: Record<RoomStatus, { label: string; className: string }> = {
@@ -307,6 +310,64 @@ export default function RoomsPage() {
   const [maintenanceTarget, setMaintenanceTarget] = useState<RoomWithType | null>(null);
   const [maintenanceDescription, setMaintenanceDescription] = useState("");
 
+  // ── Charge Types panel ──────────────────────────────────────────────────────
+  const [chargesSheetOpen, setChargesSheetOpen] = useState(false);
+  const [editingCT, setEditingCT] = useState<ChargeType | null>(null);
+  const [ctLabel, setCtLabel] = useState("");
+  const [ctDescription, setCtDescription] = useState("");
+  const [ctAmount, setCtAmount] = useState("");
+  const [ctCategory, setCtCategory] = useState("otros");
+  const [ctFormOpen, setCtFormOpen] = useState(false);
+  const [deletingCTId, setDeletingCTId] = useState<string | null>(null);
+
+  const { data: chargeTypesList = [] } = useQuery<ChargeType[]>({
+    queryKey: ["/api/charge-types"],
+    enabled: chargesSheetOpen,
+  });
+
+  function openNewCT() {
+    setEditingCT(null);
+    setCtLabel(""); setCtDescription(""); setCtAmount(""); setCtCategory("otros");
+    setCtFormOpen(true);
+  }
+  function openEditCT(ct: ChargeType) {
+    setEditingCT(ct);
+    setCtLabel(ct.label); setCtDescription(ct.description);
+    setCtAmount(String(ct.defaultAmount)); setCtCategory(ct.category);
+    setCtFormOpen(true);
+  }
+
+  const saveCTMutation = useMutation({
+    mutationFn: () => editingCT
+      ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory })
+      : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
+      setCtFormOpen(false);
+      toast({ title: editingCT ? "Cargo actualizado" : "Cargo creado" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e?.message, variant: "destructive" }),
+  });
+
+  const deleteCTMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/charge-types/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
+      setDeletingCTId(null);
+      toast({ title: "Cargo eliminado" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e?.message, variant: "destructive" }),
+  });
+
+  const CT_CATEGORIES = [
+    { value: "otros", label: "Otros" },
+    { value: "restaurant", label: "Restaurant" },
+    { value: "spa", label: "SPA" },
+    { value: "minibar", label: "Minibar" },
+    { value: "room", label: "Habitación" },
+    { value: "adjustment", label: "Ajuste" },
+  ];
+
   const { data: rooms, isLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
   });
@@ -417,10 +478,16 @@ export default function RoomsPage() {
           </h1>
           <p className="text-muted-foreground">Gestiona el inventario de habitaciones del hotel</p>
         </div>
-        <Button onClick={handleNewRoom} data-testid="button-new-room">
-          <Plus className="mr-2 h-4 w-4" />
-          Nueva Habitación
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setChargesSheetOpen(true)} data-testid="button-charge-types">
+            <ReceiptText className="mr-2 h-4 w-4" />
+            Cargos en habitaciones
+          </Button>
+          <Button onClick={handleNewRoom} data-testid="button-new-room">
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva Habitación
+          </Button>
+        </div>
       </div>
 
       {/* Status Summary Cards */}
@@ -754,6 +821,105 @@ export default function RoomsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Sheet: Cargos en Habitaciones ─────────────────────────────────── */}
+      <Sheet open={chargesSheetOpen} onOpenChange={setChargesSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-lg flex flex-col">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <ReceiptText className="h-5 w-5 text-primary" />
+              Cargos en habitaciones
+            </SheetTitle>
+            <p className="text-sm text-muted-foreground">
+              Estos son los cargos predefinidos que aparecen al agregar consumos a una reserva.
+            </p>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto mt-4 space-y-3">
+            {chargeTypesList.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">Sin cargos configurados</p>
+            )}
+            {chargeTypesList.map(ct => (
+              <div key={ct.id} className="flex items-center gap-3 border rounded-lg px-3 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{ct.label}</p>
+                  <p className="text-xs text-muted-foreground">{ct.description} · {ct.category}</p>
+                </div>
+                <span className="text-sm font-semibold shrink-0 tabular-nums">
+                  ${parseFloat(String(ct.defaultAmount)).toLocaleString("es-AR")}
+                </span>
+                <div className="flex gap-1 shrink-0">
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditCT(ct)} data-testid={`btn-edit-ct-${ct.id}`}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  {deletingCTId === ct.id ? (
+                    <div className="flex gap-1">
+                      <Button size="icon" variant="destructive" className="h-7 w-7" onClick={() => deleteCTMutation.mutate(ct.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setDeletingCTId(null)}>
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => setDeletingCTId(ct.id)} data-testid={`btn-delete-ct-${ct.id}`}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Inline form to create / edit */}
+          {ctFormOpen ? (
+            <div className="border-t pt-4 mt-2 space-y-3">
+              <p className="text-sm font-semibold">{editingCT ? "Editar cargo" : "Nuevo cargo"}</p>
+              <div className="space-y-1.5">
+                <Label htmlFor="ct-label">Nombre visible</Label>
+                <Input id="ct-label" value={ctLabel} onChange={e => setCtLabel(e.target.value)} placeholder="Ej: Cochera (por día)" data-testid="input-ct-label" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ct-desc">Descripción (aparece en el folio)</Label>
+                <Input id="ct-desc" value={ctDescription} onChange={e => setCtDescription(e.target.value)} placeholder="Ej: Cochera" data-testid="input-ct-description" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ct-amount">Precio por defecto ($)</Label>
+                  <Input id="ct-amount" type="number" min="0" step="0.01" value={ctAmount} onChange={e => setCtAmount(e.target.value)} data-testid="input-ct-amount" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ct-category">Categoría</Label>
+                  <Select value={ctCategory} onValueChange={setCtCategory}>
+                    <SelectTrigger id="ct-category" data-testid="select-ct-category"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CT_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1" onClick={() => setCtFormOpen(false)}>Cancelar</Button>
+                <Button
+                  className="flex-1"
+                  disabled={!ctLabel.trim() || !ctDescription.trim() || !ctAmount || parseFloat(ctAmount) <= 0 || saveCTMutation.isPending}
+                  onClick={() => saveCTMutation.mutate()}
+                  data-testid="btn-save-ct"
+                >
+                  {saveCTMutation.isPending ? "Guardando…" : "Guardar"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="border-t pt-4 mt-2">
+              <Button className="w-full" variant="outline" onClick={openNewCT} data-testid="btn-new-ct">
+                <Plus className="mr-2 h-4 w-4" />
+                Agregar nuevo cargo
+              </Button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
