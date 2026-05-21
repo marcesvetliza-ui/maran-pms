@@ -1223,7 +1223,7 @@ export async function registerRoutes(
           r.check_out_date,
           r.status,
           rm.room_number,
-          COALESCE(r.total_amount, 0)::numeric AS alojamiento,
+          COALESCE(r.final_rate_per_night::numeric * r.nights, 0) AS alojamiento,
           COALESCE(
             (SELECT SUM(ch.amount::numeric) FROM charges ch WHERE ch.reservation_id = r.id AND ch.category != 'adjustment'), 0
           ) AS extras,
@@ -1235,7 +1235,7 @@ export async function registerRoutes(
         LEFT JOIN rooms rm ON rm.id = r.room_id
         WHERE r.status IN ('confirmed', 'checked_in')
           AND (
-            COALESCE(r.total_amount, 0)::numeric +
+            COALESCE(r.final_rate_per_night::numeric * r.nights, 0) +
             COALESCE((SELECT SUM(ch.amount::numeric) FROM charges ch WHERE ch.reservation_id = r.id AND ch.category != 'adjustment'), 0) -
             COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id), 0)
           ) > 0.01
