@@ -35,6 +35,7 @@ import {
   Building2,
   Banknote,
   ArrowLeftRight,
+  ShoppingCart,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -590,6 +591,14 @@ export default function GroupDetailPage() {
   const [changingReservation, setChangingReservation] = useState<ReservationWithDetails | null>(null);
   const [changeRoomId, setChangeRoomId] = useState("");
 
+  // Cargo individual a una reserva del grupo
+  const [chargingReservation, setChargingReservation] = useState<ReservationWithDetails | null>(null);
+  const [indivChargePreset, setIndivChargePreset] = useState("");
+  const [indivChargeDesc, setIndivChargeDesc] = useState("");
+  const [indivChargeAmount, setIndivChargeAmount] = useState("");
+  const [indivChargeQty, setIndivChargeQty] = useState(1);
+  const [indivChargeCategory, setIndivChargeCategory] = useState("otros");
+
   // Folio Grupal state
   const [showAddGroupChargeDialog, setShowAddGroupChargeDialog] = useState(false);
   const [showFolioPaymentDialog, setShowFolioPaymentDialog] = useState(false);
@@ -631,6 +640,35 @@ export default function GroupDetailPage() {
       const res = await fetch(`/api/groups/${groupId}/master-folio`, { credentials: "include" });
       if (!res.ok) throw new Error("Error loading master folio");
       return res.json();
+    },
+  });
+
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+    queryKey: ["/api/charge-types"],
+  });
+  const chargePresets = [
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category })),
+    { label: "Cargo personalizado", description: "", amount: "", category: "otros" },
+  ];
+
+  const addIndividualChargeMutation = useMutation({
+    mutationFn: async ({ reservationId, description, amount, category }: { reservationId: string; description: string; amount: string; category: string }) => {
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      return apiRequest("POST", "/api/charges", { reservationId, description, amount, category, date: todayStr });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      toast({ title: "Cargo agregado a la reserva" });
+      setChargingReservation(null);
+      setIndivChargePreset("");
+      setIndivChargeDesc("");
+      setIndivChargeAmount("");
+      setIndivChargeQty(1);
+      setIndivChargeCategory("otros");
+    },
+    onError: () => {
+      toast({ title: "Error al agregar cargo", variant: "destructive" });
     },
   });
 
@@ -1380,6 +1418,19 @@ export default function GroupDetailPage() {
                               >
                                 <ArrowLeftRight className="h-3 w-3 mr-1" />
                                 Cambiar
+                              </Button>
+                            )}
+                            {!["cancelled"].includes(res.status) && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs px-2 text-primary border-primary/40 hover:bg-primary/5"
+                                onClick={() => { setChargingReservation(res); setIndivChargePreset(""); setIndivChargeDesc(""); setIndivChargeAmount(""); setIndivChargeQty(1); setIndivChargeCategory("otros"); }}
+                                data-testid={`button-add-charge-${res.id}`}
+                                title="Agregar cargo a esta reserva"
+                              >
+                                <ShoppingCart className="h-3 w-3 mr-1" />
+                                Cargo
                               </Button>
                             )}
                             <Button variant="ghost" size="icon" className="h-7 w-7"
@@ -2724,6 +2775,124 @@ export default function GroupDetailPage() {
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cambiando...</>
               ) : (
                 "Confirmar cambio"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Agregar cargo individual a reserva del grupo ── */}
+      <Dialog open={!!chargingReservation} onOpenChange={(open) => { if (!open) { setChargingReservation(null); setIndivChargePreset(""); setIndivChargeDesc(""); setIndivChargeAmount(""); setIndivChargeQty(1); setIndivChargeCategory("otros"); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Agregar Cargo a Reserva</DialogTitle>
+            <DialogDescription>
+              {chargingReservation && (
+                <>Reserva <span className="font-mono font-medium">{chargingReservation.reservationCode}</span> — Hab. <strong>{chargingReservation.room?.roomNumber}</strong> · {chargingReservation.guest?.lastName} {chargingReservation.guest?.firstName}</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Tipo de cargo</Label>
+              <Select
+                value={indivChargePreset}
+                onValueChange={(val) => {
+                  setIndivChargePreset(val);
+                  const preset = chargePresets.find((_, i) => String(i) === val);
+                  if (preset) {
+                    setIndivChargeDesc(preset.description);
+                    setIndivChargeAmount(preset.amount);
+                    setIndivChargeCategory(preset.category);
+                  }
+                }}
+              >
+                <SelectTrigger data-testid="select-indiv-charge-preset">
+                  <SelectValue placeholder="Seleccionar tipo de cargo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {chargePresets.map((p, i) => (
+                    <SelectItem key={i} value={String(i)}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Descripción *</Label>
+              <Input
+                value={indivChargeDesc}
+                onChange={(e) => setIndivChargeDesc(e.target.value)}
+                placeholder="Ej: Cochera, Desayuno, Minibar..."
+                data-testid="input-indiv-charge-desc"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Importe unitario *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={indivChargeAmount}
+                  onChange={(e) => setIndivChargeAmount(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="input-indiv-charge-amount"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Cantidad</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={indivChargeQty}
+                  onChange={(e) => setIndivChargeQty(parseInt(e.target.value) || 1)}
+                  data-testid="input-indiv-charge-qty"
+                />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Categoría</Label>
+              <Select value={indivChargeCategory} onValueChange={setIndivChargeCategory}>
+                <SelectTrigger data-testid="select-indiv-charge-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="otros">Otros</SelectItem>
+                  <SelectItem value="alimentos">Alimentos</SelectItem>
+                  <SelectItem value="bebidas">Bebidas</SelectItem>
+                  <SelectItem value="transporte">Transporte / Cochera</SelectItem>
+                  <SelectItem value="spa">SPA</SelectItem>
+                  <SelectItem value="lavanderia">Lavandería</SelectItem>
+                  <SelectItem value="eventos">Eventos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {indivChargeDesc && indivChargeAmount && (
+              <div className="rounded-md bg-muted px-3 py-2 text-sm">
+                Total: <strong>${(parseFloat(indivChargeAmount || "0") * indivChargeQty).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChargingReservation(null)}>Cancelar</Button>
+            <Button
+              disabled={!indivChargeDesc.trim() || !indivChargeAmount || addIndividualChargeMutation.isPending}
+              onClick={() => {
+                if (!chargingReservation) return;
+                const totalAmount = (parseFloat(indivChargeAmount) * indivChargeQty).toFixed(2);
+                addIndividualChargeMutation.mutate({
+                  reservationId: chargingReservation.id,
+                  description: indivChargeDesc.trim(),
+                  amount: totalAmount,
+                  category: indivChargeCategory,
+                });
+              }}
+              data-testid="button-confirm-indiv-charge"
+            >
+              {addIndividualChargeMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Guardando...</>
+              ) : (
+                "Agregar Cargo"
               )}
             </Button>
           </DialogFooter>
