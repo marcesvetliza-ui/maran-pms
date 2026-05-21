@@ -66,7 +66,6 @@ import {
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { SystemNotification } from "@shared/schema";
 
@@ -287,7 +286,7 @@ function NotificationBell() {
             </Button>
           )}
         </div>
-        <ScrollArea className="max-h-[360px]">
+        <div className="max-h-[420px] overflow-y-auto">
           {notifications && notifications.length > 0 ? (
             <div className="divide-y">
               {notifications.map((n) => (
@@ -343,7 +342,7 @@ function NotificationBell() {
               <p className="text-sm text-muted-foreground">Sin notificaciones</p>
             </div>
           )}
-        </ScrollArea>
+        </div>
       </PopoverContent>
     </Popover>
   );
