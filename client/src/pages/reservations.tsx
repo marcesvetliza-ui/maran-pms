@@ -675,14 +675,25 @@ export function ReservationFormDialog({
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="roomType">
-                  {isUpgrade ? "Tipo reservado (tarifa)" : "Tipo de Habitación"}
+                  {isUpgrade ? "Tarifa a cobrar" : "Tipo de Habitación"}
                 </Label>
                 <Select
-                  value={selectedRoomTypeId}
-                  onValueChange={isUpgrade ? undefined : handleRoomTypeChange}
-                  disabled={isUpgrade}
+                  value={isUpgrade ? (formData.originalRoomTypeId || selectedRoomTypeId) : selectedRoomTypeId}
+                  onValueChange={isUpgrade
+                    ? (value) => {
+                        setSelectedRoomTypeId(value);
+                        setFormData(prev => ({
+                          ...prev,
+                          originalRoomTypeId: value,
+                          ratePlanId: "",
+                          baseRatePerNight: "",
+                          finalRatePerNight: "",
+                          totalRoomAmount: "",
+                        }));
+                      }
+                    : handleRoomTypeChange}
                 >
-                  <SelectTrigger data-testid="select-room-type" className={isUpgrade ? "opacity-60" : ""}>
+                  <SelectTrigger data-testid="select-room-type" className={isUpgrade ? "border-amber-400 dark:border-amber-600" : ""}>
                     <SelectValue placeholder="Seleccionar tipo" />
                   </SelectTrigger>
                   <SelectContent>
@@ -694,7 +705,7 @@ export function ReservationFormDialog({
                   </SelectContent>
                 </Select>
                 {isUpgrade && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">Tarifa correspondiente al tipo reservado</p>
+                  <p className="text-xs text-amber-600 dark:text-amber-400">Tarifa que se cobrará al huésped</p>
                 )}
               </div>
               <div className="grid gap-2">

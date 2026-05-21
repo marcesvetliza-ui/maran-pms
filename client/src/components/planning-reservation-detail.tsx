@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -248,6 +248,17 @@ export function ReservationDetailModal({
                 const balance = totalAmount - totalPayments;
                 return (
                   <div className="space-y-3">
+                    {reservation.isUpgrade && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-md">
+                        <TrendingUp className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">Up Grade aplicado</span>
+                        {reservation.originalRoomTypeId && (reservation as any).originalRoomType && (
+                          <span className="text-xs text-amber-600/80 dark:text-amber-400/80 ml-1">
+                            — Tarifa: {(reservation as any).originalRoomType.name}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="p-3 bg-muted/50 rounded-md space-y-1">
                       <div className="flex justify-between text-sm"><span>Habitación ({reservation.nights} noches)</span><span>${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
                       {totalCharges > 0 && <div className="flex justify-between text-sm"><span>Cargos extras</span><span>${totalCharges.toFixed(2)}</span></div>}
