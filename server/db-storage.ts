@@ -3826,10 +3826,17 @@ export class DatabaseStorage implements IStorage {
     operadorSiguiente: string | null = null,
     enviarAAdministracion: boolean = false,
     notes?: string,
+    turnoTipo?: string | null,
   ): Promise<{ shift: CashShift; summary: CashClosingSummary; turnoNuevo: CashShift }> {
     const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, shiftId));
     if (!shift) throw new Error("Turno no encontrado");
     if (shift.status !== "open") throw new Error("El turno ya está cerrado");
+
+    // Update turnoTipo if provided and not already set
+    if (turnoTipo && !shift.turnoTipo) {
+      await db.update(cashShifts).set({ turnoTipo }).where(eq(cashShifts.id, shiftId));
+      shift.turnoTipo = turnoTipo;
+    }
 
     const movements = await db.select().from(cashMovements).where(
       and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.anulado, false))

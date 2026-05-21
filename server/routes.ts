@@ -1355,9 +1355,9 @@ export async function registerRoutes(
 
   app.post("/api/cash/shifts/:id/close", requireAuth, async (req, res) => {
     try {
-      const { closedBy, efectivoContado = 0, operadorSiguiente = null, enviarAAdministracion = false, notes } = req.body;
+      const { closedBy, efectivoContado = 0, operadorSiguiente = null, enviarAAdministracion = false, notes, turnoTipo } = req.body;
       if (!closedBy) return res.status(400).json({ error: "closedBy is required" });
-      const result = await storage.closeShift(req.params.id, closedBy, parseFloat(efectivoContado) || 0, operadorSiguiente || null, !!enviarAAdministracion, notes);
+      const result = await storage.closeShift(req.params.id, closedBy, parseFloat(efectivoContado) || 0, operadorSiguiente || null, !!enviarAAdministracion, notes, turnoTipo || null);
       await audit(req, "update", "cash",
         `Turno de caja cerrado — Área: ${result?.area || "recepción"}`,
         { entityType: "cash_shift", entityId: req.params.id }

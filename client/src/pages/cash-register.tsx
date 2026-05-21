@@ -382,6 +382,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [openNotes, setOpenNotes] = useState("");
   const [turnoTipoOpen, setTurnoTipoOpen] = useState("tarde");
   const [turnoTipoTomar, setTurnoTipoTomar] = useState("tarde");
+  const [turnoTipoClose, setTurnoTipoClose] = useState("tarde");
   const [closedBy, setClosedBy] = useState("");
   const [closeNotes, setCloseNotes] = useState("");
   const [operadorSiguiente, setOperadorSiguiente] = useState("");
@@ -420,6 +421,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
     setCloseStep(1);
     setClosedBy("");
     setCloseNotes("");
+    setTurnoTipoClose(currentShift?.turnoTipo || "tarde");
     setOperadorSiguiente("");
     setBilletes20000(0); setBilletes10000(0); setBilletes2000(0);
     setBilletes1000(0); setBilletes500(0); setBilletes200(0);
@@ -574,6 +576,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         efectivoContado,
         operadorSiguiente: operadorSiguiente.trim() || null,
         notes: closeNotes || undefined,
+        turnoTipo: turnoTipoClose || undefined,
       });
     },
     onSuccess: (result: any) => {
@@ -1091,6 +1094,30 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           <div className="flex-1 overflow-y-auto pr-1 -mr-1">
           {closeStep === 1 && (
             <div className="space-y-4 pb-2">
+
+              {/* Tipo de turno — siempre visible para identificarlo */}
+              <div className="border rounded-lg p-3 bg-muted/20">
+                <p className="text-sm font-semibold mb-2">
+                  ¿Qué turno estás cerrando?
+                  {currentShift?.turnoTipo && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">(ya identificado)</span>
+                  )}
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {TURNO_TIPO_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTurnoTipoClose(opt.value)}
+                      className={`flex flex-col items-center gap-0.5 py-2 px-2 rounded-md border text-sm font-medium transition-colors ${turnoTipoClose === opt.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}
+                      data-testid={`btn-close-turno-tipo-${opt.value}`}
+                    >
+                      <span>{opt.label}</span>
+                      <span className={`text-[10px] font-normal ${turnoTipoClose === opt.value ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{opt.hours}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <SummaryTable movements={movements} />
 
               <div className="border rounded-lg p-4 space-y-2 bg-muted/20">
