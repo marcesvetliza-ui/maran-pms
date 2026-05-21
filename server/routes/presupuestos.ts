@@ -128,6 +128,24 @@ export function registerPresupuestosRoutes(app: Express) {
         .where(eq(presupuestoItems.presupuestoId, pres.id))
         .orderBy(presupuestoItems.orden);
 
+      // Fetch editable T&C from system settings (same as confirmation PDF)
+      const DEFAULT_TERMINOS = [
+        "La tarifa incluye desayuno buffet y gimnasio con turno previo.",
+        "La cochera tiene costo adicional. El mismo se encuentra detallado en la parte superior.",
+        "Nuestro horario de Check-in es a partir de las 15:00 hs y el Check-out es hasta las 10:00 hs.",
+        "Early Check-in o Late Check-out tienen costo adicional del 50% del valor de una noche.",
+        "Importante: En el momento de ingreso, deberá acreditar su identidad con su respectivo DNI / PASAPORTE / CÉDULA DE IDENTIDAD. En el caso de viajar con menores de edad deberá presentar su correspondiente identificación.",
+        "La entrega de la habitación queda condicionada al pago total del alojamiento al momento del check-in. Los comprobantes, constancias de transferencia, capturas de pantalla o avisos de pago no constituyen pago válido hasta la efectiva acreditación del importe en los medios de cobro habilitados por el hotel. Ante la falta de acreditación, el hotel podrá exigir el pago por otro medio aceptado y suspender el ingreso a la habitación hasta la regularización total del saldo correspondiente.",
+      ];
+      let terminos = DEFAULT_TERMINOS;
+      try {
+        const termSetting = await storage.getSystemSetting("confirmation_terms");
+        if (termSetting?.value) {
+          const lines = termSetting.value.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+          if (lines.length > 0) terminos = lines;
+        }
+      } catch (_) { /* fallback to default */ }
+
       const doc = new PDFDocument({ margin: 0, size: "A4" });
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="${pres.numero}.pdf"`);
@@ -278,7 +296,7 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.text(`$ ${formatMoney(pres.total)}`, totX, y + 5, { width: totW - 6, align: "right" });
       y += 30;
 
-      // ── CONDITIONS ───────────────────────────────────────────
+      // ── CONDITIONS (editable, unchanged) ─────────────────────
       if (pres.condiciones) {
         const condTextH = doc.heightOfString(pres.condiciones, { width: contentW - 28 });
         const condBoxH  = condTextH + 32;
@@ -291,6 +309,25 @@ export function registerPresupuestosRoutes(app: Express) {
           .text(pres.condiciones, margin + 14, y + 26, { width: contentW - 28 });
         y += condBoxH + 10;
       }
+
+      // ── TÉRMINOS Y CONDICIONES (auto from system settings) ───
+      let tcBodyH = 10;
+      for (const t of terminos) {
+        tcBodyH += doc.heightOfString(t, { width: contentW - 30 }) + 6;
+      }
+      const tcH = 22 + tcBodyH + 8;
+      if (y + tcH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
+      doc.roundedRect(margin, y, contentW, tcH, 6).stroke("#e0e0e0");
+      doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
+      doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
+      doc.fillColor("#ffffff").fontSize(7.5).font("Helvetica-Bold")
+        .text("TÉRMINOS Y CONDICIONES", margin + 14, y + 8, { characterSpacing: 1.5, width: contentW - 28 });
+      let ty = y + 26;
+      terminos.forEach((t, i) => {
+        doc.fillColor("#333333").fontSize(8).font("Helvetica")
+          .text(`${i + 1}.  ${t}`, margin + 14, ty, { width: contentW - 28 });
+        ty += doc.heightOfString(t, { width: contentW - 28 }) + 6;
+      });
 
       doc.end();
     } catch (e: any) {
