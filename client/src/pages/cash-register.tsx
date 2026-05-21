@@ -180,20 +180,22 @@ function formatDateTime(dateStr: string): string {
 }
 
 function buildSummaryFromMovements(movements: CashMovement[]) {
-  const summary: Record<string, { count: number; total: number }> = {};
+  const summary: Record<string, { count: number; total: number; items: CashMovement[] }> = {};
   for (const m of movements) {
     if (m.anulado) continue;
     if (!summary[m.paymentMethod]) {
-      summary[m.paymentMethod] = { count: 0, total: 0 };
+      summary[m.paymentMethod] = { count: 0, total: 0, items: [] };
     }
     summary[m.paymentMethod].count += 1;
     const amt = parseFloat(String(m.amount)) || 0;
     summary[m.paymentMethod].total += m.movementType === "income" ? amt : -amt;
+    summary[m.paymentMethod].items.push(m);
   }
   return summary;
 }
 
 function SummaryTable({ movements }: { movements: CashMovement[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
   const summary = buildSummaryFromMovements(movements);
   const totalGeneral = Object.values(summary).reduce((s, v) => s + v.total, 0);
   const totalTx = Object.values(summary).reduce((s, v) => s + v.count, 0);
@@ -209,14 +211,46 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
       </TableHeader>
       <TableBody>
         {Object.entries(summary).map(([method, data]) => (
-          <TableRow key={method} className={NON_CASH_METHODS.has(method) ? "text-muted-foreground italic" : ""}>
-            <TableCell>
-              {PAYMENT_METHOD_MAP[method] || method}
-              {NON_CASH_METHODS.has(method) && <span className="ml-1 text-xs not-italic">(no efectivo)</span>}
-            </TableCell>
-            <TableCell className="text-center">{data.count}</TableCell>
-            <TableCell className="text-right">{formatCurrency(data.total)}</TableCell>
-          </TableRow>
+          <>
+            <TableRow
+              key={method}
+              className={`cursor-pointer hover:bg-muted/40 transition-colors ${NON_CASH_METHODS.has(method) ? "text-muted-foreground italic" : ""}`}
+              onClick={() => setExpanded(expanded === method ? null : method)}
+            >
+              <TableCell>
+                <span className="flex items-center gap-1">
+                  {expanded === method
+                    ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                  {PAYMENT_METHOD_MAP[method] || method}
+                  {NON_CASH_METHODS.has(method) && <span className="ml-1 text-xs not-italic">(no efectivo)</span>}
+                </span>
+              </TableCell>
+              <TableCell className="text-center">
+                <span className="underline decoration-dotted cursor-pointer">{data.count}</span>
+              </TableCell>
+              <TableCell className="text-right">{formatCurrency(data.total)}</TableCell>
+            </TableRow>
+            {expanded === method && (
+              <TableRow key={`${method}-detail`}>
+                <TableCell colSpan={3} className="p-0 bg-muted/20">
+                  <div className="px-4 py-2 space-y-0.5">
+                    {data.items.map((m, i) => (
+                      <div key={m.id ?? i} className="flex items-center gap-3 py-1 text-xs border-b border-muted/50 last:border-0">
+                        <span className="text-muted-foreground w-11 shrink-0 tabular-nums">{formatTime(m.createdAt)}</span>
+                        <span className="flex-1 truncate font-medium">
+                          {(m as any).sourceLabel || (m as any).description || "—"}
+                        </span>
+                        <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : ""}`}>
+                          {m.movementType === "expense" ? "- " : ""}{formatCurrency(Math.abs(parseFloat(String(m.amount))))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
+          </>
         ))}
         <TableRow className="font-bold border-t-2">
           <TableCell>TOTAL GENERAL</TableCell>
