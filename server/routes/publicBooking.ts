@@ -310,7 +310,7 @@ export function registerPublicBookingRoutes(app: Express) {
         SELECT
           r.id, r.reservation_code, r.check_in_date, r.check_out_date,
           r.nights, r.number_of_guests, r.status, r.source,
-          r.total_amount, r.base_rate_per_night, r.rate_plan_id,
+          r.final_rate_per_night AS total_amount, r.base_rate_per_night, r.rate_plan_id,
           r.room_id, r.room_type_id, r.notes, r.created_at,
           g.id AS guest_id, g.first_name, g.last_name, g.email, g.phone,
           g.document_type, g.document_number,
