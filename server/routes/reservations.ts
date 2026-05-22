@@ -1628,19 +1628,6 @@ async function handleConfirmationPdf(req: any, res: any) {
 
     y += boxH + 12;
 
-    // ── OBSERVATIONS ─────────────────────────────────────────────────────
-    if (reservation.notes) {
-      const notesTextH = doc.heightOfString(reservation.notes, { width: contentW - 26 });
-      const notesBoxH = Math.max(42, notesTextH + 24);
-      doc.roundedRect(margin, y, contentW, notesBoxH, 6)
-        .fillAndStroke("#fffbf0", "#ffe0a0");
-      doc.fillColor("#b8860b").fontSize(7).font("Helvetica-Bold")
-        .text("OBSERVACIONES", margin + 12, y + 9, { characterSpacing: 1 });
-      doc.fillColor("#555555").fontSize(9).font("Helvetica")
-        .text(reservation.notes, margin + 12, y + 22, { width: contentW - 26 });
-      y += notesBoxH + 12;
-    }
-
     // ── TÉRMINOS Y CONDICIONES ────────────────────────────────────────────
     const DEFAULT_TERMINOS = [
       "La tarifa incluye desayuno buffet y gimnasio con turno previo.",
