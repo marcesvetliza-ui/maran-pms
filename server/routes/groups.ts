@@ -2,9 +2,11 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, housekeepingTasks } from "@shared/schema";
+import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
+import PDFDocument from "pdfkit";
 
 export function registerGroupsRoutes(app: Express) {
   // Groups
@@ -678,8 +680,12 @@ export function registerGroupsRoutes(app: Express) {
       // Total master folio charges
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal + masterTransferred;
 
-      // Payments received at the group/master level
-      const masterPaid = gPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      // Payments received: use individual reservation payments as source of truth
+      // (includes master folio distributions + any direct payments to individual rooms)
+      const indivPaid = rooms.reduce((s: number, r: any) => s + r.individualPayments, 0);
+      const gPaid = gPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      // Take the larger value to avoid double-counting when both records exist
+      const masterPaid = Math.max(gPaid, indivPaid);
       const masterBalance = masterTotal - masterPaid;
 
       res.json({
@@ -798,6 +804,272 @@ export function registerGroupsRoutes(app: Express) {
     } catch (error: any) {
       console.error("master-payment error:", error);
       res.status(500).json({ error: "Error al registrar pago maestro" });
+    }
+  });
+
+  // ─── UNASSIGN RESERVATION FROM GROUP ────────────────────────────────────────
+  app.delete("/api/groups/:groupId/reservations/:reservationId", requireAuth, async (req, res) => {
+    try {
+      const { groupId, reservationId } = req.params;
+      const group = await storage.getGroup(groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      const reservation = group.reservations.find(r => r.id === reservationId);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada en el grupo" });
+
+      if (!["confirmed", "pending"].includes(reservation.status)) {
+        return res.status(400).json({ error: "Solo se pueden desasignar reservas confirmadas o pendientes" });
+      }
+
+      // Cancel the reservation
+      await storage.updateReservation(reservationId, { status: "cancelled" });
+
+      // Free the room
+      if (reservation.roomId) {
+        await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
+      }
+
+      // Remove the group link
+      await db.delete(groupReservationLinks).where(eq(groupReservationLinks.reservationId, reservationId));
+
+      await audit(req, "delete", "groups",
+        `Reserva ${reservation.reservationCode} desasignada del grupo ${group.name}`,
+        { entityType: "group", entityId: groupId }
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("unassign-reservation error:", error);
+      res.status(500).json({ error: "Error al desasignar reserva" });
+    }
+  });
+
+  // ─── UPDATE RESERVATION RATE + LATE CHECKOUT (from group view) ──────────────
+  app.patch("/api/groups/:groupId/reservations/:reservationId/rate", requireAuth, async (req, res) => {
+    try {
+      const { groupId, reservationId } = req.params;
+      const { finalRatePerNight, lateCheckOut, lateCheckOutTime } = req.body;
+
+      const group = await storage.getGroup(groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      const reservation = group.reservations.find(r => r.id === reservationId);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada en el grupo" });
+
+      const updateData: Record<string, any> = {};
+
+      if (finalRatePerNight !== undefined && finalRatePerNight !== "") {
+        const rate = parseFloat(finalRatePerNight);
+        if (isNaN(rate) || rate < 0) return res.status(400).json({ error: "Tarifa inválida" });
+        const checkIn = new Date(reservation.checkInDate);
+        const checkOut = new Date(reservation.checkOutDate);
+        const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+        updateData.finalRatePerNight = rate.toFixed(2);
+        updateData.totalRoomAmount = (rate * nights).toFixed(2);
+      }
+
+      if (lateCheckOut !== undefined) updateData.lateCheckOut = Boolean(lateCheckOut);
+      if (lateCheckOutTime !== undefined) updateData.lateCheckOutTime = lateCheckOutTime || null;
+
+      if (Object.keys(updateData).length === 0) return res.status(400).json({ error: "Sin cambios para aplicar" });
+
+      await storage.updateReservation(reservationId, updateData);
+
+      await audit(req, "update", "reservations",
+        `Tarifa/late checkout actualizado desde grupo ${group.name}: $${finalRatePerNight ?? "sin cambio"}`,
+        { entityType: "reservation", entityId: reservationId }
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("update-rate error:", error);
+      res.status(500).json({ error: "Error al actualizar tarifa" });
+    }
+  });
+
+  // ─── MASTER FOLIO PDF ────────────────────────────────────────────────────────
+  app.get("/api/folios/group/:groupId/pdf", requireAuth, async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      const config = (group as any).masterFolioConfig || "accommodation";
+      const gCharges = await storage.getGroupCharges(req.params.groupId);
+      const gPayments = await storage.getGroupPayments(req.params.groupId);
+
+      // Build per-room data
+      let masterAccommodation = 0;
+      let masterExtras = 0;
+      const roomRows: any[] = [];
+
+      for (const reservation of group.reservations) {
+        if (reservation.status === "cancelled") continue;
+        const resCharges = await storage.getCharges(reservation.id);
+        const resPayments = await storage.getPayments(reservation.id);
+        const accommodation = parseFloat((reservation as any).totalRoomAmount || "0");
+        const extras = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+        const paid = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+        masterAccommodation += accommodation;
+        if (config === "all") masterExtras += extras;
+        roomRows.push({ reservation, accommodation, extras, paid });
+      }
+
+      const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+      const masterTotal = masterAccommodation + masterExtras + groupChargesTotal;
+      const indivPaid = roomRows.reduce((s: number, r: any) => s + r.paid, 0);
+      const gPaid = gPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      const masterPaid = Math.max(gPaid, indivPaid);
+      const masterBalance = masterTotal - masterPaid;
+
+      // Generate PDF
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+      doc.on("end", () => {
+        const pdfBuffer = Buffer.concat(chunks);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="folio-maestro-${group.groupCode}.pdf"`);
+        res.send(pdfBuffer);
+      });
+
+      const HOTEL = "Maran Suites & Towers";
+      const ADDR = "Alameda de la Federación 698, Paraná, Entre Ríos";
+      const pageW = 595 - 80;
+
+      // Header
+      doc.fontSize(18).font("Helvetica-Bold").text(HOTEL, 40, 40);
+      doc.fontSize(9).font("Helvetica").fillColor("#666666").text(ADDR, 40, 62);
+      doc.fillColor("#000000");
+
+      doc.moveTo(40, 80).lineTo(555, 80).lineWidth(1.5).stroke("#1a1a1a");
+
+      doc.fontSize(14).font("Helvetica-Bold").text("FOLIO MAESTRO", 40, 90);
+      doc.fontSize(9).font("Helvetica").fillColor("#555555");
+      const configLabel = config === "accommodation" ? "Cubre: Solo Alojamiento" : config === "all" ? "Cubre: Alojamiento + Extras" : "Sin cobertura grupal";
+      doc.text(configLabel, 40, 108);
+      doc.fillColor("#000000");
+
+      // Group info
+      let y = 130;
+      doc.fontSize(10).font("Helvetica-Bold").text("Grupo:", 40, y);
+      doc.font("Helvetica").text(group.name, 110, y);
+      y += 16;
+      doc.font("Helvetica-Bold").text("Código:", 40, y);
+      doc.font("Helvetica").text(group.groupCode, 110, y);
+      y += 16;
+      doc.font("Helvetica-Bold").text("Check-in:", 40, y);
+      doc.font("Helvetica").text(group.checkInDate, 110, y);
+      doc.font("Helvetica-Bold").text("Check-out:", 250, y);
+      doc.font("Helvetica").text(group.checkOutDate, 330, y);
+      y += 16;
+      if (group.contactName) {
+        doc.font("Helvetica-Bold").text("Contacto:", 40, y);
+        doc.font("Helvetica").text(group.contactName, 110, y);
+        y += 16;
+      }
+
+      y += 8;
+      doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
+      y += 12;
+
+      // Room breakdown table header
+      doc.fontSize(8).font("Helvetica-Bold").fillColor("#555555")
+        .text("HAB.", 40, y)
+        .text("HUÉSPED", 80, y)
+        .text("NOCHES", 280, y, { align: "right", width: 60 })
+        .text("ALOJAMIENTO", 350, y, { align: "right", width: 80 })
+        .text("EXTRAS", 440, y, { align: "right", width: 60 })
+        .text("PAGADO", 505, y, { align: "right", width: 50 });
+      y += 4;
+      doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
+      y += 8;
+      doc.fillColor("#000000");
+
+      for (const row of roomRows) {
+        const res = row.reservation;
+        const guest = res.guest ? `${res.guest.lastName} ${res.guest.firstName}`.trim() : "Sin asignar";
+        const checkIn = new Date(res.checkInDate);
+        const checkOut = new Date(res.checkOutDate);
+        const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (y > 740) {
+          doc.addPage();
+          y = 40;
+        }
+
+        doc.fontSize(9).font("Helvetica")
+          .text(res.room?.roomNumber || "-", 40, y)
+          .text(guest.substring(0, 26), 80, y)
+          .text(String(nights), 280, y, { align: "right", width: 60 })
+          .text(`$${row.accommodation.toLocaleString("es-AR")}`, 350, y, { align: "right", width: 80 })
+          .text(config !== "none" ? `$${row.extras.toLocaleString("es-AR")}` : "-", 440, y, { align: "right", width: 60 })
+          .text(`$${row.paid.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });
+        y += 16;
+      }
+
+      y += 4;
+      doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
+      y += 12;
+
+      // Group charges
+      if (gCharges.length > 0) {
+        doc.fontSize(9).font("Helvetica-Bold").text("Cargos grupales:", 40, y);
+        y += 14;
+        for (const c of gCharges) {
+          if (y > 740) { doc.addPage(); y = 40; }
+          doc.fontSize(9).font("Helvetica")
+            .text(c.description, 50, y)
+            .text(`$${parseFloat(c.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+          y += 14;
+        }
+        y += 4;
+        doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
+        y += 12;
+      }
+
+      // Totals
+      const totals = [
+        ["Total alojamiento", `$${masterAccommodation.toLocaleString("es-AR")}`],
+        ...(config === "all" ? [["Extras (habitaciones)", `$${masterExtras.toLocaleString("es-AR")}`]] : []),
+        ...(groupChargesTotal > 0 ? [["Cargos grupales", `$${groupChargesTotal.toLocaleString("es-AR")}`]] : []),
+        ["TOTAL FOLIO MAESTRO", `$${masterTotal.toLocaleString("es-AR")}`],
+        ["Pagado", `$${masterPaid.toLocaleString("es-AR")}`],
+        ["SALDO PENDIENTE", `$${masterBalance.toLocaleString("es-AR")}`],
+      ];
+
+      for (const [label, value] of totals) {
+        if (y > 740) { doc.addPage(); y = 40; }
+        const isBold = label.startsWith("TOTAL") || label.startsWith("SALDO");
+        doc.fontSize(10).font(isBold ? "Helvetica-Bold" : "Helvetica")
+          .text(label, 300, y)
+          .text(value, 455, y, { align: "right", width: 100 });
+        y += 16;
+      }
+
+      // Group payments
+      if (gPayments.length > 0) {
+        y += 8;
+        doc.fontSize(9).font("Helvetica-Bold").text("Pagos registrados:", 40, y);
+        y += 14;
+        for (const p of gPayments) {
+          if (y > 740) { doc.addPage(); y = 40; }
+          doc.fontSize(9).font("Helvetica")
+            .text(`${p.date} — ${p.method}${p.reference ? ` (${p.reference})` : ""}`, 50, y)
+            .text(`$${parseFloat(p.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+          y += 14;
+        }
+      }
+
+      // Footer
+      y += 20;
+      doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
+      doc.fontSize(8).font("Helvetica").fillColor("#888888")
+        .text(`Generado el ${new Date().toLocaleString("es-AR")} | ${HOTEL}`, 40, y + 8, { align: "center", width: pageW });
+
+      doc.end();
+    } catch (error: any) {
+      console.error("master-folio PDF error:", error);
+      res.status(500).json({ error: "Error al generar PDF del folio maestro" });
     }
   });
 }

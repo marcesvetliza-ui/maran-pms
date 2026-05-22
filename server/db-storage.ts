@@ -1216,7 +1216,11 @@ export class DatabaseStorage implements IStorage {
     const reservationsList: ReservationWithDetails[] = [];
     for (const link of links) {
       const res = await this.getReservation(link.reservationId);
-      if (res) reservationsList.push(res);
+      if (res) {
+        const companions = await this.getReservationCompanions(res.id);
+        (res as any).companions = companions;
+        reservationsList.push(res);
+      }
     }
     const totalRooms = blocks.reduce((sum, b) => sum + b.quantity, 0);
     const assignedRooms = reservationsList.filter(r => r.status !== "cancelled" && r.status !== "checked_out").length;

@@ -91,6 +91,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     logger.warn("Migración incremental confirmation_terms: " + e.message);
   }
 
+  // Late checkout columns for reservations
+  try {
+    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout boolean DEFAULT false`);
+    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout_time varchar(10)`);
+  } catch (e: any) {
+    logger.warn("Migración incremental reservations.late_checkout: " + e.message);
+  }
+
   // Loan items tables
   try {
     await db.execute(sql`

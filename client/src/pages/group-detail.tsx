@@ -36,6 +36,9 @@ import {
   Banknote,
   ArrowLeftRight,
   ShoppingCart,
+  Pencil,
+  Unlink,
+  Clock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -621,6 +624,15 @@ export default function GroupDetailPage() {
   const [masterPaymentReference, setMasterPaymentReference] = useState("");
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
 
+  // Edit rate + late checkout
+  const [editingRateRes, setEditingRateRes] = useState<ReservationWithDetails | null>(null);
+  const [editingRate, setEditingRate] = useState("");
+  const [editingLateCheckout, setEditingLateCheckout] = useState(false);
+  const [editingLateCheckoutTime, setEditingLateCheckoutTime] = useState("");
+
+  // Unassign confirmation
+  const [unassignResId, setUnassignResId] = useState<string | null>(null);
+
   const { data: group, isLoading } = useQuery<GroupWithDetails>({
     queryKey: ["/api/groups", groupId],
   });
@@ -681,6 +693,41 @@ export default function GroupDetailPage() {
     },
     onError: () => {
       toast({ title: "Error al eliminar bloque", variant: "destructive" });
+    },
+  });
+
+  const updateRateMutation = useMutation({
+    mutationFn: ({ reservationId, rate, lateCheckOut, lateCheckOutTime }: { reservationId: string; rate: string; lateCheckOut: boolean; lateCheckOutTime: string }) =>
+      apiRequest("PATCH", `/api/groups/${groupId}/reservations/${reservationId}/rate`, {
+        finalRatePerNight: rate,
+        lateCheckOut,
+        lateCheckOutTime: lateCheckOutTime || null,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      toast({ title: "Tarifa y late checkout actualizados" });
+      setEditingRateRes(null);
+      setEditingRate("");
+      setEditingLateCheckout(false);
+      setEditingLateCheckoutTime("");
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar tarifa", variant: "destructive" });
+    },
+  });
+
+  const unassignMutation = useMutation({
+    mutationFn: (reservationId: string) => apiRequest("DELETE", `/api/groups/${groupId}/reservations/${reservationId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      toast({ title: "Habitación desasignada del grupo" });
+      setUnassignResId(null);
+    },
+    onError: () => {
+      toast({ title: "Error al desasignar habitación", variant: "destructive" });
+      setUnassignResId(null);
     },
   });
 
@@ -965,19 +1012,36 @@ export default function GroupDetailPage() {
       }
     };
 
-    const rows = sortedReservations.map((res, idx) => `
+    const rows = sortedReservations.map((res, idx) => {
+      const companions: any[] = (res as any).companions || [];
+      const lateCheckout = (res as any).lateCheckOut;
+      const lateCheckoutTime = (res as any).lateCheckOutTime;
+      const mainRow = `
       <tr>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;text-align:center;">${idx + 1}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-weight:bold;">${res.room?.roomNumber || "-"}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.room?.roomType?.name || "-"}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${res.guest?.lastName || ""} ${res.guest?.firstName || ""}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${fmtDate(res.checkInDate)}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${fmtDate(res.checkOutDate)}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;">${statusLabel(res.status)}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-size:11px;max-width:120px;">${res.notes || ""}</td>
-      </tr>
-    `).join("");
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};text-align:center;">${idx + 1}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-weight:bold;">${res.room?.roomNumber || "-"}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.room?.roomType?.name || "-"}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.guest?.lastName || ""} ${res.guest?.firstName || ""}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${fmtDate(res.checkInDate)}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${lateCheckout ? `${fmtDate(res.checkOutDate)} <span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : fmtDate(res.checkOutDate)}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${statusLabel(res.status)}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;max-width:120px;">${res.notes || ""}</td>
+      </tr>`;
+      const companionRows = companions.map((c: any) => `
+      <tr style="background:#f9f9f9;">
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;color:#666;">↳ Hab. ${res.room?.roomNumber || "-"}</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;color:#888;">Acompañante</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.lastName || ""} ${c.firstName || ""}</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.documentNumber ? `${c.documentType || "DOC"}: ${c.documentNumber}` : "-"}</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
+        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.notes || ""}</td>
+      </tr>`).join("");
+      return mainRow + companionRows;
+    }).join("");
 
     const html = `<!DOCTYPE html>
 <html>
@@ -1400,13 +1464,20 @@ export default function GroupDetailPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {res.finalRatePerNight
-                            ? `$${parseFloat(res.finalRatePerNight).toLocaleString("es-AR")}`
-                            : <span className="text-destructive font-medium">Sin tarifa</span>
-                          }
+                          <div className="flex items-center gap-1.5">
+                            {res.finalRatePerNight
+                              ? `$${parseFloat(res.finalRatePerNight).toLocaleString("es-AR")}`
+                              : <span className="text-destructive font-medium">Sin tarifa</span>
+                            }
+                            {(res as any).lateCheckOut && (
+                              <Badge className="text-[10px] px-1.5 py-0 h-4 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                LATE{(res as any).lateCheckOutTime ? ` ${(res as any).lateCheckOutTime}` : ""}
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-wrap">
                             {!["checked_in", "checked_out", "cancelled"].includes(res.status) && (
                               <Button
                                 variant="outline"
@@ -1414,10 +1485,28 @@ export default function GroupDetailPage() {
                                 className="h-7 text-xs px-2"
                                 onClick={() => { setChangingReservation(res); setChangeRoomId(""); }}
                                 data-testid={`button-change-room-${res.id}`}
-                                title="Cambiar habitación preservando tarifa"
+                                title="Cambiar habitación"
                               >
                                 <ArrowLeftRight className="h-3 w-3 mr-1" />
                                 Cambiar
+                              </Button>
+                            )}
+                            {!["checked_out", "cancelled"].includes(res.status) && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs px-2 text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30"
+                                onClick={() => {
+                                  setEditingRateRes(res);
+                                  setEditingRate(res.finalRatePerNight ? parseFloat(res.finalRatePerNight).toFixed(2) : "");
+                                  setEditingLateCheckout(!!(res as any).lateCheckOut);
+                                  setEditingLateCheckoutTime((res as any).lateCheckOutTime || "");
+                                }}
+                                data-testid={`button-edit-rate-${res.id}`}
+                                title="Editar tarifa y late checkout"
+                              >
+                                <Pencil className="h-3 w-3 mr-1" />
+                                Tarifa
                               </Button>
                             )}
                             {!["cancelled"].includes(res.status) && (
@@ -1431,6 +1520,18 @@ export default function GroupDetailPage() {
                               >
                                 <ShoppingCart className="h-3 w-3 mr-1" />
                                 Cargo
+                              </Button>
+                            )}
+                            {["confirmed", "pending"].includes(res.status) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => setUnassignResId(res.id)}
+                                data-testid={`button-unassign-${res.id}`}
+                                title="Desasignar del grupo (cancela la reserva)"
+                              >
+                                <Unlink className="h-3 w-3" />
                               </Button>
                             )}
                             <Button variant="ghost" size="icon" className="h-7 w-7"
@@ -2701,6 +2802,110 @@ export default function GroupDetailPage() {
               data-testid="button-confirm-transfer-charge"
             >
               {transferChargeMutation.isPending ? "Transfiriendo..." : "Transferir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ─── EDITAR TARIFA + LATE CHECKOUT ─── */}
+      <Dialog open={!!editingRateRes} onOpenChange={(open) => { if (!open) { setEditingRateRes(null); setEditingRate(""); setEditingLateCheckout(false); setEditingLateCheckoutTime(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4" />
+              Editar Tarifa — Hab. {editingRateRes?.room?.roomNumber}
+            </DialogTitle>
+            <DialogDescription>
+              {editingRateRes?.guest?.lastName} {editingRateRes?.guest?.firstName} · {editingRateRes?.reservationCode}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="editing-rate">Tarifa por noche ($)</Label>
+              <Input
+                id="editing-rate"
+                type="number"
+                min="0"
+                step="0.01"
+                value={editingRate}
+                onChange={(e) => setEditingRate(e.target.value)}
+                placeholder="Ej: 25000"
+                data-testid="input-editing-rate"
+                className="mt-1"
+              />
+            </div>
+            <div className="rounded-lg border p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="late-checkout"
+                  checked={editingLateCheckout}
+                  onCheckedChange={(checked) => {
+                    setEditingLateCheckout(!!checked);
+                    if (!checked) setEditingLateCheckoutTime("");
+                  }}
+                  data-testid="checkbox-late-checkout"
+                />
+                <Label htmlFor="late-checkout" className="cursor-pointer flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-amber-600" />
+                  Late Check-out
+                </Label>
+              </div>
+              {editingLateCheckout && (
+                <div>
+                  <Label htmlFor="late-checkout-time" className="text-sm text-muted-foreground">Hora de salida (opcional)</Label>
+                  <Input
+                    id="late-checkout-time"
+                    type="time"
+                    value={editingLateCheckoutTime}
+                    onChange={(e) => setEditingLateCheckoutTime(e.target.value)}
+                    className="mt-1 w-36"
+                    data-testid="input-late-checkout-time"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingRateRes(null)}>Cancelar</Button>
+            <Button
+              onClick={() => {
+                if (!editingRateRes) return;
+                updateRateMutation.mutate({
+                  reservationId: editingRateRes.id,
+                  rate: editingRate,
+                  lateCheckOut: editingLateCheckout,
+                  lateCheckOutTime: editingLateCheckoutTime,
+                });
+              }}
+              disabled={updateRateMutation.isPending}
+              data-testid="button-save-rate"
+            >
+              {updateRateMutation.isPending ? "Guardando..." : "Guardar cambios"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── DESASIGNAR HABITACIÓN ─── */}
+      <AlertDialog open={!!unassignResId} onOpenChange={(open) => { if (!open) setUnassignResId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Unlink className="h-5 w-5 text-destructive" />
+              Desasignar habitación del grupo
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción cancela la reserva de la habitación y la libera del bloque grupal. No se puede deshacer fácilmente. ¿Confirmar?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => { if (unassignResId) unassignMutation.mutate(unassignResId); }}
+              data-testid="button-confirm-unassign"
+            >
+              {unassignMutation.isPending ? "Desasignando..." : "Confirmar, desasignar"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
