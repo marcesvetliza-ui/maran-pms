@@ -2096,6 +2096,7 @@ export const adminCashConfig = pgTable("admin_cash_config", {
 export const billingConfig = pgTable("billing_config", {
   id: serial("id").primaryKey(),
   modoArca: boolean("modo_arca").default(false),
+  arcaAmbiente: text("arca_ambiente").default("ficticio"),
   cuit: text("cuit").default("33-68110008-9"),
   razonSocial: text("razon_social").default("MARAN S.A."),
   domicilioComercial: text("domicilio_comercial").default("Alameda de la Federación 698"),
@@ -2105,6 +2106,7 @@ export const billingConfig = pgTable("billing_config", {
   condicionIva: text("condicion_iva").default("Responsable Inscripto"),
   inicioActividades: text("inicio_actividades").default("01/01/2000"),
   puntoVenta: integer("punto_venta").default(1),
+  puntoVentaHomolog: integer("punto_venta_homolog").default(99),
   tipoPuntoVenta: text("tipo_punto_venta").default("online"),
   arcaCert: text("arca_cert"),
   arcaKey: text("arca_key"),

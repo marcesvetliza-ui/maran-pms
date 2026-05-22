@@ -86,17 +86,25 @@ async function getNextInvoiceNumber(tipo: string, puntoVenta: number): Promise<n
 
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
   const config = await getBillingConfig();
-  const numero = await getNextInvoiceNumber(data.tipoComprobante, config.puntoVenta!);
+  const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
+
+  // Use separate punto de venta for homologacion to avoid numbering collisions
+  const puntoVenta =
+    ambiente === "homologacion"
+      ? ((config as any).puntoVentaHomolog ?? 99)
+      : config.puntoVenta!;
+
+  const numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
   const montos = calcularMontos(data.items, data.tipoComprobante);
 
   let cae: string;
   let caeFechaVto: Date;
   let modoFicticio: boolean;
 
-  if (config.modoArca) {
+  if (ambiente === "homologacion" || ambiente === "produccion") {
     const resultado = await callARCA({
       tipo: data.tipoComprobante,
-      puntoVenta: config.puntoVenta!,
+      puntoVenta,
       numero,
       ...montos,
       cliente: {
@@ -118,7 +126,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
 
   const [factura] = await db.insert(salesInvoices).values({
     tipoComprobante: data.tipoComprobante,
-    puntoVenta: config.puntoVenta!,
+    puntoVenta,
     numero,
     fechaEmision: today,
     clienteRazonSocial: data.cliente.razonSocial,

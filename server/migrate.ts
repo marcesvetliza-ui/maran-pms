@@ -142,4 +142,22 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   } catch (e: any) {
     logger.warn("Migración incremental loan_items: " + e.message);
   }
+
+  // ── billing_config: arca_ambiente + punto_venta_homolog ────────────────────
+  try {
+    await db.execute(sql`
+      ALTER TABLE billing_config
+        ADD COLUMN IF NOT EXISTS arca_ambiente text DEFAULT 'ficticio',
+        ADD COLUMN IF NOT EXISTS punto_venta_homolog integer DEFAULT 99
+    `);
+    // Migrate existing rows: if modo_arca=true → produccion, else → ficticio
+    await db.execute(sql`
+      UPDATE billing_config
+      SET arca_ambiente = CASE WHEN modo_arca = true THEN 'produccion' ELSE 'ficticio' END
+      WHERE arca_ambiente IS NULL OR arca_ambiente = 'ficticio'
+    `);
+    logger.info("Migración billing_config: arca_ambiente + punto_venta_homolog OK");
+  } catch (e: any) {
+    logger.warn("Migración billing_config: " + e.message);
+  }
 }

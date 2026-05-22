@@ -25,9 +25,9 @@ export function registerBillingRoutes(app: Express) {
   app.patch("/api/billing/config", requireAuth, async (req, res) => {
     try {
       const allowed = [
-        "modoArca", "cuit", "razonSocial", "domicilioComercial", "localidad",
+        "modoArca", "arcaAmbiente", "cuit", "razonSocial", "domicilioComercial", "localidad",
         "provincia", "cp", "condicionIva", "inicioActividades",
-        "puntoVenta", "tipoPuntoVenta", "arcaCuit", "logoUrl",
+        "puntoVenta", "puntoVentaHomolog", "tipoPuntoVenta", "arcaCuit", "logoUrl",
         "arcaCert", "arcaKey",
       ];
       const data: any = {};
@@ -132,6 +132,37 @@ export function registerBillingRoutes(app: Express) {
       res.send(pdfBuf);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/billing/test-connection — prueba la conexión con ARCA (solo WSAA)
+  app.post("/api/billing/test-connection", requireAuth, async (req, res) => {
+    try {
+      const config = await getBillingConfig();
+      const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
+
+      if (ambiente === "ficticio") {
+        return res.status(400).json({ error: "Modo ficticio activo. Seleccionar homologación o producción." });
+      }
+      if (!config.arcaCert || !config.arcaKey) {
+        return res.status(400).json({ error: "Faltan certificado y/o clave privada." });
+      }
+
+      const { getTokenAuth } = await import("./wsaaClient");
+      const ta = await getTokenAuth(
+        config.arcaCert,
+        config.arcaKey,
+        ambiente as "homologacion" | "produccion"
+      );
+
+      res.json({
+        ok: true,
+        ambiente,
+        mensaje: `Conexión exitosa con ARCA (${ambiente}). Token obtenido correctamente.`,
+        tokenPreview: ta.token.slice(0, 30) + "...",
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
 
