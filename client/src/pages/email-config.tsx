@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Mail, Send, CheckCircle2, XCircle, Clock, Star, MessageSquare, Eye,
   RefreshCw, Settings2, BarChart3, AlertTriangle, Zap, Server,
+  Database, Download, MailCheck, ShieldCheck,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -180,6 +181,7 @@ export default function EmailConfigPage() {
           <TabsTrigger value="config"><Settings2 className="h-4 w-4 mr-1.5" />Configuración</TabsTrigger>
           <TabsTrigger value="encuestas"><Star className="h-4 w-4 mr-1.5" />Encuestas</TabsTrigger>
           <TabsTrigger value="logs"><BarChart3 className="h-4 w-4 mr-1.5" />Historial</TabsTrigger>
+          <TabsTrigger value="backup"><Database className="h-4 w-4 mr-1.5" />Backup</TabsTrigger>
         </TabsList>
 
         {/* ─── PLANTILLAS ─── */}
@@ -534,7 +536,186 @@ export default function EmailConfigPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ─── BACKUP ─── */}
+        <TabsContent value="backup" className="space-y-4 mt-4">
+          <BackupTab />
+        </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Backup tab component
+// ─────────────────────────────────────────────────────────────────────────────
+function BackupTab() {
+  const { toast } = useToast();
+  const [backupEmail, setBackupEmail] = useState("");
+  const [sendNowEmail, setSendNowEmail] = useState("");
+  const [downloading, setDownloading] = useState(false);
+
+  const { data: cfg, isLoading: cfgLoading } = useQuery<{ enabled: boolean; email: string }>({
+    queryKey: ["/api/admin/backup/config"],
+  });
+
+  const saveMut = useMutation({
+    mutationFn: (data: { enabled?: boolean; email?: string }) =>
+      apiRequest("PUT", "/api/admin/backup/config", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/backup/config"] });
+      toast({ title: "Configuración de backup guardada" });
+    },
+    onError: (e: any) => toast({ title: "Error al guardar", description: e.message, variant: "destructive" }),
+  });
+
+  const sendNowMut = useMutation({
+    mutationFn: (email: string) => apiRequest("POST", "/api/admin/backup/send-now", { email }),
+    onSuccess: () => toast({ title: "Backup enviado", description: `Revisá la bandeja de ${sendNowEmail}` }),
+    onError: (e: any) => toast({ title: "Error al enviar", description: e.message, variant: "destructive" }),
+  });
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch("/api/admin/backup/download", { credentials: "include" });
+      if (!res.ok) throw new Error("Error generando backup");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const dateStr = new Date().toLocaleDateString("es-AR").replace(/\//g, "-");
+      a.href = url;
+      a.download = `maran-backup-${dateStr}.sql`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Backup descargado correctamente" });
+    } catch (e: any) {
+      toast({ title: "Error al descargar", description: e.message, variant: "destructive" });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Info banner */}
+      <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20">
+        <CardContent className="pt-4 pb-4">
+          <div className="flex gap-3 items-start">
+            <ShieldCheck className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+            <div className="text-sm text-blue-800 dark:text-blue-300 space-y-1">
+              <p className="font-semibold">Backup completo de la base de datos</p>
+              <p>El backup incluye todas las tablas del sistema: reservas, huéspedes, folios, pagos, eventos, etc. Se genera como archivo <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">.sql</code> restaurable en cualquier PostgreSQL.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Manual download */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Download className="h-5 w-5 text-primary" />
+            Descargar backup ahora
+          </CardTitle>
+          <CardDescription>Genera y descarga un archivo SQL completo en este momento.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            onClick={handleDownload}
+            disabled={downloading}
+            data-testid="button-download-backup"
+          >
+            {downloading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+            {downloading ? "Generando backup..." : "Descargar backup (.sql)"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Send by email now */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <MailCheck className="h-5 w-5 text-primary" />
+            Enviar backup por email ahora
+          </CardTitle>
+          <CardDescription>Envía el backup inmediatamente a cualquier dirección de email.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              placeholder="destino@email.com"
+              value={sendNowEmail}
+              onChange={e => setSendNowEmail(e.target.value)}
+              className="max-w-xs"
+              data-testid="input-backup-send-email"
+            />
+            <Button
+              onClick={() => sendNowMut.mutate(sendNowEmail)}
+              disabled={!sendNowEmail || sendNowMut.isPending}
+              data-testid="button-send-backup-now"
+            >
+              {sendNowMut.isPending ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Enviar ahora
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Requiere SMTP configurado en la pestaña Configuración.</p>
+        </CardContent>
+      </Card>
+
+      {/* Automatic daily backup */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Database className="h-5 w-5 text-primary" />
+            Backup automático diario — 03:00 hs
+          </CardTitle>
+          <CardDescription>El sistema genera y envía un backup por email todos los días a las 3 de la madrugada (hora Argentina).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {cfgLoading ? (
+            <Skeleton className="h-8 w-48" />
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Backup automático activado</Label>
+                <Switch
+                  checked={cfg?.enabled ?? false}
+                  onCheckedChange={v => saveMut.mutate({ enabled: v })}
+                  data-testid="switch-backup-enabled"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm">Email de destino del backup</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="email"
+                    placeholder="gerencia@maran.com.ar"
+                    defaultValue={cfg?.email ?? ""}
+                    key={cfg?.email}
+                    onBlur={e => {
+                      if (e.target.value !== cfg?.email) {
+                        saveMut.mutate({ email: e.target.value });
+                        setBackupEmail(e.target.value);
+                      }
+                    }}
+                    className="max-w-xs"
+                    data-testid="input-backup-auto-email"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">El backup se enviará como adjunto a este email cada noche a las 03:00 hs.</p>
+              </div>
+              {cfg?.enabled && cfg?.email && (
+                <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 rounded-md px-3 py-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>Backup automático activo — se enviará a <strong>{cfg.email}</strong> cada noche a las 03:00 hs.</span>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1575,6 +1575,65 @@ export async function registerRoutes(
     }
   });
 
+  // ── BACKUP ────────────────────────────────────────────────────────────────
+  app.get("/api/admin/backup/download", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { generateBackupSql } = await import("./backup");
+      const buf = await generateBackupSql();
+      const dateStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+        .replace(/\//g, "-");
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="maran-backup-${dateStr}.sql"`);
+      res.send(buf);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Error generando backup" });
+    }
+  });
+
+  app.post("/api/admin/backup/send-now", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) return res.status(400).json({ error: "Falta el email de destino" });
+      const { sendBackupByEmail } = await import("./backup");
+      await sendBackupByEmail(email);
+      res.json({ success: true, message: `Backup enviado a ${email}` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Error enviando backup" });
+    }
+  });
+
+  app.get("/api/admin/backup/config", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { systemSettings } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const rows = await db.select().from(systemSettings)
+        .where(sql`key IN ('backup_auto_enabled','backup_email')`);
+      const map: Record<string, string> = {};
+      rows.forEach((r: any) => { map[r.key] = r.value; });
+      res.json({ enabled: map["backup_auto_enabled"] === "true", email: map["backup_email"] || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/backup/config", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { enabled, email } = req.body;
+      const { systemSettings } = await import("@shared/schema");
+      const upsert = async (key: string, value: string) => {
+        await db.execute(sql`
+          INSERT INTO system_settings (key, value) VALUES (${key}, ${value})
+          ON CONFLICT (key) DO UPDATE SET value = ${value}
+        `);
+      };
+      if (typeof enabled === "boolean") await upsert("backup_auto_enabled", enabled ? "true" : "false");
+      if (typeof email === "string") await upsert("backup_email", email);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/help/chat", requireAuth, async (req, res) => {
     try {
       const { message, history } = req.body;

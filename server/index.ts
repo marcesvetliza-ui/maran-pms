@@ -230,6 +230,14 @@ app.use((req, res, next) => {
     console.error("Night audit scheduler error (non-blocking):", err.message);
   }
 
+  try {
+    const { setupBackupScheduler } = await import("./backup");
+    setupBackupScheduler();
+    log("Backup scheduler iniciado (03:00 ARG)");
+  } catch (err: any) {
+    console.error("Backup scheduler error (non-blocking):", err.message);
+  }
+
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
