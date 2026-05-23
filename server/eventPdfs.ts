@@ -30,7 +30,7 @@ function pdfBrandedFooter(doc: InstanceType<typeof PDFDocument>, pageW: number, 
   doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
   const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
   if (fs.existsSync(logoPath)) {
-    doc.image(logoPath, margin, footerY + 14, { width: 95 });
+    doc.image(logoPath, margin, footerY + 6, { fit: [90, 58], align: "left", valign: "center" });
   }
   const cx = margin + 100;
   const cw = contentW - 200;
