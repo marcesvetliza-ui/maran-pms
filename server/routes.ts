@@ -59,6 +59,23 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  app.get("/api/health", async (_req, res) => {
+    let dbStatus = "ok";
+    try {
+      await db.execute(sql`SELECT 1`);
+    } catch {
+      dbStatus = "error";
+    }
+    const status = dbStatus === "ok" ? "ok" : "degraded";
+    res.status(dbStatus === "ok" ? 200 : 503).json({
+      status,
+      database: dbStatus,
+      version: "1.0.0",
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+    });
+  });
+
   app.post("/api/auth/login", (req, res, next) => {
     passport.authenticate("local", (err: any, user: any, info: any) => {
       if (err) return next(err);
@@ -136,6 +153,7 @@ export async function registerRoutes(
       "/api/auth/logout",
       "/api/auth/me",
       "/api/auth/setup",
+      "/api/health",
     ];
     
     if (publicPaths.includes(req.path)) {
