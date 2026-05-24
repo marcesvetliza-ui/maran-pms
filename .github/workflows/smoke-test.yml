@@ -1,0 +1,45 @@
+name: Smoke Test — Producción
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: Verificar sistema en producción
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Esperar deploy de Railway (60s)
+        run: sleep 60
+
+      - name: Esperar que la app responda
+        run: |
+          echo "Verificando que maranpms.com.ar responde..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://maranpms.com.ar/api/health || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "App respondiendo (intento $i)"
+              break
+            fi
+            echo "Intento $i — HTTP $STATUS, reintentando en 10s..."
+            sleep 10
+          done
+
+      - name: Correr smoke tests
+        run: node scripts/smoke-test.js https://maranpms.com.ar admin ${{ secrets.SMOKE_TEST_PASSWORD }}
+
+      - name: Notificar resultado en GitHub
+        if: failure()
+        run: |
+          echo "::error::❌ Smoke test falló en producción — revisar maranpms.com.ar"
