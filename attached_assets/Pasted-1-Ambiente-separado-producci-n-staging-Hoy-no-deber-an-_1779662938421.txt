@@ -1,0 +1,111 @@
+1. Ambiente separado: producción / staging
+
+Hoy no deberían probar cambios directo sobre maranpms.com.ar.
+
+Pedí a Replit/Railway:
+
+* production: maranpms.com.ar
+* staging: staging.maranpms.com.ar
+
+Todo cambio nuevo primero se prueba en staging y recién después pasa a producción.
+
+2. Deploy seguro
+
+Definir una regla:
+
+* no deploy en horario operativo fuerte
+* deploy solo desde rama estable
+* rollback probado
+* changelog de qué se subió
+
+Esto evita que una mejora rompa recepción a las 10 AM.
+
+3. Monitoreo de errores real
+
+UptimeRobot te dice si el sistema está caído. Pero falta algo tipo:
+
+* Sentry
+* Logtail
+* Axiom
+* Better Stack
+
+Para saber qué error pasó, en qué pantalla, con qué usuario y a qué hora.
+
+Para un PMS real, esto es clave.
+
+4. Health check interno
+
+Crear endpoint:
+
+/api/health
+
+Que revise:
+
+* app viva
+* conexión a DB
+* versión del deploy
+* fecha/hora server
+
+UptimeRobot debería monitorear eso además del dominio.
+
+5. Restore test real
+
+Ya tienen backup y rollback, excelente. Pero falta la prueba más importante:
+
+restaurar un backup en una base alternativa y confirmar que el sistema abre bien.
+
+Sin eso, backup es teoría.
+
+6. Tests automáticos permanentes
+
+Ya hicieron 9/9 flujos, muy bien. Ahora hay que dejarlos como rutina.
+
+Cada deploy debería correr mínimo:
+
+* login
+* planning
+* crear reserva
+* check-in
+* check-out
+* restaurant
+* caja
+* grupos
+* housekeeping
+
+Si alguno falla, no debería desplegar.
+
+7. Auditoría de permisos
+
+Verificar por rol:
+
+* recepción no modifica contabilidad
+* housekeeping no toca pagos
+* restaurant no toca reservas hotel
+* spa no toca caja recepción
+* gerencia/dirección full
+
+No solo en el menú: también en backend/API.
+
+8. Retención y seguridad de backups
+
+Definir:
+
+* cuántos días se guardan
+* dónde se guardan
+* quién tiene acceso
+* cómo se restauran
+* si están fuera de Railway
+
+Ideal: backup externo, no solo dentro del mismo ecosistema.
+
+9. Variables y claves
+
+Rotar o revisar:
+
+* GitHub token usado
+* OPENAI_API_KEY
+* SESSION_SECRET
+* accesos Railway
+* accesos Cloudflare
+
+Y dejar claro quién tiene cada acceso.
