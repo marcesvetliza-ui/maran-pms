@@ -1511,7 +1511,7 @@ export type MaintenanceBlock = typeof maintenanceBlocks.$inferSelect;
 // ============== ADMINISTRATION MODULE ==============
 
 // System User Roles (extends existing UserRole with admin roles)
-export type SystemUserRole = "admin" | "manager" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events";
+export type SystemUserRole = "admin" | "manager" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events" | "administracion" | "responsable_area" | "resp_deposito";
 
 // System Users (Usuarios del Sistema)
 export const systemUsers = pgTable("system_users", {

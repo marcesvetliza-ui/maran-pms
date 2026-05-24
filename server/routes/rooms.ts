@@ -1,6 +1,10 @@
 import type { Express } from "express";
 import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
+import { requireRole } from "../auth";
+
+const ROOMS_WRITE_ROLES = ["admin", "manager", "responsable_area"] as [string, ...string[]];
+const RATES_WRITE_ROLES = ["admin", "manager", "responsable_area"] as [string, ...string[]];
 
 export function registerRoomsRoutes(app: Express) {
   // Room Types
@@ -13,7 +17,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/room-types", async (req, res) => {
+  app.post("/api/room-types", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
     try {
       const roomType = await storage.createRoomType(req.body);
       res.status(201).json(roomType);
@@ -22,7 +26,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/room-types/:id", async (req, res) => {
+  app.patch("/api/room-types/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
     try {
       const roomType = await storage.updateRoomType(req.params.id, req.body);
       if (!roomType) {
@@ -34,7 +38,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/room-types/:id", async (req, res) => {
+  app.delete("/api/room-types/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
     try {
       const deleted = await storage.deleteRoomType(req.params.id);
       if (!deleted) {
@@ -77,7 +81,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/rate-plans", async (req, res) => {
+  app.post("/api/rate-plans", requireRole(RATES_WRITE_ROLES), async (req, res) => {
     try {
       const ratePlan = await storage.createRatePlan(req.body);
       await audit(req, "create", "rate-plans", `Nueva tarifa creada: ${req.body.name}`, { entityType: "rate_plan", entityId: ratePlan.id });
@@ -87,7 +91,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/rate-plans/:id", async (req, res) => {
+  app.patch("/api/rate-plans/:id", requireRole(RATES_WRITE_ROLES), async (req, res) => {
     try {
       const existing = await storage.getRatePlan(req.params.id);
       const ratePlan = await storage.updateRatePlan(req.params.id, req.body);
@@ -104,7 +108,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/rate-plans/:id", async (req, res) => {
+  app.delete("/api/rate-plans/:id", requireRole(RATES_WRITE_ROLES), async (req, res) => {
     try {
       const deleted = await storage.deleteRatePlan(req.params.id);
       if (!deleted) {
@@ -212,7 +216,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/rooms", async (req, res) => {
+  app.post("/api/rooms", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
     try {
       const room = await storage.createRoom(req.body);
       res.status(201).json(room);
@@ -221,7 +225,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/rooms/:id", async (req, res) => {
+  app.patch("/api/rooms/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
     try {
       const room = await storage.updateRoom(req.params.id, req.body);
       if (!room) {
@@ -233,7 +237,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/rooms/:id", async (req, res) => {
+  app.delete("/api/rooms/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
     try {
       const deleted = await storage.deleteRoom(req.params.id);
       if (!deleted) {

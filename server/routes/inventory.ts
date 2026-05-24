@@ -2,7 +2,9 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
+
+const INVENTORY_WRITE_ROLES = ["admin", "manager", "restaurant", "resp_deposito", "responsable_area"] as [string, ...string[]];
 
 export function registerInventoryRoutes(app: Express) {
   // Item Categories
@@ -19,7 +21,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/categories", async (req, res) => {
+  app.post("/api/inventory/categories", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const category = await storage.createItemCategory(req.body);
       res.status(201).json(category);
@@ -28,7 +30,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/categories/:id", async (req, res) => {
+  app.patch("/api/inventory/categories/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const category = await storage.updateItemCategory(req.params.id, req.body);
       if (!category) return res.status(404).json({ error: "Category not found" });
@@ -38,7 +40,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/categories/:id", async (req, res) => {
+  app.delete("/api/inventory/categories/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       await storage.deleteItemCategory(req.params.id);
       res.status(204).send();
@@ -57,7 +59,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/suppliers", async (req, res) => {
+  app.post("/api/inventory/suppliers", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const supplier = await storage.createSupplier(req.body);
       res.status(201).json(supplier);
@@ -66,7 +68,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/suppliers/:id", async (req, res) => {
+  app.patch("/api/inventory/suppliers/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const supplier = await storage.updateSupplier(req.params.id, req.body);
       if (!supplier) return res.status(404).json({ error: "Supplier not found" });
@@ -76,7 +78,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/suppliers/:id", async (req, res) => {
+  app.delete("/api/inventory/suppliers/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       await storage.deleteSupplier(req.params.id);
       res.status(204).send();
@@ -111,7 +113,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/items", async (req, res) => {
+  app.post("/api/inventory/items", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const body = { ...req.body };
 
@@ -153,7 +155,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/items/:id", async (req, res) => {
+  app.patch("/api/inventory/items/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const item = await storage.updateInventoryItem(req.params.id, req.body);
       if (!item) return res.status(404).json({ error: "Item not found" });
@@ -163,7 +165,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/items/:id", async (req, res) => {
+  app.delete("/api/inventory/items/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       await storage.deleteInventoryItem(req.params.id);
       res.status(204).send();
@@ -183,7 +185,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/movements", async (req, res) => {
+  app.post("/api/inventory/movements", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const { itemId, movementType, quantity, notes, sourceType, sourceId } = req.body;
 
@@ -277,7 +279,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/warehouses", requireAuth, async (req, res) => {
+  app.post("/api/inventory/warehouses", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const { name, description, area } = req.body;
       const rows = await db.execute(sql`
@@ -291,7 +293,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/warehouses/:id", requireAuth, async (req, res) => {
+  app.patch("/api/inventory/warehouses/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const { name, description, area, isActive } = req.body;
       const rows = await db.execute(sql`
@@ -310,7 +312,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/warehouses/:id", requireAuth, async (req, res) => {
+  app.delete("/api/inventory/warehouses/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       await db.execute(sql`UPDATE inventory_warehouses SET is_active = 'false' WHERE id = ${req.params.id}`);
       res.status(204).send();
@@ -354,7 +356,7 @@ export function registerInventoryRoutes(app: Express) {
   });
 
   // Transfer stock between warehouses — POST /api/inventory/transfer
-  app.post("/api/inventory/transfer", requireAuth, async (req, res) => {
+  app.post("/api/inventory/transfer", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
       const { itemId, fromWarehouseId, toWarehouseId, quantity, notes } = req.body;
       if (!itemId || !fromWarehouseId || !toWarehouseId || !quantity) {

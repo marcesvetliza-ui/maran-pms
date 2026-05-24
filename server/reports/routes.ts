@@ -1,9 +1,11 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
 import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
+
+const FINANCE_ROLES = ["admin", "manager", "administracion", "responsable_area"] as [string, ...string[]];
 
 const TOTAL_ROOMS = 66;
 
@@ -103,7 +105,7 @@ async function gastosAdminCash(desde: string, hasta: string): Promise<number> {
 export function registerReportsRoutes(app: Express) {
 
   // ── Estado de Resultados ──────────────────────────────────────────────────
-  app.get("/api/reports/estado-resultados", requireAuth, async (req, res) => {
+  app.get("/api/reports/estado-resultados", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -187,7 +189,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── KPIs Hoteleros ────────────────────────────────────────────────────────
-  app.get("/api/reports/kpis", requireAuth, async (req, res) => {
+  app.get("/api/reports/kpis", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta, dias } = periodoToRange(periodo);
@@ -312,7 +314,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Análisis de Ocupación ─────────────────────────────────────────────────
-  app.get("/api/reports/ocupacion", requireAuth, async (req, res) => {
+  app.get("/api/reports/ocupacion", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const desde = (req.query.desde as string) || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
       const hasta = (req.query.hasta as string) || new Date().toISOString().split("T")[0];
@@ -404,7 +406,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Ingresos por Área ─────────────────────────────────────────────────────
-  app.get("/api/reports/ingresos", requireAuth, async (req, res) => {
+  app.get("/api/reports/ingresos", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -499,7 +501,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Costos por Departamento ───────────────────────────────────────────────
-  app.get("/api/reports/costos", requireAuth, async (req, res) => {
+  app.get("/api/reports/costos", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -582,7 +584,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Ranking de Proveedores ────────────────────────────────────────────────
-  app.get("/api/reports/proveedores", requireAuth, async (req, res) => {
+  app.get("/api/reports/proveedores", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const top = parseInt(req.query.top as string) || 10;
@@ -649,7 +651,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Comparativo Mensual ───────────────────────────────────────────────────
-  app.get("/api/reports/comparativo", requireAuth, async (req, res) => {
+  app.get("/api/reports/comparativo", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const año = parseInt((req.query.año || req.query.anio || req.query.year) as string) || new Date().getFullYear();
       const mesesNombre = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -718,7 +720,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── PDF Export (generic) ──────────────────────────────────────────────────
-  app.get("/api/reports/export-pdf/:tipo", requireAuth, async (req, res) => {
+  app.get("/api/reports/export-pdf/:tipo", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const tipo = req.params.tipo;
       const queryStr = new URLSearchParams(req.query as any).toString();
@@ -786,7 +788,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Excel Export ──────────────────────────────────────────────────────────
-  app.get("/api/reports/export-excel/:tipo", requireAuth, async (req, res) => {
+  app.get("/api/reports/export-excel/:tipo", requireRole(FINANCE_ROLES), async (req, res) => {
     try {
       const tipo = req.params.tipo;
       const queryStr = new URLSearchParams(req.query as any).toString();

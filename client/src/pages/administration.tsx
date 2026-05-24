@@ -75,12 +75,15 @@ type SettingFormValues = z.infer<typeof settingFormSchema>;
 const roleLabels: Record<string, string> = {
   admin: "Administrador",
   manager: "Gerente",
-  reception: "Recepcion",
+  reception: "Recepción",
   housekeeping: "Housekeeping",
   maintenance: "Mantenimiento",
   restaurant: "Restaurante",
   spa: "SPA",
   events: "Eventos",
+  administracion: "Administración",
+  responsable_area: "Responsable de Área",
+  resp_deposito: "Resp. Depósito",
 };
 
 const actionLabels: Record<string, string> = {
