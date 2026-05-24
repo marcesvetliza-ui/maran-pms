@@ -142,7 +142,6 @@ const menuSections = [
     items: [
       { label: "Hospitalidad",           icon: HandHeart,     href: "/hospitality",  roles: [...HOTEL_OPS, "housekeeping"] },
       { label: "MARA Chatbot",           icon: Bot,           href: "/chatbot",       roles: HOTEL_OPS },
-      { label: "Respuestas automáticas", icon: Mail,          href: "/email-config",  roles: MGMT_ONLY },
       { label: "Reseñas",                icon: Star,          href: "/reviews",       roles: MGMT_ONLY },
     ],
   },
@@ -173,6 +172,7 @@ const menuSections = [
     titulo: "Configuración",
     items: [
       { label: "Configuración",          icon: Settings, href: "/administration", roles: ["admin"] },
+      { label: "Correo & Backup",        icon: Mail,     href: "/email-config",   roles: ["admin"] },
       { label: "Administración sistema", icon: Shield,   href: "/administration", roles: ["admin"], adminOnly: true },
       { label: "Código fuente",          icon: Code2,    href: "/source-code",    roles: ["admin"], adminOnly: true, devOnly: true },
     ],
