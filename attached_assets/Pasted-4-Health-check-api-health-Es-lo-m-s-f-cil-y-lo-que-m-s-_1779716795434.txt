@@ -1,0 +1,19 @@
+4. Health check /api/health — Es lo más fácil y lo que más valor da. Tarda una hora en implementarse y le da a UptimeRobot información real (no solo "el dominio responde" sino "la base de datos está viva"). Lo haría esta semana.
+
+6. Tests automáticos permanentes — Ya tenés los 9 flujos probados y funcionando. Convertirlos en tests que corran automáticamente en cada deploy es el paso natural y no requiere mucho trabajo adicional. Sin esto, cada cambio es un riesgo silencioso.
+
+7. Auditoría de permisos en backend — Este es el más crítico desde el punto de vista de integridad del sistema. Que recepción no vea contabilidad en el menú es bueno, pero si puede llamar directamente a /api/accounting/* y funciona, el control no existe. Hay que cerrarlo en la API también.
+
+Los que haría pronto, son importantes
+3. Monitoreo de errores (Sentry o similar) — Hoy si algo falla en producción, no sabés qué pasó ni dónde. Te enterás cuando te llama alguien del hotel. Con Sentry sabés exactamente qué error, en qué pantalla, a qué hora, con qué usuario. Para un PMS real es casi obligatorio.
+
+5. Restore test real — Tenés backup, tenés procedimiento de rollback, pero nunca lo ejecutaste de punta a punta. La primera vez que lo necesités de verdad no es el momento para descubrir que falta un paso. Habría que hacer una restauración completa en una base de prueba aunque sea una vez.
+
+9. Rotación de claves — El GitHub token que usamos tiene permisos de escritura al repositorio. Si alguien lo obtiene puede modificar el código en producción. Vale la pena revisar qué permisos tiene cada credencial y rotar las que sean muy amplias.
+
+Los que haría después, cuando el sistema esté más maduro
+1. Ambiente staging — Ideal en teoría, pero agrega complejidad operativa: dos bases de datos, dos deploys, sincronización de datos. Para el estado actual del proyecto con un equipo chico, el beneficio no compensa todavía. Primero los tests automáticos cumplen la misma función a un costo mucho menor.
+
+2. Deploy seguro con reglas — Muy válido, pero es más una disciplina de proceso que algo técnico. Con un equipo pequeño alcanza con acordar "no deployamos entre las 8 y las 14" y tener el rollback documentado (que ya tenés).
+
+8. Retención y seguridad de backups — El backup automático de las 3AM que tenés es un buen punto de partida. Definir retención, acceso y backup externo es un paso lógico, pero puede esperar hasta tener el resto de la infraestructura más firme.

@@ -71,6 +71,94 @@ export async function generateBackupSql(): Promise<Buffer> {
   return Buffer.from(lines.join("\n"), "utf-8");
 }
 
+// ─── Restore test ─────────────────────────────────────────────────────────────
+export interface RestoreTestResult {
+  success: boolean;
+  duration_ms: number;
+  tables_tested: number;
+  tables_ok: number;
+  tables_failed: number;
+  details: Array<{ table: string; original_rows: number; restored_rows: number; ok: boolean }>;
+  error?: string;
+}
+
+export async function runRestoreTest(): Promise<RestoreTestResult> {
+  const start = Date.now();
+  const schema = `restore_test_${Date.now()}`;
+  const details: RestoreTestResult["details"] = [];
+
+  try {
+    // 1. List all public tables
+    const tablesResult = await db.execute(sql`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `);
+    const tables = (tablesResult.rows as any[]).map((r: any) => r.table_name as string);
+
+    // 2. Count rows in each original table
+    const originalCounts: Record<string, number> = {};
+    for (const table of tables) {
+      const r = await db.execute(sql.raw(`SELECT COUNT(*) AS cnt FROM "${table}"`));
+      originalCounts[table] = parseInt((r.rows[0] as any).cnt, 10);
+    }
+
+    // 3. Generate backup SQL (same SQL that would be emailed/downloaded)
+    const backupBuf = await generateBackupSql();
+    const backupSql = backupBuf.toString("utf-8");
+
+    // 4. Create isolated test schema
+    await db.execute(sql.raw(`CREATE SCHEMA "${schema}"`));
+
+    // 5. Replicate table structures (without FK constraints so INSERTs work in any order)
+    for (const table of tables) {
+      await db.execute(sql.raw(`CREATE TABLE "${schema}"."${table}" (LIKE public."${table}")`));
+    }
+
+    // 6. Replay only INSERT statements redirected to the test schema
+    const lines = backupSql.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("INSERT INTO")) continue;
+      const redirected = trimmed.replace(/^INSERT INTO "([^"]+)"/, `INSERT INTO "${schema}"."$1"`);
+      await db.execute(sql.raw(redirected));
+    }
+
+    // 7. Compare counts
+    let tablesOk = 0;
+    let tablesFailed = 0;
+    for (const table of tables) {
+      const r = await db.execute(sql.raw(`SELECT COUNT(*) AS cnt FROM "${schema}"."${table}"`));
+      const restoredCount = parseInt((r.rows[0] as any).cnt, 10);
+      const originalCount = originalCounts[table];
+      const ok = restoredCount === originalCount;
+      if (ok) tablesOk++; else tablesFailed++;
+      details.push({ table, original_rows: originalCount, restored_rows: restoredCount, ok });
+    }
+
+    return {
+      success: tablesFailed === 0,
+      duration_ms: Date.now() - start,
+      tables_tested: tables.length,
+      tables_ok: tablesOk,
+      tables_failed: tablesFailed,
+      details,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      duration_ms: Date.now() - start,
+      tables_tested: 0,
+      tables_ok: 0,
+      tables_failed: 0,
+      details,
+      error: err.message,
+    };
+  } finally {
+    try { await db.execute(sql.raw(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`)); } catch (_) {}
+  }
+}
+
 // ─── Send backup by email ─────────────────────────────────────────────────────
 export async function sendBackupByEmail(targetEmail: string): Promise<void> {
   const cfgRows = await db.select().from(emailConfig).limit(1);

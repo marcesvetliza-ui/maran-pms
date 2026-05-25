@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Mail, Send, CheckCircle2, XCircle, Clock, Star, MessageSquare, Eye,
   RefreshCw, Settings2, BarChart3, AlertTriangle, Zap, Server,
-  Database, Download, MailCheck, ShieldCheck,
+  Database, Download, MailCheck, ShieldCheck, FlaskConical,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -549,11 +549,19 @@ export default function EmailConfigPage() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Backup tab component
 // ─────────────────────────────────────────────────────────────────────────────
+type RestoreTestResult = {
+  success: boolean; duration_ms: number; tables_tested: number;
+  tables_ok: number; tables_failed: number;
+  details: Array<{ table: string; original_rows: number; restored_rows: number; ok: boolean }>;
+  error?: string;
+};
+
 function BackupTab() {
   const { toast } = useToast();
   const [backupEmail, setBackupEmail] = useState("");
   const [sendNowEmail, setSendNowEmail] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<RestoreTestResult | null>(null);
 
   const { data: cfg, isLoading: cfgLoading } = useQuery<{ enabled: boolean; email: string }>({
     queryKey: ["/api/admin/backup/config"],
@@ -573,6 +581,19 @@ function BackupTab() {
     mutationFn: (email: string) => apiRequest("POST", "/api/admin/backup/send-now", { email }),
     onSuccess: () => toast({ title: "Backup enviado", description: `Revisá la bandeja de ${sendNowEmail}` }),
     onError: (e: any) => toast({ title: "Error al enviar", description: e.message, variant: "destructive" }),
+  });
+
+  const restoreTestMut = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/backup/restore-test", {}),
+    onSuccess: (data: any) => {
+      setRestoreResult(data);
+      if (data.success) {
+        toast({ title: "Restore test exitoso", description: `${data.tables_ok} tablas verificadas correctamente` });
+      } else {
+        toast({ title: "Restore test con errores", description: data.error || `${data.tables_failed} tablas fallaron`, variant: "destructive" });
+      }
+    },
+    onError: (e: any) => toast({ title: "Error en restore test", description: e.message, variant: "destructive" }),
   });
 
   const handleDownload = async () => {
@@ -713,6 +734,91 @@ function BackupTab() {
                 </div>
               )}
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Restore test */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FlaskConical className="h-5 w-5 text-primary" />
+            Test de restore
+          </CardTitle>
+          <CardDescription>
+            Genera el backup actual, lo restaura en un schema temporal aislado y verifica que cada tabla tenga la misma cantidad de filas. No modifica ningún dato existente.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button
+            onClick={() => { setRestoreResult(null); restoreTestMut.mutate(); }}
+            disabled={restoreTestMut.isPending}
+            variant="outline"
+            data-testid="button-run-restore-test"
+          >
+            {restoreTestMut.isPending
+              ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Ejecutando test de restore...</>
+              : <><FlaskConical className="h-4 w-4 mr-2" />Ejecutar test de restore</>}
+          </Button>
+
+          {restoreTestMut.isPending && (
+            <p className="text-xs text-muted-foreground">Esto puede tardar unos segundos dependiendo del tamaño de la base de datos.</p>
+          )}
+
+          {restoreResult && (
+            <div className="space-y-3">
+              {/* Summary banner */}
+              <div className={`flex items-center gap-3 rounded-md px-4 py-3 text-sm font-medium ${
+                restoreResult.success
+                  ? "bg-green-50 dark:bg-green-950/30 text-green-800 dark:text-green-300 border border-green-200 dark:border-green-800"
+                  : "bg-red-50 dark:bg-red-950/30 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800"
+              }`}>
+                {restoreResult.success
+                  ? <CheckCircle2 className="h-5 w-5 shrink-0" />
+                  : <XCircle className="h-5 w-5 shrink-0" />}
+                <div>
+                  {restoreResult.success
+                    ? `Restore exitoso — ${restoreResult.tables_ok} tablas verificadas correctamente`
+                    : restoreResult.error
+                      ? `Error: ${restoreResult.error}`
+                      : `${restoreResult.tables_failed} tabla(s) con diferencias`}
+                  {restoreResult.duration_ms > 0 && (
+                    <span className="ml-2 font-normal opacity-70">({(restoreResult.duration_ms / 1000).toFixed(1)}s)</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Table details */}
+              {restoreResult.details.length > 0 && (
+                <div className="rounded-md border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-2 font-medium">Tabla</th>
+                        <th className="text-right px-3 py-2 font-medium">Original</th>
+                        <th className="text-right px-3 py-2 font-medium">Restauradas</th>
+                        <th className="text-center px-3 py-2 font-medium">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {restoreResult.details.map((d, i) => (
+                        <tr key={d.table} className={`border-b last:border-0 ${!d.ok ? "bg-red-50 dark:bg-red-950/20" : i % 2 === 0 ? "" : "bg-muted/20"}`}
+                          data-testid={`row-restore-${d.table}`}>
+                          <td className="px-3 py-1.5 font-mono">{d.table}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{d.original_rows.toLocaleString()}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{d.restored_rows.toLocaleString()}</td>
+                          <td className="px-3 py-1.5 text-center">
+                            {d.ok
+                              ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 inline" />
+                              : <XCircle className="h-3.5 w-3.5 text-red-600 inline" />}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

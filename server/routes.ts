@@ -1652,6 +1652,16 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/backup/restore-test", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { runRestoreTest } = await import("./backup");
+      const result = await runRestoreTest();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Error ejecutando restore test" });
+    }
+  });
+
   app.post("/api/help/chat", requireAuth, async (req, res) => {
     try {
       const { message, history } = req.body;
