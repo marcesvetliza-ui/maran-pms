@@ -6,6 +6,9 @@ import { setupAuth } from "./auth";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { logger } from "./logger";
+import { initSentry, Sentry } from "./sentry";
+
+initSentry();
 
 const REQUIRED_ENV_VARS = ["DATABASE_URL", "SESSION_SECRET"];
 const missingVars = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
@@ -243,6 +246,14 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
     if (status >= 500) {
       logger.error("Unhandled API error", err, { method: req.method, path: req.path, status });
+      if (process.env.SENTRY_DSN) {
+        Sentry.withScope((scope) => {
+          scope.setExtras({ method: req.method, path: req.path, status });
+          const user = req.user as any;
+          if (user) scope.setUser({ id: user.id, username: user.username, role: user.role });
+          Sentry.captureException(err);
+        });
+      }
     }
     res.status(status).json({ message });
   });
