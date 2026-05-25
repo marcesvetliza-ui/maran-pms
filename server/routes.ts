@@ -1662,6 +1662,111 @@ export async function registerRoutes(
     }
   });
 
+  // ── SECURITY / CREDENTIALS ─────────────────────────────────────────────────
+  app.get("/api/admin/security/status", requireRole(["admin"]), async (req, res) => {
+    try {
+      const rotationRows = await db.select().from(systemSettings)
+        .where(sql`key LIKE 'credential_rotated_%'`);
+      const rotationMap: Record<string, string> = {};
+      for (const r of rotationRows as any[]) {
+        rotationMap[r.key] = r.value;
+      }
+
+      const env = process.env;
+      const configured = (key: string) => !!(env[key] && env[key]!.trim().length > 0);
+
+      const credentials = [
+        {
+          name: "Clave de sesión",
+          key: "SESSION_SECRET",
+          configured: configured("SESSION_SECRET"),
+          last_rotated: rotationMap["credential_rotated_SESSION_SECRET"] ?? null,
+          risk: "alto" as const,
+          description: "Firma y valida todas las cookies de sesión del sistema. Si se expone, cualquiera puede suplantar usuarios.",
+          notes: "Recomendado: 96 caracteres aleatorios. Rotar cada 90 días.",
+          rotatable: true,
+        },
+        {
+          name: "Base de datos",
+          key: "DATABASE_URL",
+          configured: configured("DATABASE_URL"),
+          last_rotated: rotationMap["credential_rotated_DATABASE_URL"] ?? null,
+          risk: "alto" as const,
+          description: "Cadena de conexión completa a PostgreSQL con usuario y contraseña. Acceso total a todos los datos del hotel.",
+          notes: "Gestionado por Railway. Para rotar: Railway → Database → Reset credentials, luego actualizá la variable en el servicio.",
+          rotatable: false,
+        },
+        {
+          name: "Token de GitHub",
+          key: "GITHUB_PERSONAL_ACCESS_TOKEN",
+          configured: configured("GITHUB_PERSONAL_ACCESS_TOKEN"),
+          last_rotated: rotationMap["credential_rotated_GITHUB_PERSONAL_ACCESS_TOKEN"] ?? null,
+          risk: "medio" as const,
+          description: "Permite al sistema pushear código al repositorio. Con este token se puede modificar el código fuente en producción.",
+          notes: "Recomendado: token de grano fino (fine-grained) con acceso solo al repositorio maran-pms, permisos Contents: Write + Workflows: Write.",
+          rotatable: false,
+        },
+        {
+          name: "Sentry DSN (backend)",
+          key: "SENTRY_DSN",
+          configured: configured("SENTRY_DSN"),
+          last_rotated: rotationMap["credential_rotated_SENTRY_DSN"] ?? null,
+          risk: "bajo" as const,
+          description: "URL pública del proyecto en Sentry para enviar errores del servidor.",
+          notes: "Bajo riesgo — los DSN de Sentry son semipúblicos. Solo permite enviar eventos, no leer datos.",
+          rotatable: false,
+        },
+        {
+          name: "Sentry DSN (frontend)",
+          key: "VITE_SENTRY_DSN",
+          configured: configured("VITE_SENTRY_DSN"),
+          last_rotated: rotationMap["credential_rotated_VITE_SENTRY_DSN"] ?? null,
+          risk: "bajo" as const,
+          description: "URL pública del proyecto en Sentry para enviar errores del frontend (incluida en el bundle JS).",
+          notes: "Visible en el código fuente del navegador. Bajo riesgo.",
+          rotatable: false,
+        },
+        {
+          name: "Email / SMTP",
+          key: "SMTP_RESEND",
+          configured: true,
+          last_rotated: rotationMap["credential_rotated_SMTP_RESEND"] ?? null,
+          risk: "medio" as const,
+          description: "Credenciales para envío de emails transaccionales (confirmaciones, recordatorios, backup). Se gestionan desde Correo & Backup.",
+          notes: "Gestionado internamente. Para rotar: Configuración → Correo & Backup → SMTP.",
+          rotatable: false,
+        },
+      ];
+
+      const configuredCount = credentials.filter(c => c.configured).length;
+      const needsRotation = credentials.filter(c => {
+        const days = c.last_rotated
+          ? Math.floor((Date.now() - new Date(c.last_rotated).getTime()) / 86400000)
+          : null;
+        return days === null || days > 180;
+      }).length;
+
+      res.json({ credentials, total: credentials.length, configured: configuredCount, needs_rotation: needsRotation });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/security/rotate-session", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { randomBytes } = await import("crypto");
+      const newSecret = randomBytes(48).toString("hex");
+      const now = new Date().toISOString();
+      await db.execute(sql`
+        INSERT INTO system_settings (key, value) VALUES ('credential_rotated_SESSION_SECRET', ${now})
+        ON CONFLICT (key) DO UPDATE SET value = ${now}
+      `);
+      res.json({ new_secret: newSecret, rotated_at: now });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/help/chat", requireAuth, async (req, res) => {
     try {
       const { message, history } = req.body;
