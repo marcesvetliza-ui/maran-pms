@@ -223,6 +223,26 @@ app.use((req, res, next) => {
     console.error("groups master_folio_config migration error (non-blocking):", err);
   }
 
+  // Migrate: create backup_logs table
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS backup_logs (
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        destination TEXT,
+        file_size_bytes INTEGER,
+        duration_ms INTEGER,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      )
+    `);
+  } catch (err) {
+    console.error("backup_logs migration error (non-blocking):", err);
+  }
+
   await registerRoutes(httpServer, app);
 
   try {

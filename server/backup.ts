@@ -1,9 +1,27 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import nodemailer from "nodemailer";
-import { emailConfig } from "@shared/schema";
+import { emailConfig, backupLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { systemSettings } from "@shared/schema";
+
+async function logBackup(entry: {
+  type: string; status: string; destination?: string;
+  fileSizeBytes?: number; durationMs?: number; errorMessage?: string;
+}) {
+  try {
+    await db.insert(backupLogs).values({
+      type: entry.type,
+      status: entry.status,
+      destination: entry.destination ?? null,
+      fileSizeBytes: entry.fileSizeBytes ?? null,
+      durationMs: entry.durationMs ?? null,
+      errorMessage: entry.errorMessage ?? null,
+    });
+    // Auto-purge entries older than 90 days
+    await db.execute(sql`DELETE FROM backup_logs WHERE created_at < NOW() - INTERVAL '90 days'`);
+  } catch (_) {}
+}
 
 function backupLog(msg: string) {
   const t = new Date().toLocaleTimeString("en-US", {
@@ -160,10 +178,12 @@ export async function runRestoreTest(): Promise<RestoreTestResult> {
 }
 
 // ─── Send backup by email ─────────────────────────────────────────────────────
-export async function sendBackupByEmail(targetEmail: string): Promise<void> {
+export async function sendBackupByEmail(targetEmail: string, type: string = "manual_email"): Promise<void> {
+  const start = Date.now();
   const cfgRows = await db.select().from(emailConfig).limit(1);
   const cfg = cfgRows[0];
   if (!cfg || !cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass) {
+    await logBackup({ type, status: "error", destination: targetEmail, errorMessage: "SMTP no configurado" });
     throw new Error("SMTP no configurado. Configurá el servidor de correo en Configuración > Emails.");
   }
 
@@ -179,19 +199,24 @@ export async function sendBackupByEmail(targetEmail: string): Promise<void> {
     .replace(/\//g, "-");
   const filename = `maran-backup-${dateStr}.sql`;
 
-  await transport.sendMail({
-    from: `"${cfg.fromName || "Maran Suite System"}" <${cfg.fromEmail || cfg.smtpUser}>`,
-    to: targetEmail,
-    subject: `[Maran] Backup automático de base de datos — ${dateStr}`,
-    text: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las 03:00 hs.\n\nEste email es automático, no respondas.`,
-    attachments: [
-      {
-        filename,
-        content: sqlBuffer,
-        contentType: "application/sql",
-      },
-    ],
-  });
+  try {
+    await transport.sendMail({
+      from: `"${cfg.fromName || "Maran Suite System"}" <${cfg.fromEmail || cfg.smtpUser}>`,
+      to: targetEmail,
+      subject: `[Maran] Backup automático de base de datos — ${dateStr}`,
+      text: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las 03:00 hs.\n\nEste email es automático, no respondas.`,
+      attachments: [{ filename, content: sqlBuffer, contentType: "application/sql" }],
+    });
+    await logBackup({ type, status: "success", destination: targetEmail, fileSizeBytes: sqlBuffer.length, durationMs: Date.now() - start });
+  } catch (err: any) {
+    await logBackup({ type, status: "error", destination: targetEmail, durationMs: Date.now() - start, errorMessage: err.message });
+    throw err;
+  }
+}
+
+// ─── Log manual download ───────────────────────────────────────────────────────
+export async function logManualDownload(fileSizeBytes: number): Promise<void> {
+  await logBackup({ type: "manual_download", status: "success", fileSizeBytes });
 }
 
 // ─── Scheduler — corre a las 03:00 hora Argentina ────────────────────────────
@@ -231,11 +256,12 @@ export function setupBackupScheduler() {
           return;
         }
 
-        await sendBackupByEmail(targetEmail);
+        await sendBackupByEmail(targetEmail, "scheduled");
         backupLog(`Backup enviado exitosamente a ${targetEmail}`);
       }
     } catch (err: any) {
       backupLog(`Error en backup automático: ${err.message}`);
+      await logBackup({ type: "scheduled", status: "error", errorMessage: err.message });
     }
   }, 60_000);
 

@@ -2478,6 +2478,19 @@ export const insertLoanItemSchema = createInsertSchema(loanItems).omit({ id: tru
 export type InsertLoanItem = z.infer<typeof insertLoanItemSchema>;
 export type LoanItem = typeof loanItems.$inferSelect;
 
+// ==================== BACKUP LOGS ====================
+export const backupLogs = pgTable("backup_logs", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(), // "scheduled" | "manual_email" | "manual_download" | "restore_test"
+  status: text("status").notNull(), // "success" | "error" | "skipped"
+  destination: text("destination"), // email address or null
+  fileSizeBytes: integer("file_size_bytes"),
+  durationMs: integer("duration_ms"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type BackupLog = typeof backupLogs.$inferSelect;
+
 export const itemLoans = pgTable("item_loans", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   loanItemId: varchar("loan_item_id").notNull().references(() => loanItems.id),

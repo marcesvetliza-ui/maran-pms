@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Mail, Send, CheckCircle2, XCircle, Clock, Star, MessageSquare, Eye,
   RefreshCw, Settings2, BarChart3, AlertTriangle, Zap, Server,
-  Database, Download, MailCheck, ShieldCheck, FlaskConical,
+  Database, Download, MailCheck, ShieldCheck, FlaskConical, History,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -556,6 +556,26 @@ type RestoreTestResult = {
   error?: string;
 };
 
+type BackupLog = {
+  id: number; type: string; status: string; destination: string | null;
+  fileSizeBytes: number | null; durationMs: number | null;
+  errorMessage: string | null; createdAt: string;
+};
+
+const BACKUP_TYPE_LABEL: Record<string, string> = {
+  scheduled: "Automático",
+  manual_email: "Email manual",
+  manual_download: "Descarga",
+  restore_test: "Test de restore",
+};
+
+function formatBytes(n: number | null) {
+  if (!n) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
 function BackupTab() {
   const { toast } = useToast();
   const [backupEmail, setBackupEmail] = useState("");
@@ -581,6 +601,11 @@ function BackupTab() {
     mutationFn: (email: string) => apiRequest("POST", "/api/admin/backup/send-now", { email }),
     onSuccess: () => toast({ title: "Backup enviado", description: `Revisá la bandeja de ${sendNowEmail}` }),
     onError: (e: any) => toast({ title: "Error al enviar", description: e.message, variant: "destructive" }),
+  });
+
+  const { data: logsData, refetch: refetchLogs2 } = useQuery<{ logs: BackupLog[]; hours_since_last_success: number | null }>({
+    queryKey: ["/api/admin/backup/logs"],
+    refetchInterval: 60_000,
   });
 
   const restoreTestMut = useMutation({
@@ -818,6 +843,98 @@ function BackupTab() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Historial de backups */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <History className="h-5 w-5 text-primary" />
+              Historial de backups
+            </CardTitle>
+            <Button variant="ghost" size="icon" onClick={() => refetchLogs2()}
+              data-testid="button-refresh-backup-logs" title="Actualizar">
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </div>
+          <CardDescription>
+            Últimas 30 operaciones — los registros se conservan 90 días automáticamente.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {/* Alerta si el último backup tiene más de 25h */}
+          {logsData && (logsData.hours_since_last_success === null || logsData.hours_since_last_success > 25) && (
+            <div className="flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30 dark:border-yellow-700 px-4 py-2.5 text-sm text-yellow-800 dark:text-yellow-200">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <span>
+                {logsData.hours_since_last_success === null
+                  ? "Aún no hay backups registrados."
+                  : `El último backup exitoso fue hace ${Math.round(logsData.hours_since_last_success)} horas.`}
+                {" "}Se recomienda que el backup automático corra diariamente.
+              </span>
+            </div>
+          )}
+          {logsData && logsData.logs.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No hay registros de backups aún. El historial se llenará con los próximos backups.
+            </p>
+          )}
+          {logsData && logsData.logs.length > 0 && (
+            <div className="overflow-x-auto rounded-md border" data-testid="table-backup-logs">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="px-3 py-2 text-left font-medium">Fecha</th>
+                    <th className="px-3 py-2 text-left font-medium">Tipo</th>
+                    <th className="px-3 py-2 text-left font-medium">Estado</th>
+                    <th className="px-3 py-2 text-left font-medium">Destino</th>
+                    <th className="px-3 py-2 text-right font-medium">Tamaño</th>
+                    <th className="px-3 py-2 text-right font-medium">Duración</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {logsData.logs.map(log => (
+                    <tr key={log.id} data-testid={`row-backup-log-${log.id}`}
+                      className="hover:bg-muted/30 transition-colors">
+                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                        {new Date(log.createdAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "short" })}
+                      </td>
+                      <td className="px-3 py-2">
+                        {BACKUP_TYPE_LABEL[log.type] ?? log.type}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                          log.status === "success"
+                            ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
+                            : log.status === "error"
+                            ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
+                            : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400"
+                        }`}>
+                          {log.status === "success" ? "✓ OK" : log.status === "error" ? "✗ Error" : log.status}
+                        </span>
+                        {log.errorMessage && (
+                          <span className="ml-2 text-xs text-muted-foreground" title={log.errorMessage}>
+                            {log.errorMessage.length > 40 ? log.errorMessage.slice(0, 40) + "…" : log.errorMessage}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {log.destination ?? "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {formatBytes(log.fileSizeBytes)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                        {log.durationMs ? `${(log.durationMs / 1000).toFixed(1)}s` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </CardContent>

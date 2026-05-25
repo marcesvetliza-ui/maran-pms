@@ -1598,15 +1598,32 @@ export async function registerRoutes(
   // ── BACKUP ────────────────────────────────────────────────────────────────
   app.get("/api/admin/backup/download", requireRole(["admin"]), async (req, res) => {
     try {
-      const { generateBackupSql } = await import("./backup");
+      const { generateBackupSql, logManualDownload } = await import("./backup");
       const buf = await generateBackupSql();
       const dateStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
         .replace(/\//g, "-");
       res.setHeader("Content-Type", "application/octet-stream");
       res.setHeader("Content-Disposition", `attachment; filename="maran-backup-${dateStr}.sql"`);
+      await logManualDownload(buf.length);
       res.send(buf);
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Error generando backup" });
+    }
+  });
+
+  app.get("/api/admin/backup/logs", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { backupLogs } = await import("@shared/schema");
+      const { desc } = await import("drizzle-orm");
+      const rows = await db.select().from(backupLogs).orderBy(desc(backupLogs.createdAt)).limit(30);
+      // Compute last successful backup time
+      const lastSuccess = rows.find(r => r.status === "success" && r.type !== "restore_test");
+      const hoursSinceLastSuccess = lastSuccess
+        ? (Date.now() - new Date(lastSuccess.createdAt).getTime()) / 3600000
+        : null;
+      res.json({ logs: rows, hours_since_last_success: hoursSinceLastSuccess });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 
