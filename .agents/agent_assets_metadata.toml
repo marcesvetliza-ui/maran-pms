@@ -12,3 +12,9 @@ id = "v3H5Gs1FFnsSAaECOL8PT"
 uri = "file://maran-suite-codigo.zip"
 type = "unspecified"
 title = "Maran Suite System — Código Fuente Completo"
+
+[[outputs]]
+id = "QZ5IRql4uqd0EAuNzkol1"
+uri = "file://HANDOFF_TECNICO.md"
+type = "text"
+title = "Documento de Transferencia Técnica — Maran Suite System"
