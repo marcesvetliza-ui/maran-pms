@@ -188,6 +188,11 @@ function AppLayout() {
               <ThemeToggle />
             </div>
           </header>
+            {import.meta.env.VITE_ENVIRONMENT === "staging" && (
+            <div className="bg-amber-400 text-amber-950 text-xs font-semibold text-center py-1 px-4 shrink-0 flex items-center justify-center gap-2">
+              <span>⚠ ENTORNO STAGING — los cambios aquí NO afectan producción</span>
+            </div>
+          )}
           <main className="flex-1 overflow-y-auto">
             <ErrorBoundary>
               <Router />

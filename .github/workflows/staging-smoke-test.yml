@@ -1,0 +1,77 @@
+name: Smoke Test — Staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+    inputs:
+      staging_url:
+        description: "URL del entorno staging (ej: https://maran-staging.up.railway.app)"
+        required: false
+        default: ""
+
+jobs:
+  smoke-test:
+    name: Verificar sistema en staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Esperar deploy de Railway staging (90s)
+        run: sleep 90
+
+      - name: Determinar URL de staging
+        id: url
+        run: |
+          URL="${{ github.event.inputs.staging_url }}"
+          if [ -z "$URL" ]; then
+            URL="${{ secrets.STAGING_URL }}"
+          fi
+          if [ -z "$URL" ]; then
+            echo "::error::No se configuró STAGING_URL. Agregá el secret en GitHub → Settings → Secrets → STAGING_URL"
+            exit 1
+          fi
+          echo "staging_url=$URL" >> $GITHUB_OUTPUT
+          echo "Staging URL: $URL"
+
+      - name: Esperar que staging responda
+        run: |
+          URL="${{ steps.url.outputs.staging_url }}"
+          echo "Verificando que $URL responde..."
+          for i in $(seq 1 15); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/api/health" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Staging respondiendo (intento $i)"
+              break
+            fi
+            echo "Intento $i — HTTP $STATUS, reintentando en 10s..."
+            sleep 10
+          done
+
+      - name: Verificar entorno staging en health
+        run: |
+          URL="${{ steps.url.outputs.staging_url }}"
+          RESPONSE=$(curl -s "$URL/api/health")
+          echo "Health response: $RESPONSE"
+          ENV=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('environment',''))" 2>/dev/null || echo "")
+          if [ "$ENV" = "staging" ]; then
+            echo "✓ Entorno confirmado como staging"
+          else
+            echo "::warning::El campo 'environment' del health no es 'staging' (valor: '$ENV'). Verificá que ENVIRONMENT=staging está configurado en Railway staging."
+          fi
+
+      - name: Correr smoke tests contra staging
+        run: node scripts/smoke-test.js ${{ steps.url.outputs.staging_url }} admin ${{ secrets.SMOKE_TEST_PASSWORD }}
+
+      - name: Notificar resultado
+        if: failure()
+        run: |
+          echo "::error::❌ Smoke test falló en staging (${{ steps.url.outputs.staging_url }}) — NO mergear a main hasta resolver"

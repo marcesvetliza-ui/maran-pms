@@ -67,9 +67,11 @@ export async function registerRoutes(
       dbStatus = "error";
     }
     const status = dbStatus === "ok" ? "ok" : "degraded";
+    const environment = process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
     res.status(dbStatus === "ok" ? 200 : 503).json({
       status,
       database: dbStatus,
+      environment,
       version: "1.0.0",
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
