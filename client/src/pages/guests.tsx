@@ -151,7 +151,20 @@ function GuestFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
+    onError: async (error: any) => {
+      // 409 = duplicate document number — show which existing guest was found
+      try {
+        const body = await error?.response?.json?.();
+        if (body?.error === "duplicate" && body?.existing) {
+          const ex = body.existing;
+          toast({
+            title: "Huésped ya registrado",
+            description: `${ex.lastName} ${ex.firstName} ya existe con ese documento. Buscalo en la lista y editalo si necesitás actualizar sus datos.`,
+            variant: "destructive",
+          });
+          return;
+        }
+      } catch (_) { /* ignore parse errors */ }
       toast({
         title: "Error",
         description: "No se pudo guardar el huésped. Intente nuevamente.",

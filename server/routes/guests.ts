@@ -1,6 +1,9 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
+import { db } from "../db";
+import { guests } from "../../shared/schema";
+import { eq } from "drizzle-orm";
 
 export function registerGuestsRoutes(app: Express) {
   // Companies
@@ -384,6 +387,22 @@ export function registerGuestsRoutes(app: Express) {
 
   app.post("/api/guests", async (req, res) => {
     try {
+      const { documentNumber, documentType } = req.body;
+      // If a document number is provided, check for an existing guest to avoid duplicates.
+      if (documentNumber?.trim()) {
+        const [existing] = await db
+          .select()
+          .from(guests)
+          .where(eq(guests.documentNumber, documentNumber.trim()))
+          .limit(1);
+        if (existing) {
+          return res.status(409).json({
+            error: "duplicate",
+            message: `Ya existe un huésped con ese número de documento (${documentType || "DOC"}: ${documentNumber}).`,
+            existing,
+          });
+        }
+      }
       const guest = await storage.createGuest(req.body);
       res.status(201).json(guest);
     } catch (error) {

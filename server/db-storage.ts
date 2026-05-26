@@ -1338,10 +1338,21 @@ export class DatabaseStorage implements IStorage {
     const [room] = await db.select().from(rooms).where(eq(rooms.id, roomId));
     if (!room) return undefined;
 
-    const guest = await this.createGuest({
-      firstName: guestFirstName,
-      lastName: guestLastName,
-    });
+    // Re-use existing guest if same first+last name already exists (case-insensitive).
+    // This prevents duplicate records when the same passenger is assigned to multiple
+    // rooms within a group (or across groups).
+    let guest: Guest;
+    if (guestFirstName.trim()) {
+      const [existing] = await db.select().from(guests).where(
+        and(
+          ilike(guests.firstName, guestFirstName.trim()),
+          ilike(guests.lastName, guestLastName.trim())
+        )
+      ).limit(1);
+      guest = existing ?? await this.createGuest({ firstName: guestFirstName, lastName: guestLastName });
+    } else {
+      guest = await this.createGuest({ firstName: guestFirstName, lastName: guestLastName });
+    }
 
     const blocks = await this.getGroupBlocks(groupId);
     const matchingBlock = blocks.find(b => b.roomTypeId === room.roomTypeId);
