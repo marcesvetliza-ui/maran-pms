@@ -183,7 +183,7 @@ export function registerRoomsRoutes(app: Express) {
       const rooms = await storage.getRooms();
       const allReservations = await storage.getReservations();
 
-      let filtered = rooms.filter(r => r.status !== "maintenance" && r.status !== "blocked");
+      let filtered = rooms.filter(r => r.status !== "blocked");
       if (roomTypeId) {
         filtered = filtered.filter(r => r.roomTypeId === roomTypeId);
       }
