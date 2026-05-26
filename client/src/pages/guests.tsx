@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/App";
 import {
   Users,
   Plus,
@@ -13,6 +14,8 @@ import {
   MapPin,
   FileText,
   Car,
+  AlertTriangle,
+  Wrench,
   Heart,
   Calendar,
   ChevronDown,
@@ -981,13 +984,33 @@ function GuestDetailDialog({
 
 export default function GuestsPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedGuest, setSelectedGuest] = useState<Guest | undefined>();
+  const [showPhantomResult, setShowPhantomResult] = useState(false);
 
   const { data: guests, isLoading } = useQuery<Guest[]>({
     queryKey: ["/api/guests"],
+  });
+
+  const { data: phantomData, refetch: refetchPhantoms } = useQuery<{ phantoms: any[]; count: number }>({
+    queryKey: ["/api/admin/guests/phantom"],
+    enabled: isAdmin,
+  });
+
+  const cleanupPhantomMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/guests/cleanup-phantom"),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({ title: data.message || "Limpieza completada" });
+      refetchPhantoms();
+      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+      setShowPhantomResult(false);
+    },
+    onError: () => toast({ title: "Error al limpiar huéspedes", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -1042,6 +1065,36 @@ export default function GuestsPage() {
           Nuevo Huésped
         </Button>
       </div>
+
+      {/* Admin: Phantom Guest Cleanup */}
+      {isAdmin && phantomData && phantomData.count > 0 && (
+        <Card className="border-amber-300 bg-amber-50/50 dark:border-amber-700 dark:bg-amber-950/20">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-amber-900 dark:text-amber-300">
+                  {phantomData.count} huésped(es) con nombre duplicado detectados
+                </p>
+                <p className="text-sm text-amber-700 dark:text-amber-400 mt-0.5">
+                  Estos fueron creados por el sistema al asignar habitaciones a grupos sin especificar los pasajeros. Se marcarán como "Por Confirmar".
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 border-amber-400 text-amber-800 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300"
+                onClick={() => cleanupPhantomMutation.mutate()}
+                disabled={cleanupPhantomMutation.isPending}
+                data-testid="button-cleanup-phantom-guests"
+              >
+                <Wrench className="mr-2 h-3 w-3" />
+                {cleanupPhantomMutation.isPending ? "Limpiando..." : "Limpiar"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Search */}
       <Card>

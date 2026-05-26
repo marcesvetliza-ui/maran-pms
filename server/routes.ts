@@ -1552,6 +1552,73 @@ export async function registerRoutes(
     }
   });
 
+  // ── GUEST UPDATE ────────────────────────────────────────────────────────────
+  app.patch("/api/guests/:id", requireAuth, async (req, res) => {
+    try {
+      const { firstName, lastName, email, phone, documentType, documentNumber, nationality, notes } = req.body;
+      const updated = await storage.updateGuest(req.params.id, {
+        ...(firstName !== undefined && { firstName }),
+        ...(lastName !== undefined && { lastName }),
+        ...(email !== undefined && { email }),
+        ...(phone !== undefined && { phone }),
+        ...(documentType !== undefined && { documentType }),
+        ...(documentNumber !== undefined && { documentNumber }),
+        ...(nationality !== undefined && { nationality }),
+        ...(notes !== undefined && { notes }),
+      });
+      if (!updated) return res.status(404).json({ error: "Huésped no encontrado" });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── PHANTOM GUEST CLEANUP ───────────────────────────────────────────────────
+  // Find guests where first_name === last_name (created erroneously by group assignment)
+  // that have no real contact data and only group reservations.
+  app.get("/api/admin/guests/phantom", requireRole(["admin"]), async (req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT g.id, g.first_name, g.last_name, g.email, g.phone,
+               COUNT(r.id)::int as reservation_count,
+               COUNT(r.id) FILTER (WHERE r.reservation_code LIKE 'G%')::int as group_res_count
+        FROM guests g
+        LEFT JOIN reservations r ON r.guest_id = g.id
+        WHERE g.first_name = g.last_name
+          AND (g.email IS NULL OR g.email = '')
+          AND (g.phone IS NULL OR g.phone = '')
+          AND (g.document_number IS NULL OR g.document_number = '')
+        GROUP BY g.id, g.first_name, g.last_name, g.email, g.phone
+        ORDER BY g.first_name
+      `);
+      res.json({ phantoms: result.rows, count: result.rows.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/guests/cleanup-phantom", requireRole(["admin"]), async (req, res) => {
+    try {
+      // Rename phantom guests to "Por confirmar" so they're recognizable but don't flood the list
+      const result = await db.execute(sql`
+        UPDATE guests
+        SET first_name = 'Por', last_name = 'Confirmar'
+        WHERE first_name = last_name
+          AND (email IS NULL OR email = '')
+          AND (phone IS NULL OR phone = '')
+          AND (document_number IS NULL OR document_number = '')
+          AND id IN (
+            SELECT DISTINCT r.guest_id FROM reservations r
+            WHERE r.guest_id IS NOT NULL AND r.reservation_code LIKE 'G%'
+          )
+        RETURNING id
+      `);
+      res.json({ fixed: result.rows.length, message: `${result.rows.length} huéspedes marcados como "Por Confirmar"` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/admin/clean-data", requireRole(["admin"]), async (req, res) => {
     try {
       const { sql } = await import("drizzle-orm");

@@ -360,7 +360,7 @@ function AssignBlockDialog({
     firstName: string;
     lastName: string;
   }>>(
-    Array.from({ length: pending }, () => ({ roomId: "", firstName: group.name, lastName: group.name }))
+    Array.from({ length: pending }, () => ({ roomId: "", firstName: "", lastName: "" }))
   );
 
   const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
@@ -386,6 +386,15 @@ function AssignBlockDialog({
     const validRows = rows.filter(r => r.roomId);
     if (validRows.length === 0) {
       toast({ title: "Seleccioná al menos una habitación", variant: "destructive" });
+      return;
+    }
+    const rowsWithoutName = validRows.filter(r => !r.firstName.trim());
+    if (rowsWithoutName.length > 0) {
+      toast({
+        title: "Faltan nombres de pasajeros",
+        description: `Completá el nombre del pasajero para cada habitación seleccionada. Si aún no lo tenés, escribí "Por confirmar".`,
+        variant: "destructive",
+      });
       return;
     }
 
@@ -450,6 +459,10 @@ function AssignBlockDialog({
               return ` Check-in: ${fmt(defaultCheckIn)} | Check-out: ${fmt(defaultCheckOut)}`;
             })()}
           </DialogDescription>
+          <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2 text-xs text-blue-800 dark:text-blue-200 mt-1">
+            <span className="mt-0.5">ℹ️</span>
+            <span>Completá el <strong>nombre y apellido del pasajero real</strong> que ocupará cada habitación. Si aún no lo tenés, escribí "Por confirmar".</span>
+          </div>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
@@ -534,7 +547,7 @@ function AssignBlockDialog({
                   variant="ghost"
                   size="sm"
                   className="text-xs"
-                  onClick={() => setRows([...rows, { roomId: "", firstName: group.name, lastName: group.name }])}
+                  onClick={() => setRows([...rows, { roomId: "", firstName: "", lastName: "" }])}
                   data-testid="button-add-assignment-row"
                 >
                   <Plus className="h-3 w-3 mr-1" />
@@ -629,6 +642,9 @@ export default function GroupDetailPage() {
   const [editingRate, setEditingRate] = useState("");
   const [editingLateCheckout, setEditingLateCheckout] = useState(false);
   const [editingLateCheckoutTime, setEditingLateCheckoutTime] = useState("");
+  const [editingPassengerRes, setEditingPassengerRes] = useState<ReservationWithDetails | null>(null);
+  const [editPassengerFirst, setEditPassengerFirst] = useState("");
+  const [editPassengerLast, setEditPassengerLast] = useState("");
 
   // Unassign confirmation
   const [unassignResId, setUnassignResId] = useState<string | null>(null);
@@ -972,6 +988,17 @@ export default function GroupDetailPage() {
       setMasterPaymentReference("");
     },
     onError: () => toast({ title: "Error al registrar pago maestro", variant: "destructive" }),
+  });
+
+  const updatePassengerMutation = useMutation({
+    mutationFn: ({ guestId, firstName, lastName }: { guestId: string; firstName: string; lastName: string }) =>
+      apiRequest("PATCH", `/api/guests/${guestId}`, { firstName, lastName }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      toast({ title: "Nombre de pasajero actualizado" });
+      setEditingPassengerRes(null);
+    },
+    onError: () => toast({ title: "Error al actualizar el nombre", variant: "destructive" }),
   });
 
   const loadInvoice = async () => {
@@ -1449,11 +1476,28 @@ export default function GroupDetailPage() {
                       <TableRow 
                         key={res.id} 
                         data-testid={`row-reservation-${res.id}`}
-                        className="cursor-pointer hover:bg-accent"
+                        className="group/row cursor-pointer hover:bg-accent"
                         onClick={() => navigate(`/reservations?view=${res.id}&returnTo=/groups/${groupId}`)}
                       >
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
-                        <TableCell>{res.guest?.lastName} {res.guest?.firstName}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <span>{res.guest?.lastName} {res.guest?.firstName}</span>
+                            <button
+                              className="opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
+                              title="Editar nombre del pasajero"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingPassengerRes(res);
+                                setEditPassengerFirst(res.guest?.firstName || "");
+                                setEditPassengerLast(res.guest?.lastName || "");
+                              }}
+                              data-testid={`button-edit-passenger-${res.id}`}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </TableCell>
                         <TableCell>{res.room?.roomNumber}</TableCell>
                         <TableCell className="text-sm">
                           {fmtDate(res.checkInDate)} - {fmtDate(res.checkOutDate)}
@@ -2808,6 +2852,55 @@ export default function GroupDetailPage() {
       </AlertDialog>
 
       {/* ─── EDITAR TARIFA + LATE CHECKOUT ─── */}
+      {/* Editar nombre de pasajero */}
+      <Dialog open={!!editingPassengerRes} onOpenChange={(open) => { if (!open) setEditingPassengerRes(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar pasajero</DialogTitle>
+            <DialogDescription>
+              Hab. {editingPassengerRes?.room?.roomNumber} — {editingPassengerRes?.reservationCode}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="space-y-1.5">
+              <Label>Nombre</Label>
+              <Input
+                value={editPassengerFirst}
+                onChange={e => setEditPassengerFirst(e.target.value)}
+                placeholder="Nombre"
+                data-testid="input-edit-passenger-first"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Apellido</Label>
+              <Input
+                value={editPassengerLast}
+                onChange={e => setEditPassengerLast(e.target.value)}
+                placeholder="Apellido"
+                data-testid="input-edit-passenger-last"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingPassengerRes(null)}>Cancelar</Button>
+            <Button
+              disabled={!editPassengerFirst.trim() || updatePassengerMutation.isPending}
+              onClick={() => {
+                if (!editingPassengerRes?.guest?.id) return;
+                updatePassengerMutation.mutate({
+                  guestId: editingPassengerRes.guest.id,
+                  firstName: editPassengerFirst.trim(),
+                  lastName: editPassengerLast.trim(),
+                });
+              }}
+              data-testid="button-save-passenger"
+            >
+              {updatePassengerMutation.isPending ? "Guardando..." : "Guardar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!editingRateRes} onOpenChange={(open) => { if (!open) { setEditingRateRes(null); setEditingRate(""); setEditingLateCheckout(false); setEditingLateCheckoutTime(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
