@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { getLocalToday, formatDateAR, toArgentinaDateStr } from "@/lib/utils";
@@ -3427,6 +3427,11 @@ export default function ReservationsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailReturnTo, setDetailReturnTo] = useState<string | null>(null);
+  const detailReturnToRef = useRef<string | null>(null);
+  const setDetailReturnToSync = (val: string | null) => {
+    detailReturnToRef.current = val;
+    setDetailReturnTo(val);
+  };
   const [editReturnTo, setEditReturnTo] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
@@ -3550,7 +3555,7 @@ export default function ReservationsPage() {
       .then((res: ReservationWithDetails | null) => {
         if (res) {
           setSelectedReservation(res);
-          setDetailReturnTo(returnTo);
+          setDetailReturnToSync(returnTo);
           setDetailDialogOpen(true);
         }
       })
@@ -4258,7 +4263,7 @@ export default function ReservationsPage() {
               .then(updated => {
                 if (updated) {
                   setSelectedReservation(updated);
-                  setDetailReturnTo(savedReturnTo);
+                  setDetailReturnToSync(savedReturnTo);
                   setDetailDialogOpen(true);
                 } else {
                   setSelectedReservation(undefined);
@@ -4278,15 +4283,19 @@ export default function ReservationsPage() {
           open={detailDialogOpen}
           onOpenChange={(open) => {
             setDetailDialogOpen(open);
-            if (!open && detailReturnTo) {
-              navigate(detailReturnTo);
+            if (!open && detailReturnToRef.current) {
+              const returnUrl = detailReturnToRef.current;
+              detailReturnToRef.current = null;
               setDetailReturnTo(null);
+              navigate(returnUrl);
             }
           }}
           onCancel={() => setCancelDialogOpen(true)}
           onEdit={() => {
-            setEditReturnTo(detailReturnTo);
+            const savedReturnTo = detailReturnToRef.current;
+            detailReturnToRef.current = null;
             setDetailReturnTo(null);
+            setEditReturnTo(savedReturnTo);
             setDetailDialogOpen(false);
             setDialogOpen(true);
           }}

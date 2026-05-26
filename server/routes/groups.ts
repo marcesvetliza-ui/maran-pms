@@ -928,7 +928,7 @@ export function registerGroupsRoutes(app: Express) {
       doc.on("end", () => {
         const pdfBuffer = Buffer.concat(chunks);
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename="folio-maestro-${group.groupCode}.pdf"`);
+        res.setHeader("Content-Disposition", `attachment; filename="folio-maestro-${group.groupCode}.pdf"`);
         res.send(pdfBuffer);
       });
 

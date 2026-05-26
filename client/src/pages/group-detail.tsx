@@ -1326,18 +1326,27 @@ export default function GroupDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className={`text-3xl font-bold ${group.assignedRooms > group.totalRooms ? "text-destructive" : ""}`}>
+              <span className={`text-3xl font-bold ${group.blocks.length > 0 && group.assignedRooms > group.totalRooms ? "text-destructive" : ""}`}>
                 {group.assignedRooms}
               </span>
-              <span className="text-muted-foreground">/ {group.totalRooms} asignadas</span>
+              {group.blocks.length > 0 ? (
+                <span className="text-muted-foreground">/ {group.totalRooms} bloqueadas</span>
+              ) : (
+                <span className="text-muted-foreground">asignadas</span>
+              )}
             </div>
-            {group.assignedRooms > group.totalRooms && (
+            {group.blocks.length > 0 && group.assignedRooms > group.totalRooms && (
               <div className="mt-1 flex items-center gap-1 text-sm text-destructive font-medium">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 <span>Excede el bloque en {group.assignedRooms - group.totalRooms} habitación(es). Agregue un bloque adicional.</span>
               </div>
             )}
-            {group.totalRooms > group.assignedRooms && (
+            {group.blocks.length === 0 && group.assignedRooms === 0 && (
+              <div className="mt-1 text-sm text-muted-foreground">
+                Sin habitaciones asignadas aún.
+              </div>
+            )}
+            {group.blocks.length > 0 && group.totalRooms > group.assignedRooms && (
               <div className="mt-1 flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 <span>{group.totalRooms - group.assignedRooms} habitación(es) sin asignar</span>
@@ -1680,7 +1689,9 @@ export default function GroupDetailPage() {
                             const a = document.createElement("a");
                             a.href = `/api/folios/group/${groupId}/pdf`;
                             a.download = `folio-maestro-${group?.name || groupId}.pdf`;
+                            document.body.appendChild(a);
                             a.click();
+                            document.body.removeChild(a);
                           }}
                           data-testid="button-folio-pdf"
                         >
