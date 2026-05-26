@@ -76,7 +76,7 @@ function DraggableReservationCell({
   children: React.ReactNode;
   className: string;
   style?: React.CSSProperties;
-  onClick: () => void;
+  onClick: (e?: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   "data-testid"?: string;
 }) {
@@ -95,7 +95,7 @@ function DraggableReservationCell({
       style={{ touchAction: "none", ...style }}
     >
       <div
-        onClick={() => { if (!isDragging) onClick(); }}
+        onClick={(e) => { if (!isDragging) onClick(e); }}
         data-testid={testId}
         className="w-full h-full"
       >
