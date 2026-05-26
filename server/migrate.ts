@@ -6,7 +6,19 @@ import { sql } from "drizzle-orm";
 export async function runMigrations() {
   try {
     logger.info("Ejecutando migraciones pendientes...");
-    await migrate(db, { migrationsFolder: "./migrations" });
+
+    // Wrap migrate() with a 15-second timeout.
+    // In production the advisory lock can be left stuck by a prior failed deploy,
+    // causing migrate() to hang indefinitely and blocking port 5000 from opening.
+    // All incremental schema changes use idempotent ALTER TABLE / CREATE TABLE IF NOT EXISTS
+    // below, so skipping drizzle's lock-based migrate is safe on an existing DB.
+    await Promise.race([
+      migrate(db, { migrationsFolder: "./migrations" }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("migrate() timeout after 15s — possible advisory lock on DB")), 15_000)
+      ),
+    ]);
+
     logger.info("Migraciones completadas");
   } catch (err: any) {
     // If tables already exist this is an existing DB — not a real error.
@@ -14,10 +26,10 @@ export async function runMigrations() {
     // because drizzle tracks applied migrations in __drizzle_migrations.
     if (err?.message?.includes("already exists")) {
       logger.warn("Migraciones: tablas ya existen (base de datos existente). No se requiere acción.");
+    } else if (err?.message?.includes("timeout")) {
+      logger.warn("Migraciones: " + err.message + ". Continuando arranque con migraciones incrementales.");
     } else {
       logger.error("Error ejecutando migraciones", err);
-      // Don't crash the server for migration errors in development
-      if (process.env.NODE_ENV === "production") throw err;
     }
   }
 
