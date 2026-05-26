@@ -324,7 +324,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getGuests(): Promise<Guest[]> {
-    return db.select().from(guests);
+    return db.select().from(guests).where(
+      or(isNull(guests.codigo), not(ilike(guests.codigo, 'GROUP-%')))
+    );
   }
 
   async getGuest(id: string): Promise<Guest | undefined> {
@@ -334,12 +336,15 @@ export class DatabaseStorage implements IStorage {
 
   async searchGuests(query: string): Promise<Guest[]> {
     return db.select().from(guests).where(
-      or(
-        ilike(guests.firstName, `%${query}%`),
-        ilike(guests.lastName, `%${query}%`),
-        ilike(guests.email, `%${query}%`),
-        ilike(guests.documentNumber, `%${query}%`),
-        ilike(guests.phone, `%${query}%`)
+      and(
+        or(isNull(guests.codigo), not(ilike(guests.codigo, 'GROUP-%'))),
+        or(
+          ilike(guests.firstName, `%${query}%`),
+          ilike(guests.lastName, `%${query}%`),
+          ilike(guests.email, `%${query}%`),
+          ilike(guests.documentNumber, `%${query}%`),
+          ilike(guests.phone, `%${query}%`)
+        )
       )
     ).limit(20);
   }

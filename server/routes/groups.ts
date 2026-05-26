@@ -2,11 +2,26 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks } from "@shared/schema";
+import { eq, and, ilike } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
+
+// Helper: get or create the single placeholder guest for a group
+async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
+  const code = `GROUP-${groupId}`;
+  const [existing] = await db.select().from(guestsTable).where(eq(guestsTable.codigo, code)).limit(1);
+  if (existing) return existing;
+  const [created] = await db.insert(guestsTable).values({
+    firstName: groupName,
+    lastName: "",
+    codigo: code,
+    segment: "LEISURE",
+    sexo: "no_especifica",
+  } as any).returning();
+  return created;
+}
 
 export function registerGroupsRoutes(app: Express) {
   // Groups
@@ -150,15 +165,78 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: "roomTypeId and quantity are required" });
       }
 
+      const qty = typeof quantity === 'number' ? quantity : parseInt(quantity, 10);
+
       const block = await storage.createGroupBlock({
         groupId: req.params.groupId,
         roomTypeId,
-        quantity: typeof quantity === 'number' ? quantity : parseInt(quantity, 10),
+        quantity: qty,
         ratePlanId: ratePlanId || null,
         agreedRate: agreedRate ? String(agreedRate) : null,
         blockCheckInDate: blockCheckInDate || null,
         blockCheckOutDate: blockCheckOutDate || null,
       });
+
+      // Auto-assign available rooms and create placeholder reservations
+      const group = await storage.getGroup(req.params.groupId);
+      if (group) {
+        const placeholder = await getOrCreatePlaceholderGuest(group.id, group.name);
+        const checkIn = blockCheckInDate || group.checkInDate;
+        const checkOut = blockCheckOutDate || group.checkOutDate;
+
+        const allRoomsOfType = await db.select().from(roomsTable).where(eq(roomsTable.roomTypeId, roomTypeId));
+        const allReservations = await storage.getReservations();
+        const activeStatuses = ["reserved", "checked_in", "confirmed"];
+
+        const availableRooms = allRoomsOfType.filter(room => {
+          if (room.status === "blocked") return false;
+          return !allReservations.find(res => {
+            if (!activeStatuses.includes(res.status)) return false;
+            if (res.roomId !== room.id) return false;
+            return res.checkInDate < checkOut && res.checkOutDate > checkIn;
+          });
+        });
+
+        let autoAssigned = 0;
+        for (const room of availableRooms) {
+          if (autoAssigned >= qty) break;
+          const nights = Math.max(1, Math.ceil(
+            (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)
+          ));
+          const rate = agreedRate ? String(agreedRate) : "0";
+
+          const reservation = await storage.createReservation({
+            reservationCode: `G${group.groupCode}-${room.roomNumber}`,
+            guestId: placeholder.id,
+            roomTypeId: room.roomTypeId,
+            roomId: room.id,
+            ratePlanId: ratePlanId || null,
+            checkInDate: checkIn,
+            checkOutDate: checkOut,
+            nights,
+            baseRatePerNight: rate,
+            discountType: "none",
+            discountValue: "0",
+            finalRatePerNight: rate,
+            totalRoomAmount: (parseFloat(rate) * nights).toFixed(2),
+            status: "confirmed",
+            source: "empresa",
+            otaChannelId: null,
+            externalReservationId: null,
+            numberOfGuests: 1,
+            notes: `Grupo: ${group.name}`,
+            createdAt: new Date(),
+            lastModifiedBy: null,
+          });
+
+          await storage.createGroupReservationLink({ groupId: group.id, reservationId: reservation.id });
+          await db.update(roomsTable).set({ status: "occupied" }).where(eq(roomsTable.id, room.id));
+          autoAssigned++;
+        }
+
+        return res.status(201).json({ ...block, autoAssigned, totalRequested: qty });
+      }
+
       res.status(201).json(block);
     } catch (error) {
       res.status(500).json({ error: "Error creating group block" });
@@ -179,13 +257,93 @@ export function registerGroupsRoutes(app: Express) {
 
   app.delete("/api/group-blocks/:id", async (req, res) => {
     try {
-      const deleted = await storage.deleteGroupBlock(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: "Group block not found" });
+      // Get block info before deletion to cancel its placeholder reservations
+      const [block] = await db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.id, req.params.id));
+      if (!block) return res.status(404).json({ error: "Group block not found" });
+
+      // Cancel placeholder reservations that would exceed remaining capacity
+      const group = await storage.getGroup(block.groupId);
+      if (group) {
+        const placeholderCode = `GROUP-${block.groupId}`;
+        const remainingBlocks = group.blocks.filter(b => b.id !== req.params.id && b.roomTypeId === block.roomTypeId);
+        const remainingCapacity = remainingBlocks.reduce((sum, b) => sum + b.quantity, 0);
+
+        const allPlaceholders = group.reservations.filter((r: any) =>
+          r.room?.roomTypeId === block.roomTypeId &&
+          r.guest?.codigo === placeholderCode &&
+          !["cancelled", "checked_out"].includes(r.status)
+        );
+
+        // Cancel excess placeholder reservations (beyond remaining capacity)
+        const toCancel = allPlaceholders.slice(remainingCapacity);
+        for (const res of toCancel) {
+          await storage.updateReservation(res.id, { status: "cancelled" });
+          if (res.roomId) {
+            await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, res.roomId));
+          }
+        }
       }
+
+      const deleted = await storage.deleteGroupBlock(req.params.id);
+      if (!deleted) return res.status(404).json({ error: "Group block not found" });
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting group block" });
+    }
+  });
+
+  // Assign real guest to a pre-blocked (placeholder) reservation, optionally changing room
+  app.patch("/api/groups/:groupId/placeholder-reservations/:reservationId", async (req, res) => {
+    try {
+      const { guestFirstName, guestLastName, roomId } = req.body;
+      const { groupId, reservationId } = req.params;
+
+      if (!guestFirstName?.trim()) {
+        return res.status(400).json({ error: "El nombre del pasajero es requerido" });
+      }
+
+      const group = await storage.getGroup(groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      const reservation = group.reservations.find((r: any) => r.id === reservationId);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
+
+      const firstName = guestFirstName.trim();
+      const lastName = (guestLastName || "").trim();
+
+      // Find or create real guest — never reuse a placeholder guest
+      const placeholderPrefix = "GROUP-";
+      const [existingGuest] = await db.select().from(guestsTable).where(
+        and(ilike(guestsTable.firstName, firstName), ilike(guestsTable.lastName, lastName))
+      ).limit(1);
+
+      const realGuest = (existingGuest && !existingGuest.codigo?.startsWith(placeholderPrefix))
+        ? existingGuest
+        : await storage.createGuest({ firstName, lastName });
+
+      const updates: Record<string, any> = { guestId: realGuest.id };
+
+      // Handle optional room change
+      if (roomId && roomId !== reservation.roomId) {
+        const hasConflict = await storage.checkOverbooking(roomId, reservation.checkInDate, reservation.checkOutDate, reservationId);
+        if (hasConflict) {
+          return res.status(400).json({ error: "La habitación ya tiene una reserva en esas fechas" });
+        }
+        // Free old room
+        if (reservation.roomId) {
+          await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
+        }
+        const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
+        if (!newRoom) return res.status(404).json({ error: "Habitación no encontrada" });
+        updates.roomId = roomId;
+        updates.roomTypeId = newRoom.roomTypeId;
+        await db.update(roomsTable).set({ status: "occupied" }).where(eq(roomsTable.id, roomId));
+      }
+
+      const updated = await storage.updateReservation(reservationId, updates);
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Error al asignar pasajero" });
     }
   });
 

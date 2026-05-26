@@ -326,6 +326,14 @@ function AddBlockDialog({
   );
 }
 
+type AssignRow = {
+  reservationId: string | null;
+  roomId: string;
+  originalRoomId: string;
+  firstName: string;
+  lastName: string;
+};
+
 function AssignBlockDialog({
   group,
   block,
@@ -340,28 +348,44 @@ function AssignBlockDialog({
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
-
-  // Count per-block assignments: distribute total same-type reservations across blocks of same type sequentially
-  const sameTypeBlocks = [...group.blocks].filter(b => b.roomTypeId === block.roomTypeId).sort((a, b) => a.id.localeCompare(b.id));
-  const totalAssignedOfType = group.reservations.filter(r => r.room?.roomTypeId === block.roomTypeId).length;
-  const blockIndex = sameTypeBlocks.findIndex(b => b.id === block.id);
-  let filledInPreviousBlocks = 0;
-  for (let i = 0; i < blockIndex; i++) {
-    filledInPreviousBlocks += sameTypeBlocks[i].quantity;
-  }
-  const assignedToThisBlock = Math.max(0, Math.min(block.quantity, totalAssignedOfType - filledInPreviousBlocks));
-  const pending = Math.max(0, block.quantity - assignedToThisBlock);
+  const placeholderCode = `GROUP-${group.id}`;
 
   const defaultCheckIn = block.blockCheckInDate || group.checkInDate;
   const defaultCheckOut = block.blockCheckOutDate || group.checkOutDate;
 
-  const [rows, setRows] = useState<Array<{
-    roomId: string;
-    firstName: string;
-    lastName: string;
-  }>>(
-    Array.from({ length: pending }, () => ({ roomId: "", firstName: "", lastName: "" }))
+  // Distribute reservations across same-type blocks sequentially
+  const sameTypeBlocks = [...group.blocks]
+    .filter(b => b.roomTypeId === block.roomTypeId)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const blockIndex = sameTypeBlocks.findIndex(b => b.id === block.id);
+  let offset = 0;
+  for (let i = 0; i < blockIndex; i++) offset += sameTypeBlocks[i].quantity;
+
+  const allActiveOfType = group.reservations.filter(r =>
+    r.room?.roomTypeId === block.roomTypeId &&
+    !["cancelled", "checked_out"].includes(r.status)
   );
+  const thisBlockReservations = allActiveOfType.slice(offset, offset + block.quantity);
+  const placeholderReservations = thisBlockReservations.filter(r => r.guest?.codigo === placeholderCode);
+  const realAssignedCount = thisBlockReservations.filter(r => r.guest?.codigo !== placeholderCode).length;
+  const emptyCount = Math.max(0, block.quantity - thisBlockReservations.length);
+
+  const [rows, setRows] = useState<AssignRow[]>(() => [
+    ...placeholderReservations.map(res => ({
+      reservationId: res.id,
+      roomId: res.roomId || "",
+      originalRoomId: res.roomId || "",
+      firstName: "",
+      lastName: "",
+    })),
+    ...Array.from({ length: emptyCount }, () => ({
+      reservationId: null,
+      roomId: "",
+      originalRoomId: "",
+      firstName: "",
+      lastName: "",
+    })),
+  ]);
 
   const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId],
@@ -378,21 +402,25 @@ function AssignBlockDialog({
     enabled: !!defaultCheckIn && !!defaultCheckOut,
   });
 
-  const chosenRoomIds = rows.map(r => r.roomId).filter(Boolean);
+  // For placeholder rows, always include the current pre-assigned room in options
+  const getRoomOptions = (row: AssignRow): RoomWithType[] => {
+    if (!row.originalRoomId) return availableRooms;
+    const alreadyIn = availableRooms.some(r => r.id === row.originalRoomId);
+    if (alreadyIn) return availableRooms;
+    const preAssignedRes = placeholderReservations.find(r => r.id === row.reservationId);
+    if (preAssignedRes?.room) return [...availableRooms, preAssignedRes.room as RoomWithType];
+    return availableRooms;
+  };
 
+  const allChosenRoomIds = rows.map(r => r.roomId).filter(Boolean);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAssignAll = async () => {
-    const validRows = rows.filter(r => r.roomId);
+    const validRows = rows.filter(r => r.roomId && r.firstName.trim());
     if (validRows.length === 0) {
-      toast({ title: "Seleccioná al menos una habitación", variant: "destructive" });
-      return;
-    }
-    const rowsWithoutName = validRows.filter(r => !r.firstName.trim());
-    if (rowsWithoutName.length > 0) {
       toast({
-        title: "Faltan nombres de pasajeros",
-        description: `Completá el nombre del pasajero para cada habitación seleccionada. Si aún no lo tenés, escribí "Por confirmar".`,
+        title: "Completá al menos un nombre de pasajero",
+        description: "Ingresá el nombre para al menos una habitación.",
         variant: "destructive",
       });
       return;
@@ -401,19 +429,27 @@ function AssignBlockDialog({
     setIsSubmitting(true);
     let successCount = 0;
     let failCount = 0;
-
     const errors: string[] = [];
+
     for (const row of validRows) {
       try {
-        await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
-          roomId: row.roomId,
-          guestFirstName: row.firstName || "Sin Asignar",
-          guestLastName: row.lastName || "",
-          ratePlanId: block.ratePlanId,
-          checkInDate: defaultCheckIn,
-          checkOutDate: defaultCheckOut,
-          agreedRate: block.agreedRate,
-        });
+        if (row.reservationId) {
+          await apiRequest("PATCH", `/api/groups/${group.id}/placeholder-reservations/${row.reservationId}`, {
+            guestFirstName: row.firstName.trim(),
+            guestLastName: row.lastName.trim(),
+            roomId: row.roomId !== row.originalRoomId ? row.roomId : undefined,
+          });
+        } else {
+          await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
+            roomId: row.roomId,
+            guestFirstName: row.firstName.trim(),
+            guestLastName: row.lastName.trim(),
+            ratePlanId: block.ratePlanId,
+            checkInDate: defaultCheckIn,
+            checkOutDate: defaultCheckOut,
+            agreedRate: block.agreedRate,
+          });
+        }
         successCount++;
       } catch (err: any) {
         failCount++;
@@ -432,44 +468,60 @@ function AssignBlockDialog({
     queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
 
     if (failCount === 0) {
-      toast({ title: `${successCount} habitación(es) asignada(s) exitosamente` });
+      toast({ title: `${successCount} pasajero(s) asignado(s) exitosamente` });
       onSuccess();
       onOpenChange(false);
     } else {
       const uniqueErrors = [...new Set(errors)];
       toast({
-        title: `${successCount > 0 ? `${successCount} asignadas, ` : ""}${failCount} no pudo(n) asignarse`,
+        title: `${successCount > 0 ? `${successCount} asignados, ` : ""}${failCount} no pudo(n) asignarse`,
         description: uniqueErrors.length > 0 ? uniqueErrors[0] : undefined,
         variant: "destructive",
       });
     }
   };
 
+  const fmtDate = (d: string) => {
+    const [y, m, dd] = d.split("-").map(Number);
+    return new Date(y, m - 1, dd).toLocaleDateString("es-AR");
+  };
+
+  const totalPending = rows.length;
+  const allDone = totalPending === 0 && realAssignedCount === block.quantity;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            Asignar Habitaciones — {block.roomType?.name}
+            Asignar Pasajeros — {block.roomType?.name}
           </DialogTitle>
           <DialogDescription>
-            Bloque de {block.quantity} habitaciones. {assignedToThisBlock} ya asignadas, {pending} pendientes.
-            {defaultCheckIn && (() => {
-              const fmt = (d: string) => { const [y,m,dd] = d.split("-").map(Number); return new Date(y, m-1, dd).toLocaleDateString("es-AR"); };
-              return ` Check-in: ${fmt(defaultCheckIn)} | Check-out: ${fmt(defaultCheckOut)}`;
-            })()}
+            Bloque de {block.quantity} hab.
+            {realAssignedCount > 0 && ` · ${realAssignedCount} con pasajero asignado`}
+            {placeholderReservations.length > 0 && ` · ${placeholderReservations.length} pendientes de pasajero`}
+            {emptyCount > 0 && ` · ${emptyCount} sin habitación pre-asignada`}
+            {defaultCheckIn && ` · ${fmtDate(defaultCheckIn)} → ${fmtDate(defaultCheckOut)}`}
           </DialogDescription>
-          <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2 text-xs text-blue-800 dark:text-blue-200 mt-1">
-            <span className="mt-0.5">ℹ️</span>
-            <span>Completá el <strong>nombre y apellido del pasajero real</strong> que ocupará cada habitación. Si aún no lo tenés, escribí "Por confirmar".</span>
-          </div>
+          {placeholderReservations.length > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 px-3 py-2 text-xs text-green-800 dark:text-green-200 mt-1">
+              <span className="mt-0.5">✓</span>
+              <span>Habitaciones <strong>pre-asignadas automáticamente</strong>. Completá el nombre del pasajero para cada una. Podés cambiar la habitación si necesitás.</span>
+            </div>
+          )}
+          {emptyCount > 0 && placeholderReservations.length === 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 mt-1">
+              <span className="mt-0.5">⚠</span>
+              <span>No hay suficientes habitaciones disponibles para pre-asignar. Seleccioná manualmente la habitación y el pasajero.</span>
+            </div>
+          )}
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {rows.length === 0 ? (
+          {allDone ? (
             <div className="text-center py-8 text-muted-foreground">
               <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
-              <p>Todas las habitaciones del bloque ya están asignadas.</p>
+              <p>Todos los pasajeros del bloque están asignados.</p>
             </div>
           ) : (
             <>
@@ -479,79 +531,86 @@ function AssignBlockDialog({
                 <span>Apellido</span>
                 <span></span>
               </div>
-              {rows.map((row, index) => (
-                <div key={index} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-center">
-                  <Select
-                    value={row.roomId}
-                    onValueChange={(value) => {
-                      const updated = [...rows];
-                      updated[index].roomId = value;
-                      setRows(updated);
-                    }}
-                  >
-                    <SelectTrigger data-testid={`select-room-${index}`}>
-                      <SelectValue placeholder="Seleccionar hab." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableRooms
-                        .filter(r => !chosenRoomIds.includes(r.id) || r.id === row.roomId)
-                        .map((room) => (
-                          <SelectItem key={room.id} value={room.id}>
-                            Hab. {room.roomNumber} — Piso {room.floor}
-                          </SelectItem>
-                        ))
-                      }
-                      {availableRooms.filter(r => !chosenRoomIds.includes(r.id) || r.id === row.roomId).length === 0 && (
-                        <SelectItem value="_none" disabled>Sin disponibilidad</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
+              {rows.map((row, index) => {
+                const roomOptions = getRoomOptions(row);
+                const otherChosenRoomIds = allChosenRoomIds.filter((id, i) => i !== index);
+                return (
+                  <div key={row.reservationId ?? `new-${index}`} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-center">
+                    <Select
+                      value={row.roomId}
+                      onValueChange={(value) => {
+                        const updated = [...rows];
+                        updated[index] = { ...updated[index], roomId: value };
+                        setRows(updated);
+                      }}
+                    >
+                      <SelectTrigger data-testid={`select-room-${index}`}>
+                        <SelectValue placeholder="Seleccionar hab." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {roomOptions
+                          .filter(r => !otherChosenRoomIds.includes(r.id) || r.id === row.roomId)
+                          .map((room) => (
+                            <SelectItem key={room.id} value={room.id}>
+                              Hab. {room.roomNumber} — Piso {room.floor}
+                              {row.originalRoomId === room.id ? " ★" : ""}
+                            </SelectItem>
+                          ))
+                        }
+                        {roomOptions.filter(r => !otherChosenRoomIds.includes(r.id) || r.id === row.roomId).length === 0 && (
+                          <SelectItem value="_none" disabled>Sin disponibilidad</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
 
-                  <Input
-                    placeholder="Nombre"
-                    value={row.firstName}
-                    onChange={(e) => {
-                      const updated = [...rows];
-                      updated[index].firstName = e.target.value;
-                      setRows(updated);
-                    }}
-                    data-testid={`input-firstname-${index}`}
-                  />
+                    <Input
+                      placeholder="Nombre"
+                      value={row.firstName}
+                      onChange={(e) => {
+                        const updated = [...rows];
+                        updated[index] = { ...updated[index], firstName: e.target.value };
+                        setRows(updated);
+                      }}
+                      data-testid={`input-firstname-${index}`}
+                    />
 
-                  <Input
-                    placeholder="Apellido (opcional)"
-                    value={row.lastName}
-                    onChange={(e) => {
-                      const updated = [...rows];
-                      updated[index].lastName = e.target.value;
-                      setRows(updated);
-                    }}
-                    data-testid={`input-lastname-${index}`}
-                  />
+                    <Input
+                      placeholder="Apellido"
+                      value={row.lastName}
+                      onChange={(e) => {
+                        const updated = [...rows];
+                        updated[index] = { ...updated[index], lastName: e.target.value };
+                        setRows(updated);
+                      }}
+                      data-testid={`input-lastname-${index}`}
+                    />
 
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                    onClick={() => setRows(rows.filter((_, i) => i !== index))}
-                    title="Quitar fila"
-                    data-testid={`button-remove-row-${index}`}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => setRows(rows.filter((_, i) => i !== index))}
+                      title="Quitar fila"
+                      data-testid={`button-remove-row-${index}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
 
-              {rows.length < availableRooms.length && rows.length < pending && (
+              {/* Show add-row button only for empty slots (no placeholder) */}
+              {rows.filter(r => !r.reservationId).length < emptyCount &&
+               rows.filter(r => !r.reservationId).length < availableRooms.length && (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="text-xs"
-                  onClick={() => setRows([...rows, { roomId: "", firstName: "", lastName: "" }])}
+                  onClick={() => setRows([...rows, { reservationId: null, roomId: "", originalRoomId: "", firstName: "", lastName: "" }])}
                   data-testid="button-add-assignment-row"
                 >
                   <Plus className="h-3 w-3 mr-1" />
-                  Agregar otra habitación
+                  Agregar habitación manualmente
                 </Button>
               )}
             </>
@@ -560,16 +619,16 @@ function AssignBlockDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          {rows.length > 0 && (
+          {!allDone && rows.length > 0 && (
             <Button
               onClick={handleAssignAll}
-              disabled={isSubmitting || rows.every(r => !r.roomId)}
+              disabled={isSubmitting || rows.every(r => !r.firstName.trim())}
               data-testid="button-confirm-assign-all"
             >
               {isSubmitting ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Asignando...</>
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Guardando...</>
               ) : (
-                `Asignar ${rows.filter(r => r.roomId).length} habitación(es)`
+                `Guardar ${rows.filter(r => r.firstName.trim()).length} pasajero(s)`
               )}
             </Button>
           )}
