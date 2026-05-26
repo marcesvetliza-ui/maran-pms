@@ -888,7 +888,7 @@ export function registerGroupsRoutes(app: Express) {
   });
 
   // ─── MASTER FOLIO PDF ────────────────────────────────────────────────────────
-  app.get("/api/folios/group/:groupId/pdf", requireAuth, async (req, res) => {
+  app.get("/api/groups/:groupId/master-folio/pdf", requireAuth, async (req, res) => {
     try {
       const group = await storage.getGroup(req.params.groupId);
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });

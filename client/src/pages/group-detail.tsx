@@ -1687,7 +1687,7 @@ export default function GroupDetailPage() {
                           size="sm"
                           onClick={() => {
                             const a = document.createElement("a");
-                            a.href = `/api/folios/group/${groupId}/pdf`;
+                            a.href = `/api/groups/${groupId}/master-folio/pdf`;
                             a.download = `folio-maestro-${group?.name || groupId}.pdf`;
                             document.body.appendChild(a);
                             a.click();
