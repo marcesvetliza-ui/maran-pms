@@ -418,7 +418,15 @@ function InvoiceDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) resetDialog(); }}>
-      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+      <DialogContent
+        className="max-w-2xl max-h-[92vh] overflow-y-auto"
+        onInteractOutside={(e) => {
+          const target = e.target as Element;
+          if (target.closest("[data-radix-popper-content-wrapper]") || target.closest("[cmdk-root]")) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Registrar Comprobante</DialogTitle>
           {/* Step indicator */}
