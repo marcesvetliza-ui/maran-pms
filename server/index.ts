@@ -115,121 +115,10 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const { runMigrations } = await import("./migrate");
-  await runMigrations();
-
-  const { seedDatabase, refreshRealData } = await import("./seed");
-  try {
-    await seedDatabase();
-  } catch (err) {
-    console.error("Seed error:", err);
-  }
-  try {
-    await refreshRealData();
-  } catch (err) {
-    console.error("Refresh real data error:", err);
-  }
-  try {
-    const { storage } = await import("./db-storage");
-    await storage.initCashShifts();
-  } catch (err) {
-    console.error("Init cash shifts error:", err);
-  }
-
-  // Helper: run a migration with an 8s timeout so hung DDL locks don't kill startup
-  async function mig(label: string, fn: () => Promise<unknown>) {
-    try {
-      await Promise.race([
-        fn(),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("TIMEOUT 8s")), 8_000)),
-      ]);
-    } catch (err: any) {
-      logger.warn(`Startup migration [${label}]: ${err?.message}`);
-    }
-  }
-  const { db: iDb } = await import("./db");
-  const { sql: iSql } = await import("drizzle-orm");
-
-  await mig("accounting_accounts seed", () => iDb.execute(iSql`
-    INSERT INTO accounting_accounts (codigo, nombre, tipo) VALUES
-      ('1.1.1.01', 'Caja', 'activo'),
-      ('1.1.1.02', 'Banco Macro', 'activo'),
-      ('2.1.1.01', 'Proveedores a Pagar', 'pasivo')
-    ON CONFLICT (codigo) DO NOTHING
-  `));
-
-  await mig("package_room_prices.extra_amount", () => iDb.execute(iSql`
-    ALTER TABLE package_room_prices ADD COLUMN IF NOT EXISTS extra_amount DECIMAL(12,2) DEFAULT 0
-  `));
-
-  await mig("accounting_suppliers.cuenta_contable_id", () => iDb.execute(iSql`
-    ALTER TABLE accounting_suppliers
-      ADD COLUMN IF NOT EXISTS cuenta_contable_id INTEGER REFERENCES accounting_accounts(id)
-  `));
-
-  await mig("email_config SMTP columns", () => iDb.execute(iSql`
-    ALTER TABLE email_config
-      ADD COLUMN IF NOT EXISTS smtp_host TEXT DEFAULT 'smtp.gmail.com',
-      ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587,
-      ADD COLUMN IF NOT EXISTS smtp_user TEXT,
-      ADD COLUMN IF NOT EXISTS smtp_pass TEXT,
-      ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false
-  `));
-
-  await mig("email_config row seed", () => iDb.execute(iSql`
-    INSERT INTO email_config (
-      id, global_enabled, provider,
-      from_email, from_name,
-      confirmation_enabled, confirmation_subject, confirmation_body,
-      reminder_enabled, reminder_subject, reminder_body,
-      checkout_enabled, checkout_subject, checkout_body
-    ) VALUES (
-      1, false, 'resend',
-      'reservas@maransuites.com', 'Maran Suites & Towers',
-      true, 'Confirmación de tu reserva — Maran Suites & Towers',
-      'Hola {nombre_huesped},\n\nTu reserva ha sido confirmada. Te esperamos el {fecha_checkin} en la habitación {numero_habitacion}.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\n\n¡Nos vemos pronto!\nMaran Suites & Towers',
-      true, 'Recordatorio de tu llegada — Maran Suites & Towers',
-      'Hola {nombre_huesped}, te recordamos que tu check-in es mañana {fecha_checkin}. ¡Te esperamos!',
-      true, 'Gracias por tu estadía — Maran Suites & Towers',
-      'Hola {nombre_huesped},\n\nGracias por elegirnos. Esperamos que tu estadía haya sido excelente.\n\nNos gustaría conocer tu opinión: {link_encuesta}\n\n¡Hasta pronto!\nMaran Suites & Towers'
-    ) ON CONFLICT (id) DO NOTHING
-  `));
-
-  await mig("groups.master_folio_config", () => iDb.execute(iSql`
-    ALTER TABLE groups ADD COLUMN IF NOT EXISTS master_folio_config TEXT DEFAULT 'accommodation'
-  `));
-
-  await mig("backup_logs create", () => iDb.execute(iSql`
-    CREATE TABLE IF NOT EXISTS backup_logs (
-      id SERIAL PRIMARY KEY,
-      type TEXT NOT NULL,
-      status TEXT NOT NULL,
-      destination TEXT,
-      file_size_bytes INTEGER,
-      duration_ms INTEGER,
-      error_message TEXT,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    )
-  `));
-
+  // ── 1. Register routes (synchronous, no DB needed) ──────────────────────
   await registerRoutes(httpServer, app);
 
-  try {
-    const { setupNightAuditScheduler } = await import("./night-audit");
-    setupNightAuditScheduler();
-    log("Night Audit scheduler iniciado");
-  } catch (err: any) {
-    console.error("Night audit scheduler error (non-blocking):", err.message);
-  }
-
-  try {
-    const { setupBackupScheduler } = await import("./backup");
-    setupBackupScheduler();
-    log("Backup scheduler iniciado (03:00 ARG)");
-  } catch (err: any) {
-    console.error("Backup scheduler error (non-blocking):", err.message);
-  }
-
+  // ── 2. Global error handler ──────────────────────────────────────────────
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
@@ -247,9 +136,7 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
+  // ── 3. Static serving / Vite dev ────────────────────────────────────────
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
@@ -257,19 +144,108 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // ── 4. OPEN PORT FIRST — Railway health check depends on this ───────────
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
+    log(`serving on port ${port}`);
+  });
+
+  // ── 5. Background startup tasks (DB migrations, seed, schedulers) ────────
+  //    These run AFTER the port is open so Railway never times out.
+  (async () => {
+    // helper: per-step timeout so a hung DDL lock never blocks forever
+    async function mig(label: string, fn: () => Promise<unknown>) {
+      try {
+        await Promise.race([
+          fn(),
+          new Promise<never>((_, rej) =>
+            setTimeout(() => rej(new Error("TIMEOUT 10s")), 10_000)
+          ),
+        ]);
+      } catch (err: any) {
+        logger.warn(`[startup] ${label}: ${err?.message}`);
+      }
+    }
+
+    const { runMigrations } = await import("./migrate");
+    await runMigrations();
+
+    const { seedDatabase, refreshRealData } = await import("./seed");
+    await mig("seedDatabase", seedDatabase);
+    await mig("refreshRealData", refreshRealData);
+
+    try {
+      const { storage } = await import("./db-storage");
+      await mig("initCashShifts", () => storage.initCashShifts());
+    } catch (err) {
+      logger.warn("[startup] initCashShifts: " + String(err));
+    }
+
+    const { db: iDb } = await import("./db");
+    const { sql: iSql } = await import("drizzle-orm");
+
+    await mig("accounting_accounts seed", () => iDb.execute(iSql`
+      INSERT INTO accounting_accounts (codigo, nombre, tipo) VALUES
+        ('1.1.1.01', 'Caja', 'activo'),
+        ('1.1.1.02', 'Banco Macro', 'activo'),
+        ('2.1.1.01', 'Proveedores a Pagar', 'pasivo')
+      ON CONFLICT (codigo) DO NOTHING
+    `));
+    await mig("package_room_prices.extra_amount", () => iDb.execute(iSql`
+      ALTER TABLE package_room_prices ADD COLUMN IF NOT EXISTS extra_amount DECIMAL(12,2) DEFAULT 0
+    `));
+    await mig("accounting_suppliers.cuenta_contable_id", () => iDb.execute(iSql`
+      ALTER TABLE accounting_suppliers
+        ADD COLUMN IF NOT EXISTS cuenta_contable_id INTEGER REFERENCES accounting_accounts(id)
+    `));
+    await mig("email_config SMTP columns", () => iDb.execute(iSql`
+      ALTER TABLE email_config
+        ADD COLUMN IF NOT EXISTS smtp_host TEXT DEFAULT 'smtp.gmail.com',
+        ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587,
+        ADD COLUMN IF NOT EXISTS smtp_user TEXT,
+        ADD COLUMN IF NOT EXISTS smtp_pass TEXT,
+        ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false
+    `));
+    await mig("email_config row seed", () => iDb.execute(iSql`
+      INSERT INTO email_config (
+        id, global_enabled, provider, from_email, from_name,
+        confirmation_enabled, confirmation_subject, confirmation_body,
+        reminder_enabled, reminder_subject, reminder_body,
+        checkout_enabled, checkout_subject, checkout_body
+      ) VALUES (
+        1, false, 'resend', 'reservas@maransuites.com', 'Maran Suites & Towers',
+        true, 'Confirmación de tu reserva — Maran Suites & Towers',
+        'Hola {nombre_huesped},\n\nTu reserva ha sido confirmada.',
+        true, 'Recordatorio de tu llegada — Maran Suites & Towers',
+        'Hola {nombre_huesped}, te recordamos que tu check-in es mañana {fecha_checkin}.',
+        true, 'Gracias por tu estadía — Maran Suites & Towers',
+        'Hola {nombre_huesped},\n\nGracias por elegirnos.'
+      ) ON CONFLICT (id) DO NOTHING
+    `));
+    await mig("groups.master_folio_config", () => iDb.execute(iSql`
+      ALTER TABLE groups ADD COLUMN IF NOT EXISTS master_folio_config TEXT DEFAULT 'accommodation'
+    `));
+    await mig("backup_logs create", () => iDb.execute(iSql`
+      CREATE TABLE IF NOT EXISTS backup_logs (
+        id SERIAL PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL,
+        destination TEXT, file_size_bytes INTEGER, duration_ms INTEGER,
+        error_message TEXT, created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      )
+    `));
+
+    try {
+      const { setupNightAuditScheduler } = await import("./night-audit");
+      setupNightAuditScheduler();
+      log("Night Audit scheduler iniciado");
+    } catch (err: any) {
+      logger.warn("[startup] Night Audit scheduler: " + err.message);
+    }
+    try {
+      const { setupBackupScheduler } = await import("./backup");
+      setupBackupScheduler();
+      log("Backup scheduler iniciado (03:00 ARG)");
+    } catch (err: any) {
+      logger.warn("[startup] Backup scheduler: " + err.message);
+    }
+  })().catch((err) => logger.error("Background startup error", err));
 })();
