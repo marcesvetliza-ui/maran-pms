@@ -1441,7 +1441,7 @@ function NewItemForm({
               <SelectValue placeholder="Seleccionar categoria" />
             </SelectTrigger>
             <SelectContent>
-              {categories.map((cat) => (
+              {categories.filter(cat => cat.id).map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>
                   {cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}
                 </SelectItem>
@@ -1456,7 +1456,7 @@ function NewItemForm({
               <SelectValue placeholder="Seleccionar proveedor" />
             </SelectTrigger>
             <SelectContent>
-              {suppliers.map((sup) => (
+              {suppliers.filter(sup => sup.id).map((sup) => (
                 <SelectItem key={sup.id} value={sup.id}>
                   {sup.name}
                 </SelectItem>
@@ -1473,7 +1473,7 @@ function NewItemForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(unitLabels).map(([key, label]) => (
+              {Object.entries(unitLabels).filter(([key]) => key).map(([key, label]) => (
                 <SelectItem key={key} value={key}>
                   {label}
                 </SelectItem>
@@ -1570,7 +1570,7 @@ function TransferForm({
         <Select value={itemId} onValueChange={setItemId}>
           <SelectTrigger data-testid="select-transfer-item"><SelectValue placeholder="Seleccionar artículo..." /></SelectTrigger>
           <SelectContent>
-            {items.filter(i => i.isActive !== "false").map(i => (
+            {items.filter(i => i.id && i.isActive !== "false").map(i => (
               <SelectItem key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ""}</SelectItem>
             ))}
           </SelectContent>
@@ -1582,7 +1582,7 @@ function TransferForm({
           <Select value={fromWarehouseId} onValueChange={setFromWarehouseId}>
             <SelectTrigger data-testid="select-from-warehouse"><SelectValue placeholder="Depósito origen..." /></SelectTrigger>
             <SelectContent>
-              {warehouses.map(w => (
+              {warehouses.filter(w => w.id).map(w => (
                 <SelectItem key={w.id} value={w.id} disabled={w.id === toWarehouseId}>{w.name}</SelectItem>
               ))}
             </SelectContent>
@@ -1593,7 +1593,7 @@ function TransferForm({
           <Select value={toWarehouseId} onValueChange={setToWarehouseId}>
             <SelectTrigger data-testid="select-to-warehouse"><SelectValue placeholder="Depósito destino..." /></SelectTrigger>
             <SelectContent>
-              {warehouses.map(w => (
+              {warehouses.filter(w => w.id).map(w => (
                 <SelectItem key={w.id} value={w.id} disabled={w.id === fromWarehouseId}>{w.name}</SelectItem>
               ))}
             </SelectContent>
@@ -1653,7 +1653,7 @@ function WarehouseMovementForm({
         <Select value={itemId} onValueChange={(v) => { setItemId(v); const it = items.find(i => i.id === v); if (it) setUnitCost(parseFloat(it.costPrice || "0")); }}>
           <SelectTrigger data-testid="select-wh-mov-item"><SelectValue placeholder="Seleccionar artículo..." /></SelectTrigger>
           <SelectContent>
-            {items.filter(i => i.isActive !== "false").map(i => (
+            {items.filter(i => i.id && i.isActive !== "false").map(i => (
               <SelectItem key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ""}</SelectItem>
             ))}
           </SelectContent>

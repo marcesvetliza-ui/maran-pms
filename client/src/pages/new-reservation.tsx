@@ -639,7 +639,7 @@ export default function NewReservationPage() {
                   }}>
                     <SelectTrigger data-testid="select-nr-charge-preset"><SelectValue placeholder="Tipo de cargo..." /></SelectTrigger>
                     <SelectContent>
-                      {nrChargePresets.map(p => <SelectItem key={p.label} value={p.label}>{p.label}</SelectItem>)}
+                      {nrChargePresets.filter(p => p.label).map(p => <SelectItem key={p.label} value={p.label}>{p.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <div className="grid grid-cols-4 gap-1 items-end">

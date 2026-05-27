@@ -3134,6 +3134,7 @@ export default function RestaurantPage() {
                             r.roomNumber.includes(roomSearchFilter) ||
                             r.guestName.toLowerCase().includes(roomSearchFilter.toLowerCase())
                           )
+                          .filter(r => r.reservationId)
                           .map(r => (
                             <SelectItem key={r.roomId} value={r.reservationId}>{r.roomNumber} — {r.guestName}</SelectItem>
                           ))}
@@ -3322,6 +3323,7 @@ export default function RestaurantPage() {
                                           const search = splitRoomSearchFilters[split.id] || "";
                                           return search === "" || r.roomNumber.includes(search) || r.guestName.toLowerCase().includes(search.toLowerCase());
                                         })
+                                        .filter(r => r.reservationId)
                                         .map(r => (
                                           <SelectItem key={r.roomId} value={r.reservationId}>{r.roomNumber} — {r.guestName}</SelectItem>
                                         ))}

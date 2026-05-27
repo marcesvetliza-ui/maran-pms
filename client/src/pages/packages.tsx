@@ -433,7 +433,7 @@ function PackageFormDialog({
                           <SelectValue placeholder="Seleccionar tipo..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {roomTypes?.filter(rt => !roomPrices.some((r, i) => i !== idx && r.roomTypeId === rt.id)).map((rt) => (
+                          {roomTypes?.filter(rt => rt.id && !roomPrices.some((r, i) => i !== idx && r.roomTypeId === rt.id)).map((rt) => (
                             <SelectItem key={rt.id} value={rt.id}>
                               {rt.name}
                             </SelectItem>

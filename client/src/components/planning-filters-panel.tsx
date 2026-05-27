@@ -125,7 +125,7 @@ export function PlanningFiltersPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">Todas las categorías</SelectItem>
-              {availableRoomTypes.map(rt => (
+              {availableRoomTypes.filter(rt => rt.id).map(rt => (
                 <SelectItem key={rt.id} value={rt.id}>{rt.name}</SelectItem>
               ))}
             </SelectContent>

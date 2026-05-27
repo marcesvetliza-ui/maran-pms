@@ -1036,7 +1036,7 @@ export default function EventsPage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {eventRooms.filter(r => r.isActive).map((room) => (
+                          {eventRooms.filter(r => r.isActive && r.id).map((room) => (
                             <SelectItem key={room.id} value={room.id}>
                               {room.name} (Cap: {room.capacity})
                             </SelectItem>
@@ -1315,7 +1315,7 @@ export default function EventsPage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {eventRooms.filter(r => r.isActive).map((room) => (
+                          {eventRooms.filter(r => r.isActive && r.id).map((room) => (
                             <SelectItem key={room.id} value={room.id}>
                               {room.name} (Cap: {room.capacity})
                             </SelectItem>
@@ -2084,7 +2084,7 @@ export default function EventsPage() {
                                 <SelectValue placeholder="Seleccionar habitacion" />
                               </SelectTrigger>
                               <SelectContent>
-                                {activeReservations.map((r) => (
+                                {activeReservations.filter(r => r.id).map((r) => (
                                   <SelectItem key={r.id} value={r.id}>
                                     Hab. {r.room?.roomNumber || "?"} - {r.guest?.lastName} {r.guest?.firstName}
                                   </SelectItem>
@@ -2116,8 +2116,8 @@ export default function EventsPage() {
                                     </SelectTrigger>
                                     <SelectContent>
                                       {paymentCcEntityType === "company"
-                                        ? companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
-                                        : agencies.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                                        ? companies.filter(c => c.id).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
+                                        : agencies.filter(a => a.id).map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
                                       }
                                     </SelectContent>
                                   </Select>
@@ -2261,7 +2261,7 @@ export default function EventsPage() {
                       <SelectValue placeholder="Seleccionar tipo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {chargeTypes.filter(ct => ct.isActive).map((ct) => (
+                      {chargeTypes.filter(ct => ct.isActive && ct.id).map((ct) => (
                         <SelectItem key={ct.id} value={ct.id}>
                           {ct.name} — ${ct.defaultPrice}
                         </SelectItem>
@@ -2486,7 +2486,7 @@ export default function EventsPage() {
                         <SelectValue placeholder="Seleccionar tipo..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {chargeTypes.filter(ct => ct.isActive).map(ct => (
+                        {chargeTypes.filter(ct => ct.isActive && ct.id).map(ct => (
                           <SelectItem key={ct.id} value={ct.id}>{ct.name} — ${ct.defaultPrice}</SelectItem>
                         ))}
                         <SelectItem value="fuera_de_menu">Fuera de menú (libre)</SelectItem>
@@ -2611,7 +2611,7 @@ export default function EventsPage() {
                               <SelectValue placeholder="Seleccionar habitacion" />
                             </SelectTrigger>
                             <SelectContent>
-                              {activeReservations.map((r) => (
+                              {activeReservations.filter(r => r.id).map((r) => (
                                 <SelectItem key={r.id} value={r.id}>
                                   Hab. {r.room?.roomNumber || "?"} - {r.guest?.lastName} {r.guest?.firstName}
                                 </SelectItem>

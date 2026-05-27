@@ -289,7 +289,7 @@ function AssignRoomDialog({
                       <div className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted/50">
                         Mismo tipo ({reservation.room_type_name})
                       </div>
-                      {sameTypeRooms.map(r => (
+                      {sameTypeRooms.filter(r => r.id).map(r => (
                         <SelectItem key={r.id} value={r.id} data-testid={`option-room-${r.id}`}>
                           Hab. {r.roomNumber} — {r.roomTypeName}
                         </SelectItem>
@@ -301,7 +301,7 @@ function AssignRoomDialog({
                       <div className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted/50">
                         Otros tipos disponibles
                       </div>
-                      {otherRooms.map(r => (
+                      {otherRooms.filter(r => r.id).map(r => (
                         <SelectItem key={r.id} value={r.id} data-testid={`option-room-${r.id}`}>
                           Hab. {r.roomNumber} — {r.roomTypeName}
                         </SelectItem>

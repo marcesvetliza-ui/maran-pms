@@ -593,6 +593,7 @@ function LostFoundForm({
                 {rooms
                   .slice()
                   .sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber))
+                  .filter(r => r.id)
                   .map(r => (
                     <SelectItem key={r.id} value={r.id}>
                       Hab. {r.roomNumber} — Piso {r.floor}

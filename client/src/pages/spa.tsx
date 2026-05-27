@@ -1515,7 +1515,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl><SelectTrigger data-testid="select-cabin"><SelectValue placeholder="Seleccionar" /></SelectTrigger></FormControl>
                       <SelectContent>
-                        {activeCabins.map((cabin) => (
+                        {activeCabins.filter(cabin => cabin.id).map((cabin) => (
                           <SelectItem key={cabin.id} value={cabin.id}>{cabin.name}</SelectItem>
                         ))}
                       </SelectContent>
@@ -1545,7 +1545,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl><SelectTrigger data-testid="select-treatment"><SelectValue placeholder="Seleccionar tratamiento" /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {treatments.filter(t => t.isActive === "true").map((treatment) => (
+                      {treatments.filter(t => t.isActive === "true" && t.id).map((treatment) => (
                         <SelectItem key={treatment.id} value={treatment.id}>
                           {treatment.name} - ${parseFloat(treatment.price).toLocaleString()} ({treatment.durationMinutes}min)
                         </SelectItem>
@@ -1562,7 +1562,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <Select onValueChange={field.onChange} value={field.value || undefined}>
                     <FormControl><SelectTrigger data-testid="select-professional"><SelectValue placeholder="Sin asignar" /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {activeProfessionals.map((p) => (
+                      {activeProfessionals.filter(p => p.id).map((p) => (
                         <SelectItem key={p.id} value={p.id}>{p.name} {p.lastName || ""}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1577,7 +1577,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <Select onValueChange={(val) => { field.onChange(val); handleReservationAutoFill(val); }} value={field.value || undefined}>
                     <FormControl><SelectTrigger data-testid="select-reservation"><SelectValue placeholder="Sin asociar" /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {checkedInReservations.map((res) => (
+                      {checkedInReservations.filter(res => res.id).map((res) => (
                         <SelectItem key={res.id} value={res.id}>
                           Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
                         </SelectItem>
@@ -1594,7 +1594,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <Select onValueChange={handleSpaClientAutoFill}>
                     <SelectTrigger data-testid="select-spa-client"><SelectValue placeholder="Seleccionar cliente registrado" /></SelectTrigger>
                     <SelectContent>
-                      {spaClients.map((c) => (
+                      {spaClients.filter(c => c.id).map((c) => (
                         <SelectItem key={c.id} value={c.id}>{c.firstName} {c.lastName || ""} {c.phone ? `- ${c.phone}` : ""}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1989,7 +1989,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <SelectValue placeholder="Seleccionar servicio..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {treatments.filter(t => t.isActive === "true").map(t => (
+                  {treatments.filter(t => t.id && t.isActive === "true").map(t => (
                     <SelectItem key={t.id} value={t.id}>{t.name} — ${parseFloat(t.price).toFixed(2)}</SelectItem>
                   ))}
                   <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
@@ -2067,7 +2067,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     <SelectValue placeholder="Seleccionar habitación" />
                   </SelectTrigger>
                   <SelectContent>
-                    {checkedInReservations.map((res) => (
+                    {checkedInReservations.filter(res => res.id).map((res) => (
                       <SelectItem key={res.id} value={res.id}>
                         Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
                       </SelectItem>
@@ -2131,7 +2131,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               <Select value={treatmentForm.watch("categoryId")} onValueChange={(v) => treatmentForm.setValue("categoryId", v)}>
                 <SelectTrigger data-testid="select-treatment-category"><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
                 <SelectContent>
-                  {treatmentCategories.map((cat) => (
+                  {treatmentCategories.filter(cat => cat.id).map((cat) => (
                     <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -2200,7 +2200,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         <SelectSeparator />
                         <SelectGroup>
                           <SelectLabel className="text-xs">Insumos SPA</SelectLabel>
-                          {allInventoryItems.map((item: any) => (
+                          {allInventoryItems.filter((item: any) => item.id).map((item: any) => (
                             <SelectItem key={item.id} value={item.id}>
                               {item.name} ({item.unit})
                               {parseFloat(item.costPrice || "0") > 0 ? ` — $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : ""}

@@ -144,7 +144,7 @@ function ItemRowEdit({
                 <SelectValue placeholder="Autocompletar tipo hab..." />
               </SelectTrigger>
               <SelectContent>
-                {roomTypes.map(rt => (
+                {roomTypes.filter(rt => rt.id).map(rt => (
                   <SelectItem key={rt.id} value={rt.id}>{rt.name}</SelectItem>
                 ))}
               </SelectContent>
