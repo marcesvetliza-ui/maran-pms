@@ -417,6 +417,7 @@ function InvoiceDialog({
   const isNC = form.tipoComprobante.startsWith("NC");
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) resetDialog(); }}>
       <DialogContent
         className="max-w-2xl max-h-[92vh] overflow-y-auto"
@@ -899,6 +900,7 @@ function InvoiceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 
