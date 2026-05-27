@@ -420,12 +420,8 @@ function InvoiceDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!v) resetDialog(); }}>
       <DialogContent
         className="max-w-2xl max-h-[92vh] overflow-y-auto"
-        onInteractOutside={(e) => {
-          const target = e.target as Element;
-          if (target.closest("[data-radix-popper-content-wrapper]") || target.closest("[cmdk-root]")) {
-            e.preventDefault();
-          }
-        }}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
           <DialogTitle>Registrar Comprobante</DialogTitle>
@@ -847,60 +843,61 @@ function InvoiceDialog({
         </div>
       </DialogContent>
 
-      {/* Quick-create supplier dialog */}
-      <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Nuevo Proveedor</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
-            <div className="col-span-2">
-              <Label>Razón Social *</Label>
-              <Input value={quickForm.razonSocial} onChange={(e) => qf("razonSocial", e.target.value)} data-testid="input-quick-razon-social" />
-            </div>
-            <div>
-              <Label>CUIT *</Label>
-              <Input value={quickForm.cuit} onChange={(e) => qf("cuit", e.target.value)} placeholder="20-12345678-9" data-testid="input-quick-cuit" />
-            </div>
-            <div>
-              <Label>Condición IVA *</Label>
-              <Select value={quickForm.condicionIva} onValueChange={(v) => qf("condicionIva", v)}>
-                <SelectTrigger data-testid="select-quick-condicion-iva">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["Responsable Inscripto","Monotributo","Exento","No Responsable","Consumidor Final"].map((c) => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="col-span-2">
-              <Label>Cuenta contable por defecto</Label>
-              <Select value={quickForm.cuentaContableId} onValueChange={(v) => qf("cuentaContableId", v)}>
-                <SelectTrigger data-testid="select-quick-cuenta-contable">
-                  <SelectValue placeholder="Sin cuenta por defecto" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Sin cuenta por defecto</SelectItem>
-                  {accounts.map((a) => (
-                    <SelectItem key={a.id} value={String(a.id)}>
-                      {a.codigo} — {a.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+    </Dialog>
+
+    {/* Quick-create supplier dialog — rendered OUTSIDE main Dialog to avoid Radix nesting issues */}
+    <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Nuevo Proveedor</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="col-span-2">
+            <Label>Razón Social *</Label>
+            <Input value={quickForm.razonSocial} onChange={(e) => qf("razonSocial", e.target.value)} data-testid="input-quick-razon-social" />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setQuickCreateOpen(false)}>Cancelar</Button>
-            <Button onClick={handleQuickCreateSubmit} disabled={quickCreateMut.isPending} data-testid="btn-submit-quick-supplier">
-              {quickCreateMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-              Crear proveedor
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div>
+            <Label>CUIT *</Label>
+            <Input value={quickForm.cuit} onChange={(e) => qf("cuit", e.target.value)} placeholder="20-12345678-9" data-testid="input-quick-cuit" />
+          </div>
+          <div>
+            <Label>Condición IVA *</Label>
+            <Select value={quickForm.condicionIva} onValueChange={(v) => qf("condicionIva", v)}>
+              <SelectTrigger data-testid="select-quick-condicion-iva">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["Responsable Inscripto","Monotributo","Exento","No Responsable","Consumidor Final"].map((c) => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="col-span-2">
+            <Label>Cuenta contable por defecto</Label>
+            <Select value={quickForm.cuentaContableId} onValueChange={(v) => qf("cuentaContableId", v)}>
+              <SelectTrigger data-testid="select-quick-cuenta-contable">
+                <SelectValue placeholder="Sin cuenta por defecto" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Sin cuenta por defecto</SelectItem>
+                {accounts.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {a.codigo} — {a.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setQuickCreateOpen(false)}>Cancelar</Button>
+          <Button onClick={handleQuickCreateSubmit} disabled={quickCreateMut.isPending} data-testid="btn-submit-quick-supplier">
+            {quickCreateMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
+            Crear proveedor
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }
