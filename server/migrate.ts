@@ -3,6 +3,21 @@ import { db } from "./db";
 import { logger } from "./logger";
 import { sql } from "drizzle-orm";
 
+// Wraps a migration in a timeout so a hung DDL lock never kills the startup
+async function withTimeout<T>(label: string, ms: number, fn: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`TIMEOUT after ${ms}ms`)), ms)
+      ),
+    ]);
+  } catch (e: any) {
+    logger.warn(`Migración ${label}: ${e.message}`);
+    return undefined;
+  }
+}
+
 export async function runMigrations() {
   // In production Railway uses PgBouncer (connection pooling). Drizzle's migrate()
   // issues DDL commands (CREATE SCHEMA, advisory locks) that are incompatible with
@@ -30,16 +45,16 @@ export async function runMigrations() {
     logger.info("Producción: migrate() omitido (conexión pooled). Usando migraciones incrementales.");
   }
 
-  // Incremental schema additions (idempotent, safe to run on every startup)
-  try {
-    await db.execute(sql`ALTER TABLE cash_shifts ADD COLUMN IF NOT EXISTS turno_tipo text`);
-  } catch (e: any) {
-    logger.warn("Migración incremental cash_shifts.turno_tipo: " + e.message);
-  }
+  // Incremental schema additions — each wrapped in an 8s timeout so a hung
+  // DDL lock in Railway/PgBouncer never prevents the app from starting.
+  const T = 8_000;
 
-  // Charge types table
-  try {
-    await db.execute(sql`
+  await withTimeout("cash_shifts.turno_tipo", T, () =>
+    db.execute(sql`ALTER TABLE cash_shifts ADD COLUMN IF NOT EXISTS turno_tipo text`)
+  );
+
+  await withTimeout("charge_types (create)", T, () =>
+    db.execute(sql`
       CREATE TABLE IF NOT EXISTS charge_types (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         label text NOT NULL,
@@ -49,8 +64,9 @@ export async function runMigrations() {
         active boolean NOT NULL DEFAULT true,
         sort_order integer NOT NULL DEFAULT 0
       )
-    `);
-    // Seed presets only if table is empty
+    `)
+  );
+  await withTimeout("charge_types (seed)", T, async () => {
     const existing = await db.execute(sql`SELECT COUNT(*) FROM charge_types`);
     const count = parseInt((existing.rows[0] as any)?.count ?? "0");
     if (count === 0) {
@@ -68,12 +84,9 @@ export async function runMigrations() {
       `);
       logger.info("Charge types seeded with default presets.");
     }
-  } catch (e: any) {
-    logger.warn("Migración incremental charge_types: " + e.message);
-  }
+  });
 
-  // Confirmation terms seed (editable via system settings)
-  try {
+  await withTimeout("confirmation_terms (seed)", T, async () => {
     const existing = await db.execute(sql`SELECT COUNT(*) FROM system_settings WHERE key = 'confirmation_terms'`);
     const count = parseInt((existing.rows[0] as any)?.count ?? "0");
     if (count === 0) {
@@ -94,23 +107,19 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
           'system'
         )
       `);
-      logger.info("confirmation_terms seeded in system_settings.");
+      logger.info("confirmation_terms seeded.");
     }
-  } catch (e: any) {
-    logger.warn("Migración incremental confirmation_terms: " + e.message);
-  }
+  });
 
-  // Late checkout columns for reservations
-  try {
-    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout boolean DEFAULT false`);
-    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout_time varchar(10)`);
-  } catch (e: any) {
-    logger.warn("Migración incremental reservations.late_checkout: " + e.message);
-  }
+  await withTimeout("reservations.late_checkout", T, () =>
+    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout boolean DEFAULT false`)
+  );
+  await withTimeout("reservations.late_checkout_time", T, () =>
+    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout_time varchar(10)`)
+  );
 
-  // Loan items tables
-  try {
-    await db.execute(sql`
+  await withTimeout("loan_items (create)", T, () =>
+    db.execute(sql`
       CREATE TABLE IF NOT EXISTS loan_items (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         name text NOT NULL,
@@ -119,8 +128,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         active boolean NOT NULL DEFAULT true,
         sort_order integer NOT NULL DEFAULT 0
       )
-    `);
-    await db.execute(sql`
+    `)
+  );
+  await withTimeout("item_loans (create)", T, () =>
+    db.execute(sql`
       CREATE TABLE IF NOT EXISTS item_loans (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         loan_item_id varchar NOT NULL REFERENCES loan_items(id),
@@ -131,7 +142,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         notes text,
         registered_by text
       )
-    `);
+    `)
+  );
+  await withTimeout("loan_items (seed)", T, async () => {
     const existing = await db.execute(sql`SELECT COUNT(*) FROM loan_items`);
     const count = parseInt((existing.rows[0] as any)?.count ?? "0");
     if (count === 0) {
@@ -146,27 +159,23 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ('Cuna', 'Cuna de viaje para bebé', 2, 7),
         ('Toallas extra', 'Toallas adicionales (juego)', 8, 8)
       `);
-      logger.info("Loan items seeded with default presets.");
+      logger.info("Loan items seeded.");
     }
-  } catch (e: any) {
-    logger.warn("Migración incremental loan_items: " + e.message);
-  }
+  });
 
-  // ── billing_config: arca_ambiente + punto_venta_homolog ────────────────────
-  try {
-    await db.execute(sql`
+  await withTimeout("billing_config.arca_ambiente", T, () =>
+    db.execute(sql`
       ALTER TABLE billing_config
         ADD COLUMN IF NOT EXISTS arca_ambiente text DEFAULT 'ficticio',
         ADD COLUMN IF NOT EXISTS punto_venta_homolog integer DEFAULT 99
-    `);
-    // Migrate existing rows: if modo_arca=true → produccion, else → ficticio
-    await db.execute(sql`
+    `)
+  );
+  await withTimeout("billing_config.arca_ambiente (update)", T, () =>
+    db.execute(sql`
       UPDATE billing_config
       SET arca_ambiente = CASE WHEN modo_arca = true THEN 'produccion' ELSE 'ficticio' END
       WHERE arca_ambiente IS NULL OR arca_ambiente = 'ficticio'
-    `);
-    logger.info("Migración billing_config: arca_ambiente + punto_venta_homolog OK");
-  } catch (e: any) {
-    logger.warn("Migración billing_config: " + e.message);
-  }
+    `)
+  );
+  logger.info("Migraciones incrementales completadas.");
 }

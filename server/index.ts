@@ -136,112 +136,81 @@ app.use((req, res, next) => {
     console.error("Init cash shifts error:", err);
   }
 
-  try {
-    const { db } = await import("./db");
-    const { sql } = await import("drizzle-orm");
-    await db.execute(sql`
-      INSERT INTO accounting_accounts (codigo, nombre, tipo) VALUES
-        ('1.1.1.01', 'Caja', 'activo'),
-        ('1.1.1.02', 'Banco Macro', 'activo'),
-        ('2.1.1.01', 'Proveedores a Pagar', 'pasivo')
-      ON CONFLICT (codigo) DO NOTHING
-    `);
-  } catch (err) {
-    console.error("Critical accounts insert error (non-blocking):", err);
+  // Helper: run a migration with an 8s timeout so hung DDL locks don't kill startup
+  async function mig(label: string, fn: () => Promise<unknown>) {
+    try {
+      await Promise.race([
+        fn(),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("TIMEOUT 8s")), 8_000)),
+      ]);
+    } catch (err: any) {
+      logger.warn(`Startup migration [${label}]: ${err?.message}`);
+    }
   }
+  const { db: iDb } = await import("./db");
+  const { sql: iSql } = await import("drizzle-orm");
 
-  // Migrate: add extra_amount to package_room_prices
-  try {
-    const { db } = await import("./db");
-    const { sql } = await import("drizzle-orm");
-    await db.execute(sql`
-      ALTER TABLE package_room_prices
-        ADD COLUMN IF NOT EXISTS extra_amount DECIMAL(12,2) DEFAULT 0
-    `);
-  } catch (err) {
-    console.error("package_room_prices migration error (non-blocking):", err);
-  }
+  await mig("accounting_accounts seed", () => iDb.execute(iSql`
+    INSERT INTO accounting_accounts (codigo, nombre, tipo) VALUES
+      ('1.1.1.01', 'Caja', 'activo'),
+      ('1.1.1.02', 'Banco Macro', 'activo'),
+      ('2.1.1.01', 'Proveedores a Pagar', 'pasivo')
+    ON CONFLICT (codigo) DO NOTHING
+  `));
 
-  // Migrate: add cuenta_contable_id to accounting_suppliers
-  try {
-    const { db } = await import("./db");
-    const { sql } = await import("drizzle-orm");
-    await db.execute(sql`
-      ALTER TABLE accounting_suppliers
-        ADD COLUMN IF NOT EXISTS cuenta_contable_id INTEGER REFERENCES accounting_accounts(id)
-    `);
-  } catch (err) {
-    console.error("accounting_suppliers migration error (non-blocking):", err);
-  }
+  await mig("package_room_prices.extra_amount", () => iDb.execute(iSql`
+    ALTER TABLE package_room_prices ADD COLUMN IF NOT EXISTS extra_amount DECIMAL(12,2) DEFAULT 0
+  `));
 
-  // Migrate: add SMTP columns to email_config + ensure the single config row exists
-  try {
-    const { db } = await import("./db");
-    const { sql } = await import("drizzle-orm");
-    // Add new columns if missing
-    await db.execute(sql`
-      ALTER TABLE email_config
-        ADD COLUMN IF NOT EXISTS smtp_host TEXT DEFAULT 'smtp.gmail.com',
-        ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587,
-        ADD COLUMN IF NOT EXISTS smtp_user TEXT,
-        ADD COLUMN IF NOT EXISTS smtp_pass TEXT,
-        ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false
-    `);
-    // Ensure the single config row (id=1) always exists
-    await db.execute(sql`
-      INSERT INTO email_config (
-        id, global_enabled, provider,
-        from_email, from_name,
-        confirmation_enabled, confirmation_subject, confirmation_body,
-        reminder_enabled, reminder_subject, reminder_body,
-        checkout_enabled, checkout_subject, checkout_body
-      ) VALUES (
-        1, false, 'resend',
-        'reservas@maransuites.com', 'Maran Suites & Towers',
-        true, 'Confirmación de tu reserva — Maran Suites & Towers',
-        'Hola {nombre_huesped},\n\nTu reserva ha sido confirmada. Te esperamos el {fecha_checkin} en la habitación {numero_habitacion}.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\n\n¡Nos vemos pronto!\nMaran Suites & Towers',
-        true, 'Recordatorio de tu llegada — Maran Suites & Towers',
-        'Hola {nombre_huesped}, te recordamos que tu check-in es mañana {fecha_checkin}. ¡Te esperamos!',
-        true, 'Gracias por tu estadía — Maran Suites & Towers',
-        'Hola {nombre_huesped},\n\nGracias por elegirnos. Esperamos que tu estadía haya sido excelente.\n\nNos gustaría conocer tu opinión: {link_encuesta}\n\n¡Hasta pronto!\nMaran Suites & Towers'
-      )
-      ON CONFLICT (id) DO NOTHING
-    `);
-  } catch (err) {
-    console.error("Email config migration error (non-blocking):", err);
-  }
+  await mig("accounting_suppliers.cuenta_contable_id", () => iDb.execute(iSql`
+    ALTER TABLE accounting_suppliers
+      ADD COLUMN IF NOT EXISTS cuenta_contable_id INTEGER REFERENCES accounting_accounts(id)
+  `));
 
-  // Migrate: add master_folio_config to groups
-  try {
-    const { db } = await import("./db");
-    const { sql } = await import("drizzle-orm");
-    await db.execute(sql`
-      ALTER TABLE groups
-        ADD COLUMN IF NOT EXISTS master_folio_config TEXT DEFAULT 'accommodation'
-    `);
-  } catch (err) {
-    console.error("groups master_folio_config migration error (non-blocking):", err);
-  }
+  await mig("email_config SMTP columns", () => iDb.execute(iSql`
+    ALTER TABLE email_config
+      ADD COLUMN IF NOT EXISTS smtp_host TEXT DEFAULT 'smtp.gmail.com',
+      ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587,
+      ADD COLUMN IF NOT EXISTS smtp_user TEXT,
+      ADD COLUMN IF NOT EXISTS smtp_pass TEXT,
+      ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false
+  `));
 
-  // Migrate: create backup_logs table
-  try {
-    const { db } = await import("./db");
-    const { sql } = await import("drizzle-orm");
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS backup_logs (
-        id SERIAL PRIMARY KEY,
-        type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        destination TEXT,
-        file_size_bytes INTEGER,
-        duration_ms INTEGER,
-        error_message TEXT,
-        created_at TIMESTAMP DEFAULT NOW() NOT NULL
-      )
-    `);
-  } catch (err) {
-    console.error("backup_logs migration error (non-blocking):", err);
-  }
+  await mig("email_config row seed", () => iDb.execute(iSql`
+    INSERT INTO email_config (
+      id, global_enabled, provider,
+      from_email, from_name,
+      confirmation_enabled, confirmation_subject, confirmation_body,
+      reminder_enabled, reminder_subject, reminder_body,
+      checkout_enabled, checkout_subject, checkout_body
+    ) VALUES (
+      1, false, 'resend',
+      'reservas@maransuites.com', 'Maran Suites & Towers',
+      true, 'Confirmación de tu reserva — Maran Suites & Towers',
+      'Hola {nombre_huesped},\n\nTu reserva ha sido confirmada. Te esperamos el {fecha_checkin} en la habitación {numero_habitacion}.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\n\n¡Nos vemos pronto!\nMaran Suites & Towers',
+      true, 'Recordatorio de tu llegada — Maran Suites & Towers',
+      'Hola {nombre_huesped}, te recordamos que tu check-in es mañana {fecha_checkin}. ¡Te esperamos!',
+      true, 'Gracias por tu estadía — Maran Suites & Towers',
+      'Hola {nombre_huesped},\n\nGracias por elegirnos. Esperamos que tu estadía haya sido excelente.\n\nNos gustaría conocer tu opinión: {link_encuesta}\n\n¡Hasta pronto!\nMaran Suites & Towers'
+    ) ON CONFLICT (id) DO NOTHING
+  `));
+
+  await mig("groups.master_folio_config", () => iDb.execute(iSql`
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS master_folio_config TEXT DEFAULT 'accommodation'
+  `));
+
+  await mig("backup_logs create", () => iDb.execute(iSql`
+    CREATE TABLE IF NOT EXISTS backup_logs (
+      id SERIAL PRIMARY KEY,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      destination TEXT,
+      file_size_bytes INTEGER,
+      duration_ms INTEGER,
+      error_message TEXT,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    )
+  `));
 
   await registerRoutes(httpServer, app);
 
