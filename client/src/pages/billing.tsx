@@ -131,10 +131,10 @@ export default function BillingPage() {
                 <span className="text-muted-foreground text-sm">a</span>
                 <Input type="date" value={filtroHasta} onChange={e => setFiltroHasta(e.target.value)} className="w-36 text-sm h-8" />
               </div>
-              <Select value={filtroTipo} onValueChange={setFiltroTipo}>
+              <Select value={filtroTipo || "__all__"} onValueChange={(v) => setFiltroTipo(v === "__all__" ? "" : v)}>
                 <SelectTrigger className="w-36 h-8 text-sm"><SelectValue placeholder="Tipo..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Todos</SelectItem>
+                  <SelectItem value="__all__">Todos</SelectItem>
                   <SelectItem value="FA">Factura A</SelectItem>
                   <SelectItem value="FB">Factura B</SelectItem>
                   <SelectItem value="FC">Factura C</SelectItem>

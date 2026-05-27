@@ -397,12 +397,12 @@ export default function AccountingSuppliers() {
             </div>
             <div className="col-span-2">
               <Label>Cuenta contable (se auto-completa en comprobantes)</Label>
-              <Select value={form.cuentaContableId} onValueChange={(v) => f(v, "cuentaContableId")}>
+              <Select value={form.cuentaContableId || "__none__"} onValueChange={(v) => f(v === "__none__" ? "" : v, "cuentaContableId")}>
                 <SelectTrigger data-testid="select-cuenta-contable">
                   <SelectValue placeholder="Sin cuenta por defecto" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sin cuenta por defecto</SelectItem>
+                  <SelectItem value="__none__">Sin cuenta por defecto</SelectItem>
                   {accounts.map((a) => (
                     <SelectItem key={a.id} value={String(a.id)}>
                       {a.codigo} — {a.nombre}
