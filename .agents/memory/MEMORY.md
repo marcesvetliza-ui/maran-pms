@@ -1,4 +1,1 @@
-- [Group placeholder guest pattern](group-placeholder-guest.md) — GROUP-{groupId} codigo marks auto-created placeholder guests; filter with `or(isNull(codigo), not(ilike(codigo,'GROUP-%')))` to exclude from guest lists.
-- [Planning guestName leading space bug](planning-guestname-trim.md) — always `.trim()` the `${lastName} ${firstName}` concatenation or `.split(" ")[0]` returns empty string when lastName is blank.
-- [Folio PDF route conflict](folio-route-conflict.md) — `/api/folios/:entityType/:entityId/pdf` in folios.ts intercepts any 3-segment path; group-specific routes must use `/api/groups/...` prefix.
-- [Drizzle NULL guard pattern](drizzle-null-guard.md) — `NOT ILIKE` on a nullable column excludes NULLs in SQL; use `or(isNull(col), not(ilike(col, pattern)))` instead of bare `not(ilike(...))`.
+- [Radix SelectItem empty value crashes](radix-select-empty-values.md) — any SelectItem with `value=""` crashes the whole React tree; dynamic sources from API can silently introduce empty strings.

@@ -1383,7 +1383,7 @@ export default function Housekeeping() {
     onError: () => toast({ title: "Error", description: "No se pudo iniciar la limpieza.", variant: "destructive" }),
   });
 
-  const floors = rooms ? Array.from(new Set(rooms.map(r => r.floor))).sort((a, b) => a - b) : [];
+  const floors = rooms ? Array.from(new Set(rooms.map(r => r.floor).filter((f): f is number => f != null))).sort((a, b) => a - b) : [];
   
   const filteredRooms = rooms?.filter(room => {
     if (floorFilter !== "all" && room.floor !== parseInt(floorFilter)) return false;

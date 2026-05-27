@@ -1110,7 +1110,7 @@ export default function AdministrationPage() {
     ? auditLogs
     : auditLogs.filter((log) => log.module === filterModule);
 
-  const uniqueModules = Array.from(new Set(auditLogs.map((l) => l.module)));
+  const uniqueModules = Array.from(new Set(auditLogs.map((l) => l.module).filter((m): m is string => !!m && typeof m === "string")));
 
   const groupedSettings = settings.reduce((acc, setting) => {
     const cat = setting.category || "general";
