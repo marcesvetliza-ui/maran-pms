@@ -896,7 +896,7 @@ export class DatabaseStorage implements IStorage {
 
         reservationsMap[res.id] = {
           id: res.id,
-          guestName: guest ? `${guest.lastName} ${guest.firstName}` : "(Sin huésped)",
+          guestName: guest ? `${guest.lastName} ${guest.firstName}`.trim() : "(Sin huésped)",
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,
