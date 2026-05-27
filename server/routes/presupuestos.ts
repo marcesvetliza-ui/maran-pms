@@ -228,16 +228,15 @@ export function registerPresupuestosRoutes(app: Express) {
       y += infoBoxH + 8;
 
       // ── TABLE ────────────────────────────────────────────────
-      // col positions (x) and widths designed for wide Argentine prices
+      // Without DTO% column — redistribute width to desc, precio and sub
       const cols = {
         sector: margin,           // 40
         desc:   margin + 62,      // 102
-        cant:   margin + 264,     // 304
-        precio: margin + 300,     // 340
-        dto:    margin + 388,     // 428
-        sub:    margin + 428,     // 468
+        cant:   margin + 272,     // 312
+        precio: margin + 312,     // 352
+        sub:    margin + 420,     // 460
       };
-      const W = { sector: 58, desc: 198, cant: 32, precio: 84, dto: 36, sub: 82 };
+      const W = { sector: 58, desc: 205, cant: 32, precio: 98, sub: 95 };
       doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
       doc.fillColor("white").fontSize(8).font("Helvetica-Bold");
       const thY = y + 6;
@@ -245,7 +244,6 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.text("DESCRIPCIÓN", cols.desc,       thY, { width: W.desc });
       doc.text("CANT",        cols.cant,        thY, { width: W.cant,   align: "right" });
       doc.text("PRECIO",      cols.precio,      thY, { width: W.precio, align: "right" });
-      doc.text("DTO%",        cols.dto,         thY, { width: W.dto,    align: "right" });
       doc.text("SUBTOTAL",    cols.sub,         thY, { width: W.sub,    align: "right" });
       y += 22;
 
@@ -254,7 +252,11 @@ export function registerPresupuestosRoutes(app: Express) {
         spa: "SPA", evento: "Evento", otro: "Otro",
       };
       items.forEach((item, idx) => {
-        const rowH = Math.max(22, doc.heightOfString(item.descripcion, { width: W.desc }) + 12);
+        const descH   = doc.heightOfString(item.descripcion, { width: W.desc, fontSize: 8 });
+        const detailH = item.detalle
+          ? doc.heightOfString(item.detalle, { width: W.desc, fontSize: 7 }) + 5
+          : 0;
+        const rowH = Math.max(22, descH + detailH + 14);
         if (y + rowH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
         doc.rect(margin, y, contentW, rowH)
           .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
@@ -264,12 +266,11 @@ export function registerPresupuestosRoutes(app: Express) {
         doc.font("Helvetica-Bold").text(item.descripcion, cols.desc, cellY, { width: W.desc });
         if (item.detalle) {
           doc.font("Helvetica").fillColor(MUTED).fontSize(7)
-            .text(item.detalle, cols.desc, cellY + 11, { width: W.desc });
+            .text(item.detalle, cols.desc, cellY + descH + 3, { width: W.desc });
         }
         doc.font("Helvetica").fillColor(DARK).fontSize(8);
         doc.text(formatNum(item.cantidad),                cols.cant,  cellY, { width: W.cant,   align: "right" });
         doc.text(`$ ${formatMoney(item.precioUnitario)}`, cols.precio, cellY, { width: W.precio, align: "right" });
-        doc.text(`${formatNum(item.descuento)}%`,         cols.dto,   cellY, { width: W.dto,    align: "right" });
         doc.font("Helvetica-Bold")
           .text(`$ ${formatMoney(item.subtotal)}`,        cols.sub,   cellY, { width: W.sub,    align: "right" });
         y = y + rowH;
@@ -296,17 +297,27 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.text(`$ ${formatMoney(pres.total)}`, totX, y + 5, { width: totW - 6, align: "right" });
       y += 30;
 
-      // ── CONDITIONS (editable, unchanged) ─────────────────────
+      // ── CONDITIONS (editable) ────────────────────────────────
       if (pres.condiciones) {
-        const condTextH = doc.heightOfString(pres.condiciones, { width: contentW - 28 });
-        const condBoxH  = condTextH + 32;
+        const condLines = pres.condiciones.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+        let condBodyH = 10;
+        for (const line of condLines) {
+          condBodyH += doc.heightOfString(line, { width: contentW - 28 }) + 5;
+        }
+        const condBoxH = 24 + condBodyH + 8;
+        if (y + condBoxH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
         doc.roundedRect(margin, y, contentW, condBoxH, 6).stroke("#e0e0e0");
         doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
         doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
         doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold")
           .text("CONDICIONES Y OBSERVACIONES", margin + 14, y + 8, { characterSpacing: 1, width: contentW - 28 });
-        doc.fillColor(MUTED).fontSize(8.5).font("Helvetica")
-          .text(pres.condiciones, margin + 14, y + 26, { width: contentW - 28 });
+        let cy = y + 28;
+        for (const line of condLines) {
+          if (cy > pageH - 110) { doc.addPage(); drawPageBackground(); cy = 40; }
+          doc.fillColor(MUTED).fontSize(8.5).font("Helvetica")
+            .text(line, margin + 14, cy, { width: contentW - 28 });
+          cy += doc.heightOfString(line, { width: contentW - 28 }) + 5;
+        }
         y += condBoxH + 10;
       }
 
@@ -315,18 +326,20 @@ export function registerPresupuestosRoutes(app: Express) {
       for (const t of terminos) {
         tcBodyH += doc.heightOfString(t, { width: contentW - 30 }) + 6;
       }
-      const tcH = 22 + tcBodyH + 8;
+      const tcH = 24 + tcBodyH + 8;
       if (y + tcH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
       doc.roundedRect(margin, y, contentW, tcH, 6).stroke("#e0e0e0");
       doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
       doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
       doc.fillColor("#ffffff").fontSize(7.5).font("Helvetica-Bold")
         .text("TÉRMINOS Y CONDICIONES", margin + 14, y + 8, { characterSpacing: 1.5, width: contentW - 28 });
-      let ty = y + 26;
+      let ty = y + 28;
       terminos.forEach((t, i) => {
+        if (ty > pageH - 110) { doc.addPage(); drawPageBackground(); ty = 40; }
+        const lineH = doc.heightOfString(`${i + 1}.  ${t}`, { width: contentW - 28 });
         doc.fillColor("#333333").fontSize(8).font("Helvetica")
           .text(`${i + 1}.  ${t}`, margin + 14, ty, { width: contentW - 28 });
-        ty += doc.heightOfString(t, { width: contentW - 28 }) + 6;
+        ty += lineH + 6;
       });
 
       doc.end();
