@@ -234,7 +234,8 @@ function InvoiceDialog({
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [quickForm, setQuickForm] = useState({ ...emptyQuickSupplier });
-  const [supplierOpen, setSupplierOpen] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
@@ -473,60 +474,61 @@ function InvoiceDialog({
                 <div className="col-span-2">
                   <Label>Proveedor</Label>
                   <div className="flex gap-2 items-center">
-                    <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          className="flex-1 justify-between font-normal h-9"
-                          data-testid="select-supplier"
-                        >
-                          <span className="truncate">
-                            {form.supplierId === "manual"
-                              ? "— Ingreso manual —"
-                              : form.supplierId
-                              ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || "Seleccionar proveedor..."
-                              : "Seleccionar proveedor..."}
-                          </span>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[400px] p-0" align="start">
-                        <Command>
-                          <CommandInput placeholder="Buscar proveedor..." />
-                          <CommandList>
-                            <CommandEmpty>No se encontraron proveedores</CommandEmpty>
-                            <CommandGroup>
-                              <CommandItem
-                                value="manual"
-                                onSelect={() => { handleSupplierChange("manual"); setSupplierOpen(false); }}
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        placeholder="Buscar proveedor..."
+                        value={supplierDropdownOpen
+                          ? supplierSearch
+                          : form.supplierId === "manual"
+                          ? "— Ingreso manual —"
+                          : form.supplierId
+                          ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
+                          : ""}
+                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        data-testid="select-supplier"
+                        autoComplete="off"
+                      />
+                      {supplierDropdownOpen && (
+                        <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
+                          <div
+                            className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                            onMouseDown={() => { handleSupplierChange("manual"); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${form.supplierId === "manual" ? "opacity-100" : "opacity-0"}`} />
+                            — Ingresar manual —
+                          </div>
+                          {[...suppliers]
+                            .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
+                            .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
+                            .slice(0, 60)
+                            .map((s) => (
+                              <div
+                                key={s.id}
+                                className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                                onMouseDown={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
-                                <Check className={`mr-2 h-4 w-4 ${form.supplierId === "manual" ? "opacity-100" : "opacity-0"}`} />
-                                — Ingresar manual —
-                              </CommandItem>
-                              {[...suppliers]
-                                .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
-                                .map((s) => (
-                                  <CommandItem
-                                    key={s.id}
-                                    value={`${s.razonSocial} ${s.cuit}`}
-                                    onSelect={() => { handleSupplierChange(String(s.id)); setSupplierOpen(false); }}
-                                  >
-                                    <Check className={`mr-2 h-4 w-4 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
-                                    <span className="flex-1 truncate">{s.razonSocial}</span>
-                                    <span className="text-xs text-muted-foreground ml-2">{s.cuit}</span>
-                                  </CommandItem>
-                                ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
+                                  <span className="truncate">{s.razonSocial}</span>
+                                </div>
+                                <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
+                              </div>
+                            ))}
+                          {suppliers.filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch)).length === 0 && (
+                            <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
-                      onClick={() => setQuickCreateOpen(true)}
+                      onMouseDown={(e) => { e.preventDefault(); setSupplierDropdownOpen(false); setQuickCreateOpen(true); }}
                       title="Crear nuevo proveedor"
                       data-testid="btn-quick-create-supplier"
                     >
