@@ -878,12 +878,12 @@ function InvoiceDialog({
           </div>
           <div className="col-span-2">
             <Label>Cuenta contable por defecto</Label>
-            <Select value={quickForm.cuentaContableId} onValueChange={(v) => qf("cuentaContableId", v)}>
+            <Select value={quickForm.cuentaContableId || "__none__"} onValueChange={(v) => qf("cuentaContableId", v === "__none__" ? "" : v)}>
               <SelectTrigger data-testid="select-quick-cuenta-contable">
                 <SelectValue placeholder="Sin cuenta por defecto" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Sin cuenta por defecto</SelectItem>
+                <SelectItem value="__none__">Sin cuenta por defecto</SelectItem>
                 {accounts.map((a) => (
                   <SelectItem key={a.id} value={String(a.id)}>
                     {a.codigo} — {a.nombre}
