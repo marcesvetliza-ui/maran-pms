@@ -779,8 +779,8 @@ function InvoiceDialog({
                               <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="__none__">— Sin categoría —</SelectItem>
-                                {itemCategories.map((cat: any) => (
-                                  <SelectItem key={cat.id} value={cat.id}>{cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}</SelectItem>
+                                {(itemCategories as any[]).filter((cat: any) => cat.id).map((cat: any) => (
+                                  <SelectItem key={cat.id} value={String(cat.id)}>{cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
