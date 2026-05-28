@@ -1,5 +1,5 @@
 import { useState, useEffect, createContext, useContext, useCallback, lazy, Suspense } from "react";
-import { Switch, Route, useRoute } from "wouter";
+import { Switch, Route, useRoute, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -93,6 +93,15 @@ function PageLoader() {
     <div className="flex items-center justify-center h-64">
       <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin" />
     </div>
+  );
+}
+
+function RouteAwareErrorBoundary() {
+  const [location] = useLocation();
+  return (
+    <ErrorBoundary key={location}>
+      <Router />
+    </ErrorBoundary>
   );
 }
 
@@ -226,9 +235,7 @@ function AppLayout() {
             </div>
           )}
           <main className="flex-1 overflow-y-auto">
-            <ErrorBoundary>
-              <Router />
-            </ErrorBoundary>
+            <RouteAwareErrorBoundary />
           </main>
         </div>
       </div>

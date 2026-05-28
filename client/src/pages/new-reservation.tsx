@@ -375,7 +375,7 @@ export default function NewReservationPage() {
                       <SelectValue placeholder="Seleccionar tipo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {roomTypes?.map((rt) => (
+                      {roomTypes?.filter(rt => rt.id).map((rt) => (
                         <SelectItem key={rt.id} value={rt.id}>
                           {rt.name}
                         </SelectItem>
@@ -416,6 +416,7 @@ export default function NewReservationPage() {
                           };
                           const label = statusLabel[room.status] || room.status;
                           const isCurrentlyFree = room.status === "available";
+                          if (!room.id) return null;
                           return (
                             <SelectItem key={room.id} value={room.id}>
                               <span>Hab. {room.roomNumber} — Piso {room.floor}</span>
@@ -486,7 +487,7 @@ export default function NewReservationPage() {
                     <SelectValue placeholder={selectedRoomTypeId ? "Seleccionar tarifa..." : "Primero seleccione tipo"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {applicableRatePlans?.map((rp) => (
+                    {applicableRatePlans?.filter(rp => rp.id).map((rp) => (
                       <SelectItem key={rp.id} value={rp.id}>
                         {rp.name} - ${rp.baseRate}/noche
                       </SelectItem>
