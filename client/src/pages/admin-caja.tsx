@@ -467,10 +467,12 @@ function NuevoMovimientoDialog({ open, onClose }: { open: boolean; onClose: () =
                   <SelectContent>
                     {(cuentas as any[])
                       .filter((c: any) =>
-                        c.tipo === "egreso" ||
-                        c.codigo?.startsWith("4") ||
-                        c.codigo?.startsWith("5") ||
-                        c.codigo?.startsWith("6")
+                        c.id && (
+                          c.tipo === "egreso" ||
+                          c.codigo?.startsWith("4") ||
+                          c.codigo?.startsWith("5") ||
+                          c.codigo?.startsWith("6")
+                        )
                       )
                       .map((c: any) => (
                         <SelectItem key={c.id} value={String(c.id)}>

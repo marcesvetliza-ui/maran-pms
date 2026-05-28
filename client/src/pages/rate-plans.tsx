@@ -203,7 +203,7 @@ function RatePlanFormDialog({
                   <SelectValue placeholder="Seleccionar tipo de habitación" />
                 </SelectTrigger>
                 <SelectContent>
-                  {roomTypes.map((type) => (
+                  {roomTypes.filter(type => type.id).map((type) => (
                     <SelectItem key={type.id} value={type.id}>
                       {type.name}
                     </SelectItem>
@@ -497,7 +497,7 @@ export default function RatePlansPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos los tipos</SelectItem>
-                {roomTypes?.map((type) => (
+                {roomTypes?.filter(type => type.id).map((type) => (
                   <SelectItem key={type.id} value={type.id}>
                     {type.name}
                   </SelectItem>

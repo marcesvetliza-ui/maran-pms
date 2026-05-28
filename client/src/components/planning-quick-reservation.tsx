@@ -316,7 +316,7 @@ export function QuickReservationDialog({
                 <SelectTrigger data-testid="select-bed-config"><SelectValue placeholder="Sin preferencia" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sin preferencia</SelectItem>
-                  {activeBedTypes.map(bt => (
+                  {activeBedTypes.filter(bt => bt.id).map(bt => (
                     <SelectItem key={bt.id} value={bt.id}>
                       <div className="flex flex-col gap-0"><span>{bt.name}</span>{bt.description && <span className="text-xs text-muted-foreground">{bt.description}</span>}</div>
                     </SelectItem>
@@ -338,7 +338,7 @@ export function QuickReservationDialog({
                 <SelectContent>
                   {roomRatePlans.length === 0 ? (
                     <div className="px-3 py-2 text-sm text-muted-foreground">Sin planes para este tipo</div>
-                  ) : roomRatePlans.map(rp => {
+                  ) : roomRatePlans.filter(rp => rp.id).map(rp => {
                     const hasPaxRates = rp.rate2pax || rp.rate3pax || rp.rate4pax;
                     return (
                       <SelectItem key={rp.id} value={rp.id}>
@@ -402,7 +402,7 @@ export function QuickReservationDialog({
                 <SelectTrigger data-testid="select-package"><SelectValue placeholder="Sin paquete" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Sin paquete</SelectItem>
-                  {activePackages.map(pkg => <SelectItem key={pkg.id} value={pkg.id}>{pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})</SelectItem>)}
+                  {activePackages.filter(pkg => pkg.id).map(pkg => <SelectItem key={pkg.id} value={pkg.id}>{pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

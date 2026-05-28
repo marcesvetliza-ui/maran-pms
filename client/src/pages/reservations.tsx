@@ -702,7 +702,7 @@ export function ReservationFormDialog({
                     <SelectValue placeholder="Seleccionar tipo" />
                   </SelectTrigger>
                   <SelectContent>
-                    {roomTypes.map((type) => (
+                    {roomTypes.filter(type => type.id).map((type) => (
                       <SelectItem key={type.id} value={type.id}>
                         {type.name}
                       </SelectItem>
@@ -733,7 +733,7 @@ export function ReservationFormDialog({
                     <SelectValue placeholder="Seleccionar habitación" />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableRooms.slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => {
+                    {availableRooms.filter(room => room.id).slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => {
                       const roomType = isUpgrade ? roomTypes.find(t => t.id === room.roomTypeId) : null;
                       return (
                         <SelectItem key={room.id} value={room.id}>
@@ -757,7 +757,7 @@ export function ReservationFormDialog({
                   <SelectValue placeholder="Seleccionar plan tarifario" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ratePlans?.map((plan) => {
+                  {ratePlans?.filter(plan => plan.id).map((plan) => {
                     const hasPaxRates = plan.rate2pax || plan.rate3pax || plan.rate4pax;
                     return (
                       <SelectItem key={plan.id} value={plan.id}>
@@ -940,7 +940,7 @@ export function ReservationFormDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin paquete</SelectItem>
-                    {activePackages.map(pkg => (
+                    {activePackages.filter(pkg => pkg.id).map(pkg => (
                       <SelectItem key={pkg.id} value={pkg.id}>
                         {pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})
                       </SelectItem>
@@ -1123,7 +1123,7 @@ export function ReservationFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sin preferencia</SelectItem>
-                  {bedTypes?.filter(bt => bt.isActive).sort((a, b) => a.displayOrder - b.displayOrder).map(bt => (
+                  {bedTypes?.filter(bt => bt.id && bt.isActive).sort((a, b) => a.displayOrder - b.displayOrder).map(bt => (
                     <SelectItem key={bt.id} value={bt.id}>
                       <div className="flex flex-col gap-0">
                         <span>{bt.name}</span>
@@ -2629,7 +2629,7 @@ function ReservationDetailDialog({
                                 <SelectValue placeholder="Seleccionar empresa..." />
                               </SelectTrigger>
                               <SelectContent>
-                                {companiesForCC.map(c => (
+                                {companiesForCC.filter(c => c.id).map(c => (
                                   <SelectItem key={c.id} value={c.id}>
                                     {c.razonSocial || c.nombreFantasia}
                                   </SelectItem>
@@ -2657,7 +2657,7 @@ function ReservationDetailDialog({
                                 <SelectValue placeholder="Seleccionar agencia..." />
                               </SelectTrigger>
                               <SelectContent>
-                                {agenciesForCC.map(a => (
+                                {agenciesForCC.filter(a => a.id).map(a => (
                                   <SelectItem key={a.id} value={a.id}>
                                     {a.razonSocial || a.nombreFantasia}
                                   </SelectItem>
@@ -3004,7 +3004,7 @@ function ReservationDetailDialog({
                     <SelectValue placeholder={isActiveReservationsLoading ? "Cargando..." : "Seleccionar habitación..."} />
                   </SelectTrigger>
                   <SelectContent>
-                    {activeReservations?.map((r) => (
+                    {activeReservations?.filter(r => r.id).map((r) => (
                       <SelectItem key={r.id} value={r.id}>
                         Hab. {r.room?.roomNumber} — {r.guest?.lastName} {r.guest?.firstName}
                         {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}
@@ -3069,7 +3069,7 @@ function ReservationDetailDialog({
                   <SelectValue placeholder={isActiveReservationsLoading ? "Cargando..." : "Seleccionar habitación / huésped..."} />
                 </SelectTrigger>
                 <SelectContent>
-                  {activeReservations?.map((r) => (
+                  {activeReservations?.filter(r => r.id).map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       Hab. {r.room?.roomNumber} — {r.guest?.lastName} {r.guest?.firstName}
                       {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}

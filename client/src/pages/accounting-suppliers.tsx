@@ -403,7 +403,7 @@ export default function AccountingSuppliers() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Sin cuenta por defecto</SelectItem>
-                  {accounts.map((a) => (
+                  {accounts.filter((a: any) => a.id).map((a) => (
                     <SelectItem key={a.id} value={String(a.id)}>
                       {a.codigo} — {a.nombre}
                     </SelectItem>

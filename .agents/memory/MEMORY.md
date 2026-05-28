@@ -1,1 +1,1 @@
-- [Radix SelectItem empty value crashes](radix-select-empty-values.md) — any SelectItem with `value=""` crashes the whole React tree; dynamic sources from API can silently introduce empty strings.
+- [Radix SelectItem empty value crashes](radix-select-empty-values.md) — any SelectItem with `value=""` crashes the whole React tree; dynamic sources from API can silently introduce empty strings. All known occurrences fixed as of May 2026.

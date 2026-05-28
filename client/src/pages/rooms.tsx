@@ -235,7 +235,7 @@ function RoomFormDialog({
                   <SelectValue placeholder="Seleccionar tipo" />
                 </SelectTrigger>
                 <SelectContent>
-                  {roomTypes.map((type) => (
+                  {roomTypes.filter(type => type.id).map((type) => (
                     <SelectItem key={type.id} value={type.id}>
                       {type.name}
                     </SelectItem>
@@ -533,7 +533,7 @@ export default function RoomsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos los tipos</SelectItem>
-                {roomTypes?.map((type) => (
+                {roomTypes?.filter(type => type.id).map((type) => (
                   <SelectItem key={type.id} value={type.id}>
                     {type.name}
                   </SelectItem>

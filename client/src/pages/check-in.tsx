@@ -581,7 +581,7 @@ export default function CheckInPage() {
                         <SelectValue placeholder="Seleccionar tipo..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {roomTypes?.map((rt) => (
+                        {roomTypes?.filter(rt => rt.id).map((rt) => (
                           <SelectItem key={rt.id} value={rt.id}>
                             {rt.name} - {rt.maxOccupancy} pax
                           </SelectItem>
@@ -598,7 +598,7 @@ export default function CheckInPage() {
                           <SelectValue placeholder="Seleccionar habitacion..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableRooms?.map((room) => (
+                          {availableRooms?.filter(room => room.id).map((room) => (
                             <SelectItem key={room.id} value={room.id}>
                               Hab. {room.roomNumber} - Piso {room.floor}
                             </SelectItem>
@@ -621,7 +621,7 @@ export default function CheckInPage() {
                           <SelectValue placeholder="Seleccionar tarifa..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {applicableRatePlans.map((rp) => (
+                          {applicableRatePlans.filter(rp => rp.id).map((rp) => (
                             <SelectItem key={rp.id} value={rp.id}>
                               {rp.name} - ${rp.baseRate}/noche
                             </SelectItem>

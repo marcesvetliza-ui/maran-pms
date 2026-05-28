@@ -640,7 +640,7 @@ function InvoiceDialog({
                     <SelectContent>
                       <SelectItem value="__none__">— Sin clasificar —</SelectItem>
                       {accounts
-                        .filter((a) => a.tipo === "egreso")
+                        .filter((a) => a.id && a.tipo === "egreso")
                         .map((a) => (
                           <SelectItem key={a.id} value={String(a.id)}>
                             {a.codigo} — {a.nombre}
@@ -884,7 +884,7 @@ function InvoiceDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">Sin cuenta por defecto</SelectItem>
-                {accounts.map((a) => (
+                {accounts.filter((a: any) => a.id).map((a) => (
                   <SelectItem key={a.id} value={String(a.id)}>
                     {a.codigo} — {a.nombre}
                   </SelectItem>

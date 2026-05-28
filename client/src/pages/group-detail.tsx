@@ -215,7 +215,7 @@ function AddBlockDialog({
                   <SelectValue placeholder="Seleccionar tipo" />
                 </SelectTrigger>
                 <SelectContent>
-                  {roomTypes?.map((rt) => (
+                  {roomTypes?.filter(rt => rt.id).map((rt) => (
                     <SelectItem key={rt.id} value={rt.id}>
                       {rt.name} ({rt.code})
                     </SelectItem>
@@ -244,7 +244,7 @@ function AddBlockDialog({
                   <SelectValue placeholder="Seleccionar plan" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ratePlans?.map((rp) => (
+                  {ratePlans?.filter(rp => rp.id).map((rp) => (
                     <SelectItem key={rp.id} value={rp.id}>
                       {rp.name} - ${rp.baseRate}
                     </SelectItem>
@@ -549,7 +549,7 @@ function AssignBlockDialog({
                       </SelectTrigger>
                       <SelectContent>
                         {roomOptions
-                          .filter(r => !otherChosenRoomIds.includes(r.id) || r.id === row.roomId)
+                          .filter(r => r.id && (!otherChosenRoomIds.includes(r.id) || r.id === row.roomId))
                           .map((room) => (
                             <SelectItem key={room.id} value={room.id}>
                               Hab. {room.roomNumber} — Piso {room.floor}
@@ -3100,7 +3100,7 @@ export default function GroupDetailPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {changeRoomOptions
-                    .filter(r => r.id !== changingReservation?.roomId)
+                    .filter(r => r.id && r.id !== changingReservation?.roomId)
                     .map(r => (
                       <SelectItem key={r.id} value={r.id}>
                         Hab. {r.roomNumber} — Piso {r.floor} ({r.roomType?.name || r.roomTypeId})
