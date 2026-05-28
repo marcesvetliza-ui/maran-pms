@@ -978,7 +978,7 @@ function StayNotesTab() {
                   <SelectValue placeholder="Seleccionar reserva..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {checkedInReservations.map((r) => (
+                  {checkedInReservations.filter(r => r.id).map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.guestId ? getGuestName(r.guestId) : "Sin huésped"} - Hab. {(r as any).room?.roomNumber || r.roomId}
                     </SelectItem>

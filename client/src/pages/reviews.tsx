@@ -171,7 +171,7 @@ function ReviewFormDialog({
                 <SelectValue placeholder="Seleccionar huesped" />
               </SelectTrigger>
               <SelectContent>
-                {guests?.map((guest) => (
+                {guests?.filter(guest => guest.id).map((guest) => (
                   <SelectItem key={guest.id} value={guest.id}>
                     {guest.lastName} {guest.firstName}
                   </SelectItem>

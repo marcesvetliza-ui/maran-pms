@@ -3042,8 +3042,8 @@ export default function RestaurantPage() {
                         </SelectTrigger>
                         <SelectContent>
                           {closeCcEntityType === "company"
-                            ? companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
-                            : agencies.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                            ? companies.filter(c => c.id).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
+                            : agencies.filter(a => a.id).map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
                           }
                         </SelectContent>
                       </Select>
@@ -3085,7 +3085,7 @@ export default function RestaurantPage() {
                             {companies.length === 0 && (
                               <div className="px-3 py-2 text-xs text-muted-foreground">Sin empresas cargadas</div>
                             )}
-                            {companies.map(c => (
+                            {companies.filter(c => c.id).map(c => (
                               <SelectItem key={c.id} value={c.id}>
                                 {c.razonSocial}{c.nombreFantasia ? ` (${c.nombreFantasia})` : ""}
                               </SelectItem>

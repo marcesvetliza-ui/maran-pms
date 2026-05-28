@@ -585,6 +585,7 @@ export default function InventoryPage() {
               <SelectContent>
                 <SelectItem value="all">Todas las categorías</SelectItem>
                 {[...categories]
+                  .filter(cat => cat.id)
                   .sort((a, b) => a.name.localeCompare(b.name, "es"))
                   .map((cat) => (
                     <SelectItem key={cat.id} value={String(cat.id)}>

@@ -3811,7 +3811,7 @@ export default function ReservationsPage() {
                     {availableRoomsForAssign.length === 0 ? (
                       <SelectItem value="_none" disabled>Sin habitaciones disponibles</SelectItem>
                     ) : (
-                      availableRoomsForAssign.map((r: any) => (
+                      availableRoomsForAssign.filter((r: any) => r.id).map((r: any) => (
                         <SelectItem key={r.id} value={r.id}>
                           Hab. {r.roomNumber} — {r.roomTypeName}
                         </SelectItem>
