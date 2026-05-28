@@ -549,9 +549,20 @@ export default function PlanningPage() {
   };
 
   const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
-    if (status === "early_blocked" || status === "late_blocked") return;
     if (status === "maintenance") {
       toast({ title: "Habitación en mantenimiento", description: "No se pueden crear reservas en esta habitación mientras está en mantenimiento.", variant: "destructive" });
+      return;
+    }
+    if (status === "late_blocked") {
+      toast({ title: "Late check-out ese día", description: "La habitación tiene late check-out. Podés igualmente cargar una nueva reserva para ese día.", duration: 4000 });
+      setNewReservationDefaults({ roomId: room.id, roomTypeId: room.roomTypeId, checkInDate: day });
+      setNewReservationOpen(true);
+      return;
+    }
+    if (status === "early_blocked") {
+      toast({ title: "Early check-in al día siguiente", description: "La habitación tiene early check-in mañana. Podés igualmente cargar una nueva reserva.", duration: 4000 });
+      setNewReservationDefaults({ roomId: room.id, roomTypeId: room.roomTypeId, checkInDate: day });
+      setNewReservationOpen(true);
       return;
     }
     if (status === "available" || status === "dirty" || status === "cleaning" || status === "inspected") {
