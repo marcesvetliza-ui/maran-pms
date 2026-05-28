@@ -80,7 +80,13 @@ export async function registerRoutes(
 
   app.post("/api/auth/login", (req, res, next) => {
     passport.authenticate("local", (err: any, user: any, info: any) => {
-      if (err) return next(err);
+      if (err) {
+        const msg = err?.message || "";
+        if (msg.includes("Connection terminated") || msg.includes("timeout") || msg.includes("ECONNRESET") || msg.includes("pool")) {
+          return res.status(503).json({ message: "El servidor está iniciando, por favor intentá de nuevo en unos segundos." });
+        }
+        return next(err);
+      }
       if (!user) {
         return res.status(401).json({ message: info?.message || "Credenciales incorrectas" });
       }
