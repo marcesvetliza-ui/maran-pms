@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -47,6 +47,8 @@ export function ReservationDetailModal({
 }) {
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
+  const [retroDialogOpen, setRetroDialogOpen] = useState(false);
+  const [retroMotivo, setRetroMotivo] = useState("");
   const [editCheckIn, setEditCheckIn] = useState("");
   const [editCheckOut, setEditCheckOut] = useState("");
   const [editChannel, setEditChannel] = useState("");
@@ -128,7 +130,8 @@ export function ReservationDetailModal({
   };
 
   const checkInMutation = useMutation({
-    mutationFn: async () => apiRequest("POST", `/api/reservations/${reservationId}/check-in`, {}),
+    mutationFn: async ({ motivo }: { motivo?: string } = {}) =>
+      apiRequest("POST", `/api/reservations/${reservationId}/check-in`, motivo ? { motivo } : {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
@@ -137,11 +140,22 @@ export function ReservationDetailModal({
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({ title: "Check-in realizado", description: "El huesped ha sido registrado." });
+      setRetroDialogOpen(false);
+      setRetroMotivo("");
       onOpenChange(false);
     },
     onError: (error: any) => {
-      const message = error?.data?.error || error?.message || "No se pudo realizar el check-in.";
-      toast({ title: "Error en Check-in", description: message, variant: "destructive" });
+      let body: any = {};
+      try {
+        const msg = error?.message || "";
+        const jsonStart = msg.indexOf("{");
+        if (jsonStart !== -1) body = JSON.parse(msg.slice(jsonStart));
+      } catch {}
+      if (body?.error === "CHECK_IN_RETROACTIVO") {
+        setRetroDialogOpen(true);
+      } else {
+        toast({ title: "Error en Check-in", description: body?.error || body?.message || error?.message || "No se pudo realizar el check-in.", variant: "destructive" });
+      }
     },
   });
 
@@ -483,7 +497,7 @@ export function ReservationDetailModal({
               )
             )}
             {canCheckIn && (
-              <Button onClick={() => checkInMutation.mutate()} disabled={checkInMutation.isPending} className="w-full sm:w-auto" data-testid="button-checkin-quick">
+              <Button onClick={() => checkInMutation.mutate({})} disabled={checkInMutation.isPending} className="w-full sm:w-auto" data-testid="button-checkin-quick">
                 <LogIn className="h-4 w-4 mr-2" />{checkInMutation.isPending ? "Procesando..." : "Check-in"}
               </Button>
             )}
@@ -508,6 +522,39 @@ export function ReservationDetailModal({
           </DialogFooter>
         )}
       </DialogContent>
+
+      {/* Retroactive check-in dialog */}
+      <Dialog open={retroDialogOpen} onOpenChange={(open) => { setRetroDialogOpen(open); if (!open) setRetroMotivo(""); }}>
+        <DialogContent className="w-[95vw] max-w-md">
+          <DialogHeader>
+            <DialogTitle>Check-in retroactivo</DialogTitle>
+            <DialogDescription>
+              La fecha de check-in es anterior a hoy. Ingresá el motivo para registrarlo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Label htmlFor="retro-motivo-planning">Motivo (obligatorio)</Label>
+            <Input
+              id="retro-motivo-planning"
+              className="mt-1"
+              placeholder="Ej: El huésped llegó ayer sin registrar..."
+              value={retroMotivo}
+              onChange={(e) => setRetroMotivo(e.target.value)}
+              data-testid="input-retro-motivo-planning"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRetroDialogOpen(false); setRetroMotivo(""); }}>Cancelar</Button>
+            <Button
+              disabled={!retroMotivo.trim() || checkInMutation.isPending}
+              onClick={() => { if (retroMotivo.trim()) checkInMutation.mutate({ motivo: retroMotivo }); }}
+              data-testid="button-confirm-retro-checkin-planning"
+            >
+              {checkInMutation.isPending ? "Procesando..." : "Confirmar Check-in"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

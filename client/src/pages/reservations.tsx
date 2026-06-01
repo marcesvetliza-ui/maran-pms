@@ -44,6 +44,7 @@ import {
   TrendingUp,
   Download,
   Phone,
+  AlertCircle,
 } from "lucide-react";
 import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -1473,8 +1474,17 @@ function ReservationDetailDialog({
       onOpenChange(false);
       toast({ title: "Check-out anticipado realizado", description: "La habitación fue liberada." });
     },
-    onError: () => {
-      toast({ title: "Error al realizar check-out", variant: "destructive" });
+    onError: (error: any) => {
+      let msg = "No se pudo realizar el check-out anticipado.";
+      try {
+        const raw = error?.message || "";
+        const jsonStart = raw.indexOf("{");
+        if (jsonStart !== -1) {
+          const body = JSON.parse(raw.slice(jsonStart));
+          msg = body?.message || body?.error || msg;
+        }
+      } catch {}
+      toast({ title: "Error al realizar check-out", description: msg, variant: "destructive" });
     },
   });
 

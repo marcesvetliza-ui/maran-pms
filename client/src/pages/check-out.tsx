@@ -390,9 +390,9 @@ export default function CheckOutPage() {
             <Card className={balance > 0.01 ? "border-red-300 bg-red-50 dark:bg-red-900/10 dark:border-red-800" : "border-green-300 bg-green-50 dark:bg-green-900/10 dark:border-green-800"}>
               <CardContent className="flex items-center justify-between p-4">
                 <div>
-                  <p className="text-sm font-medium">Saldo pendiente</p>
+                  <p className="text-sm font-medium">{balance < -0.01 ? "Saldo a favor del huésped" : "Saldo pendiente"}</p>
                   <p className={`text-2xl font-bold ${balance > 0.01 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`} data-testid="text-balance">
-                    ${balance.toFixed(2)}
+                    {balance < -0.01 ? `+$${Math.abs(balance).toFixed(2)}` : `$${balance.toFixed(2)}`}
                   </p>
                 </div>
                 {balance <= 0.01 && <CircleCheck className="h-8 w-8 text-green-500" />}
@@ -615,10 +615,12 @@ export default function CheckOutPage() {
                   </Card>
                 )}
 
-                <Card className="border-red-300 bg-red-50 dark:bg-red-900/10 dark:border-red-800">
+                <Card className={balance < -0.01 ? "border-green-300 bg-green-50 dark:bg-green-900/10 dark:border-green-800" : "border-red-300 bg-red-50 dark:bg-red-900/10 dark:border-red-800"}>
                   <CardContent className="flex items-center justify-between p-4">
-                    <p className="font-medium">Saldo restante</p>
-                    <p className="text-xl font-bold text-red-600 dark:text-red-400" data-testid="text-remaining-balance">${balance.toFixed(2)}</p>
+                    <p className="font-medium">{balance < -0.01 ? "Saldo a favor del huésped" : "Saldo restante"}</p>
+                    <p className={`text-xl font-bold ${balance < -0.01 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`} data-testid="text-remaining-balance">
+                      {balance < -0.01 ? `+$${Math.abs(balance).toFixed(2)}` : `$${balance.toFixed(2)}`}
+                    </p>
                   </CardContent>
                 </Card>
               </>
