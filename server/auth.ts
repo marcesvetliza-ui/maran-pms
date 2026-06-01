@@ -58,7 +58,7 @@ export function setupAuth(app: Express) {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
         sameSite: "lax",
-        maxAge: 8 * 60 * 60 * 1000,
+        maxAge: 24 * 60 * 60 * 1000,
       },
     })
   );

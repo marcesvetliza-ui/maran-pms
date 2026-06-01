@@ -19,6 +19,7 @@ interface LoginPageProps {
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const sessionExpired = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("session_expired") === "1";
 
   const { register, handleSubmit } = useForm<LoginForm>({
     defaultValues: { username: "", password: "" },
@@ -61,6 +62,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </CardHeader>
         <CardContent className="pt-4">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {sessionExpired && !error && (
+              <Alert className="border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200" data-testid="alert-session-expired">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>Tu sesión expiró. Por favor ingresá nuevamente.</AlertDescription>
+              </Alert>
+            )}
             {error && (
               <Alert variant="destructive" data-testid="alert-login-error">
                 <AlertCircle className="h-4 w-4" />
