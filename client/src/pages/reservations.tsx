@@ -3451,6 +3451,9 @@ export default function ReservationsPage() {
   const [confirmingReservation, setConfirmingReservation] = useState<any | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [retroCheckInDialogOpen, setRetroCheckInDialogOpen] = useState(false);
+  const [retroCheckInMotivo, setRetroCheckInMotivo] = useState("");
+  const [pendingCheckInId, setPendingCheckInId] = useState<string | null>(null);
 
   const { data: webPendingReservations = [], refetch: refetchWeb } = useQuery<any[]>({
     queryKey: ["/api/admin/booking-engine/reservations"],
@@ -3584,6 +3587,36 @@ export default function ReservationsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({ title: "Estado actualizado", description: "El estado de la reserva ha sido actualizado." });
+    },
+  });
+
+  const checkInFromListMutation = useMutation({
+    mutationFn: async ({ id, motivo }: { id: string; motivo?: string }) => {
+      return apiRequest("POST", `/api/reservations/${id}/check-in`, motivo ? { motivo } : {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setRetroCheckInDialogOpen(false);
+      setRetroCheckInMotivo("");
+      setPendingCheckInId(null);
+      toast({ title: "Check-in realizado", description: "El huésped fue registrado correctamente." });
+    },
+    onError: (error: any) => {
+      let body: any = {};
+      try {
+        const msg = error?.message || "";
+        const jsonStart = msg.indexOf("{");
+        if (jsonStart !== -1) body = JSON.parse(msg.slice(jsonStart));
+      } catch {}
+      if (body?.error === "CHECK_IN_RETROACTIVO") {
+        setRetroCheckInDialogOpen(true);
+      } else {
+        toast({ title: "Error en check-in", description: body?.error || body?.message || "No se pudo realizar el check-in.", variant: "destructive" });
+        setPendingCheckInId(null);
+      }
     },
   });
 
@@ -4186,7 +4219,10 @@ export default function ReservationsPage() {
                           )}
                           {reservation.status === "confirmed" && (
                             <DropdownMenuItem
-                              onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "checked_in" })}
+                              onClick={() => {
+                                setPendingCheckInId(reservation.id);
+                                checkInFromListMutation.mutate({ id: reservation.id });
+                              }}
                             >
                               <LogIn className="mr-2 h-4 w-4 text-blue-600" />
                               Hacer Check-in
@@ -4413,6 +4449,42 @@ export default function ReservationsPage() {
               data-testid="button-confirm-duplicate"
             >
               {duplicateMutation.isPending ? "Duplicando..." : "Crear Reserva"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Check-in retroactivo dialog */}
+      <Dialog open={retroCheckInDialogOpen} onOpenChange={(open) => { setRetroCheckInDialogOpen(open); if (!open) { setRetroCheckInMotivo(""); setPendingCheckInId(null); } }}>
+        <DialogContent className="w-[95vw] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Check-in retroactivo
+            </DialogTitle>
+            <DialogDescription>
+              La fecha de check-in es anterior a hoy. Ingrese el motivo por el cual se registra con fecha pasada.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Label htmlFor="retro-motivo-list">Motivo (obligatorio)</Label>
+            <Input
+              id="retro-motivo-list"
+              className="mt-1"
+              placeholder="Ej: El huésped llegó ayer sin registrar..."
+              value={retroCheckInMotivo}
+              onChange={(e) => setRetroCheckInMotivo(e.target.value)}
+              data-testid="input-retro-checkin-motivo"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRetroCheckInDialogOpen(false); setRetroCheckInMotivo(""); setPendingCheckInId(null); }}>Cancelar</Button>
+            <Button
+              disabled={!retroCheckInMotivo.trim() || checkInFromListMutation.isPending}
+              onClick={() => { if (pendingCheckInId && retroCheckInMotivo.trim()) checkInFromListMutation.mutate({ id: pendingCheckInId, motivo: retroCheckInMotivo }); }}
+              data-testid="button-confirm-retro-checkin"
+            >
+              {checkInFromListMutation.isPending ? "Procesando..." : "Confirmar Check-in"}
             </Button>
           </DialogFooter>
         </DialogContent>

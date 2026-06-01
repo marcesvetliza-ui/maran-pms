@@ -119,8 +119,10 @@ export function registerReservationsRoutes(app: Express) {
     try {
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
       for (const field of numericFields) {
-        if (req.body[field] === "" || req.body[field] === undefined) {
+        if (req.body[field] === "") {
           req.body[field] = null;
+        } else if (req.body[field] === undefined) {
+          delete req.body[field];
         }
       }
       const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId"];
@@ -221,8 +223,10 @@ export function registerReservationsRoutes(app: Express) {
 
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
       for (const field of numericFields) {
-        if (req.body[field] === "" || req.body[field] === undefined) {
+        if (req.body[field] === "") {
           req.body[field] = null;
+        } else if (req.body[field] === undefined) {
+          delete req.body[field];
         }
       }
       const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId"];
