@@ -653,8 +653,9 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(404).json({ error: "Reservation not found" });
       }
 
-      if (reservation.status !== "checked_in") {
-        return res.status(400).json({ error: "Solo se puede hacer check-out de reservas con estado checked_in" });
+      const checkoutableStatuses = ["checked_in", "confirmed", "pending"];
+      if (!checkoutableStatuses.includes(reservation.status)) {
+        return res.status(400).json({ error: "Solo se puede hacer check-out de reservas activas" });
       }
 
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });

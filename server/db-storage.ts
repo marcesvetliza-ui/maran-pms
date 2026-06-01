@@ -551,7 +551,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getReservationsForCheckOut(): Promise<ReservationWithDetails[]> {
-    const allRes = await db.select().from(reservations).where(eq(reservations.status, "checked_in"));
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    // Include checked_in (all dates) + confirmed/pending with checkout <= today
+    const allRes = await db.select().from(reservations).where(
+      or(
+        eq(reservations.status, "checked_in"),
+        and(
+          inArray(reservations.status, ["confirmed", "pending"] as any),
+          lte(reservations.checkOutDate, today)
+        )
+      )
+    );
     return this.enrichReservations(allRes);
   }
 

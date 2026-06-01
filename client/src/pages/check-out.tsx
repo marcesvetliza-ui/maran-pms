@@ -252,6 +252,17 @@ export default function CheckOutPage() {
           </div>
         </div>
 
+        {selectedReservation.status !== "checked_in" && (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3" data-testid="banner-no-checkin">
+            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold text-amber-800 dark:text-amber-300">Check-in no procesado en el sistema</p>
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                Esta reserva nunca fue marcada como ingresada. El sistema procesará el check-out directamente y cerrará la habitación.
+              </p>
+            </div>
+          </div>
+        )}
         {isHistorical && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3" data-testid="banner-historical-checkout">
             <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
@@ -786,9 +797,11 @@ export default function CheckOutPage() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-400">
-                      Alojado
-                    </Badge>
+                    {reservation.status === "checked_in" ? (
+                      <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-400">Alojado</Badge>
+                    ) : (
+                      <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400" data-testid={`badge-no-checkin-${reservation.id}`}>Sin check-in</Badge>
+                    )}
                     {reservation.checkOutDate === today ? (
                       <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400" data-testid={`badge-today-${reservation.id}`}>Hoy</Badge>
                     ) : reservation.checkOutDate < today ? (
