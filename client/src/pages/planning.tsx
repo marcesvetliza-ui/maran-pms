@@ -636,9 +636,9 @@ export default function PlanningPage() {
   });
 
   return (
-    <div ref={planningRef} className={`flex flex-col gap-4 p-6 ${isFullscreen ? "fixed inset-0 z-[60] bg-background overflow-auto" : ""}`}>
+    <div ref={planningRef} className={`flex flex-col gap-4 p-6 ${isFullscreen ? "fixed inset-0 z-[60] bg-background overflow-auto" : "h-full"}`}>
       {/* ── HEADER ─────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 shrink-0">
         {/* Top bar: title + navigation + collapse button — always visible */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -772,8 +772,8 @@ export default function PlanningPage() {
         )}
       </div>
 
-      <Card>
-        <CardHeader className="py-3 px-4 border-b">
+      <Card className="flex-1 min-h-0 flex flex-col">
+        <CardHeader className="py-3 px-4 border-b shrink-0">
           <CardTitle className="text-base font-medium flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Info className="h-4 w-4 text-muted-foreground" />
@@ -797,7 +797,7 @@ export default function PlanningPage() {
             </button>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
           {isLoading ? (
             <div className="p-4 space-y-2">
               {[...Array(10)].map((_, i) => (
@@ -806,7 +806,7 @@ export default function PlanningPage() {
             </div>
           ) : data ? (
             <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-              <div className={`overflow-auto ${isFullscreen ? "max-h-[calc(100vh-80px)]" : headerCollapsed ? "max-h-[calc(100vh-200px)]" : "max-h-[calc(100vh-390px)]"}`}>
+              <div className={`overflow-auto ${isFullscreen ? "max-h-[calc(100vh-80px)]" : "flex-1 min-h-0"}`}>
               <div className="min-w-max">
                 <table className="w-full border-collapse">
                   <thead className="sticky top-0 z-20 bg-background">
