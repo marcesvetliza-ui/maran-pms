@@ -289,6 +289,7 @@ export default function EventsPage() {
   const [prefilledRoomId, setPrefilledRoomId] = useState<string>("");
   const [prefilledDate, setPrefilledDate] = useState<string>("");
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [deleteEventConfirmOpen, setDeleteEventConfirmOpen] = useState(false);
   const [folioReceiptType, setFolioReceiptType] = useState("");
   const [activeTab, setActiveTab] = useState("details");
   const [isTableFolioOpen, setIsTableFolioOpen] = useState(false);
@@ -471,6 +472,20 @@ export default function EventsPage() {
     onError: async (error: any) => {
       const msg = error?.message || "Error al actualizar el evento";
       toast({ title: msg, variant: "destructive" });
+    },
+  });
+
+  const deleteEventMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/events/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/events/planning"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+      setSelectedEvent(null);
+      setDeleteEventConfirmOpen(false);
+      toast({ title: "Evento eliminado correctamente" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Error al eliminar el evento", variant: "destructive" });
     },
   });
 
@@ -1749,6 +1764,17 @@ export default function EventsPage() {
                       Cancelar Evento
                     </Button>
                   )}
+                  {selectedEvent.status !== "invoiced" && (
+                    <Button
+                      variant="outline"
+                      className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20"
+                      onClick={() => setDeleteEventConfirmOpen(true)}
+                      data-testid="button-delete-event"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Eliminar
+                    </Button>
+                  )}
                   {["pending", "tentative", "confirmed", "in_progress", "completed", "invoiced"].includes(selectedEvent.status) && (
                     <>
                       <Button
@@ -2224,6 +2250,28 @@ export default function EventsPage() {
               data-testid="button-cancel-confirm-yes"
             >
               Si, cancelar evento
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Event Confirmation Dialog */}
+      <AlertDialog open={deleteEventConfirmOpen} onOpenChange={setDeleteEventConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar Evento</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro que querés eliminar el evento <strong>'{selectedEvent?.name}'</strong>? Esta acción borrará el evento y todos sus cargos de forma permanente. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-delete-event-cancel">Volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (selectedEvent) deleteEventMutation.mutate(selectedEvent.id); }}
+              data-testid="button-delete-event-confirm"
+            >
+              {deleteEventMutation.isPending ? "Eliminando..." : "Sí, eliminar evento"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
