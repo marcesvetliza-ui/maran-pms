@@ -2946,15 +2946,15 @@ function ReservationDetailDialog({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Volver</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => earlyCheckoutMutation.mutate()}
+            <AlertDialogCancel onClick={(e) => { e.stopPropagation(); setEarlyCheckoutDialogOpen(false); }}>Volver</AlertDialogCancel>
+            <Button
+              onClick={(e) => { e.stopPropagation(); earlyCheckoutMutation.mutate(); }}
               disabled={earlyCheckoutMutation.isPending}
               className="bg-orange-600 hover:bg-orange-700"
               data-testid="button-confirm-early-checkout"
             >
               {earlyCheckoutMutation.isPending ? "Procesando..." : "Confirmar Check-out anticipado"}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

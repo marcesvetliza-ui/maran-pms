@@ -456,7 +456,7 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(400).json({ error: `No se puede hacer check-in en fecha futura. La reserva es para el ${checkInDate} y hoy es ${today}.` });
       }
 
-      if (diffDays < -1) {
+      if (diffDays < 0) {
         const { motivo } = req.body || {};
         if (!motivo || String(motivo).trim() === "") {
           return res.status(400).json({
@@ -567,7 +567,10 @@ export function registerReservationsRoutes(app: Express) {
       const paymentsList = await storage.getPayments(req.params.id);
       const totalCharges = chargesList.reduce((sum, c) => sum + parseFloat(c.amount), 0);
       const totalPayments = paymentsList.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-      const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+      const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
+      const roomTotal = savedRoomTotal > 0
+        ? savedRoomTotal
+        : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
       const grandTotal = roomTotal + totalCharges;
       const balance = grandTotal - totalPayments;
 
@@ -673,7 +676,10 @@ export function registerReservationsRoutes(app: Express) {
       if (!forceCheckout) {
         const chargesTotal = await storage.getChargesTotal(req.params.id);
         const paymentsTotal = await storage.getPaymentsTotal(req.params.id);
-        const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+        const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
+        const roomTotal = savedRoomTotal > 0
+          ? savedRoomTotal
+          : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
         const balance = roomTotal + chargesTotal - paymentsTotal;
 
         if (balance > 0.01) {
