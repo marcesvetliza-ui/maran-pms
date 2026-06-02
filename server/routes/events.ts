@@ -195,10 +195,12 @@ export function registerEventsRoutes(app: Express) {
 
   app.delete("/api/events/:id", async (req, res) => {
     try {
-      await storage.deleteEvent(req.params.id);
+      const deleted = await storage.deleteEvent(req.params.id);
+      if (!deleted) return res.status(404).json({ error: "Evento no encontrado" });
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting event" });
+    } catch (error: any) {
+      console.error("[events] deleteEvent error:", error?.message || error);
+      res.status(500).json({ error: error?.message || "Error al eliminar el evento" });
     }
   });
 

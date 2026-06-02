@@ -2702,7 +2702,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteEvent(id: string): Promise<boolean> {
+    // Must delete in FK order: table sub-records → tables → charges/payments → event
+    const tables = await db.select({ id: eventTables.id }).from(eventTables).where(eq(eventTables.eventId, id));
+    if (tables.length > 0) {
+      const tableIds = tables.map(t => t.id);
+      await db.delete(eventTableCharges).where(inArray(eventTableCharges.eventTableId, tableIds));
+      await db.delete(eventTablePayments).where(inArray(eventTablePayments.eventTableId, tableIds));
+      await db.delete(eventTables).where(eq(eventTables.eventId, id));
+    }
     await db.delete(eventCharges).where(eq(eventCharges.eventId, id));
+    await db.delete(eventPayments).where(eq(eventPayments.eventId, id));
     const result = await db.delete(events).where(eq(events.id, id));
     return (result.rowCount ?? 0) > 0;
   }
