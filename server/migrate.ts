@@ -190,5 +190,25 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await withTimeout("housekeeping_tasks", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS housekeeping_tasks (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        task_type text NOT NULL DEFAULT 'checkout_clean',
+        status text NOT NULL DEFAULT 'pending',
+        priority text NOT NULL DEFAULT 'normal',
+        assigned_to varchar,
+        notes text,
+        scheduled_date date NOT NULL,
+        started_at timestamp,
+        completed_at timestamp,
+        inspected_by varchar,
+        inspected_at timestamp,
+        created_at timestamp NOT NULL
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

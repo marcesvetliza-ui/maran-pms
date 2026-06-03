@@ -739,7 +739,10 @@ export function registerReservationsRoutes(app: Express) {
 
       await storage.updateReservation(req.params.id, { status: "checked_out" });
       await storage.updateRoom(reservation.roomId, { status: "dirty" });
-      await storage.createCheckoutCleaningTask(reservation.roomId);
+      // Fire-and-forget: si falla la tarea de limpieza no bloqueamos el check-out
+      storage.createCheckoutCleaningTask(reservation.roomId).catch(e =>
+        console.error("[checkout] createCheckoutCleaningTask error:", e)
+      );
       await audit(req, "update", "reservations",
         `Check-out: ${reservation.reservationCode} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
         { entityType: "reservation", entityId: req.params.id }
