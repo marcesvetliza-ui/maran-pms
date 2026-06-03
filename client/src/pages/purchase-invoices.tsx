@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -1011,6 +1011,7 @@ function PaymentOrderDialog({
   const { toast } = useToast();
   const [selectedInvoices, setSelectedInvoices] = useState<number[]>([]);
   const [createdOpId, setCreatedOpId] = useState<number | null>(null);
+  const [autoCalcActive, setAutoCalcActive] = useState(true);
   const [form, setForm] = useState({
     fecha: getLocalToday(),
     formaPago: "transferencia",
@@ -1035,12 +1036,34 @@ function PaymentOrderDialog({
   const facturas: Invoice[] = (ccData?.facturasPendientes || []).map(camelInvoice);
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
+  // When user edits a retention field manually, disable auto-calc
+  const fRetention = (k: string, v: string) => {
+    setAutoCalcActive(false);
+    setForm((p) => ({ ...p, [k]: v }));
+  };
   const toggleInv = (id: number) =>
     setSelectedInvoices((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   const totalSelected = facturas
     .filter((f) => selectedInvoices.includes(f.id))
     .reduce((s, f) => s + $n(f.montoTotal), 0);
+
+  // Auto-calculate retenciones from supplier alícuotas whenever selection changes
+  useEffect(() => {
+    if (!autoCalcActive || !supplier) return;
+    const calc = (alicuota: number) =>
+      totalSelected > 0 ? (totalSelected * (alicuota / 100)).toFixed(2) : "";
+    setForm((p) => ({
+      ...p,
+      retencionIibb: calc(supplier.alicuotaIibb ?? 0),
+      retencionGanancias: calc(supplier.alicuotaGanancias ?? 0),
+      retencionIva: calc(supplier.alicuotaIva ?? 0),
+    }));
+  }, [totalSelected, supplier, autoCalcActive]);
+
+  const handleRecalcular = () => {
+    setAutoCalcActive(true);
+  };
 
   const totalAbonado =
     totalSelected -
@@ -1165,12 +1188,33 @@ function PaymentOrderDialog({
           </div>
 
           <Separator />
-          <p className="text-sm font-semibold text-muted-foreground">Retenciones a practicar</p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-muted-foreground">Retenciones a practicar</p>
+            {!autoCalcActive ? (
+              <Button type="button" variant="outline" size="sm" onClick={handleRecalcular} data-testid="btn-recalcular-retenciones">
+                ↻ Recalcular desde alícuotas
+              </Button>
+            ) : (
+              <span className="text-xs text-green-600 dark:text-green-400 font-medium">✓ Auto-calculado desde alícuotas del proveedor</span>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Ret. IIBB</Label><Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => f("retencionIibb", e.target.value)} data-testid="input-op-ret-iibb" /></div>
-            <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-op-ret-ganancias" /></div>
-            <div><Label>Ret. IVA</Label><Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => f("retencionIva", e.target.value)} data-testid="input-op-ret-iva" /></div>
-            <div><Label>Compensación</Label><Input type="number" step="0.01" value={form.compensacion} onChange={(e) => f("compensacion", e.target.value)} data-testid="input-op-compensacion" /></div>
+            <div>
+              <Label>Ret. IIBB {supplier?.alicuotaIibb ? <span className="text-xs text-muted-foreground">({supplier.alicuotaIibb}%)</span> : null}</Label>
+              <Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => fRetention("retencionIibb", e.target.value)} data-testid="input-op-ret-iibb" />
+            </div>
+            <div>
+              <Label>Ret. Ganancias {supplier?.alicuotaGanancias ? <span className="text-xs text-muted-foreground">({supplier.alicuotaGanancias}%)</span> : null}</Label>
+              <Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => fRetention("retencionGanancias", e.target.value)} data-testid="input-op-ret-ganancias" />
+            </div>
+            <div>
+              <Label>Ret. IVA {supplier?.alicuotaIva ? <span className="text-xs text-muted-foreground">({supplier.alicuotaIva}%)</span> : null}</Label>
+              <Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => fRetention("retencionIva", e.target.value)} data-testid="input-op-ret-iva" />
+            </div>
+            <div>
+              <Label>Compensación</Label>
+              <Input type="number" step="0.01" value={form.compensacion} onChange={(e) => f("compensacion", e.target.value)} data-testid="input-op-compensacion" />
+            </div>
           </div>
 
           <div><Label>Observaciones</Label><Textarea value={form.observaciones} onChange={(e) => f("observaciones", e.target.value)} rows={2} /></div>
