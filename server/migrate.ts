@@ -177,5 +177,18 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       WHERE arca_ambiente IS NULL OR arca_ambiente = 'ficticio'
     `)
   );
+  await withTimeout("reservation_changelog", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS reservation_changelog (
+        id serial PRIMARY KEY,
+        reservation_id varchar NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+        fecha timestamp NOT NULL DEFAULT now(),
+        operador text,
+        tipo text NOT NULL,
+        descripcion text NOT NULL
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

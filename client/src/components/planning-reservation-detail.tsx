@@ -212,14 +212,20 @@ export function ReservationDetailModal({
   const isCheckInDateValid = reservation ? (() => {
     const todayMs = new Date(todayLocal + "T12:00:00").getTime();
     const ciMs = new Date(reservation.checkInDate + "T12:00:00").getTime();
-    return Math.abs(Math.round((ciMs - todayMs) / (1000 * 60 * 60 * 24))) <= 1;
+    const diffDays = Math.round((ciMs - todayMs) / (1000 * 60 * 60 * 24));
+    return diffDays <= 1; // today, any past date, or tomorrow (early check-in)
   })() : false;
   const isCheckOutDateValid = reservation ? (() => {
     const todayMs = new Date(todayLocal + "T12:00:00").getTime();
     const coMs = new Date(reservation.checkOutDate + "T12:00:00").getTime();
-    return Math.abs(Math.round((coMs - todayMs) / (1000 * 60 * 60 * 24))) <= 1;
+    const diffDays = Math.round((coMs - todayMs) / (1000 * 60 * 60 * 24));
+    return diffDays <= 1; // today, any past date, or tomorrow
   })() : false;
-  const canCheckIn = (reservation?.status === "confirmed" || reservation?.status === "pending") && isCheckInDateValid;
+  const canCheckIn = (
+    reservation?.status === "confirmed" ||
+    reservation?.status === "pending" ||
+    reservation?.status === "tentative"
+  ) && isCheckInDateValid;
   const canCheckOut = reservation?.status === "checked_in" && isCheckOutDateValid;
   const canCancel = reservation?.status === "confirmed" || reservation?.status === "pending" || reservation?.status === "tentative";
   const totalCharges = reservation?.charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;

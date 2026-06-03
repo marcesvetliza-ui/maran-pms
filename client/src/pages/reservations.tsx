@@ -4227,7 +4227,7 @@ export default function ReservationsPage() {
                               Confirmar
                             </DropdownMenuItem>
                           )}
-                          {reservation.status === "confirmed" && (
+                          {(reservation.status === "confirmed" || reservation.status === "pending" || reservation.status === "tentative") && (
                             <DropdownMenuItem
                               onClick={() => {
                                 setPendingCheckInId(reservation.id);
