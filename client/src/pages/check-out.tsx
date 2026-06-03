@@ -84,6 +84,7 @@ export default function CheckOutPage() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [showOverdueDialog, setShowOverdueDialog] = useState(false);
+  const [bulkClosing, setBulkClosing] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [wizardStep, setWizardStep] = useState(0);
   const [addChargeOpen, setAddChargeOpen] = useState(false);
@@ -160,6 +161,28 @@ export default function CheckOutPage() {
         variant: "destructive",
       });
       console.error("Payment error:", error);
+    },
+  });
+
+  const bulkCheckoutOverdueMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/reservations/bulk-checkout-overdue`, {});
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      setBulkClosing(false);
+      setShowOverdueDialog(false);
+      toast({
+        title: "Cierre masivo completado",
+        description: `${data.closed} salidas registradas. ${data.skipped > 0 ? `${data.skipped} con saldo pendiente (requieren revisión manual).` : ""}`,
+      });
+    },
+    onError: () => {
+      setBulkClosing(false);
+      toast({ title: "Error", description: "No se pudo completar el cierre masivo.", variant: "destructive" });
     },
   });
 
@@ -928,8 +951,28 @@ export default function CheckOutPage() {
               })
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowOverdueDialog(false)}>Cerrar</Button>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <div className="flex-1 text-xs text-muted-foreground self-center">
+              El cierre masivo solo registra salidas con saldo $0. Las que tienen saldo pendiente requieren revisión manual.
+            </div>
+            <Button variant="outline" onClick={() => setShowOverdueDialog(false)}>Cancelar</Button>
+            {overdueReservations.length > 0 && (
+              <Button
+                variant="destructive"
+                disabled={bulkCheckoutOverdueMutation.isPending}
+                data-testid="button-bulk-checkout-overdue"
+                onClick={() => {
+                  setBulkClosing(true);
+                  bulkCheckoutOverdueMutation.mutate();
+                }}
+              >
+                {bulkCheckoutOverdueMutation.isPending ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cerrando...</>
+                ) : (
+                  <><LogOut className="h-4 w-4 mr-2" />Registrar salidas masivas ({overdueReservations.length})</>
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

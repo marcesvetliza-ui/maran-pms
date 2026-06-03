@@ -144,6 +144,69 @@ export async function runNightAudit(options: {
     const foliosConSaldo = folioDetail.filter((f) => f.hasBalance);
 
     // ============================================================
+    // PASO 1.5 — Auto-cierre de reservas vencidas
+    // checked_in con checkOutDate <= ayer y saldo = 0 → checked_out automático
+    // confirmed/pending/tentative con checkOutDate < ayer → no-show → cancelado
+    // ============================================================
+    let autoCerradasCount = 0;
+    let autoNoShowCount = 0;
+    try {
+      // Buscar checked_in con checkout vencido
+      const overdueCheckedIn = await db
+        .select({ id: reservations.id, roomId: reservations.roomId, reservationCode: reservations.reservationCode })
+        .from(reservations)
+        .where(and(
+          eq(reservations.status, "checked_in"),
+          lte(reservations.checkOutDate, auditDate),
+        ));
+
+      if (overdueCheckedIn.length > 0) {
+        const overdueIds = overdueCheckedIn.map((r) => r.id);
+        // Calcular balances
+        const chargeSums = await db
+          .select({ reservationId: charges.reservationId, total: sql<number>`COALESCE(SUM(${charges.amount}::numeric), 0)` })
+          .from(charges).where(inArray(charges.reservationId, overdueIds)).groupBy(charges.reservationId);
+        const paymentSums = await db
+          .select({ reservationId: payments.reservationId, total: sql<number>`COALESCE(SUM(${payments.amount}::numeric), 0)` })
+          .from(payments).where(inArray(payments.reservationId, overdueIds)).groupBy(payments.reservationId);
+        const cMap = new Map(chargeSums.map((c) => [c.reservationId, Number(c.total)]));
+        const pMap = new Map(paymentSums.map((p) => [p.reservationId, Number(p.total)]));
+
+        for (const r of overdueCheckedIn) {
+          const balance = (cMap.get(r.id) ?? 0) - (pMap.get(r.id) ?? 0);
+          if (balance <= 0.01) {
+            await db.update(reservations).set({ status: "checked_out" } as any).where(eq(reservations.id, r.id));
+            if (r.roomId) {
+              await db.update(rooms).set({ status: "dirty" } as any).where(eq(rooms.id, r.roomId));
+            }
+            autoCerradasCount++;
+          }
+        }
+        naLog(`Auto-cierre: ${autoCerradasCount} reservas checked_in vencidas cerradas (${overdueCheckedIn.length - autoCerradasCount} con saldo pendiente)`);
+      }
+
+      // No-shows: confirmed/pending/tentative con checkout vencido (más de 1 día)
+      const noShows = await db
+        .select({ id: reservations.id, reservationCode: reservations.reservationCode })
+        .from(reservations)
+        .where(and(
+          inArray(reservations.status, ["confirmed", "pending", "tentative"] as any),
+          lte(reservations.checkOutDate, auditDate),
+        ));
+
+      if (noShows.length > 0) {
+        for (const r of noShows) {
+          await db.update(reservations).set({ status: "cancelled" } as any).where(eq(reservations.id, r.id));
+          autoNoShowCount++;
+        }
+        naLog(`Auto-cancelación: ${autoNoShowCount} reservas no-show canceladas`);
+      }
+    } catch (autoErr: any) {
+      naLog(`Error en auto-cierre de vencidas: ${autoErr.message}`);
+      errors.push(`Auto-cierre: ${autoErr.message}`);
+    }
+
+    // ============================================================
     // PASO 2 — Verificar prepagos/garantías del día siguiente (JOIN, sin N+1)
     // ============================================================
     const arrivalsNextDay = await db

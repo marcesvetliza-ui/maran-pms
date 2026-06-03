@@ -652,6 +652,42 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Bulk close overdue reservations (checked_in with past checkout date, balance = 0)
+  app.post("/api/reservations/bulk-checkout-overdue", async (req, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      // Get all checked_in with checkOutDate < today
+      const overdueList = await storage.getReservationsForCheckOut();
+      const overdue = overdueList.filter(r => r.checkOutDate < today);
+      let closed = 0;
+      let skipped = 0;
+      for (const r of overdue) {
+        const chargesTotal = await storage.getChargesTotal(r.id);
+        const paymentsTotal = await storage.getPaymentsTotal(r.id);
+        const savedRoomTotal = parseFloat(r.totalRoomAmount || "0");
+        const roomTotal = savedRoomTotal > 0
+          ? savedRoomTotal
+          : parseFloat(r.finalRatePerNight || "0") * (r.nights || 0);
+        const balance = roomTotal + chargesTotal - paymentsTotal;
+        if (balance > 0.01) {
+          skipped++;
+          continue;
+        }
+        await storage.updateReservation(r.id, { status: "checked_out" });
+        if (r.roomId) await storage.updateRoom(r.roomId, { status: "dirty" });
+        storage.createCheckoutCleaningTask(r.roomId).catch(() => {});
+        closed++;
+      }
+      await audit(req, "update", "reservations",
+        `Cierre masivo de vencidas: ${closed} cerradas, ${skipped} con saldo pendiente`,
+        {}
+      );
+      res.json({ closed, skipped });
+    } catch (error) {
+      res.status(500).json({ error: "Error en cierre masivo" });
+    }
+  });
+
   // Check-out endpoint
   app.post("/api/reservations/:id/check-out", async (req, res) => {
     try {
