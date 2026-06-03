@@ -395,12 +395,24 @@ export async function registerRoutes(
 
   app.put("/api/admin/settings", async (req, res) => {
     try {
-      const setting = await storage.upsertSystemSetting({
-        ...req.body,
-        updatedAt: new Date(),
-      });
-      res.json(setting);
+      const { key, value, category, description, updatedBy } = req.body;
+      if (!key || value === undefined || value === null) {
+        return res.status(400).json({ error: "key y value son requeridos" });
+      }
+      const result = await db.execute(sql`
+        INSERT INTO system_settings (id, key, value, category, description, updated_at, updated_by)
+        VALUES (gen_random_uuid(), ${key}, ${String(value)}, ${category || "general"}, ${description || null}, now(), ${updatedBy || null})
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          category = EXCLUDED.category,
+          description = EXCLUDED.description,
+          updated_at = now(),
+          updated_by = EXCLUDED.updated_by
+        RETURNING *
+      `);
+      res.json(result.rows[0]);
     } catch (error) {
+      console.error("[settings PUT]", error);
       res.status(500).json({ error: "Error saving setting" });
     }
   });
