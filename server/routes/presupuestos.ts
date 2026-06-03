@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import fs from "fs";
 import path from "path";
 import { db } from "../db";
-import { presupuestos, presupuestoItems } from "@shared/schema";
+import { presupuestos, presupuestoItems, systemSettings } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, desc, like } from "drizzle-orm";
 import PDFDocument from "pdfkit";
@@ -139,8 +139,8 @@ export function registerPresupuestosRoutes(app: Express) {
       ];
       let terminos = DEFAULT_TERMINOS;
       try {
-        const termSetting = await storage.getSystemSetting("confirmation_terms");
-        if (termSetting !== null && termSetting !== undefined) {
+        const [termSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, "confirmation_terms"));
+        if (termSetting !== undefined) {
           // Setting exists in DB — respect it even if empty (user cleared it on purpose)
           terminos = termSetting.value
             ? termSetting.value.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0)
