@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel } from "lucide-react";
+import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { insertCompanySchema, type Company, type AccountMovement, type Guest, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
@@ -711,6 +711,17 @@ export default function CompaniesPage() {
                         <span className="block text-xs font-normal text-muted-foreground">
                           {parseFloat(mov.amount) > 0 ? "cargo" : "pago"}
                         </span>
+                        {parseFloat(mov.amount) < 0 && (
+                          <a
+                            href={`/api/account-movements/${mov.id}/receipt-pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5 font-normal"
+                            data-testid={`btn-receipt-${mov.id}`}
+                          >
+                            <FileText className="h-3 w-3" /> Recibo PDF
+                          </a>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

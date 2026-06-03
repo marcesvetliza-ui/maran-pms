@@ -932,4 +932,147 @@ export function registerExportRoutes(app: Express) {
       res.status(500).json({ error: e.message });
     }
   });
+
+  // ── Recibo de Cobro — Cuenta Corriente ───────────────────────────────────────
+  app.get("/api/account-movements/:id/receipt-pdf", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const movResult = await db.execute(sql`SELECT * FROM account_movements WHERE id = ${id}`);
+      const mov = movResult.rows[0] as any;
+      if (!mov) return res.status(404).json({ error: "Movimiento no encontrado" });
+      if (mov.type !== "pago") return res.status(400).json({ error: "Solo se generan recibos para movimientos de pago" });
+
+      const createdAt = new Date(mov.created_at);
+      const year = createdAt.getFullYear();
+
+      const numResult = await db.execute(sql`
+        SELECT COUNT(*)::int AS num FROM account_movements
+        WHERE type = 'pago'
+          AND EXTRACT(YEAR FROM created_at) = ${year}
+          AND created_at <= ${mov.created_at}
+      `);
+      const recNum = parseInt((numResult.rows[0] as any).num) || 1;
+      const recibo = `REC-${year}-${String(recNum).padStart(4, "0")}`;
+
+      let entityName = "";
+      let entityDoc = "";
+      let entityAddress = "";
+
+      if (mov.entity_type === "guest") {
+        const r = await db.execute(sql`
+          SELECT first_name, last_name, cuil_cuit, document_type, document_number, direccion, localidad
+          FROM guests WHERE id = ${mov.entity_id}
+        `);
+        const g = r.rows[0] as any;
+        if (g) {
+          entityName = `${g.first_name} ${g.last_name}`;
+          entityDoc = g.cuil_cuit
+            ? `CUIL/CUIT ${g.cuil_cuit}`
+            : g.document_number
+            ? `${g.document_type || "DNI"} ${g.document_number}`
+            : "";
+          entityAddress = [g.direccion, g.localidad].filter(Boolean).join("  ·  ");
+        }
+      } else if (mov.entity_type === "company") {
+        const r = await db.execute(sql`
+          SELECT razon_social, nombre_fantasia, cuil_cuit, direccion, localidad
+          FROM companies WHERE id = ${mov.entity_id}
+        `);
+        const c = r.rows[0] as any;
+        if (c) {
+          entityName = c.nombre_fantasia || c.razon_social;
+          entityDoc = c.cuil_cuit ? `CUIT ${c.cuil_cuit}` : "";
+          entityAddress = [c.direccion, c.localidad].filter(Boolean).join("  ·  ");
+        }
+      } else if (mov.entity_type === "agency") {
+        const r = await db.execute(sql`
+          SELECT razon_social, nombre_fantasia, cuil_cuit, direccion, localidad
+          FROM agencies WHERE id = ${mov.entity_id}
+        `);
+        const a = r.rows[0] as any;
+        if (a) {
+          entityName = a.nombre_fantasia || a.razon_social;
+          entityDoc = a.cuil_cuit ? `CUIT ${a.cuil_cuit}` : "";
+          entityAddress = [a.direccion, a.localidad].filter(Boolean).join("  ·  ");
+        }
+      }
+
+      const amount = Math.abs($n(mov.amount));
+      const pageW = 595;
+      const x0 = 50;
+
+      const pdfBuf = await genPDF((doc) => {
+        // ─── Header azul ───────────────────────────────────────────────────
+        doc.rect(0, 0, pageW, 108).fill("#1a3a5c");
+        doc.fill("white").font("Helvetica-Bold").fontSize(13)
+          .text(H.nombre, x0, 20, { width: pageW - 160 });
+        doc.font("Helvetica").fontSize(8.5)
+          .text(`${H.empresa}  ·  CUIT ${H.cuit}`, x0, 37)
+          .text(`${H.domicilio}  ·  ${H.localidad}`, x0, 50);
+
+        doc.fill("white").font("Helvetica-Bold").fontSize(22)
+          .text("RECIBO", pageW - 145, 18, { width: 120, align: "right" });
+        doc.font("Helvetica-Bold").fontSize(10)
+          .text(`Nº ${recibo}`, pageW - 145, 48, { width: 120, align: "right" });
+
+        // ─── Bloque: Recibimos de ─────────────────────────────────────────
+        let y = 128;
+        doc.fill("#000000");
+        doc.rect(x0, y, pageW - 100, 72).strokeColor("#cccccc").lineWidth(0.5).stroke();
+        doc.font("Helvetica").fontSize(7.5).fill("#888")
+          .text("Recibimos de:", x0 + 10, y + 9);
+        doc.font("Helvetica-Bold").fontSize(11).fill("#111")
+          .text(entityName || "—", x0 + 10, y + 21, { width: pageW - 125 });
+        if (entityDoc) doc.font("Helvetica").fontSize(9).fill("#444").text(entityDoc, x0 + 10, y + 38);
+        if (entityAddress) doc.font("Helvetica").fontSize(8.5).fill("#666").text(entityAddress, x0 + 10, y + 51);
+
+        // ─── Bloque: Importe ──────────────────────────────────────────────
+        y += 87;
+        doc.rect(x0, y, pageW - 100, 52).strokeColor("#cccccc").lineWidth(0.5).stroke();
+        doc.font("Helvetica").fontSize(7.5).fill("#888").text("La suma de pesos:", x0 + 10, y + 9);
+        doc.font("Helvetica-Bold").fontSize(18).fill("#1a3a5c")
+          .text(`$${fPeso(amount)}`, x0 + 10, y + 21, { width: 300 });
+
+        // ─── Bloque: Concepto ─────────────────────────────────────────────
+        y += 67;
+        doc.rect(x0, y, pageW - 100, 52).strokeColor("#cccccc").lineWidth(0.5).stroke();
+        doc.font("Helvetica").fontSize(7.5).fill("#888").text("En concepto de:", x0 + 10, y + 9);
+        doc.font("Helvetica").fontSize(9.5).fill("#111")
+          .text(mov.description || "Cobro cuenta corriente", x0 + 10, y + 22, { width: pageW - 125 });
+        if (mov.reference) {
+          doc.font("Helvetica").fontSize(8).fill("#777")
+            .text(`Referencia: ${mov.reference}`, x0 + 10, y + 38);
+        }
+
+        // ─── Fecha ────────────────────────────────────────────────────────
+        y += 67;
+        doc.font("Helvetica").fontSize(9).fill("#333")
+          .text(`Fecha de pago: ${fDate(mov.date || mov.created_at)}`, x0, y)
+          .text(`Registrado: ${fDate(mov.created_at)}`, x0, y + 14);
+
+        // ─── Líneas de firma ──────────────────────────────────────────────
+        const sigY = y + 60;
+        const half = (pageW - 100) / 2;
+        doc.moveTo(x0, sigY).lineTo(x0 + half - 20, sigY).strokeColor("#aaa").lineWidth(0.5).stroke();
+        doc.moveTo(x0 + half + 20, sigY).lineTo(pageW - 50, sigY).stroke();
+        doc.font("Helvetica").fontSize(7.5).fill("#888")
+          .text("Firma y aclaración del cobrador", x0, sigY + 5, { width: half - 20, align: "center" })
+          .text("Sello del hotel", x0 + half + 20, sigY + 5, { width: half - 20, align: "center" });
+
+        // ─── Pie ──────────────────────────────────────────────────────────
+        doc.font("Helvetica").fontSize(6.5).fill("#bbb")
+          .text(
+            "Documento no válido como comprobante fiscal. Solo para uso interno.",
+            x0, 782, { align: "center", width: pageW - 100 }
+          );
+      });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="recibo_${recibo}.pdf"`);
+      res.send(pdfBuf);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 }

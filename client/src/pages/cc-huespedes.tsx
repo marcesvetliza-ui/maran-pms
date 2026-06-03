@@ -10,6 +10,7 @@ import {
   Search,
   Loader2,
   CreditCard,
+  FileText,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -295,6 +296,17 @@ export default function CcHuespedesPage() {
                           <p className="text-[10px] text-muted-foreground text-right">
                             {parseFloat(m.amount) > 0 ? "Cargo" : "Pago"}
                           </p>
+                          {parseFloat(m.amount) < 0 && (
+                            <a
+                              href={`/api/account-movements/${m.id}/receipt-pdf`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5"
+                              data-testid={`btn-receipt-${m.id}`}
+                            >
+                              <FileText className="h-3 w-3" /> Recibo PDF
+                            </a>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
