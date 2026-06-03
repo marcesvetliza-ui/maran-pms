@@ -469,13 +469,13 @@ export function registerReservationsRoutes(app: Express) {
             requiresMotivo: true,
           });
         }
-        await db.insert(reservationChangelog).values({
+        db.insert(reservationChangelog).values({
           reservationId: req.params.id,
           fecha: new Date(),
           operador: (req as any).user?.username || "sistema",
           tipo: "checkin_retroactivo",
           descripcion: `Check-in retroactivo registrado el ${today} para fecha ${checkInDate}. Motivo: ${String(motivo).trim()}`,
-        });
+        }).catch((e) => console.warn("changelog insert failed (non-fatal):", e?.message));
       }
 
       const room = await storage.getRoom(reservation.roomId);
@@ -521,7 +521,7 @@ export function registerReservationsRoutes(app: Express) {
               priority: pref.priority as any,
             });
           }
-          await db.insert(stayNotes).values({
+          db.insert(stayNotes).values({
             id: randomUUID(),
             reservationId: req.params.id,
             guestId: reservation.guestId,
@@ -533,7 +533,7 @@ export function registerReservationsRoutes(app: Express) {
             isResolved: false,
             recordedBy: "sistema (check-in automático)",
             createdAt: new Date(),
-          });
+          }).catch((e) => console.warn("stayNotes insert failed (non-fatal):", e?.message));
           if (pref.priority === "critical" || pref.priority === "high") {
             await storage.createNotification({
               type: "hospitality_alert",
