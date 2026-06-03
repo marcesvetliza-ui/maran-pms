@@ -657,24 +657,50 @@ export function registerReservationsRoutes(app: Express) {
     try {
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       const force = req.body.force === true;
-      // Get all checked_in with checkOutDate <= today
+
+      if (force) {
+        // Bulk SQL UPDATE — close all overdue checked_in regardless of balance
+        const result = await db.execute(sql`
+          UPDATE reservations
+          SET status = 'checked_out'
+          WHERE status = 'checked_in'
+            AND check_out_date <= ${today}
+        `);
+        const closed = (result as any).rowCount ?? 0;
+
+        // Bulk mark rooms as dirty for those reservations
+        await db.execute(sql`
+          UPDATE rooms r
+          SET status = 'dirty'
+          FROM reservations res
+          WHERE res.room_id = r.id
+            AND res.status = 'checked_out'
+            AND res.check_out_date <= ${today}
+        `);
+
+        await audit(req, "update", "reservations",
+          `Cierre masivo forzado de vencidas: ${closed} cerradas`,
+          {}
+        );
+        return res.json({ closed, skipped: 0 });
+      }
+
+      // Non-force: only close zero-balance overdue reservations
       const overdueList = await storage.getReservationsForCheckOut();
       const overdue = overdueList.filter(r => r.checkOutDate <= today);
       let closed = 0;
       let skipped = 0;
       for (const r of overdue) {
-        if (!force) {
-          const chargesTotal = await storage.getChargesTotal(r.id);
-          const paymentsTotal = await storage.getPaymentsTotal(r.id);
-          const savedRoomTotal = parseFloat(r.totalRoomAmount || "0");
-          const roomTotal = savedRoomTotal > 0
-            ? savedRoomTotal
-            : parseFloat(r.finalRatePerNight || "0") * (r.nights || 0);
-          const balance = roomTotal + chargesTotal - paymentsTotal;
-          if (balance > 0.01) {
-            skipped++;
-            continue;
-          }
+        const chargesTotal = await storage.getChargesTotal(r.id);
+        const paymentsTotal = await storage.getPaymentsTotal(r.id);
+        const savedRoomTotal = parseFloat(r.totalRoomAmount || "0");
+        const roomTotal = savedRoomTotal > 0
+          ? savedRoomTotal
+          : parseFloat(r.finalRatePerNight || "0") * (r.nights || 0);
+        const balance = roomTotal + chargesTotal - paymentsTotal;
+        if (balance > 0.01) {
+          skipped++;
+          continue;
         }
         await storage.updateReservation(r.id, { status: "checked_out" });
         if (r.roomId) await storage.updateRoom(r.roomId, { status: "dirty" });
@@ -682,11 +708,12 @@ export function registerReservationsRoutes(app: Express) {
         closed++;
       }
       await audit(req, "update", "reservations",
-        `Cierre masivo de vencidas${force ? " (forzado)" : ""}: ${closed} cerradas, ${skipped} con saldo pendiente`,
+        `Cierre masivo de vencidas: ${closed} cerradas, ${skipped} con saldo pendiente`,
         {}
       );
       res.json({ closed, skipped });
     } catch (error) {
+      console.error("bulk-checkout-overdue error:", error);
       res.status(500).json({ error: "Error en cierre masivo" });
     }
   });
