@@ -1,0 +1,56 @@
+Tengo el panorama completo. Te doy mi evaluación honesta de los 10 puntos:
+
+Lo que ya está construido ✅
+Punto 1 — Carga de facturas (A, B, C, NC)
+Existe. Tiene tipos A/B/C/NC, alícuotas de IVA, condición de pago (contado/cuenta corriente), centro de costo, cuenta contable, e impuestos adicionales (percepciones/retenciones). Genera asientos contables automáticamente al cargar.
+
+Punto 2 — Info SIRCAR
+Existe completo. Genera el .txt para ARCA más dos Excel auxiliares. Accesible desde el módulo de Consultas.
+
+Punto 3 — Listado de retenciones
+Existe. PDF mensual con detalle de retenciones practicadas.
+
+Punto 4 — Libro IVA Ventas
+Existe. Genera el Excel agrupado + los 6 archivos del Libro Digital (3 Excel + 3 TXT).
+
+Punto 5 — Resúmenes bancarios
+Existe como tipo especial en la carga de comprobantes (RESUMEN-BANCO). Genera asiento contable automático.
+
+Punto 6 — Resúmenes de tarjetas
+Existe como tipo LIQ-TARJETA. Genera asiento contable automático.
+
+Punto 7 — Orden de Pago (OP)
+Existe. Muestra facturas pendientes del proveedor, permite seleccionarlas, registra retenciones y genera asiento de cancelación contra banco o caja.
+
+Punto 8 — Cuenta corriente de proveedores
+Existe. Detalle por proveedor, saldo adeudado, total general.
+
+Punto 9 — Libro IVA Compras
+Existe. Excel agrupado + TXT para Libro Digital Compras, filtrado por período.
+
+Punto 10 — Mayor de cuentas (Asiento mensual)
+Existe. Dos versiones en PDF: Totalizado (resumen por cuenta) y Detallado (movimiento por movimiento con fecha, minuta, comprobante, proveedor, debe/haber/saldo acumulado).
+
+Lo que puede tener brechas ⚠️
+Punto 1 — Impuestos adicionales en facturas
+Hay que verificar si captura todos los campos específicos que mencionás: percepción IIBB, percepción IVA, percepción Ganancias, impuestos internos. Probablemente estén pero quizás no todos.
+
+Punto 5 — Resúmenes bancarios
+El documento menciona campos específicos: Ley 25.413, retención Ganancias, retención IVA, retención IIBB, percepción IVA. Es probable que no todos estén capturados con ese nivel de detalle porque la pantalla actual unifica todos los tipos de comprobante.
+
+Punto 6 — Resúmenes de tarjetas
+Similar: retención SUSS en particular puede no estar contemplada como campo separado.
+
+Punto 7 — Cálculo automático de retenciones en la OP
+El sistema existe, pero probablemente las retenciones se ingresan manualmente. El documento pide que el sistema las calcule automáticamente aplicando el porcentaje configurado por ARCA por proveedor. Eso todavía no está. Además menciona un comprobante PDF de la retención IIBB de cada OP — necesito verificar si ese PDF existe.
+
+Lo que NO existe y es factible construir 🔧
+Estas son las mejoras concretas que faltan y que sí se pueden hacer:
+
+Cálculo automático de retenciones en la OP — Que cada proveedor tenga configurada su alícuota de IIBB (que vos actualizás mensualmente), y que al generar una OP el sistema calcule automáticamente el monto a retener. Es viable.
+PDF de comprobante de retención IIBB por OP — Un PDF descargable que sirva como constancia de la retención practicada. Factible.
+Campos faltantes en resúmenes bancarios y de tarjetas — Agregar Ley 25.413, retención SUSS, etc. como campos opcionales en la pantalla de carga correspondiente.
+Mi opinión general
+El sistema tiene el 85-90% de lo que describe el documento. Las partes más importantes (carga de facturas, libros IVA, SIRCAR, OP, mayor de cuentas) están construidas. Lo que falta es relativamente puntual: el cálculo automático de alícuotas de retención en la OP y algunos campos específicos en resúmenes bancarios/tarjetas.
+
+¿Querés que arranque por el cálculo automático de retenciones en la OP, que parece ser lo más estratégico del documento? ¿O preferís que primero haga un relevamiento más fino de qué campos exactamente faltan en resúmenes bancarios y tarjetas?
