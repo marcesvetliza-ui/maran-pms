@@ -148,6 +148,12 @@ export function registerPresupuestosRoutes(app: Express) {
         }
       } catch (_) { /* fallback to default */ }
 
+      // Check if T&C are enabled
+      try {
+        const [tcEnabledSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, "confirmation_terms_enabled"));
+        if (tcEnabledSetting?.value === "false") terminos = [];
+      } catch (_) { /* keep terminos as-is */ }
+
       const doc = new PDFDocument({ margin: 0, size: "A4" });
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="${pres.numero}.pdf"`);

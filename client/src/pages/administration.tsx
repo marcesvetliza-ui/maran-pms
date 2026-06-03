@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { Bed, Check } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/App";
 import type { SystemUser, SystemSetting, AuditLog, SystemUserRole, BedType, SystemIncident } from "@shared/schema";
 
@@ -1112,12 +1113,36 @@ export default function AdministrationPage() {
 
   const uniqueModules = Array.from(new Set(auditLogs.map((l) => l.module).filter((m): m is string => !!m && typeof m === "string")));
 
-  const groupedSettings = settings.reduce((acc, setting) => {
-    const cat = setting.category || "general";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(setting);
-    return acc;
-  }, {} as Record<string, SystemSetting[]>);
+  const tcEnabled = settings.find(s => s.key === "confirmation_terms_enabled")?.value !== "false";
+
+  const toggleTcMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      return apiRequest("PUT", "/api/admin/settings", {
+        key: "confirmation_terms_enabled",
+        value: enabled ? "true" : "false",
+        category: "documentos",
+        description: "Mostrar T&C en PDF de presupuesto",
+        updatedBy: user?.id,
+        updatedAt: new Date(),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
+      toast({ title: "Configuración actualizada" });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar", variant: "destructive" });
+    },
+  });
+
+  const groupedSettings = settings
+    .filter(s => s.key !== "confirmation_terms_enabled")
+    .reduce((acc, setting) => {
+      const cat = setting.category || "general";
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(setting);
+      return acc;
+    }, {} as Record<string, SystemSetting[]>);
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -1400,10 +1425,22 @@ export default function AdministrationPage() {
                       {categorySettings.map((setting) => (
                         <TableRow key={setting.id} data-testid={`row-setting-${setting.id}`}>
                           <TableCell className="font-mono text-sm">{setting.key}</TableCell>
-                          <TableCell className="font-medium max-w-[220px] truncate">
-                            {TEXTAREA_KEYS.includes(setting.key)
+                          <TableCell className="font-medium max-w-[220px]">
+                            {setting.key === "confirmation_terms" ? (
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={tcEnabled}
+                                  onCheckedChange={(checked) => toggleTcMutation.mutate(checked)}
+                                  disabled={toggleTcMutation.isPending}
+                                  data-testid="switch-confirmation-terms"
+                                />
+                                <span className={tcEnabled ? "text-green-600 text-sm font-medium" : "text-muted-foreground text-sm"}>
+                                  {tcEnabled ? "Activo" : "Inactivo"}
+                                </span>
+                              </div>
+                            ) : TEXTAREA_KEYS.includes(setting.key)
                               ? `${setting.value.split("\n").filter(l => l.trim()).length} cláusulas`
-                              : setting.value}
+                              : <span className="truncate block max-w-[200px]">{setting.value}</span>}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {setting.description || "-"}
