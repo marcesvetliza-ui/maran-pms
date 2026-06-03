@@ -140,9 +140,11 @@ export function registerPresupuestosRoutes(app: Express) {
       let terminos = DEFAULT_TERMINOS;
       try {
         const termSetting = await storage.getSystemSetting("confirmation_terms");
-        if (termSetting?.value) {
-          const lines = termSetting.value.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0);
-          if (lines.length > 0) terminos = lines;
+        if (termSetting !== null && termSetting !== undefined) {
+          // Setting exists in DB — respect it even if empty (user cleared it on purpose)
+          terminos = termSetting.value
+            ? termSetting.value.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0)
+            : [];
         }
       } catch (_) { /* fallback to default */ }
 
@@ -257,7 +259,7 @@ export function registerPresupuestosRoutes(app: Express) {
           ? doc.heightOfString(item.detalle, { width: W.desc, fontSize: 7 }) + 5
           : 0;
         const rowH = Math.max(22, descH + detailH + 14);
-        if (y + rowH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
+        if (y + rowH > pageH - 100) { doc.addPage(); drawPageBackground(); y = headerH + 10; }
         doc.rect(margin, y, contentW, rowH)
           .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
         doc.fillColor(DARK).fontSize(8).font("Helvetica");
@@ -305,7 +307,7 @@ export function registerPresupuestosRoutes(app: Express) {
           condBodyH += doc.heightOfString(line, { width: contentW - 28 }) + 5;
         }
         const condBoxH = 24 + condBodyH + 8;
-        if (y + condBoxH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
+        if (y + condBoxH > pageH - 100) { doc.addPage(); drawPageBackground(); y = headerH + 10; }
         doc.roundedRect(margin, y, contentW, condBoxH, 6).stroke("#e0e0e0");
         doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
         doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
@@ -313,7 +315,7 @@ export function registerPresupuestosRoutes(app: Express) {
           .text("CONDICIONES Y OBSERVACIONES", margin + 14, y + 8, { characterSpacing: 1, width: contentW - 28 });
         let cy = y + 28;
         for (const line of condLines) {
-          if (cy > pageH - 110) { doc.addPage(); drawPageBackground(); cy = 40; }
+          if (cy > pageH - 110) { doc.addPage(); drawPageBackground(); cy = headerH + 10; }
           doc.fillColor(MUTED).fontSize(8.5).font("Helvetica")
             .text(line, margin + 14, cy, { width: contentW - 28 });
           cy += doc.heightOfString(line, { width: contentW - 28 }) + 5;
@@ -322,25 +324,27 @@ export function registerPresupuestosRoutes(app: Express) {
       }
 
       // ── TÉRMINOS Y CONDICIONES (auto from system settings) ───
-      let tcBodyH = 10;
-      for (const t of terminos) {
-        tcBodyH += doc.heightOfString(t, { width: contentW - 30 }) + 6;
+      if (terminos.length > 0) {
+        let tcBodyH = 10;
+        for (const t of terminos) {
+          tcBodyH += doc.heightOfString(t, { width: contentW - 30 }) + 6;
+        }
+        const tcH = 24 + tcBodyH + 8;
+        if (y + tcH > pageH - 100) { doc.addPage(); drawPageBackground(); y = headerH + 10; }
+        doc.roundedRect(margin, y, contentW, tcH, 6).stroke("#e0e0e0");
+        doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
+        doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
+        doc.fillColor("#ffffff").fontSize(7.5).font("Helvetica-Bold")
+          .text("TÉRMINOS Y CONDICIONES", margin + 14, y + 8, { characterSpacing: 1.5, width: contentW - 28 });
+        let ty = y + 28;
+        terminos.forEach((t, i) => {
+          if (ty > pageH - 110) { doc.addPage(); drawPageBackground(); ty = headerH + 10; }
+          const lineH = doc.heightOfString(`${i + 1}.  ${t}`, { width: contentW - 28 });
+          doc.fillColor("#333333").fontSize(8).font("Helvetica")
+            .text(`${i + 1}.  ${t}`, margin + 14, ty, { width: contentW - 28 });
+          ty += lineH + 6;
+        });
       }
-      const tcH = 24 + tcBodyH + 8;
-      if (y + tcH > pageH - 100) { doc.addPage(); drawPageBackground(); y = 40; }
-      doc.roundedRect(margin, y, contentW, tcH, 6).stroke("#e0e0e0");
-      doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
-      doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
-      doc.fillColor("#ffffff").fontSize(7.5).font("Helvetica-Bold")
-        .text("TÉRMINOS Y CONDICIONES", margin + 14, y + 8, { characterSpacing: 1.5, width: contentW - 28 });
-      let ty = y + 28;
-      terminos.forEach((t, i) => {
-        if (ty > pageH - 110) { doc.addPage(); drawPageBackground(); ty = 40; }
-        const lineH = doc.heightOfString(`${i + 1}.  ${t}`, { width: contentW - 28 });
-        doc.fillColor("#333333").fontSize(8).font("Helvetica")
-          .text(`${i + 1}.  ${t}`, margin + 14, ty, { width: contentW - 28 });
-        ty += lineH + 6;
-      });
 
       doc.end();
     } catch (e: any) {
