@@ -165,8 +165,8 @@ export default function CheckOutPage() {
   });
 
   const bulkCheckoutOverdueMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/reservations/bulk-checkout-overdue`, {});
+    mutationFn: async (force: boolean = false) => {
+      return apiRequest("POST", `/api/reservations/bulk-checkout-overdue`, { force });
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -952,26 +952,40 @@ export default function CheckOutPage() {
             )}
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <div className="flex-1 text-xs text-muted-foreground self-center">
-              El cierre masivo solo registra salidas con saldo $0. Las que tienen saldo pendiente requieren revisión manual.
-            </div>
             <Button variant="outline" onClick={() => setShowOverdueDialog(false)}>Cancelar</Button>
             {overdueReservations.length > 0 && (
-              <Button
-                variant="destructive"
-                disabled={bulkCheckoutOverdueMutation.isPending}
-                data-testid="button-bulk-checkout-overdue"
-                onClick={() => {
-                  setBulkClosing(true);
-                  bulkCheckoutOverdueMutation.mutate();
-                }}
-              >
-                {bulkCheckoutOverdueMutation.isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cerrando...</>
-                ) : (
-                  <><LogOut className="h-4 w-4 mr-2" />Registrar salidas masivas ({overdueReservations.length})</>
-                )}
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  disabled={bulkCheckoutOverdueMutation.isPending}
+                  data-testid="button-bulk-checkout-overdue"
+                  onClick={() => {
+                    setBulkClosing(true);
+                    bulkCheckoutOverdueMutation.mutate(false);
+                  }}
+                >
+                  {bulkCheckoutOverdueMutation.isPending ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cerrando...</>
+                  ) : (
+                    <><LogOut className="h-4 w-4 mr-2" />Cerrar saldo $0 ({overdueReservations.length})</>
+                  )}
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={bulkCheckoutOverdueMutation.isPending}
+                  data-testid="button-bulk-checkout-force"
+                  onClick={() => {
+                    setBulkClosing(true);
+                    bulkCheckoutOverdueMutation.mutate(true);
+                  }}
+                >
+                  {bulkCheckoutOverdueMutation.isPending ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Cerrando...</>
+                  ) : (
+                    <><LogOut className="h-4 w-4 mr-2" />Forzar cierre de TODAS</>
+                  )}
+                </Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>
