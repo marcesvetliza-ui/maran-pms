@@ -27,7 +27,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   FileText, Plus, Trash2, Search, ArrowLeft, Building2,
   CreditCard, Landmark, Receipt, ChevronRight, CheckCircle2, Clock, FileDown, Package,
-  ChevronsUpDown, Check, Eye,
+  ChevronsUpDown, Check, Eye, Pencil,
 } from "lucide-react";
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -237,11 +237,13 @@ function InvoiceDialog({
   onClose,
   suppliers,
   accounts,
+  editingInvoice,
 }: {
   open: boolean;
   onClose: () => void;
   suppliers: Supplier[];
   accounts: AccountingAccount[];
+  editingInvoice?: Invoice | null;
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState(emptyForm());
@@ -253,8 +255,51 @@ function InvoiceDialog({
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
 
+  const isEditing = !!editingInvoice;
+
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
   const qf = (k: string, v: string) => setQuickForm((p) => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    if (open && editingInvoice) {
+      setForm({
+        tipoComprobante: editingInvoice.tipoComprobante || "FACT-A",
+        supplierId: editingInvoice.supplierId ? String(editingInvoice.supplierId) : "",
+        proveedorNombre: editingInvoice.proveedorNombre || editingInvoice.supplierNombre || "",
+        proveedorCuit: editingInvoice.proveedorCuit || "",
+        puntoVenta: editingInvoice.puntoVenta ? String(editingInvoice.puntoVenta) : "",
+        numeroComprobante: editingInvoice.numeroComprobante || "",
+        fechaEmision: editingInvoice.fechaEmision || "",
+        periodo: editingInvoice.periodo || "",
+        condicionPago: editingInvoice.condicionPago || "contado",
+        alicuotaIva: "21",
+        montoNeto: editingInvoice.montoNeto || "",
+        montoIva21: editingInvoice.montoIva21 || "",
+        montoIva105: editingInvoice.montoIva105 || "",
+        montoIva27: editingInvoice.montoIva27 || "",
+        montoIva5: (editingInvoice as any).montoIva5 || "",
+        montoIva25: (editingInvoice as any).montoIva25 || "",
+        montoExento: (editingInvoice as any).montoExento || "",
+        montoNoGravado: (editingInvoice as any).montoNoGravado || "",
+        percepcionIibb: editingInvoice.percepcionIibb || "",
+        percepcionIva: editingInvoice.percepcionIva || "",
+        percepcionGanancias: editingInvoice.percepcionGanancias || "",
+        retencionIibb: editingInvoice.retencionIibb || "",
+        retencionGanancias: editingInvoice.retencionGanancias || "",
+        retencionIva: editingInvoice.retencionIva || "",
+        retencionSuss: editingInvoice.retencionSuss || "",
+        impuestosInternos: editingInvoice.impuestosInternos || "",
+        ley25413: editingInvoice.ley25413 || "",
+        cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
+        centroCosto: editingInvoice.centroCosto || "",
+        observaciones: editingInvoice.observaciones || "",
+      });
+      setStep(1);
+    } else if (open && !editingInvoice) {
+      setForm(emptyForm());
+      setStep(0);
+    }
+  }, [open, editingInvoice]);
 
   const quickCreateMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/accounting-suppliers", data),
@@ -405,7 +450,21 @@ function InvoiceDialog({
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const patchMut = useMutation({
+    mutationFn: (data: any) => apiRequest("PATCH", `/api/purchase-invoices/${editingInvoice!.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
+      resetDialog();
+      toast({ title: "Comprobante actualizado correctamente" });
+    },
+    onError: (e: any) => toast({ title: "Error al actualizar", description: e.message, variant: "destructive" }),
+  });
+
   const handleSubmit = () => {
+    if (isEditing) {
+      patchMut.mutate({ ...form, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
+      return;
+    }
     if (!form.numeroComprobante) {
       toast({ title: "Ingrese el número de comprobante", variant: "destructive" });
       return;
@@ -428,7 +487,9 @@ function InvoiceDialog({
     createMut.mutate({ ...form, supplierId: form.supplierId ? parseInt(form.supplierId) : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
   };
 
-  const steps = ["Encabezado", "Montos", "Retenciones", "Clasificación", "Inventario"];
+  const steps = isEditing
+    ? ["Encabezado", "Montos", "Retenciones", "Clasificación"]
+    : ["Encabezado", "Montos", "Retenciones", "Clasificación", "Inventario"];
   const isResumen = form.tipoComprobante === "RESUMEN-BANCO" || form.tipoComprobante === "LIQ-TARJETA";
   const isNC = form.tipoComprobante.startsWith("NC");
 
@@ -441,7 +502,7 @@ function InvoiceDialog({
         onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>Registrar Comprobante</DialogTitle>
+          <DialogTitle>{isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}</DialogTitle>
           {/* Step indicator */}
           <div className="flex gap-1 mt-2">
             {steps.map((s, i) => (
@@ -865,9 +926,13 @@ function InvoiceDialog({
             {step < steps.length - 1 ? (
               <Button onClick={() => setStep((p) => p + 1)} data-testid="btn-next-step">Siguiente</Button>
             ) : (
-              <Button onClick={handleSubmit} disabled={createMut.isPending} data-testid="btn-submit-invoice">
-                {createMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-                Factura completa
+              <Button
+                onClick={handleSubmit}
+                disabled={createMut.isPending || patchMut.isPending}
+                data-testid="btn-submit-invoice"
+              >
+                {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
+                {isEditing ? "Guardar cambios" : "Factura completa"}
               </Button>
             )}
           </div>
@@ -1475,6 +1540,7 @@ export default function PurchaseInvoices() {
     return params.get("tab") || "comprobantes";
   });
   const [newOpen, setNewOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [opSupplier, setOpSupplier] = useState<CCItem | null>(null);
   const [anularId, setAnularId] = useState<number | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
@@ -1693,13 +1759,24 @@ export default function PurchaseInvoices() {
                                 <Eye className="h-4 w-4" />
                               </Button>
                               {inv.estado === "pendiente" && (
-                                <Button
-                                  variant="ghost" size="icon"
-                                  onClick={() => setAnularId(inv.id)}
-                                  data-testid={`btn-anular-invoice-${inv.id}`}
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
+                                <>
+                                  <Button
+                                    variant="ghost" size="icon"
+                                    onClick={() => setEditingInvoice(inv)}
+                                    title="Editar"
+                                    data-testid={`btn-edit-invoice-${inv.id}`}
+                                  >
+                                    <Pencil className="h-4 w-4 text-muted-foreground" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost" size="icon"
+                                    onClick={() => setAnularId(inv.id)}
+                                    title="Anular"
+                                    data-testid={`btn-anular-invoice-${inv.id}`}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </>
                               )}
                             </div>
                           </TableCell>
@@ -1779,7 +1856,7 @@ export default function PurchaseInvoices() {
       </div>
 
       {/* Dialogs */}
-      <InvoiceDialog open={newOpen} onClose={() => setNewOpen(false)} suppliers={suppliers} accounts={accounts} />
+      <InvoiceDialog open={newOpen || !!editingInvoice} onClose={() => { setNewOpen(false); setEditingInvoice(null); }} suppliers={suppliers} accounts={accounts} editingInvoice={editingInvoice} />
       <PaymentOrderDialog supplier={opSupplier} open={!!opSupplier} onClose={() => setOpSupplier(null)} />
       <InvoiceDetailDialog invoice={detailInvoice} accounts={accounts} onClose={() => setDetailInvoice(null)} />
 
