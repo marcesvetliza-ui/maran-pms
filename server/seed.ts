@@ -681,6 +681,13 @@ export async function refreshRealData() {
       ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS alicuota_iibb_op numeric(6,4) DEFAULT 0
     `);
 
+    // Sincronizar secuencias de tablas serial para evitar duplicate key errors
+    await db.execute(sql`SELECT setval('admin_cash_movements_id_seq', COALESCE((SELECT MAX(id) FROM admin_cash_movements), 0) + 1, false)`);
+    await db.execute(sql`SELECT setval('admin_cash_arqueos_id_seq', COALESCE((SELECT MAX(id) FROM admin_cash_arqueos), 0) + 1, false)`);
+    await db.execute(sql`SELECT setval('payment_orders_id_seq', COALESCE((SELECT MAX(id) FROM payment_orders), 0) + 1, false)`);
+    await db.execute(sql`SELECT setval('purchase_invoices_id_seq', COALESCE((SELECT MAX(id) FROM purchase_invoices), 0) + 1, false)`);
+    await db.execute(sql`SELECT setval('iibb_retentions_id_seq', COALESCE((SELECT MAX(id) FROM iibb_retentions), 0) + 1, false)`);
+
     const existingStaff = await db.select({ id: maintenanceStaff.id }).from(maintenanceStaff);
     if (existingStaff.length === 0) {
       console.log("Seeding maintenance staff...");
