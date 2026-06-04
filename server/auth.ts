@@ -3,6 +3,7 @@ import { Strategy as LocalStrategy } from "passport-local";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcrypt";
+import pg from "pg";
 import { db } from "./db";
 import { systemUsers } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -42,7 +43,7 @@ export function setupAuth(app: Express) {
         conString: process.env.DATABASE_URL,
         tableName: "sessions",
         createTableIfMissing: false,
-        pool: new (require("pg").Pool)({
+        pool: new pg.Pool({
           connectionString: process.env.DATABASE_URL,
           connectionTimeoutMillis: 5_000,
           max: 3,
