@@ -751,7 +751,7 @@ export default function GroupsPage() {
       if (isOld) return false;
     }
     return matchesSearch && matchesStatus;
-  });
+  })?.sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
 
   const handleEdit = (group: GroupWithDetails) => {
     setEditingGroup(group);
