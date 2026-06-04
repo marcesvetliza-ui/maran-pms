@@ -325,6 +325,7 @@ export interface IStorage {
     totalRooms: number;
     availableRooms: number;
     occupiedRooms: number;
+    inHouseGuests: number;
     dirtyRooms: number;
     cleaningRooms: number;
     maintenanceRooms: number;
@@ -2077,10 +2078,16 @@ export class MemStorage implements IStorage {
     const totalGuests = guests.length;
     const pendingReservations = reservations.filter((r) => r.status === "pending" || r.status === "tentative").length;
 
+    const occupiedRoomIds = new Set(rooms.filter((r) => r.status === "occupied").map((r) => r.id));
+    const inHouseGuests = reservations
+      .filter((r) => occupiedRoomIds.has(r.roomId) && r.status !== "cancelled" && r.status !== "checked_out")
+      .reduce((sum, r) => sum + (r.numberOfGuests ?? 0), 0);
+
     return {
       totalRooms,
       availableRooms,
       occupiedRooms,
+      inHouseGuests,
       dirtyRooms,
       cleaningRooms,
       maintenanceRooms,

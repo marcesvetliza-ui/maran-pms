@@ -30,6 +30,7 @@ type DashboardStats = {
   totalRooms: number;
   availableRooms: number;
   occupiedRooms: number;
+  inHouseGuests: number;
   dirtyRooms: number;
   cleaningRooms: number;
   maintenanceRooms: number;
@@ -219,7 +220,7 @@ export default function Dashboard() {
     enabled: inHouseOpen,
   });
 
-  const totalInHouse = stats ? stats.occupiedRooms : 0;
+  const totalInHouse = stats ? stats.inHouseGuests : 0;
 
   const { data: cancelledLogs = [] } = useQuery<any[]>({
     queryKey: ["/api/cancelled-reservations"],
@@ -340,7 +341,7 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">{totalInHouse}</div>
-                <p className="text-sm text-muted-foreground mt-1">hab. ocupadas ahora</p>
+                <p className="text-sm text-muted-foreground mt-1">personas alojadas ahora</p>
                 <p className="text-xs text-primary mt-1">{inHouseOpen ? "Cerrar listado ↑" : "Ver listado policial ↓"}</p>
               </CardContent>
             </Card>

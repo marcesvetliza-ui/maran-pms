@@ -815,10 +815,21 @@ export class DatabaseStorage implements IStorage {
     const breakfastsTomorrow = Number(tonightRows[0]?.pax ?? 0);
     const roomsTonight = Number(tonightRows[0]?.rooms ?? 0);
 
+    // Personas in house = sum(numberOfGuests) de habitaciones ocupadas
+    const inHouseRows = await db.execute(sql`
+      SELECT COALESCE(SUM(r.number_of_guests), 0) AS pax
+      FROM rooms rm
+      JOIN reservations r ON r.room_id = rm.id
+      WHERE rm.status = 'occupied'
+        AND r.status NOT IN ('cancelled', 'checked_out')
+    `);
+    const inHouseGuests = Number((inHouseRows.rows[0] as any)?.pax ?? 0);
+
     return {
       totalRooms,
       availableRooms,
       occupiedRooms,
+      inHouseGuests,
       dirtyRooms,
       cleaningRooms,
       maintenanceRooms,

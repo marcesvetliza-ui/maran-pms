@@ -283,11 +283,12 @@ export async function registerRoutes(
           rc.document_number AS comp_doc_number,
           rc.nationality AS comp_nationality,
           rc.date_of_birth AS comp_dob
-        FROM reservations r
+        FROM rooms rm
+        JOIN reservations r ON r.room_id = rm.id
         JOIN guests g ON g.id = r.guest_id
-        JOIN rooms rm ON rm.id = r.room_id
         LEFT JOIN reservation_companions rc ON rc.reservation_id = r.id
-        WHERE r.status = 'checked_in'
+        WHERE rm.status = 'occupied'
+          AND r.status NOT IN ('cancelled', 'checked_out')
         ORDER BY rm.room_number, r.id, rc.id
       `);
 
