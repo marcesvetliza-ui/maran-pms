@@ -233,6 +233,16 @@ app.use((req, res, next) => {
       )
     `));
 
+    // Sincronizar secuencias serial — siempre, para evitar duplicate key errors
+    await mig("sync sequences", () => iDb.execute(iSql`
+      SELECT
+        setval('admin_cash_movements_id_seq', COALESCE((SELECT MAX(id) FROM admin_cash_movements), 0) + 1, false),
+        setval('admin_cash_arqueos_id_seq', COALESCE((SELECT MAX(id) FROM admin_cash_arqueos), 0) + 1, false),
+        setval('payment_orders_id_seq', COALESCE((SELECT MAX(id) FROM payment_orders), 0) + 1, false),
+        setval('purchase_invoices_id_seq', COALESCE((SELECT MAX(id) FROM purchase_invoices), 0) + 1, false),
+        setval('iibb_retentions_id_seq', COALESCE((SELECT MAX(id) FROM iibb_retentions), 0) + 1, false)
+    `));
+
     try {
       const { setupNightAuditScheduler } = await import("./night-audit");
       setupNightAuditScheduler();
