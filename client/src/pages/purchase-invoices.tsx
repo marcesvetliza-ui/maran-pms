@@ -230,11 +230,13 @@ const IVA_MAP: Record<string, { field: string; rate: number }> = {
   "27":  { field: "montoIva27",  rate: 27 },
 };
 
+const ALL_IVA_FIELDS = { montoIva5: "", montoIva25: "", montoIva105: "", montoIva21: "", montoIva27: "" };
+
 function calcIvaField(neto: string, alicuota: string): Record<string, string> {
   const n = parseFloat(neto);
   const entry = IVA_MAP[alicuota];
-  if (!entry || isNaN(n) || n <= 0) return {};
-  return { [entry.field]: (n * entry.rate / 100).toFixed(2) };
+  if (!entry || isNaN(n) || n <= 0) return { ...ALL_IVA_FIELDS };
+  return { ...ALL_IVA_FIELDS, [entry.field]: (n * entry.rate / 100).toFixed(2) };
 }
 
 function InvoiceDialog({
