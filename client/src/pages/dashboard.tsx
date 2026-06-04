@@ -12,6 +12,9 @@ import {
   LogOut,
   XCircle,
   Coffee,
+  ChevronDown,
+  ChevronUp,
+  Hotel,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +24,7 @@ import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails, RoomWithType } from "@shared/schema";
+import { useState as useLocalState } from "react";
 
 type DashboardStats = {
   totalRooms: number;
@@ -158,8 +162,37 @@ function RoomStatusBadge({ status }: { status: string }) {
   return <Badge className={config.className}>{config.label}</Badge>;
 }
 
+type InHouseEntry = {
+  reservationId: string;
+  roomNumber: string;
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children: number;
+  guest: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    documentType: string;
+    documentNumber: string;
+    nationality: string;
+    dateOfBirth: string;
+    phone: string;
+    email: string;
+  };
+  companions: {
+    firstName: string;
+    lastName: string;
+    documentType: string;
+    documentNumber: string;
+    nationality: string;
+    dateOfBirth: string;
+  }[];
+};
+
 export default function Dashboard() {
   const { toast } = useToast();
+  const [inHouseOpen, setInHouseOpen] = useLocalState(false);
 
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
@@ -180,6 +213,13 @@ export default function Dashboard() {
   const { data: departures = [], isLoading: departuresLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/dashboard/departures"],
   });
+
+  const { data: inHouseData = [], isLoading: inHouseLoading } = useQuery<InHouseEntry[]>({
+    queryKey: ["/api/dashboard/inhouse"],
+    enabled: inHouseOpen,
+  });
+
+  const totalInHouse = stats ? stats.occupiedRooms : 0;
 
   const { data: cancelledLogs = [] } = useQuery<any[]>({
     queryKey: ["/api/cancelled-reservations"],
@@ -286,13 +326,24 @@ export default function Dashboard() {
               icon={CalendarCheck}
               testId="stat-checkins-today"
             />
-            <StatCard
-              title="Huéspedes Activos"
-              value={stats.totalGuests}
-              description="registrados en el sistema"
-              icon={Users}
-              testId="stat-active-guests"
-            />
+            <Card
+              className="cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all"
+              onClick={() => setInHouseOpen((v) => !v)}
+              data-testid="stat-inhouse-guests"
+            >
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Huéspedes In House</CardTitle>
+                <div className="flex items-center gap-1">
+                  <Hotel className="h-5 w-5 text-muted-foreground" />
+                  {inHouseOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{totalInHouse}</div>
+                <p className="text-sm text-muted-foreground mt-1">hab. ocupadas ahora</p>
+                <p className="text-xs text-primary mt-1">{inHouseOpen ? "Cerrar listado ↑" : "Ver listado policial ↓"}</p>
+              </CardContent>
+            </Card>
             <StatCard
               title="Desayunos Mañana"
               value={stats.breakfastsTomorrow}
@@ -303,6 +354,82 @@ export default function Dashboard() {
           </>
         ) : null}
       </div>
+
+      {/* In-House Panel */}
+      {inHouseOpen && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Hotel className="h-5 w-5" />
+                Listado In House — {new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })}
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setInHouseOpen(false)}>Cerrar</Button>
+            </div>
+            <CardDescription>Huéspedes principales y acompañantes alojados en este momento</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {inHouseLoading ? (
+              <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            ) : inHouseData.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No hay huéspedes con check-in activo.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-muted-foreground text-xs uppercase">
+                      <th className="text-left py-2 px-2 font-medium">Hab.</th>
+                      <th className="text-left py-2 px-2 font-medium">Apellido y Nombre</th>
+                      <th className="text-left py-2 px-2 font-medium">Tipo Doc.</th>
+                      <th className="text-left py-2 px-2 font-medium">N° Doc.</th>
+                      <th className="text-left py-2 px-2 font-medium">Nac.</th>
+                      <th className="text-left py-2 px-2 font-medium">F. Nac.</th>
+                      <th className="text-left py-2 px-2 font-medium">Ingreso</th>
+                      <th className="text-left py-2 px-2 font-medium">Egreso</th>
+                      <th className="text-left py-2 px-2 font-medium">Rol</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inHouseData.flatMap((entry) => {
+                      const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                      const rows = [];
+                      rows.push(
+                        <tr key={`${entry.reservationId}-main`} className="border-b hover:bg-muted/40">
+                          <td className="py-1.5 px-2 font-semibold">{entry.roomNumber}</td>
+                          <td className="py-1.5 px-2 font-medium">{entry.guest.lastName}, {entry.guest.firstName}</td>
+                          <td className="py-1.5 px-2">{entry.guest.documentType?.toUpperCase() || "—"}</td>
+                          <td className="py-1.5 px-2">{entry.guest.documentNumber || "—"}</td>
+                          <td className="py-1.5 px-2">{entry.guest.nationality || "—"}</td>
+                          <td className="py-1.5 px-2">{entry.guest.dateOfBirth ? fmt(entry.guest.dateOfBirth) : "—"}</td>
+                          <td className="py-1.5 px-2">{fmt(entry.checkIn)}</td>
+                          <td className="py-1.5 px-2">{fmt(entry.checkOut)}</td>
+                          <td className="py-1.5 px-2"><Badge variant="outline" className="text-xs">Titular</Badge></td>
+                        </tr>
+                      );
+                      entry.companions.forEach((c, ci) => {
+                        rows.push(
+                          <tr key={`${entry.reservationId}-comp-${ci}`} className="border-b bg-muted/20 hover:bg-muted/40">
+                            <td className="py-1.5 px-2 text-muted-foreground">{entry.roomNumber}</td>
+                            <td className="py-1.5 px-2 pl-4">{c.lastName}, {c.firstName}</td>
+                            <td className="py-1.5 px-2">{c.documentType?.toUpperCase() || "—"}</td>
+                            <td className="py-1.5 px-2">{c.documentNumber || "—"}</td>
+                            <td className="py-1.5 px-2">{c.nationality || "—"}</td>
+                            <td className="py-1.5 px-2">{c.dateOfBirth ? fmt(c.dateOfBirth) : "—"}</td>
+                            <td className="py-1.5 px-2">{fmt(entry.checkIn)}</td>
+                            <td className="py-1.5 px-2">{fmt(entry.checkOut)}</td>
+                            <td className="py-1.5 px-2"><Badge variant="secondary" className="text-xs">Acomp.</Badge></td>
+                          </tr>
+                        );
+                      });
+                      return rows;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick Actions */}
       <div>

@@ -256,6 +256,83 @@ export async function registerRoutes(
     }
   });
 
+  // In-house guests (reservations with status checked_in + companions)
+  app.get("/api/dashboard/inhouse", requireAuth, async (req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          r.id AS reservation_id,
+          r.room_id,
+          rm.room_number,
+          r.check_in_date,
+          r.check_out_date,
+          r.adults,
+          r.children,
+          g.id AS guest_id,
+          g.first_name,
+          g.last_name,
+          g.document_type,
+          g.document_number,
+          g.nationality,
+          g.date_of_birth,
+          g.phone,
+          g.email,
+          rc.first_name AS comp_first_name,
+          rc.last_name AS comp_last_name,
+          rc.document_type AS comp_doc_type,
+          rc.document_number AS comp_doc_number,
+          rc.nationality AS comp_nationality,
+          rc.date_of_birth AS comp_dob
+        FROM reservations r
+        JOIN guests g ON g.id = r.guest_id
+        JOIN rooms rm ON rm.id = r.room_id
+        LEFT JOIN reservation_companions rc ON rc.reservation_id = r.id
+        WHERE r.status = 'checked_in'
+        ORDER BY rm.room_number, r.id, rc.id
+      `);
+
+      // group by reservation
+      const map = new Map<string, any>();
+      for (const row of result.rows as any[]) {
+        if (!map.has(row.reservation_id)) {
+          map.set(row.reservation_id, {
+            reservationId: row.reservation_id,
+            roomNumber: row.room_number,
+            checkIn: row.check_in_date,
+            checkOut: row.check_out_date,
+            adults: row.adults,
+            children: row.children,
+            guest: {
+              id: row.guest_id,
+              firstName: row.first_name,
+              lastName: row.last_name,
+              documentType: row.document_type,
+              documentNumber: row.document_number,
+              nationality: row.nationality,
+              dateOfBirth: row.date_of_birth,
+              phone: row.phone,
+              email: row.email,
+            },
+            companions: [],
+          });
+        }
+        if (row.comp_first_name) {
+          map.get(row.reservation_id).companions.push({
+            firstName: row.comp_first_name,
+            lastName: row.comp_last_name,
+            documentType: row.comp_doc_type,
+            documentNumber: row.comp_doc_number,
+            nationality: row.comp_nationality,
+            dateOfBirth: row.comp_dob,
+          });
+        }
+      }
+      res.json(Array.from(map.values()));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Today's departures (check-outs scheduled for today)
   app.get("/api/dashboard/departures", async (req, res) => {
     try {
