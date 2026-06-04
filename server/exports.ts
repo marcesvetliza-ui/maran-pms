@@ -837,8 +837,10 @@ export function registerExportRoutes(app: Express) {
           .text("Firma y Sello", x0 + 350, y + 4);
       });
 
+      const opNumStr = op.numero ? String(parseInt((op.numero as string).split("-")[1] || "0")).padStart(5, "0") : String(op.id);
+      const provNameOp = ((op.razon_social as string) || "").replace(/[^a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]/g, "").substring(0, 20);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="OP_${op.numero?.replace(/-/g,"")}_${op.razon_social?.split(" ")[0]}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="OP_${opNumStr}_${provNameOp}.pdf"`);
       res.send(pdfBuf);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -860,8 +862,21 @@ export function registerExportRoutes(app: Express) {
       const op = opRes.rows[0] as any;
 
       const retIibb = $n(op.retencion_iibb);
-      const base = $n(op.total_facturas);
-      const alicuota = op.alicuota_iibb ? parseFloat(op.alicuota_iibb).toFixed(2) : (base > 0 ? ((retIibb / base) * 100).toFixed(2) : "0.00");
+
+      // Base = suma de netos de las facturas de la OP (no el total)
+      const netosRes = await db.execute(sql`
+        SELECT COALESCE(SUM(pi.monto_neto), 0) AS base_netos
+        FROM payment_order_items poi
+        JOIN purchase_invoices pi ON pi.id = poi.invoice_id
+        WHERE poi.payment_order_id = ${opId}
+      `);
+      const baseNetos = $n((netosRes.rows[0] as any)?.base_netos);
+      const base = baseNetos > 0 ? baseNetos : $n(op.total_facturas);
+
+      const alicuotaUsed = op.alicuota_iibb_op ? parseFloat(op.alicuota_iibb_op)
+        : op.alicuota_iibb ? parseFloat(op.alicuota_iibb)
+        : base > 0 ? (retIibb / base) * 100 : 0;
+      const alicuota = alicuotaUsed.toFixed(2);
 
       const pdfBuf = await genPDF((doc) => {
         const x0 = 40;
@@ -925,8 +940,10 @@ export function registerExportRoutes(app: Express) {
         doc.text(fDate(new Date()), x0, y + 4);
       });
 
+      const opNum = op.numero ? String(parseInt(op.numero.split("-")[1] || "0")).padStart(5, "0") : String(opId);
+      const provNameCert = (op.razon_social || "").replace(/[^a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]/g, "").substring(0, 20);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="cert_retencion_iibb_OP${opId}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="RETIIBB_${opNum}_${provNameCert}.pdf"`);
       res.send(pdfBuf);
     } catch (e: any) {
       res.status(500).json({ error: e.message });

@@ -2132,7 +2132,7 @@ export async function registerRoutes(
           impuestos_internos, ley_25413, percepcion_iibb, percepcion_iva,
           percepcion_ganancias, retencion_iibb, retencion_ganancias, retencion_iva,
           retencion_suss, retencion_municipal, monotributo_comp_bc,
-          monto_total, cuenta_contable_id, centro_costo, estado, observaciones
+          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion
         ) VALUES (
           ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
           ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
@@ -2142,7 +2142,7 @@ export async function registerRoutes(
           ${n("impuestosInternos")}, ${n("ley25413")}, ${n("percepcionIibb")}, ${n("percepcionIva")},
           ${n("percepcionGanancias")}, ${n("retencionIibb")}, ${n("retencionGanancias")}, ${n("retencionIva")},
           ${n("retencionSuss")}, ${n("retencionMunicipal")}, ${n("monotributoCompBC")},
-          ${montoTotal}, ${body.cuentaContableId||null}, ${body.centroCosto||null}, ${estado}, ${body.observaciones||null}
+          ${montoTotal}, ${body.cuentaContableId||null}, ${body.centroCosto||null}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null}
         )
         RETURNING *
       `);
@@ -2302,7 +2302,7 @@ export async function registerRoutes(
     try {
       const { supplierId, fecha, facturaIds, retencionIibb, retencionGanancias,
         retencionIva, retencionProfLibs, compensacion, formaPago, depBancario,
-        efectivo, cheques, observaciones } = req.body;
+        efectivo, cheques, observaciones, alicuotaIibb } = req.body;
 
       if (!supplierId || !facturaIds?.length) {
         return res.status(400).json({ error: "Proveedor y facturas son requeridos" });
@@ -2315,7 +2315,7 @@ export async function registerRoutes(
       }
       const idsSQL = sql.raw(idsInt.join(","));
       const facturasRes = await db.execute(sql`
-        SELECT id, monto_total, estado, supplier_id FROM purchase_invoices
+        SELECT id, monto_total, monto_neto, estado, supplier_id FROM purchase_invoices
         WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado = 'pendiente'
       `);
       if (facturasRes.rows.length !== idsInt.length) {
@@ -2334,6 +2334,7 @@ export async function registerRoutes(
 
       // Calcular totales
       const totalFacturas = facturasRes.rows.reduce((s: number, r: any) => s + parseFloat(r.monto_total), 0);
+      const baseNetosIibb = facturasRes.rows.reduce((s: number, r: any) => s + parseFloat(r.monto_neto || "0"), 0);
       const retIibb = parseFloat(retencionIibb || "0");
       const retGan = parseFloat(retencionGanancias || "0");
       const retIva = parseFloat(retencionIva || "0");
@@ -2353,8 +2354,8 @@ export async function registerRoutes(
       const ef = parseFloat(efectivo || "0");
       const ch = parseFloat(cheques || "0");
       const opRes = await db.execute(sql`
-        INSERT INTO payment_orders (numero, supplier_id, fecha, forma_pago, dep_bancario, efectivo, cheques, total_facturas, retencion_iibb, retencion_ganancias, retencion_iva, retencion_prof_libs, compensacion, total_abonado, observaciones)
-        VALUES (${numero}, ${supplierId}, ${fecha || getArgentinaToday()}, ${formaPago||"transferencia"}, ${dep}, ${ef}, ${ch}, ${totalFacturas}, ${retIibb}, ${retGan}, ${retIva}, ${retProf}, ${comp}, ${totalAbonado}, ${observaciones||null})
+        INSERT INTO payment_orders (numero, supplier_id, fecha, forma_pago, dep_bancario, efectivo, cheques, total_facturas, retencion_iibb, retencion_ganancias, retencion_iva, retencion_prof_libs, compensacion, total_abonado, observaciones, alicuota_iibb_op)
+        VALUES (${numero}, ${supplierId}, ${fecha || getArgentinaToday()}, ${formaPago||"transferencia"}, ${dep}, ${ef}, ${ch}, ${totalFacturas}, ${retIibb}, ${retGan}, ${retIva}, ${retProf}, ${comp}, ${totalAbonado}, ${observaciones||null}, ${parseFloat(alicuotaIibb||"0")||null})
         RETURNING *
       `);
       const op = opRes.rows[0] as any;
@@ -2385,7 +2386,7 @@ export async function registerRoutes(
           const cuit = (sup.rows[0] as any)?.cuit || "";
           await db.execute(sql`
             INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, importe_base, alicuota, importe_retenido)
-            VALUES (${nroConstancia}, ${supplierId}, ${cuit}, ${fecha||getArgentinaToday()}, ${fecha||getArgentinaToday()}, ${nextNum}, ${totalFacturas}, 0, ${retIibb})
+            VALUES (${nroConstancia}, ${supplierId}, ${cuit}, ${fecha||getArgentinaToday()}, ${fecha||getArgentinaToday()}, ${nextNum}, ${baseNetosIibb > 0 ? baseNetosIibb : totalFacturas}, ${parseFloat(alicuotaIibb||"0") || 0}, ${retIibb})
           `);
         } catch (re) { console.error("Error inserting iibb_retention for OP:", re); }
       }

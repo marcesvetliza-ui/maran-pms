@@ -673,6 +673,14 @@ export async function refreshRealData() {
       ALTER TABLE spa_appointments ADD COLUMN IF NOT EXISTS professional_id VARCHAR
     `);
 
+    await db.execute(sql`
+      ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS subtipo_retencion text
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS alicuota_iibb_op numeric(6,4) DEFAULT 0
+    `);
+
     const existingStaff = await db.select({ id: maintenanceStaff.id }).from(maintenanceStaff);
     if (existingStaff.length === 0) {
       console.log("Seeding maintenance staff...");

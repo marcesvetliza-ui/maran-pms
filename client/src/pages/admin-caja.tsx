@@ -438,22 +438,49 @@ function NuevoMovimientoDialog({ open, onClose }: { open: boolean; onClose: () =
           </div>
 
           {tipo === "egreso_gasto" && (
-            <div className="space-y-1">
-              <Label>Centro de costo</Label>
-              <Select value={centroCosto} onValueChange={setCentroCosto}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Opcional..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="recepcion">Recepción</SelectItem>
-                  <SelectItem value="restaurant">Restaurante</SelectItem>
-                  <SelectItem value="spa">Spa</SelectItem>
-                  <SelectItem value="administracion">Administración</SelectItem>
-                  <SelectItem value="mantenimiento">Mantenimiento</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <>
+              <div className="space-y-1">
+                <Label>Cuenta contable <span className="text-muted-foreground text-xs font-normal">(opcional — solo si hay comprobante)</span></Label>
+                <Select value={cuentaContableId || "__none__"} onValueChange={(v) => setCuentaContableId(v === "__none__" ? "" : v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sin cuenta contable (sin asiento)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin cuenta contable</SelectItem>
+                    {(cuentas as any[])
+                      .filter((c: any) =>
+                        c.id && (
+                          c.tipo === "egreso" ||
+                          c.codigo?.startsWith("4") ||
+                          c.codigo?.startsWith("5") ||
+                          c.codigo?.startsWith("6")
+                        )
+                      )
+                      .map((c: any) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.codigo} — {c.nombre}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Centro de costo</Label>
+                <Select value={centroCosto} onValueChange={setCentroCosto}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Opcional..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="recepcion">Recepción</SelectItem>
+                    <SelectItem value="restaurant">Restaurante</SelectItem>
+                    <SelectItem value="spa">Spa</SelectItem>
+                    <SelectItem value="administracion">Administración</SelectItem>
+                    <SelectItem value="mantenimiento">Mantenimiento</SelectItem>
+                    <SelectItem value="general">General</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
           )}
 
           {tipo === "egreso_proveedor" && (

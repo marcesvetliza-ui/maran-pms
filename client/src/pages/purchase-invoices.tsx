@@ -109,6 +109,10 @@ const TIPOS = [
   { value: "NC-C", label: "Nota de Crédito C" },
   { value: "RESUMEN-BANCO", label: "Resumen Bancario" },
   { value: "LIQ-TARJETA", label: "Liquidación Tarjeta" },
+  { value: "RETENCION", label: "Retención Recibida" },
+  { value: "RECIBO-A", label: "Recibo A" },
+  { value: "RECIBO-B", label: "Recibo B" },
+  { value: "RECIBO-C", label: "Recibo C" },
 ];
 
 const CENTROS_COSTO = ["Hotel", "Restaurant", "Spa", "Administración", "Mantenimiento"];
@@ -197,6 +201,7 @@ const emptyForm = () => ({
   cuentaContableId: "",
   centroCosto: "",
   observaciones: "",
+  subtipoRetencion: "",
 });
 
 // ─── Subcomponent: New Invoice Dialog ────────────────────────────────────────
@@ -492,6 +497,7 @@ function InvoiceDialog({
     : ["Encabezado", "Montos", "Retenciones", "Clasificación", "Inventario"];
   const isResumen = form.tipoComprobante === "RESUMEN-BANCO" || form.tipoComprobante === "LIQ-TARJETA";
   const isNC = form.tipoComprobante.startsWith("NC");
+  const isRetencion = form.tipoComprobante === "RETENCION";
 
   return (
     <>
@@ -641,6 +647,24 @@ function InvoiceDialog({
                   <Input value={form.periodo} onChange={(e) => f("periodo", e.target.value)} placeholder="MM/AAAA" data-testid="input-periodo" />
                 </div>
               </div>
+              {isRetencion && (
+                <div>
+                  <Label>Tipo de Retención</Label>
+                  <Select value={form.subtipoRetencion || "__none__"} onValueChange={(v) => f("subtipoRetencion", v === "__none__" ? "" : v)}>
+                    <SelectTrigger data-testid="select-subtipo-retencion">
+                      <SelectValue placeholder="Seleccionar tipo..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Sin especificar —</SelectItem>
+                      <SelectItem value="municipal">Municipal</SelectItem>
+                      <SelectItem value="iibb">Ingresos Brutos (IIBB)</SelectItem>
+                      <SelectItem value="ganancias">Ganancias</SelectItem>
+                      <SelectItem value="iva">IVA</SelectItem>
+                      <SelectItem value="suss">SUSS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </>
           )}
 
@@ -648,42 +672,38 @@ function InvoiceDialog({
           {step === 1 && (
             <>
               <div className="grid grid-cols-2 gap-3">
-                {!isResumen && (
-                  <>
-                    <div>
-                      <Label>Neto Gravado</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={form.montoNeto}
-                        onChange={(e) => {
-                          const neto = e.target.value;
-                          setForm((p) => ({ ...p, montoNeto: neto, ...calcIvaField(neto, p.alicuotaIva) }));
-                        }}
-                        data-testid="input-monto-neto"
-                      />
-                    </div>
-                    <div>
-                      <Label>Alícuota IVA</Label>
-                      <Select
-                        value={form.alicuotaIva}
-                        onValueChange={(v) => {
-                          setForm((p) => ({ ...p, alicuotaIva: v, ...calcIvaField(p.montoNeto, v) }));
-                        }}
-                      >
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="0">0%</SelectItem>
-                          <SelectItem value="5">5%</SelectItem>
-                          <SelectItem value="10.5">10.5%</SelectItem>
-                          <SelectItem value="21">21%</SelectItem>
-                          <SelectItem value="25">2.5%</SelectItem>
-                          <SelectItem value="27">27%</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
+                <div>
+                  <Label>Neto Gravado {isResumen && <span className="text-xs text-muted-foreground">(base para IVA)</span>}</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={form.montoNeto}
+                    onChange={(e) => {
+                      const neto = e.target.value;
+                      setForm((p) => ({ ...p, montoNeto: neto, ...calcIvaField(neto, p.alicuotaIva) }));
+                    }}
+                    data-testid="input-monto-neto"
+                  />
+                </div>
+                <div>
+                  <Label>Alícuota IVA</Label>
+                  <Select
+                    value={form.alicuotaIva}
+                    onValueChange={(v) => {
+                      setForm((p) => ({ ...p, alicuotaIva: v, ...calcIvaField(p.montoNeto, v) }));
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">0%</SelectItem>
+                      <SelectItem value="5">5%</SelectItem>
+                      <SelectItem value="10.5">10.5%</SelectItem>
+                      <SelectItem value="21">21%</SelectItem>
+                      <SelectItem value="25">2.5%</SelectItem>
+                      <SelectItem value="27">27%</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div><Label>IVA 21%</Label><Input type="number" step="0.01" value={form.montoIva21} onChange={(e) => f("montoIva21", e.target.value)} data-testid="input-iva21" /></div>
                 <div><Label>IVA 10.5%</Label><Input type="number" step="0.01" value={form.montoIva105} onChange={(e) => f("montoIva105", e.target.value)} data-testid="input-iva105" /></div>
                 <div><Label>IVA 27%</Label><Input type="number" step="0.01" value={form.montoIva27} onChange={(e) => f("montoIva27", e.target.value)} data-testid="input-iva27" /></div>
@@ -1106,6 +1126,7 @@ function PaymentOrderDialog({
   const [selectedInvoices, setSelectedInvoices] = useState<number[]>([]);
   const [createdOpId, setCreatedOpId] = useState<number | null>(null);
   const [autoCalcActive, setAutoCalcActive] = useState(true);
+  const [alicuotaIibbForm, setAlicuotaIibbForm] = useState("");
   const [form, setForm] = useState({
     fecha: getLocalToday(),
     formaPago: "transferencia",
@@ -1138,22 +1159,31 @@ function PaymentOrderDialog({
   const toggleInv = (id: number) =>
     setSelectedInvoices((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
-  const totalSelected = facturas
-    .filter((f) => selectedInvoices.includes(f.id))
-    .reduce((s, f) => s + $n(f.montoTotal), 0);
+  const selectedFacturas = facturas.filter((inv) => selectedInvoices.includes(inv.id));
+  const totalSelected = selectedFacturas.reduce((s, inv) => s + $n(inv.montoTotal), 0);
+  const baseNetosIibb = selectedFacturas.reduce((s, inv) => s + $n(inv.montoNeto), 0);
+
+  // Initialize alicuotaIibbForm from supplier when dialog opens
+  useEffect(() => {
+    if (supplier && open) {
+      setAlicuotaIibbForm(String(supplier.alicuotaIibb ?? ""));
+    }
+  }, [supplier?.id, open]);
 
   // Auto-calculate retenciones from supplier alícuotas whenever selection changes
   useEffect(() => {
     if (!autoCalcActive || !supplier) return;
-    const calc = (alicuota: number) =>
+    const alicuotaIibb = parseFloat(alicuotaIibbForm) || supplier.alicuotaIibb || 0;
+    const calcIibb = baseNetosIibb > 0 ? (baseNetosIibb * (alicuotaIibb / 100)).toFixed(2) : "";
+    const calcOther = (alicuota: number) =>
       totalSelected > 0 ? (totalSelected * (alicuota / 100)).toFixed(2) : "";
     setForm((p) => ({
       ...p,
-      retencionIibb: calc(supplier.alicuotaIibb ?? 0),
-      retencionGanancias: calc(supplier.alicuotaGanancias ?? 0),
-      retencionIva: calc(supplier.alicuotaIva ?? 0),
+      retencionIibb: calcIibb,
+      retencionGanancias: calcOther(supplier.alicuotaGanancias ?? 0),
+      retencionIva: calcOther(supplier.alicuotaIva ?? 0),
     }));
-  }, [totalSelected, supplier, autoCalcActive]);
+  }, [totalSelected, baseNetosIibb, supplier, autoCalcActive, alicuotaIibbForm]);
 
   const handleRecalcular = () => {
     setAutoCalcActive(true);
@@ -1205,6 +1235,7 @@ function PaymentOrderDialog({
       retencionIva: form.retencionIva || 0,
       compensacion: form.compensacion || 0,
       observaciones: form.observaciones,
+      alicuotaIibb: parseFloat(alicuotaIibbForm) || 0,
     });
   };
 
@@ -1294,7 +1325,18 @@ function PaymentOrderDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Ret. IIBB {supplier?.alicuotaIibb ? <span className="text-xs text-muted-foreground">({supplier.alicuotaIibb}%)</span> : null}</Label>
+              <Label>Alíc. IIBB (%) <span className="text-xs text-muted-foreground">base netos: ${fmt(baseNetosIibb)}</span></Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={alicuotaIibbForm}
+                onChange={(e) => { setAlicuotaIibbForm(e.target.value); setAutoCalcActive(false); }}
+                placeholder="ej. 3.5"
+                data-testid="input-op-alicuota-iibb"
+              />
+            </div>
+            <div>
+              <Label>Ret. IIBB</Label>
               <Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => fRetention("retencionIibb", e.target.value)} data-testid="input-op-ret-iibb" />
             </div>
             <div>
