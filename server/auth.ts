@@ -41,7 +41,12 @@ export function setupAuth(app: Express) {
       store: new PgSession({
         conString: process.env.DATABASE_URL,
         tableName: "sessions",
-        createTableIfMissing: true,
+        createTableIfMissing: false,
+        pool: new (require("pg").Pool)({
+          connectionString: process.env.DATABASE_URL,
+          connectionTimeoutMillis: 5_000,
+          max: 3,
+        }),
       }),
       secret: (() => {
         if (!process.env.SESSION_SECRET) {
