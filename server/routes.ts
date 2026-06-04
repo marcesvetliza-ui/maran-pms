@@ -285,7 +285,7 @@ export async function registerRoutes(
           rc.date_of_birth AS comp_dob
         FROM rooms rm
         JOIN reservations r ON r.room_id = rm.id
-        JOIN guests g ON g.id = r.guest_id
+        LEFT JOIN guests g ON g.id = r.guest_id
         LEFT JOIN reservation_companions rc ON rc.reservation_id = r.id
         WHERE rm.status = 'occupied'
           AND r.status NOT IN ('cancelled', 'checked_out')
