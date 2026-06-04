@@ -652,16 +652,17 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Invalid or missing webhook secret" });
       }
 
-      const { eventType, area, priority, guestName, roomNumber, reservationId, message, timestamp, sessionId } = req.body;
+      const { eventType, priority, guestName, roomNumber, reservationId, message, timestamp, sessionId } = req.body;
+      let { area } = req.body;
 
       const validAreas = ["housekeeping", "maintenance", "restaurant", "spa", "reception", "all"];
       const validPriorities = ["normal", "high", "urgent"];
 
-      if (!area || !message) {
-        return res.status(400).json({ error: "area and message are required" });
+      if (!message) {
+        return res.status(400).json({ error: "message is required" });
       }
-      if (!validAreas.includes(area)) {
-        return res.status(400).json({ error: `Invalid area. Must be one of: ${validAreas.join(", ")}` });
+      if (!area || !validAreas.includes(area)) {
+        area = "all";
       }
       if (priority && !validPriorities.includes(priority)) {
         return res.status(400).json({ error: `Invalid priority. Must be one of: ${validPriorities.join(", ")}` });
