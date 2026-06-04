@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   Hotel,
+  Printer,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -222,6 +223,63 @@ export default function Dashboard() {
 
   const totalInHouse = stats ? stats.inHouseGuests : 0;
 
+  const printInHouseList = () => {
+    const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+    const dateStr = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+    const rows = inHouseData.flatMap((entry) => {
+      const mainRow = `<tr>
+        <td>${entry.roomNumber}</td>
+        <td>${entry.guest.lastName ?? "—"}, ${entry.guest.firstName ?? "—"}</td>
+        <td>${entry.guest.documentType?.toUpperCase() ?? "—"}</td>
+        <td>${entry.guest.documentNumber ?? "—"}</td>
+        <td>${entry.guest.nationality ?? "—"}</td>
+        <td>${entry.guest.dateOfBirth ? fmt(entry.guest.dateOfBirth) : "—"}</td>
+        <td>${fmt(entry.checkIn)}</td>
+        <td>${fmt(entry.checkOut)}</td>
+        <td>Titular</td>
+      </tr>`;
+      const compRows = entry.companions.map((c: any) => `<tr class="comp">
+        <td>${entry.roomNumber}</td>
+        <td style="padding-left:16px">${c.lastName ?? "—"}, ${c.firstName ?? "—"}</td>
+        <td>${c.documentType?.toUpperCase() ?? "—"}</td>
+        <td>${c.documentNumber ?? "—"}</td>
+        <td>${c.nationality ?? "—"}</td>
+        <td>${c.dateOfBirth ? fmt(c.dateOfBirth) : "—"}</td>
+        <td>${fmt(entry.checkIn)}</td>
+        <td>${fmt(entry.checkOut)}</td>
+        <td>Acomp.</td>
+      </tr>`).join("");
+      return mainRow + compRows;
+    }).join("");
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+    <title>Listado In House — ${dateStr}</title>
+    <style>
+      body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
+      h1 { font-size: 15px; margin-bottom: 2px; }
+      p.sub { font-size: 11px; color: #555; margin: 0 0 12px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #f0f0f0; border: 1px solid #ccc; padding: 5px 6px; text-align: left; font-size: 10px; text-transform: uppercase; }
+      td { border: 1px solid #ddd; padding: 4px 6px; }
+      tr.comp td { background: #fafafa; color: #555; }
+      @media print { @page { margin: 15mm; } }
+    </style></head><body>
+    <h1>Listado In House — Maran Suites & Towers</h1>
+    <p class="sub">${dateStr} · ${inHouseData.length} habitación(es) · ${totalInHouse} persona(s)</p>
+    <table>
+      <thead><tr>
+        <th>Hab.</th><th>Apellido y Nombre</th><th>Tipo Doc.</th><th>N° Doc.</th>
+        <th>Nac.</th><th>F. Nac.</th><th>Ingreso</th><th>Egreso</th><th>Rol</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <script>window.onload=()=>{window.print();}</script>
+    </body></html>`;
+
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+
   const { data: cancelledLogs = [] } = useQuery<any[]>({
     queryKey: ["/api/cancelled-reservations"],
   });
@@ -365,7 +423,15 @@ export default function Dashboard() {
                 <Hotel className="h-5 w-5" />
                 Listado In House — {new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })}
               </CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setInHouseOpen(false)}>Cerrar</Button>
+              <div className="flex items-center gap-2">
+                {!inHouseLoading && inHouseData.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={printInHouseList} data-testid="button-print-inhouse">
+                    <Printer className="h-4 w-4 mr-1" />
+                    Imprimir
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => setInHouseOpen(false)}>Cerrar</Button>
+              </div>
             </div>
             <CardDescription>Huéspedes principales y acompañantes alojados en este momento</CardDescription>
           </CardHeader>
