@@ -217,6 +217,21 @@ const emptyQuickSupplier = {
   razonSocial: "", cuit: "", condicionIva: "Responsable Inscripto", cuentaContableId: "",
 };
 
+const IVA_MAP: Record<string, { field: string; rate: number }> = {
+  "5":   { field: "montoIva5",   rate: 5 },
+  "10.5":{ field: "montoIva105", rate: 10.5 },
+  "21":  { field: "montoIva21",  rate: 21 },
+  "25":  { field: "montoIva25",  rate: 2.5 },
+  "27":  { field: "montoIva27",  rate: 27 },
+};
+
+function calcIvaField(neto: string, alicuota: string): Record<string, string> {
+  const n = parseFloat(neto);
+  const entry = IVA_MAP[alicuota];
+  if (!entry || isNaN(n) || n <= 0) return {};
+  return { [entry.field]: (n * entry.rate / 100).toFixed(2) };
+}
+
 function InvoiceDialog({
   open,
   onClose,
@@ -576,18 +591,32 @@ function InvoiceDialog({
                   <>
                     <div>
                       <Label>Neto Gravado</Label>
-                      <Input type="number" step="0.01" value={form.montoNeto} onChange={(e) => f("montoNeto", e.target.value)} data-testid="input-monto-neto" />
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={form.montoNeto}
+                        onChange={(e) => {
+                          const neto = e.target.value;
+                          setForm((p) => ({ ...p, montoNeto: neto, ...calcIvaField(neto, p.alicuotaIva) }));
+                        }}
+                        data-testid="input-monto-neto"
+                      />
                     </div>
                     <div>
                       <Label>Alícuota IVA</Label>
-                      <Select value={form.alicuotaIva} onValueChange={(v) => f("alicuotaIva", v)}>
+                      <Select
+                        value={form.alicuotaIva}
+                        onValueChange={(v) => {
+                          setForm((p) => ({ ...p, alicuotaIva: v, ...calcIvaField(p.montoNeto, v) }));
+                        }}
+                      >
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="0">0%</SelectItem>
                           <SelectItem value="5">5%</SelectItem>
                           <SelectItem value="10.5">10.5%</SelectItem>
                           <SelectItem value="21">21%</SelectItem>
-                          <SelectItem value="25">25%</SelectItem>
+                          <SelectItem value="25">2.5%</SelectItem>
                           <SelectItem value="27">27%</SelectItem>
                         </SelectContent>
                       </Select>
