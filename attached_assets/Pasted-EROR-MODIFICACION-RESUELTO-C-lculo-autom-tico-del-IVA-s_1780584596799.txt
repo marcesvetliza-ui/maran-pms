@@ -1,0 +1,117 @@
+EROR / MODIFICACION
+RESUELTO
+Cálculo automático del IVA según alícuota seleccionada
+Comportamiento actual:
+Al ingresar el monto neto de la factura, el campo de IVA no se calcula automáticamente.
+Comportamiento esperado:
+Una vez que el usuario ingresa el monto neto y selecciona la alícuota de IVA (por ejemplo 21%), el sistema debe calcular y completar automáticamente el monto de IVA correspondiente. La fórmula a aplicar es:
+
+
+
+
+Permitir editar ingresos y gastos cargados
+Comportamiento actual:
+Una vez cargado un ingreso o gasto, no es posible editarlo ni corregirlo.
+Comportamiento esperado:
+El sistema debe permitir editar los comprobantes ya cargados. Como mínimo se requiere la opción de edición. La opción de eliminar también sería deseable, pero no es excluyente.
+
+
+
+
+Comportamiento actual:
+Al registrar un gasto de caja chica, el sistema solicita el ingreso de una cuenta contable y genera un asiento.
+Comportamiento esperado:
+Los gastos registrados en caja administración (caja chica) no todos deben generar asiento contable. Por lo tanto, el campo de cuenta contable debe ser opcional, ya que las cosas que abonamos sin factura no generan asiento, si las que abonamos en efectivo con factura
+
+
+
+
+Descarga de comprobante de la OP y de la Retención de IIBB
+Comportamiento esperado:
+Al emitir una OP, el sistema debe permitir descargar dos comprobantes en PDF:
+• 	Comprobante de la Orden de Pago (OP): debe incluir el detalle de las facturas canceladas, los montos netos de cada una, las retenciones practicadas y el monto final transferido al proveedor.
+• 	Comprobante de Retención de IIBB: debe mostrar la base de cálculo (suma de los netos de las facturas incluidas en la OP, no el total final), la alícuota aplicada y el monto retenido.
+
+
+
+
+Nombre del archivo de la OP y Ret IIBB
+
+Comportamiento esperado:
+El nombre del archivo debe incluir el número de OP y el nombre del proveedor.
+Formato sugerido: OP_[NroOrden]_[NombreProveedor].pdf
+Ejemplo: OP_00045_JohnsonAcero.pdf
+
+IDEM RET IIBB
+
+
+
+Base de cálculo y alícuota variable en la Retención de IIBB
+Comportamiento actual:
+La base de cálculo de la retención de IIBB toma el monto total de la OP y la alícuota está fija al 3,5%.
+Comportamiento esperado:
+La base de cálculo debe ser la suma de los montos NETOS de las facturas incluidas en la OP (no el monto final). La alícuota debe ser variable y editable manualmente en cada OP, dado que varía según el proveedor y el período. El monto de retención debe calcularse automáticamente al ingresar la alícuota. 
+
+Seria ideal que en la ficha tecnica de cada proveedor, yo pueda EDITAR la alicuota, entonces al momento de practicarle una retencion que se calcule automaticamente
+
+
+Permitir ingresar Neto e IVA en resúmenes bancarios
+Comportamiento actual:
+En la sección de alícuotas del resumen bancario, no es posible ingresar el monto neto.
+Comportamiento esperado:
+El formulario debe permitir ingresar el monto neto y que el IVA se calcule automáticamente al seleccionar la alícuota (igual que en el punto 1.2). El asiento contable que debe generarse es el siguiente:
+DEBE:
+  Gastos Bancarios      	[Monto Neto]
+  IVA 21%               	[IVA calculado sobre el neto]
+  Percepción IVA        	[Ingreso manual]
+  Ley 25.413            	[Ingreso manual]
+ 
+HABER:
+  Banco                 	[Total = Neto + IVA + Perc IVA + Ley 25.413]
+
+
+
+
+
+
+Comprobante: Retenciones recibidas
+Descripción:
+Se necesita un nuevo tipo de comprobante llamado RETENCIONES, destinado a registrar las retenciones que nos practican a nosotros las empresas al momento de pagarnos (a diferencia de las retenciones que nosotros practicamos a proveedores).
+Tipos de retención a contemplar:
+•     Municipal
+•     IIBB (Ingresos Brutos)
+•     Ganancias
+•     IVA
+•     SUSS
+Generación de asiento contable:
+Cada tipo de retención debe generar su asiento correspondiente. La estructura general es la siguiente:
+DEBE:
+  [Cuenta del impuesto]  	[Monto retenido]
+    (Ej: Imp. a las Ganancias, Ret. IIBB, Ret. IVA, etc.)
+ 
+HABER:
+  Caja / Banco           	[Monto retenido]
+ 
+Ejemplo Ganancias:
+  DEBE:  Imp. a las Ganancias   $1.500
+  HABER: Caja               	$1.500
+
+
+
+
+
+
+
+Comprobantes: Recibo A, B y C
+Descripción:
+Se solicita agregar la posibilidad de cargar comprobantes del tipo Recibo en sus tres variantes: Recibo A, Recibo B y Recibo C. Estos comprobantes deben comportarse de manera similar a los ya existentes, con generación de asiento contable correspondiente.
+
+
+
+
+
+
+
+
+
+
