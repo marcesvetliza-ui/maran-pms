@@ -256,80 +256,94 @@ export async function registerRoutes(
     }
   });
 
-  // In-house guests (reservations with status checked_in + companions)
+  // In-house guests: all reservations for occupied rooms
   app.get("/api/dashboard/inhouse", requireAuth, async (req, res) => {
     try {
-      const result = await db.execute(sql`
-        SELECT
-          r.id AS reservation_id,
-          r.room_id,
-          rm.room_number,
-          r.check_in_date,
-          r.check_out_date,
-          r.adults,
-          r.children,
-          g.id AS guest_id,
-          g.first_name,
-          g.last_name,
-          g.document_type,
-          g.document_number,
-          g.nationality,
-          g.date_of_birth,
-          g.phone,
-          g.email,
-          rc.first_name AS comp_first_name,
-          rc.last_name AS comp_last_name,
-          rc.document_type AS comp_doc_type,
-          rc.document_number AS comp_doc_number,
-          rc.nationality AS comp_nationality,
-          rc.date_of_birth AS comp_dob
-        FROM rooms rm
-        JOIN reservations r ON r.room_id = rm.id
-        LEFT JOIN guests g ON g.id = r.guest_id
-        LEFT JOIN reservation_companions rc ON rc.reservation_id = r.id
-        WHERE rm.status = 'occupied'
-          AND r.status NOT IN ('cancelled', 'checked_out')
-        ORDER BY rm.room_number, r.id, rc.id
-      `);
+      const { reservationCompanions } = await import("@shared/schema");
 
-      // group by reservation
-      const map = new Map<string, any>();
-      for (const row of result.rows as any[]) {
-        if (!map.has(row.reservation_id)) {
-          map.set(row.reservation_id, {
-            reservationId: row.reservation_id,
-            roomNumber: row.room_number,
-            checkIn: row.check_in_date,
-            checkOut: row.check_out_date,
-            adults: row.adults,
-            children: row.children,
-            guest: {
-              id: row.guest_id,
-              firstName: row.first_name,
-              lastName: row.last_name,
-              documentType: row.document_type,
-              documentNumber: row.document_number,
-              nationality: row.nationality,
-              dateOfBirth: row.date_of_birth,
-              phone: row.phone,
-              email: row.email,
-            },
-            companions: [],
-          });
-        }
-        if (row.comp_first_name) {
-          map.get(row.reservation_id).companions.push({
-            firstName: row.comp_first_name,
-            lastName: row.comp_last_name,
-            documentType: row.comp_doc_type,
-            documentNumber: row.comp_doc_number,
-            nationality: row.comp_nationality,
-            dateOfBirth: row.comp_dob,
-          });
-        }
+      // 1. Get all occupied rooms
+      const occupiedRooms = await db.select({ id: rooms.id, roomNumber: rooms.roomNumber })
+        .from(rooms)
+        .where(eq(rooms.status, "occupied"));
+
+      if (occupiedRooms.length === 0) {
+        return res.json([]);
       }
-      res.json(Array.from(map.values()));
+
+      const occupiedRoomIds = occupiedRooms.map((r) => r.id);
+      const roomNumberMap = new Map(occupiedRooms.map((r) => [r.id, r.roomNumber]));
+
+      // 2. Get reservations for those rooms (exclude cancelled/checked_out)
+      const activeReservations = await db.select()
+        .from(reservations)
+        .where(
+          and(
+            inArray(reservations.roomId, occupiedRoomIds),
+            ne(reservations.status, "cancelled"),
+            ne(reservations.status, "checked_out")
+          )
+        );
+
+      if (activeReservations.length === 0) {
+        return res.json([]);
+      }
+
+      const reservationIds = activeReservations.map((r) => r.id);
+      const guestIds = activeReservations.map((r) => r.guestId).filter(Boolean) as string[];
+
+      // 3. Get guests
+      const guestList = guestIds.length > 0
+        ? await db.select().from(guests).where(inArray(guests.id, guestIds))
+        : [];
+      const guestMap = new Map(guestList.map((g) => [g.id, g]));
+
+      // 4. Get companions
+      const companionList = await db.select().from(reservationCompanions)
+        .where(inArray(reservationCompanions.reservationId, reservationIds));
+      const companionsByRes = new Map<string, typeof companionList>();
+      for (const c of companionList) {
+        if (!companionsByRes.has(c.reservationId)) companionsByRes.set(c.reservationId, []);
+        companionsByRes.get(c.reservationId)!.push(c);
+      }
+
+      // 5. Assemble response sorted by room number
+      const result = activeReservations
+        .sort((a, b) => (roomNumberMap.get(a.roomId) ?? "").localeCompare(roomNumberMap.get(b.roomId) ?? ""))
+        .map((r) => {
+          const g = r.guestId ? guestMap.get(r.guestId) : undefined;
+          const comps = (companionsByRes.get(r.id) ?? []).map((c) => ({
+            firstName: c.firstName,
+            lastName: c.lastName,
+            documentType: c.documentType,
+            documentNumber: c.documentNumber,
+            nationality: c.nationality,
+            dateOfBirth: c.dateOfBirth,
+          }));
+          return {
+            reservationId: r.id,
+            roomNumber: roomNumberMap.get(r.roomId) ?? "",
+            checkIn: r.checkInDate,
+            checkOut: r.checkOutDate,
+            adults: r.adults,
+            children: r.children,
+            guest: {
+              id: g?.id ?? null,
+              firstName: g?.firstName ?? null,
+              lastName: g?.lastName ?? null,
+              documentType: g?.documentType ?? null,
+              documentNumber: g?.documentNumber ?? null,
+              nationality: g?.nationality ?? null,
+              dateOfBirth: g?.dateOfBirth ?? null,
+              phone: g?.phone ?? null,
+              email: g?.email ?? null,
+            },
+            companions: comps,
+          };
+        });
+
+      res.json(result);
     } catch (e: any) {
+      console.error("[inhouse] error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
