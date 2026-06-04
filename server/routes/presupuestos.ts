@@ -236,53 +236,114 @@ export function registerPresupuestosRoutes(app: Express) {
       y += infoBoxH + 8;
 
       // ── TABLE ────────────────────────────────────────────────
-      // Without DTO% column — redistribute width to desc, precio and sub
-      const cols = {
-        sector: margin,           // 40
-        desc:   margin + 62,      // 102
-        cant:   margin + 272,     // 312
-        precio: margin + 312,     // 352
-        sub:    margin + 420,     // 460
-      };
-      const W = { sector: 58, desc: 205, cant: 32, precio: 98, sub: 95 };
-      doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
-      doc.fillColor("white").fontSize(8).font("Helvetica-Bold");
-      const thY = y + 6;
-      doc.text("SECTOR",      cols.sector + 6, thY, { width: W.sector });
-      doc.text("DESCRIPCIÓN", cols.desc,       thY, { width: W.desc });
-      doc.text("CANT",        cols.cant,        thY, { width: W.cant,   align: "right" });
-      doc.text("PRECIO",      cols.precio,      thY, { width: W.precio, align: "right" });
-      doc.text("SUBTOTAL",    cols.sub,         thY, { width: W.sub,    align: "right" });
-      y += 22;
+      const hasAnyDiscount = items.some(i => parseFloat(i.descuento ?? "0") > 0);
 
       const SECTOR_LABELS: Record<string, string> = {
         alojamiento: "Alojamiento", restaurant: "Restaurant",
         spa: "SPA", evento: "Evento", otro: "Otro",
       };
-      items.forEach((item, idx) => {
-        const descH   = doc.heightOfString(item.descripcion, { width: W.desc, fontSize: 8 });
-        const detailH = item.detalle
-          ? doc.heightOfString(item.detalle, { width: W.desc, fontSize: 7 }) + 5
-          : 0;
-        const rowH = Math.max(22, descH + detailH + 14);
-        if (y + rowH > pageH - 100) { doc.addPage(); drawPageBackground(); y = headerH + 10; }
-        doc.rect(margin, y, contentW, rowH)
-          .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
-        doc.fillColor(DARK).fontSize(8).font("Helvetica");
-        const cellY = y + 6;
-        doc.text(SECTOR_LABELS[item.sector] || item.sector, cols.sector + 6, cellY, { width: W.sector });
-        doc.font("Helvetica-Bold").text(item.descripcion, cols.desc, cellY, { width: W.desc });
-        if (item.detalle) {
-          doc.font("Helvetica").fillColor(MUTED).fontSize(7)
-            .text(item.detalle, cols.desc, cellY + descH + 3, { width: W.desc });
-        }
-        doc.font("Helvetica").fillColor(DARK).fontSize(8);
-        doc.text(formatNum(item.cantidad),                cols.cant,  cellY, { width: W.cant,   align: "right" });
-        doc.text(`$ ${formatMoney(item.precioUnitario)}`, cols.precio, cellY, { width: W.precio, align: "right" });
-        doc.font("Helvetica-Bold")
-          .text(`$ ${formatMoney(item.subtotal)}`,        cols.sub,   cellY, { width: W.sub,    align: "right" });
-        y = y + rowH;
-      });
+
+      if (hasAnyDiscount) {
+        // 6-column layout: SECTOR | DESC | CANT | PRECIO RACK | TARIFA C/DESCUENTO | SUBTOTAL
+        // Widths: 55+185+32+75+85+73 = 505, 5 gaps of 2 = 515 = contentW
+        const cols6 = {
+          sector:     margin,           // 40
+          desc:       margin + 57,      // 97
+          cant:       margin + 244,     // 284
+          precioRack: margin + 278,     // 318
+          tarifaDto:  margin + 355,     // 395
+          sub:        margin + 442,     // 482
+        };
+        const W6 = { sector: 55, desc: 185, cant: 32, precioRack: 75, tarifaDto: 85, sub: 73 };
+        doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
+        doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
+        const thY = y + 6;
+        doc.text("SECTOR",            cols6.sector + 6,  thY, { width: W6.sector });
+        doc.text("DESCRIPCIÓN",       cols6.desc,        thY, { width: W6.desc });
+        doc.text("CANT",              cols6.cant,        thY, { width: W6.cant,        align: "right" });
+        doc.text("PRECIO RACK",       cols6.precioRack,  thY, { width: W6.precioRack,  align: "right" });
+        doc.text("TARIFA C/DTO.",     cols6.tarifaDto,   thY, { width: W6.tarifaDto,   align: "right" });
+        doc.text("SUBTOTAL",          cols6.sub,         thY, { width: W6.sub,         align: "right" });
+        y += 22;
+
+        items.forEach((item, idx) => {
+          const descH   = doc.heightOfString(item.descripcion, { width: W6.desc, fontSize: 8 });
+          const detailH = item.detalle
+            ? doc.heightOfString(item.detalle, { width: W6.desc, fontSize: 7 }) + 5
+            : 0;
+          const rowH = Math.max(22, descH + detailH + 14);
+          if (y + rowH > pageH - 100) { doc.addPage(); drawPageBackground(); y = headerH + 10; }
+          doc.rect(margin, y, contentW, rowH)
+            .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
+          doc.fillColor(DARK).fontSize(8).font("Helvetica");
+          const cellY = y + 6;
+          const dto = parseFloat(item.descuento ?? "0");
+          const tarifaConDto = parseFloat(item.precioUnitario) * (1 - dto / 100);
+          doc.text(SECTOR_LABELS[item.sector] || item.sector, cols6.sector + 6, cellY, { width: W6.sector });
+          doc.font("Helvetica-Bold").text(item.descripcion, cols6.desc, cellY, { width: W6.desc });
+          if (item.detalle) {
+            doc.font("Helvetica").fillColor(MUTED).fontSize(7)
+              .text(item.detalle, cols6.desc, cellY + descH + 3, { width: W6.desc });
+          }
+          doc.font("Helvetica").fillColor(DARK).fontSize(8);
+          doc.text(formatNum(item.cantidad),                cols6.cant,        cellY, { width: W6.cant,        align: "right" });
+          doc.text(`$ ${formatMoney(item.precioUnitario)}`, cols6.precioRack,  cellY, { width: W6.precioRack,  align: "right" });
+          if (dto > 0) {
+            doc.fillColor("#1a6c3a");
+            doc.font("Helvetica-Bold").text(`$ ${formatMoney(tarifaConDto.toFixed(2))}`, cols6.tarifaDto, cellY, { width: W6.tarifaDto, align: "right" });
+            doc.fillColor(DARK).font("Helvetica");
+          } else {
+            doc.text("—", cols6.tarifaDto, cellY, { width: W6.tarifaDto, align: "right" });
+          }
+          doc.font("Helvetica-Bold")
+            .text(`$ ${formatMoney(item.subtotal)}`, cols6.sub, cellY, { width: W6.sub, align: "right" });
+          y = y + rowH;
+        });
+      } else {
+        // 5-column layout (original): SECTOR | DESC | CANT | PRECIO | SUBTOTAL
+        const cols5 = {
+          sector: margin,           // 40
+          desc:   margin + 62,      // 102
+          cant:   margin + 272,     // 312
+          precio: margin + 312,     // 352
+          sub:    margin + 420,     // 460
+        };
+        const W5 = { sector: 58, desc: 205, cant: 32, precio: 98, sub: 95 };
+        doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
+        doc.fillColor("white").fontSize(8).font("Helvetica-Bold");
+        const thY = y + 6;
+        doc.text("SECTOR",      cols5.sector + 6, thY, { width: W5.sector });
+        doc.text("DESCRIPCIÓN", cols5.desc,       thY, { width: W5.desc });
+        doc.text("CANT",        cols5.cant,        thY, { width: W5.cant,   align: "right" });
+        doc.text("PRECIO",      cols5.precio,      thY, { width: W5.precio, align: "right" });
+        doc.text("SUBTOTAL",    cols5.sub,         thY, { width: W5.sub,    align: "right" });
+        y += 22;
+
+        items.forEach((item, idx) => {
+          const descH   = doc.heightOfString(item.descripcion, { width: W5.desc, fontSize: 8 });
+          const detailH = item.detalle
+            ? doc.heightOfString(item.detalle, { width: W5.desc, fontSize: 7 }) + 5
+            : 0;
+          const rowH = Math.max(22, descH + detailH + 14);
+          if (y + rowH > pageH - 100) { doc.addPage(); drawPageBackground(); y = headerH + 10; }
+          doc.rect(margin, y, contentW, rowH)
+            .fill(idx % 2 === 0 ? "#ffffff" : "#fafafa").stroke("#e8e8e8");
+          doc.fillColor(DARK).fontSize(8).font("Helvetica");
+          const cellY = y + 6;
+          doc.text(SECTOR_LABELS[item.sector] || item.sector, cols5.sector + 6, cellY, { width: W5.sector });
+          doc.font("Helvetica-Bold").text(item.descripcion, cols5.desc, cellY, { width: W5.desc });
+          if (item.detalle) {
+            doc.font("Helvetica").fillColor(MUTED).fontSize(7)
+              .text(item.detalle, cols5.desc, cellY + descH + 3, { width: W5.desc });
+          }
+          doc.font("Helvetica").fillColor(DARK).fontSize(8);
+          doc.text(formatNum(item.cantidad),                cols5.cant,  cellY, { width: W5.cant,   align: "right" });
+          doc.text(`$ ${formatMoney(item.precioUnitario)}`, cols5.precio, cellY, { width: W5.precio, align: "right" });
+          doc.font("Helvetica-Bold")
+            .text(`$ ${formatMoney(item.subtotal)}`,        cols5.sub,   cellY, { width: W5.sub,    align: "right" });
+          y = y + rowH;
+        });
+      }
       y += 8;
 
       // ── TOTALS ───────────────────────────────────────────────
