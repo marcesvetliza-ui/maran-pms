@@ -438,6 +438,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [movMethod, setMovMethod] = useState("cash");
   const [movAmount, setMovAmount] = useState("");
   const [movReceipt, setMovReceipt] = useState("");
+  const [movReceiptNumber, setMovReceiptNumber] = useState("");
+  const [movProveedor, setMovProveedor] = useState("");
+  const [movExpenseCategory, setMovExpenseCategory] = useState("");
   // Cobro cuenta corriente
   const [movCCEntityType, setMovCCEntityType] = useState<"company" | "agency" | "guest">("company");
   const [movCCEntityId, setMovCCEntityId] = useState("");
@@ -553,8 +556,11 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         sourceLabel: label,
         paymentMethod: movMethod,
         amount: parseFloat(movAmount),
-        movementType: "income",
+        movementType: movType === "expense" ? "expense" : "income",
         receiptType: movReceipt || undefined,
+        receiptNumber: movReceiptNumber || undefined,
+        proveedor: movProveedor || undefined,
+        expenseCategory: movExpenseCategory || undefined,
         description: label,
         ...(isCobro ? {
           ccEntityType: movCCEntityType,
@@ -814,8 +820,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                               {m.sourceLabel && m.sourceLabel !== m.description && (
                                 <div><span className="font-medium text-foreground">Referencia:</span> {m.sourceLabel}</div>
                               )}
+                              {(m as any).proveedor && (
+                                <div><span className="font-medium text-foreground">Proveedor:</span> {(m as any).proveedor}</div>
+                              )}
+                              {(m as any).expenseCategory && (
+                                <div><span className="font-medium text-foreground">Categoría:</span> {{
+                                  servicios: "Servicios", insumos: "Insumos / Materiales", sueldos: "Sueldos / Personal",
+                                  impuestos: "Impuestos / Tasas", alquileres: "Alquileres", mantenimiento: "Mantenimiento", otro: "Otro"
+                                }[(m as any).expenseCategory] || (m as any).expenseCategory}</div>
+                              )}
                               {(m as any).receiptType && (
-                                <div><span className="font-medium text-foreground">Comprobante:</span> {(m as any).receiptType}</div>
+                                <div><span className="font-medium text-foreground">Comprobante:</span> {(m as any).receiptType}{(m as any).receiptNumber ? ` — ${(m as any).receiptNumber}` : ""}</div>
                               )}
                               {(m as any).motivoAnulacion && (
                                 <div className="col-span-2 text-destructive"><span className="font-medium">Motivo anulación:</span> {(m as any).motivoAnulacion}</div>
@@ -917,6 +932,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           setMovMethod("cash");
           setMovAmount("");
           setMovReceipt("");
+          setMovReceiptNumber("");
+          setMovProveedor("");
+          setMovExpenseCategory("");
           setMovCCEntityId("");
           setMovCCEntityName("");
           setMovCCEntityType("company");
@@ -1079,7 +1097,40 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               />
             </div>
 
-            {/* Comprobante — obligatorio para egresos */}
+            {/* Campos extra para egresos */}
+            {movType === "expense" && (
+              <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Datos del egreso</p>
+                <div>
+                  <label className="text-sm font-medium">Proveedor / Beneficiario <span className="text-destructive">*</span></label>
+                  <Input
+                    value={movProveedor}
+                    onChange={(e) => setMovProveedor(e.target.value)}
+                    placeholder="A quién se le pagó"
+                    data-testid={`input-mov-proveedor-${area}`}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Categoría <span className="text-destructive">*</span></label>
+                  <Select value={movExpenseCategory} onValueChange={setMovExpenseCategory}>
+                    <SelectTrigger data-testid={`select-mov-category-${area}`}>
+                      <SelectValue placeholder="Seleccionar categoría..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="servicios">Servicios</SelectItem>
+                      <SelectItem value="insumos">Insumos / Materiales</SelectItem>
+                      <SelectItem value="sueldos">Sueldos / Personal</SelectItem>
+                      <SelectItem value="impuestos">Impuestos / Tasas</SelectItem>
+                      <SelectItem value="alquileres">Alquileres</SelectItem>
+                      <SelectItem value="mantenimiento">Mantenimiento</SelectItem>
+                      <SelectItem value="otro">Otro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* Comprobante */}
             <div>
               <label className="text-sm font-medium">
                 Comprobante {movType === "expense" ? <span className="text-destructive">*</span> : <span className="text-muted-foreground text-xs">(opcional)</span>}
@@ -1089,13 +1140,38 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                   <SelectValue placeholder="Seleccionar..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ticket">Ticket</SelectItem>
-                  <SelectItem value="factura_a">Factura A</SelectItem>
-                  <SelectItem value="factura_b">Factura B</SelectItem>
-                  <SelectItem value="factura_c">Factura C</SelectItem>
+                  {movType === "expense" ? (
+                    <>
+                      <SelectItem value="ticket">Ticket</SelectItem>
+                      <SelectItem value="factura_a">Factura A</SelectItem>
+                      <SelectItem value="factura_b">Factura B</SelectItem>
+                      <SelectItem value="factura_c">Factura C</SelectItem>
+                      <SelectItem value="remito">Remito</SelectItem>
+                      <SelectItem value="recibo">Recibo</SelectItem>
+                    </>
+                  ) : (
+                    <>
+                      <SelectItem value="ticket">Ticket</SelectItem>
+                      <SelectItem value="remito">Remito</SelectItem>
+                      <SelectItem value="recibo">Recibo</SelectItem>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* N° de comprobante */}
+            {movReceipt && (
+              <div>
+                <label className="text-sm font-medium">N° de comprobante {movType === "expense" && <span className="text-destructive">*</span>}</label>
+                <Input
+                  value={movReceiptNumber}
+                  onChange={(e) => setMovReceiptNumber(e.target.value)}
+                  placeholder="Ej: 0001-00003456"
+                  data-testid={`input-mov-receipt-number-${area}`}
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -1104,7 +1180,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 !movAmount ||
                 addMovementMutation.isPending ||
                 (isCobro ? !movCCEntityId : !movDesc.trim()) ||
-                (movType === "expense" && !movReceipt)
+                (movType === "expense" && (!movReceipt || !movProveedor.trim() || !movExpenseCategory || !movReceiptNumber.trim()))
               }
               data-testid={`btn-confirm-movement-${area}`}
             >
