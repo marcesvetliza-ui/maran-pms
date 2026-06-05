@@ -704,9 +704,19 @@ export default function ChatbotDashboardPage() {
             <div className="space-y-2">
               <p className="text-sm font-medium">Header de Autenticación</p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 block p-2 bg-muted rounded text-xs font-mono" data-testid="text-webhook-secret">
-                  X-Chatbot-Secret: {showSecret && secretData?.secret ? secretData.secret : "••••••••••••"}
-                </code>
+                {showSecret && secretData?.secret ? (
+                  <input
+                    readOnly
+                    value={secretData.secret}
+                    className="flex-1 p-2 bg-muted rounded text-xs font-mono border-0 outline-none select-all cursor-text"
+                    onFocus={(e) => e.target.select()}
+                    data-testid="text-webhook-secret"
+                  />
+                ) : (
+                  <code className="flex-1 block p-2 bg-muted rounded text-xs font-mono" data-testid="text-webhook-secret">
+                    X-Chatbot-Secret: ••••••••••••
+                  </code>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -722,7 +732,22 @@ export default function ChatbotDashboardPage() {
                   className="h-8 w-8 shrink-0"
                   onClick={() => {
                     if (secretData?.secret) {
-                      navigator.clipboard.writeText(secretData.secret);
+                      const copyFn = async () => {
+                        try {
+                          await navigator.clipboard.writeText(secretData.secret);
+                        } catch {
+                          const el = document.createElement("textarea");
+                          el.value = secretData.secret;
+                          el.style.position = "fixed";
+                          el.style.opacity = "0";
+                          document.body.appendChild(el);
+                          el.focus();
+                          el.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(el);
+                        }
+                      };
+                      copyFn();
                       setCopied(true);
                       setTimeout(() => setCopied(false), 2000);
                       toast({ title: "Secret copiado al portapapeles" });
@@ -733,6 +758,9 @@ export default function ChatbotDashboardPage() {
                   {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
+              {showSecret && secretData?.secret && (
+                <p className="text-xs text-muted-foreground">Tocá el campo y mantené presionado para copiar en iOS</p>
+              )}
             </div>
             <div className="space-y-2 md:col-span-2">
               <p className="text-sm font-medium">Áreas soportadas</p>
