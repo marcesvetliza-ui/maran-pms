@@ -219,13 +219,13 @@ Son preferencias de categoría "Fecha especial" como cumpleaños o aniversarios.
 MÓDULO: ADMINISTRACIÓN
 
 Cómo crear un usuario del sistema
-Ir a "Administración" en el sidebar, sección "Usuarios". Hacer clic en "Nuevo usuario", completar nombre completo, nombre de usuario, contraseña, rol y área. Los roles disponibles son: admin, manager, recepción, restaurante, housekeeping, spa.
+Ir a "Configuración" en el sidebar (parte inferior), pestaña "Usuarios". Hacer clic en "Nuevo usuario", completar nombre completo, nombre de usuario, contraseña, rol y área. Los roles disponibles son: admin, manager, recepción, restaurante, housekeeping, spa.
 
 Cómo cambiar la contraseña de un usuario
-En Administración → Usuarios, abrir el usuario y hacer clic en "Cambiar contraseña". Ingresar la nueva contraseña y confirmar.
+En Configuración → Usuarios, abrir el usuario y hacer clic en "Cambiar contraseña". Ingresar la nueva contraseña y confirmar.
 
 Cómo desactivar un usuario
-En el listado de usuarios, hacer clic en el toggle "Activo/Inactivo" del usuario. Un usuario desactivado no puede ingresar al sistema pero su historial se conserva.
+En Configuración → Usuarios, hacer clic en el toggle "Activo/Inactivo" del usuario. Un usuario desactivado no puede ingresar al sistema pero su historial se conserva.
 
 Cómo configurar los tipos de habitación
 En Administración → Tipos de habitación, se pueden crear, editar o eliminar los tipos (Suite, Doble, Triple, etc.) con su ocupación base y máxima.
