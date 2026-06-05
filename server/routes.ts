@@ -10,7 +10,7 @@ import { charges, payments, spaPayments, eventPayments, cashMovements, cashShift
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
-import { systemUsers, spaProfessionals, spaClients } from "@shared/schema";
+import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
@@ -730,23 +730,30 @@ export async function registerRoutes(
 
   // Helper: get or auto-generate the chatbot webhook secret
   async function getChatbotWebhookSecret(): Promise<string> {
-    // 1. Prefer env var if set
-    const envSecret = process.env.CHATBOT_WEBHOOK_SECRET;
-    if (envSecret && envSecret.trim()) return envSecret.trim();
-    // 2. Try DB
-    const { systemSettings } = await import("@shared/schema");
-    const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, "chatbot_webhook_secret"));
-    if (row?.value) return row.value;
-    // 3. Auto-generate and persist
-    const { randomUUID } = await import("crypto");
-    const generated = randomUUID();
-    await db.execute(sql`
-      INSERT INTO system_settings (id, key, value, category, description, updated_at)
-      VALUES (gen_random_uuid(), 'chatbot_webhook_secret', ${generated}, 'integrations', 'Auto-generated MARA webhook secret', now())
-      ON CONFLICT (key) DO NOTHING
-    `);
-    console.log("[webhook/chatbot] Secreto auto-generado y guardado en system_settings");
-    return generated;
+    try {
+      // 1. Prefer env var if set
+      const envSecret = process.env.CHATBOT_WEBHOOK_SECRET;
+      if (envSecret && envSecret.trim()) return envSecret.trim();
+      // 2. Try DB
+      const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, "chatbot_webhook_secret"));
+      if (row?.value) return row.value;
+      // 3. Auto-generate and persist
+      const generated = randomUUID();
+      await db.insert(systemSettings).values({
+        id: randomUUID(),
+        key: "chatbot_webhook_secret",
+        value: generated,
+        category: "integrations",
+        description: "Auto-generated MARA webhook secret",
+        updatedAt: new Date(),
+        updatedBy: null,
+      } as any);
+      console.log("[webhook/chatbot] Secreto auto-generado y guardado en DB:", generated.slice(-4));
+      return generated;
+    } catch (err) {
+      console.error("[webhook/chatbot] Error en getChatbotWebhookSecret:", err);
+      return "";
+    }
   }
 
   app.get("/api/webhook/chatbot/secret", requireAuth, async (req, res) => {
