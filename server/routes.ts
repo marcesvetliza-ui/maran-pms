@@ -741,6 +741,9 @@ export async function registerRoutes(
       const secret = req.headers["x-chatbot-secret"] as string;
       const expectedSecret = process.env.CHATBOT_WEBHOOK_SECRET;
       if (!expectedSecret || secret !== expectedSecret) {
+        const receivedHint = secret ? `"...${secret.slice(-4)}" (${secret.length} chars)` : "ninguno";
+        const expectedHint = expectedSecret ? `"...${expectedSecret.slice(-4)}" (${expectedSecret.length} chars)` : "NO CONFIGURADO";
+        console.warn(`[webhook/chatbot] 401 — recibido: ${receivedHint} | esperado: ${expectedHint}`);
         return res.status(401).json({ error: "Invalid or missing webhook secret" });
       }
 
