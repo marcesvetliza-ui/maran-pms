@@ -940,7 +940,6 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="income">Ingreso manual</SelectItem>
-                  <SelectItem value="cobro_cc">Cobro cuenta corriente</SelectItem>
                   {isAdmin && <SelectItem value="expense">Egreso (solo admin)</SelectItem>}
                 </SelectContent>
               </Select>
@@ -1080,9 +1079,11 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               />
             </div>
 
-            {/* Comprobante */}
+            {/* Comprobante — obligatorio para egresos */}
             <div>
-              <label className="text-sm font-medium">Comprobante (opcional)</label>
+              <label className="text-sm font-medium">
+                Comprobante {movType === "expense" ? <span className="text-destructive">*</span> : <span className="text-muted-foreground text-xs">(opcional)</span>}
+              </label>
               <Select value={movReceipt} onValueChange={setMovReceipt}>
                 <SelectTrigger data-testid={`select-mov-receipt-${area}`}>
                   <SelectValue placeholder="Seleccionar..." />
@@ -1102,11 +1103,12 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               disabled={
                 !movAmount ||
                 addMovementMutation.isPending ||
-                (isCobro ? !movCCEntityId : !movDesc.trim())
+                (isCobro ? !movCCEntityId : !movDesc.trim()) ||
+                (movType === "expense" && !movReceipt)
               }
               data-testid={`btn-confirm-movement-${area}`}
             >
-              {isCobro ? "Registrar cobro CC" : "Registrar"}
+              Registrar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2208,6 +2210,7 @@ function NightAuditTab() {
 }
 
 export default function CashRegister() {
+  const { user } = useAuth();
   const { data: configs, isLoading } = useQuery<CashConfig[]>({
     queryKey: ["/api/cash/configs"],
     queryFn: async () => {
@@ -2217,7 +2220,15 @@ export default function CashRegister() {
     },
   });
 
-  const activeConfigs = configs?.filter((c) => c.isActive) || [];
+  const allActiveConfigs = configs?.filter((c) => c.isActive) || [];
+  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const isReception = user?.role === "reception";
+  const canSeeGlobalTabs = isAdminOrManager || isReception;
+
+  // Non-admin/manager users only see their assigned department
+  const visibleConfigs = isAdminOrManager
+    ? allActiveConfigs
+    : allActiveConfigs.filter((c) => c.area === user?.department);
 
   if (isLoading) {
     return (
@@ -2228,7 +2239,7 @@ export default function CashRegister() {
     );
   }
 
-  const defaultTab = activeConfigs.length > 0 ? activeConfigs[0].area : "historial";
+  const defaultTab = visibleConfigs.length > 0 ? visibleConfigs[0].area : (canSeeGlobalTabs ? "historial" : "");
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -2236,44 +2247,66 @@ export default function CashRegister() {
         Caja
       </h1>
 
-      <Tabs defaultValue={defaultTab}>
-        <TabsList data-testid="tabs-cash-areas">
-          {activeConfigs.map((c) => (
-            <TabsTrigger key={c.area} value={c.area} data-testid={`tab-${c.area}`}>
-              {c.areaLabel}
-            </TabsTrigger>
+      {visibleConfigs.length === 0 && !canSeeGlobalTabs ? (
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <DollarSign className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">Sin departamento asignado</p>
+            <p className="text-sm mt-1">Tu usuario no tiene un área de caja asignada. Contactá al administrador del sistema.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Tabs defaultValue={defaultTab}>
+          <TabsList data-testid="tabs-cash-areas">
+            {visibleConfigs.map((c) => (
+              <TabsTrigger key={c.area} value={c.area} data-testid={`tab-${c.area}`}>
+                {c.areaLabel}
+              </TabsTrigger>
+            ))}
+            {canSeeGlobalTabs && (
+              <TabsTrigger value="historial" data-testid="tab-historial">
+                Historial
+              </TabsTrigger>
+            )}
+            {canSeeGlobalTabs && (
+              <TabsTrigger value="resumen-dia" data-testid="tab-resumen-dia">
+                <BarChart3 className="h-4 w-4 mr-1" />
+                Resumen del Día
+              </TabsTrigger>
+            )}
+            {canSeeGlobalTabs && (
+              <TabsTrigger value="night-audit" data-testid="tab-night-audit">
+                <Moon className="h-4 w-4 mr-1" />
+                Night Audit
+              </TabsTrigger>
+            )}
+          </TabsList>
+
+          {visibleConfigs.map((c) => (
+            <TabsContent key={c.area} value={c.area}>
+              <AreaTab area={c.area} config={c} />
+            </TabsContent>
           ))}
-          <TabsTrigger value="historial" data-testid="tab-historial">
-            Historial
-          </TabsTrigger>
-          <TabsTrigger value="resumen-dia" data-testid="tab-resumen-dia">
-            <BarChart3 className="h-4 w-4 mr-1" />
-            Resumen del Día
-          </TabsTrigger>
-          <TabsTrigger value="night-audit" data-testid="tab-night-audit">
-            <Moon className="h-4 w-4 mr-1" />
-            Night Audit
-          </TabsTrigger>
-        </TabsList>
 
-        {activeConfigs.map((c) => (
-          <TabsContent key={c.area} value={c.area}>
-            <AreaTab area={c.area} config={c} />
-          </TabsContent>
-        ))}
+          {canSeeGlobalTabs && (
+            <TabsContent value="historial">
+              <HistorialTab />
+            </TabsContent>
+          )}
 
-        <TabsContent value="historial">
-          <HistorialTab />
-        </TabsContent>
+          {canSeeGlobalTabs && (
+            <TabsContent value="resumen-dia">
+              <ResumenDiaTab />
+            </TabsContent>
+          )}
 
-        <TabsContent value="resumen-dia">
-          <ResumenDiaTab />
-        </TabsContent>
-
-        <TabsContent value="night-audit">
-          <NightAuditTab />
-        </TabsContent>
-      </Tabs>
+          {canSeeGlobalTabs && (
+            <TabsContent value="night-audit">
+              <NightAuditTab />
+            </TabsContent>
+          )}
+        </Tabs>
+      )}
     </div>
   );
 }

@@ -1883,10 +1883,20 @@ export default function AdministrationPage() {
                 name="department"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Departamento</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="Recepcion" data-testid="input-user-department" />
-                    </FormControl>
+                    <FormLabel>Departamento (Caja)</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-user-department">
+                          <SelectValue placeholder="Seleccionar área de caja..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Sin departamento</SelectItem>
+                        {cashConfigs.filter((c: any) => c.isActive).map((c: any) => (
+                          <SelectItem key={c.area} value={c.area}>{c.areaLabel}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
