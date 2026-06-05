@@ -704,14 +704,20 @@ export default function ChatbotDashboardPage() {
             <div className="space-y-2">
               <p className="text-sm font-medium">Header de Autenticación</p>
               <div className="flex items-center gap-2">
-                {showSecret && secretData?.secret ? (
-                  <input
-                    readOnly
-                    value={secretData.secret}
-                    className="flex-1 p-2 bg-muted rounded text-xs font-mono border-0 outline-none select-all cursor-text"
-                    onFocus={(e) => e.target.select()}
-                    data-testid="text-webhook-secret"
-                  />
+                {showSecret ? (
+                  secretData?.secret ? (
+                    <input
+                      readOnly
+                      value={secretData.secret}
+                      className="flex-1 p-2 bg-muted rounded text-xs font-mono border-0 outline-none select-all cursor-text"
+                      onFocus={(e) => e.target.select()}
+                      data-testid="text-webhook-secret"
+                    />
+                  ) : (
+                    <code className="flex-1 block p-2 bg-muted rounded text-xs font-mono text-destructive" data-testid="text-webhook-secret">
+                      ⚠ CHATBOT_WEBHOOK_SECRET no configurada en Railway
+                    </code>
+                  )
                 ) : (
                   <code className="flex-1 block p-2 bg-muted rounded text-xs font-mono" data-testid="text-webhook-secret">
                     X-Chatbot-Secret: ••••••••••••
