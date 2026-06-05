@@ -105,6 +105,29 @@ function RouteAwareErrorBoundary() {
   );
 }
 
+function getRoleHomePage(role: string): string {
+  switch (role) {
+    case "restaurant": return "/restaurant";
+    case "housekeeping": return "/housekeeping";
+    case "maintenance": return "/maintenance";
+    case "spa": return "/spa";
+    case "events": return "/events";
+    default: return "/";
+  }
+}
+
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+  useEffect(() => {
+    if (user && user.role !== "admin") {
+      navigate(getRoleHomePage(user.role));
+    }
+  }, [user, navigate]);
+  if (!user || user.role !== "admin") return null;
+  return <Component />;
+}
+
 function Router() {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -131,7 +154,7 @@ function Router() {
         <Route path="/spa-clients" component={SpaClientsPage} />
         <Route path="/events" component={EventsPage} />
         <Route path="/maintenance" component={MaintenancePage} />
-        <Route path="/administration" component={AdministrationPage} />
+        <Route path="/administration">{() => <AdminRoute component={AdministrationPage} />}</Route>
         <Route path="/packages" component={PackagesPage} />
         <Route path="/companies" component={CompaniesPage} />
         <Route path="/agencies" component={AgenciesPage} />
@@ -249,6 +272,7 @@ function AppLayout() {
 function AuthenticatedApp() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checking, setChecking] = useState(true);
+  const [, navigate] = useLocation();
 
   const checkAuth = useCallback(async () => {
     try {
@@ -272,6 +296,7 @@ function AuthenticatedApp() {
 
   const handleLogin = (userData: AuthUser) => {
     setUser(userData);
+    navigate(getRoleHomePage(userData.role));
   };
 
   const handleLogout = async () => {
