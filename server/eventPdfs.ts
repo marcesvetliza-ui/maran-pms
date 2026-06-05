@@ -26,22 +26,28 @@ function pdfBrandedHeader(doc: InstanceType<typeof PDFDocument>, pageW: number, 
 }
 
 function pdfBrandedFooter(doc: InstanceType<typeof PDFDocument>, pageW: number, pageH: number, margin: number, contentW: number) {
-  const footerY = pageH - 72;
-  doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
-  const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
-  if (fs.existsSync(logoPath)) {
-    doc.image(logoPath, margin, footerY + 6, { fit: [90, 58], align: "left", valign: "center" });
-  }
-  const cx = margin + 100;
-  const cw = contentW - 200;
-  doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
-    .text(HOTEL_ADDRESS, cx, footerY + 13, { width: cw, align: "center" });
-  doc.fillColor("#ffffff").fontSize(8).font("Helvetica")
-    .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, cx, footerY + 26, { width: cw, align: "center" });
-  doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
-    .text(`CUIT ${HOTEL_CUIT} · Responsable Inscripto`, cx, footerY + 40, { width: cw, align: "center" });
-  doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
-    .text(HOTEL_WEB, pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
+  const footerY = pageH - 60;
+  // Orange top stripe
+  doc.rect(0, footerY, pageW, 3).fill(ORANGE);
+  // Dark brown bar
+  doc.rect(0, footerY + 3, pageW, 57).fill(FOOTER_BG);
+  // Left: hotel name in text
+  doc.fillColor("#ffffff").fontSize(8.5).font("Helvetica-Bold")
+    .text("MARAN SUITES & TOWERS", margin, footerY + 12, { width: 160 });
+  doc.fillColor("#ddbbaa").fontSize(7).font("Helvetica")
+    .text("Hotel & Spa", margin, footerY + 25, { width: 160 });
+  // Center: contact info
+  const cx = margin + 168;
+  const cw = contentW - 310;
+  doc.fillColor("#ffffff").fontSize(7.5).font("Helvetica")
+    .text(HOTEL_ADDRESS, cx, footerY + 11, { width: cw, align: "center" });
+  doc.fillColor("#ffffff").fontSize(7.5).font("Helvetica")
+    .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, cx, footerY + 23, { width: cw, align: "center" });
+  doc.fillColor("#cccccc").fontSize(6.5).font("Helvetica")
+    .text(`CUIT ${HOTEL_CUIT} · Responsable Inscripto`, cx, footerY + 36, { width: cw, align: "center" });
+  // Right: website
+  doc.fillColor("#ffffff").fontSize(9.5).font("Helvetica-Bold")
+    .text(HOTEL_WEB, pageW - margin - 110, footerY + 23, { width: 110, align: "right" });
   return footerY;
 }
 
@@ -100,7 +106,7 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
     const col2     = margin + 140;
     const col3     = margin + 268;
     const col4     = margin + 398;
-    const FOOTER_H = 72;
+    const FOOTER_H = 60;
     const safeBottom = pageH - FOOTER_H - 10; // content must stay above this
 
     // ── Helper: compact header for continuation pages ─────────────────────
@@ -294,7 +300,7 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
     doc.fillColor("#2e7d32").fontSize(7).font("Helvetica-Bold")
       .text("CONFIRMADO", codeBoxX + 16, titleY + 54, { width: codeBoxW - 32, align: "center", characterSpacing: 0.5 });
 
-    let y = titleY + 56;
+    let y = titleY + 74;
     doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
     y += 12;
 
