@@ -728,21 +728,42 @@ export async function registerRoutes(
 
   // ==================== CHATBOT WEBHOOK ====================
 
+  // Helper: get or auto-generate the chatbot webhook secret
+  async function getChatbotWebhookSecret(): Promise<string> {
+    // 1. Prefer env var if set
+    const envSecret = process.env.CHATBOT_WEBHOOK_SECRET;
+    if (envSecret && envSecret.trim()) return envSecret.trim();
+    // 2. Try DB
+    const { systemSettings } = await import("@shared/schema");
+    const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, "chatbot_webhook_secret"));
+    if (row?.value) return row.value;
+    // 3. Auto-generate and persist
+    const { randomUUID } = await import("crypto");
+    const generated = randomUUID();
+    await db.execute(sql`
+      INSERT INTO system_settings (id, key, value, category, description, updated_at)
+      VALUES (gen_random_uuid(), 'chatbot_webhook_secret', ${generated}, 'integrations', 'Auto-generated MARA webhook secret', now())
+      ON CONFLICT (key) DO NOTHING
+    `);
+    console.log("[webhook/chatbot] Secreto auto-generado y guardado en system_settings");
+    return generated;
+  }
+
   app.get("/api/webhook/chatbot/secret", requireAuth, async (req, res) => {
     if ((req.user as any)?.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
-    const secret = process.env.CHATBOT_WEBHOOK_SECRET || "";
+    const secret = await getChatbotWebhookSecret();
     res.json({ secret });
   });
 
   app.post("/api/webhook/chatbot", async (req, res) => {
     try {
       const secret = req.headers["x-chatbot-secret"] as string;
-      const expectedSecret = process.env.CHATBOT_WEBHOOK_SECRET;
-      if (!expectedSecret || secret !== expectedSecret) {
+      const expectedSecret = await getChatbotWebhookSecret();
+      if (!secret || secret !== expectedSecret) {
         const receivedHint = secret ? `"...${secret.slice(-4)}" (${secret.length} chars)` : "ninguno";
-        const expectedHint = expectedSecret ? `"...${expectedSecret.slice(-4)}" (${expectedSecret.length} chars)` : "NO CONFIGURADO";
+        const expectedHint = `"...${expectedSecret.slice(-4)}" (${expectedSecret.length} chars)`;
         console.warn(`[webhook/chatbot] 401 — recibido: ${receivedHint} | esperado: ${expectedHint}`);
         return res.status(401).json({ error: "Invalid or missing webhook secret" });
       }
