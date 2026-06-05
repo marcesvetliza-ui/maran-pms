@@ -732,22 +732,20 @@ export default function ChatbotDashboardPage() {
                   className="h-8 w-8 shrink-0"
                   onClick={() => {
                     if (secretData?.secret) {
-                      const copyFn = async () => {
-                        try {
-                          await navigator.clipboard.writeText(secretData.secret);
-                        } catch {
-                          const el = document.createElement("textarea");
-                          el.value = secretData.secret;
-                          el.style.position = "fixed";
-                          el.style.opacity = "0";
-                          document.body.appendChild(el);
-                          el.focus();
-                          el.select();
-                          document.execCommand("copy");
-                          document.body.removeChild(el);
-                        }
-                      };
-                      copyFn();
+                      const el = document.createElement("textarea");
+                      el.value = secretData.secret;
+                      el.style.position = "fixed";
+                      el.style.top = "0";
+                      el.style.left = "0";
+                      el.style.opacity = "0.01";
+                      el.style.fontSize = "16px";
+                      document.body.appendChild(el);
+                      el.focus();
+                      el.select();
+                      el.setSelectionRange(0, el.value.length);
+                      try { document.execCommand("copy"); } catch {}
+                      document.body.removeChild(el);
+                      navigator.clipboard?.writeText(secretData.secret).catch(() => {});
                       setCopied(true);
                       setTimeout(() => setCopied(false), 2000);
                       toast({ title: "Secret copiado al portapapeles" });
