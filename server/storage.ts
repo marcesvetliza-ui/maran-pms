@@ -4296,28 +4296,30 @@ export class MemStorage implements IStorage {
 
     const occupancy: Record<string, EventPlanningCellStatus[]> = {};
     const eventsMap: Record<string, { id: string; name: string; contactName: string; startDate: string; endDate: string; status: EventStatus; eventType: EventType }> = {};
-    const cellEvents: Record<string, Record<string, string>> = {};
+    const cellEvents: Record<string, Record<string, string[]>> = {};
 
     rooms.forEach(room => {
       occupancy[room.id] = [];
       cellEvents[room.id] = {};
 
       days.forEach(day => {
-        const event = eventsInRange.find(e => e.eventRoomId === room.id && e.startDate <= day && e.endDate >= day);
-        if (event) {
+        const dayEvents = eventsInRange.filter(e => e.eventRoomId === room.id && e.startDate <= day && e.endDate >= day);
+        if (dayEvents.length > 0) {
           occupancy[room.id].push("event");
-          cellEvents[room.id][day] = event.id;
-          if (!eventsMap[event.id]) {
-            eventsMap[event.id] = {
-              id: event.id,
-              name: event.name,
-              contactName: event.contactName,
-              startDate: event.startDate,
-              endDate: event.endDate,
-              status: event.status as EventStatus,
-              eventType: event.eventType as EventType,
-            };
-          }
+          cellEvents[room.id][day] = dayEvents.map(e => e.id);
+          dayEvents.forEach(event => {
+            if (!eventsMap[event.id]) {
+              eventsMap[event.id] = {
+                id: event.id,
+                name: event.name,
+                contactName: event.contactName,
+                startDate: event.startDate,
+                endDate: event.endDate,
+                status: event.status as EventStatus,
+                eventType: event.eventType as EventType,
+              };
+            }
+          });
         } else if (room.status === "maintenance") {
           occupancy[room.id].push("maintenance");
         } else {

@@ -274,7 +274,7 @@ type EventPlanningResponse = {
   rooms: EventRoom[];
   days: string[];
   events: Record<string, PlanningEvent>;
-  cellEvents: Record<string, Record<string, string>>;
+  cellEvents: Record<string, Record<string, string[]>>;
 };
 
 export default function EventsPage() {
@@ -798,11 +798,9 @@ export default function EventsPage() {
 
   const getEventsForCell = (roomId: string, date: Date): PlanningEvent[] => {
     const dateStr = format(date, "yyyy-MM-dd");
-    const eventId = cellEventsMap[roomId]?.[dateStr];
-    if (eventId && eventsMap[eventId]) {
-      return [eventsMap[eventId]];
-    }
-    return [];
+    const eventIds = cellEventsMap[roomId]?.[dateStr];
+    if (!eventIds) return [];
+    return eventIds.map(id => eventsMap[id]).filter(Boolean);
   };
 
   const calculateEventTotal = (event: HotelEvent): number => {
