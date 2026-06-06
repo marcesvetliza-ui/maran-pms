@@ -246,5 +246,22 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // allow_price_edit flag on charge_types (precio variable)
+  await withTimeout("charge_types_allow_price_edit", T, () =>
+    db.execute(sql`
+      ALTER TABLE charge_types
+        ADD COLUMN IF NOT EXISTS allow_price_edit boolean NOT NULL DEFAULT false
+    `)
+  );
+
+  // Activate allow_price_edit for Lavandería by default
+  await withTimeout("charge_types_lavanderia_price_edit", T, () =>
+    db.execute(sql`
+      UPDATE charge_types
+        SET allow_price_edit = true
+      WHERE label ILIKE '%lavand%' AND allow_price_edit = false
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

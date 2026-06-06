@@ -316,6 +316,7 @@ export default function RoomsPage() {
   const [ctDescription, setCtDescription] = useState("");
   const [ctAmount, setCtAmount] = useState("");
   const [ctCategory, setCtCategory] = useState("otros");
+  const [ctAllowPriceEdit, setCtAllowPriceEdit] = useState(false);
   const [ctFormOpen, setCtFormOpen] = useState(false);
   const [deletingCTId, setDeletingCTId] = useState<string | null>(null);
 
@@ -326,20 +327,21 @@ export default function RoomsPage() {
 
   function openNewCT() {
     setEditingCT(null);
-    setCtLabel(""); setCtDescription(""); setCtAmount(""); setCtCategory("otros");
+    setCtLabel(""); setCtDescription(""); setCtAmount(""); setCtCategory("otros"); setCtAllowPriceEdit(false);
     setCtFormOpen(true);
   }
   function openEditCT(ct: ChargeType) {
     setEditingCT(ct);
     setCtLabel(ct.label); setCtDescription(ct.description);
     setCtAmount(String(ct.defaultAmount)); setCtCategory(ct.category);
+    setCtAllowPriceEdit(ct.allowPriceEdit ?? false);
     setCtFormOpen(true);
   }
 
   const saveCTMutation = useMutation({
     mutationFn: () => editingCT
-      ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory })
-      : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory }),
+      ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit })
+      : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
       setCtFormOpen(false);
@@ -841,11 +843,19 @@ export default function RoomsPage() {
             {chargeTypesList.map(ct => (
               <div key={ct.id} className="flex items-center gap-3 border rounded-lg px-3 py-2.5">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{ct.label}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium truncate">{ct.label}</p>
+                    {ct.allowPriceEdit && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 shrink-0">Variable</span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">{ct.description} · {ct.category}</p>
                 </div>
                 <span className="text-sm font-semibold shrink-0 tabular-nums">
-                  ${parseFloat(String(ct.defaultAmount)).toLocaleString("es-AR")}
+                  {ct.allowPriceEdit
+                    ? <span className="text-muted-foreground italic text-xs">ref. ${parseFloat(String(ct.defaultAmount)).toLocaleString("es-AR")}</span>
+                    : `$${parseFloat(String(ct.defaultAmount)).toLocaleString("es-AR")}`
+                  }
                 </span>
                 <div className="flex gap-1 shrink-0">
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditCT(ct)} data-testid={`btn-edit-ct-${ct.id}`}>
@@ -884,7 +894,7 @@ export default function RoomsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="ct-amount">Precio por defecto ($)</Label>
+                  <Label htmlFor="ct-amount">{ctAllowPriceEdit ? "Precio de referencia ($)" : "Precio por defecto ($)"}</Label>
                   <Input id="ct-amount" type="number" min="0" step="0.01" value={ctAmount} onChange={e => setCtAmount(e.target.value)} data-testid="input-ct-amount" />
                 </div>
                 <div className="space-y-1.5">
@@ -895,6 +905,19 @@ export default function RoomsPage() {
                       {CT_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                </div>
+              </div>
+              <div
+                className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${ctAllowPriceEdit ? "border-primary/40 bg-primary/5" : "border-border bg-muted/20"}`}
+                onClick={() => setCtAllowPriceEdit(v => !v)}
+                data-testid="toggle-ct-allow-price-edit"
+              >
+                <div className={`mt-0.5 h-4 w-4 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${ctAllowPriceEdit ? "bg-primary border-primary" : "border-muted-foreground/40"}`}>
+                  {ctAllowPriceEdit && <svg className="h-2.5 w-2.5 text-primary-foreground" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <div>
+                  <p className="text-sm font-medium leading-none">Precio variable</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">El recepcionista ingresa el importe al cargar este cargo</p>
                 </div>
               </div>
               <div className="flex gap-2 pt-1">

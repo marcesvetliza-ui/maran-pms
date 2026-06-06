@@ -1022,9 +1022,9 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/charge-types", requireAuth, async (req, res) => {
     try {
-      const { label, description, defaultAmount, category, sortOrder } = req.body;
+      const { label, description, defaultAmount, category, sortOrder, allowPriceEdit } = req.body;
       if (!label || !description || !defaultAmount) return res.status(400).json({ error: "label, description y defaultAmount son requeridos" });
-      const ct = await storage.createChargeType({ label, description, defaultAmount: String(defaultAmount), category: category || "otros", active: true, sortOrder: sortOrder ?? 0 });
+      const ct = await storage.createChargeType({ label, description, defaultAmount: String(defaultAmount), category: category || "otros", active: true, sortOrder: sortOrder ?? 0, allowPriceEdit: allowPriceEdit ?? false });
       res.status(201).json(ct);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1033,7 +1033,7 @@ export function registerReservationsRoutes(app: Express) {
 
   app.patch("/api/charge-types/:id", requireAuth, async (req, res) => {
     try {
-      const { label, description, defaultAmount, category, sortOrder, active } = req.body;
+      const { label, description, defaultAmount, category, sortOrder, active, allowPriceEdit } = req.body;
       const updated = await storage.updateChargeType(req.params.id, {
         ...(label !== undefined && { label }),
         ...(description !== undefined && { description }),
@@ -1041,6 +1041,7 @@ export function registerReservationsRoutes(app: Express) {
         ...(category !== undefined && { category }),
         ...(sortOrder !== undefined && { sortOrder }),
         ...(active !== undefined && { active }),
+        ...(allowPriceEdit !== undefined && { allowPriceEdit }),
       });
       if (!updated) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
       res.json(updated);

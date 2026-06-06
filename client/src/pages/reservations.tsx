@@ -181,12 +181,12 @@ export function ReservationFormDialog({
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
   // Cargos adicionales al crear — cargados desde la BD
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
     queryKey: ["/api/charge-types"],
   });
   const newResChargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any })),
-    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false })),
+    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const, allowPriceEdit: true },
   ];
   const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
   const [showResChargeForm, setShowResChargeForm] = useState(false);
@@ -1457,7 +1457,7 @@ function ReservationDetailDialog({
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
 
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
     queryKey: ["/api/charge-types"],
   });
 
@@ -1507,8 +1507,8 @@ function ReservationDetailDialog({
     category: "otros" as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
   });
   const chargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any })),
-    { label: "Cargo editable", description: "", amount: "", category: "otros" as const },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false })),
+    { label: "Cargo editable", description: "", amount: "", category: "otros" as const, allowPriceEdit: true },
   ];
   const [chargeQty, setChargeQty] = useState(1);
   const [selectedPreset, setSelectedPreset] = useState<typeof chargePresets[0] | null>(null);
@@ -2358,18 +2358,23 @@ function ReservationDetailDialog({
                         placeholder="Descripción del cargo"
                         value={newCharge.description}
                         onChange={(e) => setNewCharge({ ...newCharge, description: e.target.value })}
-                        disabled={selectedPreset?.label !== "Cargo editable"}
+                        disabled={!selectedPreset?.allowPriceEdit}
                         data-testid="input-charge-description"
                       />
                     </div>
                     <div>
-                      <Label className="text-xs text-muted-foreground mb-1 block">Precio unit. <span className="text-xs">(con IVA)</span></Label>
+                      <Label className="text-xs text-muted-foreground mb-1 block">
+                        Precio unit. <span className="text-xs">(con IVA)</span>
+                        {selectedPreset?.allowPriceEdit && selectedPreset?.label !== "Cargo editable" && (
+                          <span className="ml-1 text-amber-600 font-medium">· variable</span>
+                        )}
+                      </Label>
                       <Input
                         type="number"
                         placeholder="0.00"
                         value={newCharge.amount}
                         onChange={(e) => setNewCharge({ ...newCharge, amount: e.target.value })}
-                        disabled={selectedPreset?.label !== "Cargo editable"}
+                        disabled={!selectedPreset?.allowPriceEdit}
                         data-testid="input-charge-unit-price"
                       />
                     </div>
@@ -2403,7 +2408,7 @@ function ReservationDetailDialog({
                       <Select
                         value={newCharge.category}
                         onValueChange={(value) => setNewCharge({ ...newCharge, category: value as typeof newCharge.category })}
-                        disabled={selectedPreset?.label !== "Cargo editable"}
+                        disabled={!selectedPreset?.allowPriceEdit}
                       >
                         <SelectTrigger data-testid="select-charge-category">
                           <SelectValue />

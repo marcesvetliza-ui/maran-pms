@@ -256,6 +256,7 @@ export const chargeTypes = pgTable("charge_types", {
   category: text("category").$type<ChargeCategory>().notNull().default("otros"),
   active: boolean("active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
+  allowPriceEdit: boolean("allow_price_edit").notNull().default(false),
 });
 export const insertChargeTypeSchema = createInsertSchema(chargeTypes).omit({ id: true });
 export type InsertChargeType = z.infer<typeof insertChargeTypeSchema>;
