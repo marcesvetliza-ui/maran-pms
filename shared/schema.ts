@@ -978,6 +978,7 @@ export const restaurantOrders = pgTable("restaurant_orders", {
   roomNumber: text("room_number"),
   receiptType: text("receipt_type").$type<ReceiptType>(),
   paymentMethod: text("payment_method").$type<RestaurantPaymentMethod>(),
+  cuentaPedida: boolean("cuenta_pedida").notNull().default(false),
 });
 
 export const insertRestaurantOrderSchema = createInsertSchema(restaurantOrders).omit({ id: true });

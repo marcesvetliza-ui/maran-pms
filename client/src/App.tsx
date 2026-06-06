@@ -67,6 +67,8 @@ const EmailConfigPage = lazy(() => import("@/pages/email-config"));
 const SeguridadPage = lazy(() => import("@/pages/seguridad"));
 const SurveyPage = lazy(() => import("@/pages/survey"));
 const HelpChat = lazy(() => import("@/components/help-chat"));
+const MozoPage = lazy(() => import("@/pages/mozo"));
+const CocinaPage = lazy(() => import("@/pages/cocina"));
 
 interface AuthUser {
   id: string;
@@ -180,6 +182,8 @@ function Router() {
         <Route path="/email-config" component={EmailConfigPage} />
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
+        <Route path="/mozo" component={MozoPage} />
+        <Route path="/cocina" component={CocinaPage} />
         <Route component={NotFound} />
       </Switch>
     </Suspense>
@@ -220,6 +224,20 @@ function useRadixScrollLockCleanup() {
 function AppLayout() {
   const { user, logout } = useAuth();
   useRadixScrollLockCleanup();
+  const [location] = useLocation();
+
+  const isStandalone = location === "/mozo" || location === "/cocina";
+
+  if (isStandalone) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Suspense fallback={<PageLoader />}>
+          <Router />
+        </Suspense>
+      </div>
+    );
+  }
+
   const sidebarStyle = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",

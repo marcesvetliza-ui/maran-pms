@@ -246,6 +246,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // cuentaPedida flag on restaurant_orders (mozo solicitó la cuenta)
+  await withTimeout("restaurant_orders_cuenta_pedida", T, () =>
+    db.execute(sql`
+      ALTER TABLE restaurant_orders
+        ADD COLUMN IF NOT EXISTS cuenta_pedida boolean NOT NULL DEFAULT false
+    `)
+  );
+
   // allow_price_edit flag on charge_types (precio variable)
   await withTimeout("charge_types_allow_price_edit", T, () =>
     db.execute(sql`

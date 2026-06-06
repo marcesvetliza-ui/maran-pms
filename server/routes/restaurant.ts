@@ -850,4 +850,98 @@ export function registerRestaurantRoutes(app: Express) {
       res.status(500).json({ error: "Error deleting ingredient" });
     }
   });
+
+  // ── Mozo / Cocina ────────────────────────────────────────────────────────
+
+  // Enviar items pendientes a cocina (sentAt = now, status → preparing)
+  app.post("/api/restaurant/orders/:id/send-kitchen", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Orden no encontrada" });
+      if (order.status === "closed") return res.status(400).json({ error: "La orden está cerrada" });
+
+      const items = await storage.getOrderItems(req.params.id);
+      const unsent = items.filter((i: any) => !i.sentAt && i.status === "pending");
+      if (unsent.length === 0) return res.status(400).json({ error: "No hay ítems pendientes de envío" });
+
+      const now = new Date();
+      await Promise.all(
+        unsent.map((i: any) =>
+          storage.updateOrderItem(i.id, { sentAt: now, status: "preparing" })
+        )
+      );
+
+      const updated = await storage.getRestaurantOrder(req.params.id);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error enviando a cocina" });
+    }
+  });
+
+  // Pedir cuenta (cuentaPedida = true)
+  app.post("/api/restaurant/orders/:id/pedir-cuenta", async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Orden no encontrada" });
+
+      const updated = await storage.updateRestaurantOrder(req.params.id, {
+        cuentaPedida: true,
+      } as any);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error al pedir cuenta" });
+    }
+  });
+
+  // Feed de cocina — órdenes activas con ítems enviados (KDS)
+  app.get("/api/restaurant/kitchen", async (req, res) => {
+    try {
+      const [openOrders, inProgressOrders, tables] = await Promise.all([
+        storage.getRestaurantOrders("open" as any),
+        storage.getRestaurantOrders("in_progress" as any),
+        storage.getRestaurantTables(),
+      ]);
+
+      const allActive = [...openOrders, ...inProgressOrders];
+
+      const results = await Promise.all(
+        allActive.map(async (order: any) => {
+          const items = await storage.getOrderItems(order.id);
+          const kitchenItems = (items as any[]).filter(
+            (i) => i.sentAt !== null && !["served", "cancelled"].includes(i.status)
+          );
+          if (kitchenItems.length === 0) return null;
+
+          const table = (tables as any[]).find((t) => t.id === order.tableId);
+          const oldestSentAt = kitchenItems.reduce(
+            (oldest: Date | null, i: any) => {
+              const d = i.sentAt ? new Date(i.sentAt) : null;
+              return d && (!oldest || d < oldest) ? d : oldest;
+            },
+            null as Date | null
+          );
+
+          return {
+            ...order,
+            tableNumber: table?.tableNumber || order.orderLabel || order.orderNumber,
+            areaName: table?.area?.name || "",
+            kitchenItems,
+            oldestSentAt,
+          };
+        })
+      );
+
+      const filtered = results
+        .filter(Boolean)
+        .sort(
+          (a: any, b: any) =>
+            (a.oldestSentAt ? new Date(a.oldestSentAt).getTime() : 0) -
+            (b.oldestSentAt ? new Date(b.oldestSentAt).getTime() : 0)
+        );
+
+      res.json(filtered);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching kitchen orders" });
+    }
+  });
 }
