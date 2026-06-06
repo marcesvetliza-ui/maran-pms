@@ -210,6 +210,16 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Cash movements: columnas receiptNumber, proveedor, expenseCategory
+  await withTimeout("cash_movements_receipt_cols", T, () =>
+    db.execute(sql`
+      ALTER TABLE cash_movements
+        ADD COLUMN IF NOT EXISTS receipt_number text,
+        ADD COLUMN IF NOT EXISTS proveedor text,
+        ADD COLUMN IF NOT EXISTS expense_category text
+    `)
+  );
+
   // Security: brute-force columns on system_users + failed_login_attempts table
   await withTimeout("system_users_security_cols", T, () =>
     db.execute(sql`

@@ -407,12 +407,13 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "manager";
   const { toast } = useToast();
+  const defaultOperatorName = user?.fullName || user?.username || "";
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
   const [closeShiftDialog, setCloseShiftDialog] = useState(false);
   const [closeStep, setCloseStep] = useState<1 | 2>(1);
   const [movementDialog, setMovementDialog] = useState(false);
   const [tomarTurnoDialog, setTomarTurnoDialog] = useState(false);
-  const [openedBy, setOpenedBy] = useState("");
+  const [openedBy, setOpenedBy] = useState(defaultOperatorName);
   const [openNotes, setOpenNotes] = useState("");
   const [turnoTipoOpen, setTurnoTipoOpen] = useState("tarde");
   const [turnoTipoTomar, setTurnoTipoTomar] = useState("tarde");
@@ -534,7 +535,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       const tipoLabel = TURNO_TIPO_OPTIONS.find(t => t.value === turnoTipoOpen)?.label || turnoTipoOpen;
       toast({ title: "Turno abierto", description: `Turno ${tipoLabel} abierto para ${config.areaLabel}` });
       setOpenShiftDialog(false);
-      setOpenedBy("");
+      setOpenedBy(defaultOperatorName);
       setOpenNotes("");
     },
     onError: (err: any) => {
@@ -644,7 +645,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/autocreados"] });
       toast({ title: "Turno tomado", description: "El operador fue asignado al turno activo." });
       setTomarTurnoDialog(false);
-      setOpenedBy("");
+      setOpenedBy(defaultOperatorName);
       setTurnoTipoTomar("tarde");
     },
     onError: (err: any) => {
@@ -1377,7 +1378,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
             </div>
             <div>
               <label className="text-sm font-medium">Tu nombre *</label>
-              <Input value={openedBy} onChange={e => setOpenedBy(e.target.value)} placeholder="Tu nombre" data-testid={`input-tomar-turno-operador-${area}`} autoFocus />
+              <Input value={openedBy} onChange={e => setOpenedBy(e.target.value)} placeholder="Nombre del responsable" data-testid={`input-tomar-turno-operador-${area}`} autoFocus />
             </div>
           </div>
           <DialogFooter>
