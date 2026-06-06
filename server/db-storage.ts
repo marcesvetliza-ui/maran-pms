@@ -3957,6 +3957,16 @@ export class DatabaseStorage implements IStorage {
       and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.anulado, false))
     );
 
+    // Normaliza tanto valores en español como en inglés almacenados históricamente
+    const methodNorm: Record<string, string> = {
+      efectivo: "cash", cash: "cash",
+      tarjeta_debito: "debit_card", debit_card: "debit_card",
+      tarjeta_credito: "credit_card", credit_card: "credit_card",
+      transferencia: "transfer", transfer: "transfer",
+      mercadopago: "mercadopago",
+      cuenta_corriente: "current_account", current_account: "current_account",
+      cargo_habitacion: "room_charge", room_charge: "room_charge",
+    };
     const totals: Record<string, number> = {
       cash: 0, debit_card: 0, credit_card: 0, transfer: 0,
       mercadopago: 0, current_account: 0, room_charge: 0,
@@ -3965,7 +3975,7 @@ export class DatabaseStorage implements IStorage {
     for (const m of movements) {
       const amt = parseFloat(m.amount);
       const sign = m.movementType === "expense" ? -1 : 1;
-      const method = m.paymentMethod;
+      const method = methodNorm[m.paymentMethod] ?? m.paymentMethod;
       if (totals[method] !== undefined) totals[method] += amt * sign;
       totalGeneral += amt * sign;
     }
