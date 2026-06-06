@@ -1,0 +1,45 @@
+Problema de seguridad serio, si se cierra el navegador se debe de cerrar la sesión del usuario, cosa que no hace y debe de hacerlo. Siempre al ingresar debe de pedir usuario y clave 
+
+Respuesta 
+
+Seguridad — Sesiones
+Expiración automática de 8 horas: la sesión se invalida sola después de 8 horas, sin importar si el navegador la restaura
+Cierre por navegador: la sesión también se invalida al cerrar el navegador (comportamiento complementario)
+El comporatamiento sigue igual
+
+	Explico la imagen, la primera que dice Cerrar sesión porque con el Chorome pude entrar al sistema con el mismo usuario que deje ayer a la noche. Cerre sesión y entre de nuevo, cerre el navegador con sesion iniciada y de nuevo lo mismo, ingreso sin problemas
+	La de las 17:07 con el navegador Edge, que lo estaba utilizando con otro usuario, paso lo mismo, entro sin pedir ninguna autorizacion siendo que lo deje de usar ayer a la noche. Cerre sesion 17:08 ingrese con usuario y clave, cerre el navegador sin cerrar sesión y entro con el mismo usuario sin problema 
+
+Errores de ingreso al sistema
+Si se registra 3 o 5 intentos erroneos de ingreso a una cuenta el sistema debe de bloquear la cuenta, no por unos minutos como dice la ayuda, sino por mucho mas tiempo. Ante un segundo grupo de intentos fallido el sistema debe de bloquear la cuenta definitivamente y avisar por algun medio al administrador.
+Un bots sabiendo el nombre de un usuario puede usar un archivo de texto (el "diccionario") que contiene millones de contraseñas reales filtradas, palabras comunes, nombres y fechas. El bot va probando solo las palabras de esa lista. Luego de tener ingreso uno esta expuesto a cualquier cosa. En esto hay que ser paranoico y nunca confiarse 
+Para auditar y frenar estos ataques (tanto de fuerza bruta como de diccionario), un buen registro de log de intentos fallidos debe guardar, como mínimo, estos 6 datos clave:
+Usuario afectado: El nombre de usuario o correo que intentaron usar (sirve para detectar si atacan a una cuenta específica o si es un ataque masivo tipo Password Spraying).
+Dirección IP: Desde dónde proviene el intento. Es vital para bloquear al atacante a nivel de red o de servidor.
+Fecha y hora exacta (Timestamp): Con precisión de segundos. Permite ver la velocidad del ataque; si hay 50 intentos en un segundo, es un bot.
+Estado del intento: Registrar claramente que fue un "Fallo" (y si el sistema lo permite, el motivo: "Usuario inexistente" o "Contraseña incorrecta", sin dar pistas al usuario en la pantalla web).
+User-Agent: El identificador del navegador o herramienta que usaron. Los bots de los hackers a veces olvidan camuflar esto y dejan firmas obvias.
+ID de Sesión / Parámetros de ruta: Para identificar si el ataque entra por la pantalla de login común, por una API o por un formulario de recuperación de contraseña.
+Ejemplo de estructura básica (Tabla de Logs)
+Timestamp
+IP
+Username
+Status
+Detail
+2026-06-05 18:01:23
+190.12.34.56
+admin
+FAILED
+Wrong password
+2026-06-05 18:01:24
+190.12.34.56
+admin
+FAILED
+Wrong password
+2026-06-05 18:01:25
+190.12.34.56
+admin
+BLOCKED
+
+
+
