@@ -210,5 +210,31 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Security: brute-force columns on system_users + failed_login_attempts table
+  await withTimeout("system_users_security_cols", T, () =>
+    db.execute(sql`
+      ALTER TABLE system_users
+        ADD COLUMN IF NOT EXISTS locked_at timestamp,
+        ADD COLUMN IF NOT EXISTS lock_reason text,
+        ADD COLUMN IF NOT EXISTS lock_permanent text DEFAULT 'false',
+        ADD COLUMN IF NOT EXISTS failed_login_count integer DEFAULT 0
+    `)
+  );
+
+  await withTimeout("failed_login_attempts", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS failed_login_attempts (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        username text NOT NULL,
+        ip_address text NOT NULL,
+        timestamp timestamp NOT NULL DEFAULT now(),
+        status text NOT NULL DEFAULT 'FAILED',
+        detail text,
+        user_agent text,
+        session_id text
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

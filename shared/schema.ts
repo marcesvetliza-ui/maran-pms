@@ -1526,6 +1526,21 @@ export const systemUsers = pgTable("system_users", {
   isActive: text("is_active").default("true"),
   lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").notNull(),
+  lockedAt: timestamp("locked_at"),
+  lockReason: text("lock_reason"),
+  lockPermanent: text("lock_permanent").default("false"),
+  failedLoginCount: integer("failed_login_count").default(0),
+});
+
+export const failedLoginAttempts = pgTable("failed_login_attempts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  username: text("username").notNull(),
+  ipAddress: text("ip_address").notNull(),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+  status: text("status").notNull().default("FAILED"),
+  detail: text("detail"),
+  userAgent: text("user_agent"),
+  sessionId: text("session_id"),
 });
 
 export const insertSystemUserSchema = createInsertSchema(systemUsers).omit({ id: true });

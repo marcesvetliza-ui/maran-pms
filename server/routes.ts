@@ -459,6 +459,53 @@ export async function registerRoutes(
     }
   });
 
+  // ── Security: intentos fallidos y desbloqueo ────────────────────────
+  app.get("/api/admin/security/failed-logins", requireRole(["admin"]), async (req, res) => {
+    try {
+      const { failedLoginAttempts } = await import("@shared/schema");
+      const limit = Math.min(parseInt(req.query.limit as string) || 200, 500);
+      const rows = await db.select().from(failedLoginAttempts)
+        .orderBy(desc(failedLoginAttempts.timestamp))
+        .limit(limit);
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching failed logins" });
+    }
+  });
+
+  app.get("/api/admin/security/locked-users", requireRole(["admin"]), async (req, res) => {
+    try {
+      const locked = await db.select({
+        id: systemUsers.id,
+        username: systemUsers.username,
+        fullName: systemUsers.fullName,
+        lockedAt: systemUsers.lockedAt,
+        lockReason: systemUsers.lockReason,
+        lockPermanent: systemUsers.lockPermanent,
+        failedLoginCount: systemUsers.failedLoginCount,
+      }).from(systemUsers).where(sql`locked_at IS NOT NULL`);
+      res.json(locked);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching locked users" });
+    }
+  });
+
+  app.post("/api/admin/security/unlock-user/:id", requireRole(["admin"]), async (req, res) => {
+    try {
+      const [updated] = await db.update(systemUsers).set({
+        lockedAt: null,
+        lockReason: null,
+        lockPermanent: "false",
+        failedLoginCount: 0,
+      }).where(eq(systemUsers.id, req.params.id)).returning({ username: systemUsers.username });
+      if (!updated) return res.status(404).json({ error: "Usuario no encontrado" });
+      await audit(req, "security_unlock", "auth", `Cuenta desbloqueada: ${updated.username}`);
+      res.json({ message: `Cuenta ${updated.username} desbloqueada` });
+    } catch (error) {
+      res.status(500).json({ error: "Error unlocking user" });
+    }
+  });
+
   // System Settings
   app.get("/api/admin/settings", async (req, res) => {
     try {
