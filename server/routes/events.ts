@@ -132,7 +132,7 @@ export function registerEventsRoutes(app: Express) {
 
   app.post("/api/events", async (req, res) => {
     try {
-      const { eventRoomId, startDate, endDate } = req.body;
+      const { eventRoomId, startDate, endDate, startTime, endTime } = req.body;
       if (eventRoomId && startDate && endDate) {
         const activeStatuses = ["tentative", "confirmed", "in_progress"];
         const existingEvents = await storage.getEventsByDateRange(startDate, endDate);
@@ -140,10 +140,14 @@ export function registerEventsRoutes(app: Express) {
           if (existing.eventRoomId !== eventRoomId) continue;
           if (!activeStatuses.includes(existing.status)) continue;
           if (existing.startDate <= endDate && existing.endDate >= startDate) {
+            // Si ambos eventos tienen horario definido, verificar superposición de horario
+            if (startTime && endTime && existing.startTime && existing.endTime) {
+              if (startTime >= existing.endTime || endTime <= existing.startTime) continue;
+            }
             const room = await storage.getEventRoom(eventRoomId);
             return res.status(409).json({
               error: "Superposición de evento",
-              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}.`,
+              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}${existing.startTime ? ` (${existing.startTime}–${existing.endTime})` : ""}.`,
             });
           }
         }
@@ -170,6 +174,8 @@ export function registerEventsRoutes(app: Express) {
       const endDate = req.body.endDate || current.endDate;
 
       if (req.body.eventRoomId || req.body.startDate || req.body.endDate) {
+        const startTime = req.body.startTime ?? current.startTime;
+        const endTime = req.body.endTime ?? current.endTime;
         const activeStatuses = ["tentative", "confirmed", "in_progress"];
         const existingEvents = await storage.getEventsByDateRange(startDate, endDate);
         for (const existing of existingEvents) {
@@ -177,10 +183,14 @@ export function registerEventsRoutes(app: Express) {
           if (existing.eventRoomId !== eventRoomId) continue;
           if (!activeStatuses.includes(existing.status)) continue;
           if (existing.startDate <= endDate && existing.endDate >= startDate) {
+            // Si ambos eventos tienen horario definido, verificar superposición de horario
+            if (startTime && endTime && existing.startTime && existing.endTime) {
+              if (startTime >= existing.endTime || endTime <= existing.startTime) continue;
+            }
             const room = await storage.getEventRoom(eventRoomId);
             return res.status(409).json({
               error: "Superposición de evento",
-              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}.`,
+              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}${existing.startTime ? ` (${existing.startTime}–${existing.endTime})` : ""}.`,
             });
           }
         }
