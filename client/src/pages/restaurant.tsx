@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useAuth } from "@/App";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -278,7 +279,29 @@ const categoryFormSchema = z.object({
 
 type CategoryFormValues = z.infer<typeof categoryFormSchema>;
 
+function useElapsedTime(openedAt: string | null | undefined): string {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+  if (!openedAt) return "";
+  const diff = Math.floor((Date.now() - new Date(openedAt).getTime()) / 60000);
+  if (diff < 60) return `${diff}min`;
+  const h = Math.floor(diff / 60);
+  const m = diff % 60;
+  return m > 0 ? `${h}h ${m}min` : `${h}h`;
+}
+
+function TableElapsedBadge({ openedAt }: { openedAt: string }) {
+  const elapsed = useElapsedTime(openedAt);
+  if (!elapsed) return null;
+  return <span className="text-[9px] opacity-70 font-medium">{elapsed}</span>;
+}
+
 export default function RestaurantPage() {
+  const { user } = useAuth();
+  const canEditLayout = ["admin", "manager", "responsable_area"].includes(user?.role || "");
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("floor");
   const [selectedArea, setSelectedArea] = useState<string>("all");
@@ -1227,15 +1250,17 @@ export default function RestaurantPage() {
               ))}
             </div>
             <div className="ml-auto flex items-center gap-2">
-              <Button
-                variant={isEditMode ? "default" : "outline"}
-                size="sm"
-                onClick={() => setIsEditMode(!isEditMode)}
-                data-testid="button-edit-layout"
-              >
-                {isEditMode ? <Check className="h-4 w-4 mr-2" /> : <Settings className="h-4 w-4 mr-2" />}
-                {isEditMode ? "Guardar Layout" : "Editar Layout"}
-              </Button>
+              {canEditLayout && (
+                <Button
+                  variant={isEditMode ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setIsEditMode(!isEditMode)}
+                  data-testid="button-edit-layout"
+                >
+                  {isEditMode ? <Check className="h-4 w-4 mr-2" /> : <Settings className="h-4 w-4 mr-2" />}
+                  {isEditMode ? "Guardar Layout" : "Editar Layout"}
+                </Button>
+              )}
               {isEditMode && (
                 <Button
                   size="sm"
@@ -1427,9 +1452,15 @@ export default function RestaurantPage() {
                                 </div>
                                 {table.status === "occupied" && (() => {
                                   const tableOrder = activeOrders.find(o => o.tableId === table.id);
-                                  return tableOrder?.waiterName ? (
-                                    <span className="text-[9px] truncate max-w-full opacity-80">{tableOrder.waiterName}</span>
-                                  ) : null;
+                                  if (!tableOrder) return null;
+                                  return (
+                                    <>
+                                      {tableOrder.waiterName && (
+                                        <span className="text-[9px] truncate max-w-full opacity-80">{tableOrder.waiterName}</span>
+                                      )}
+                                      <TableElapsedBadge openedAt={tableOrder.openedAt} />
+                                    </>
+                                  );
                                 })()}
                                 {isEditMode && (
                                   <GripVertical className="h-3 w-3 opacity-50" />
@@ -2433,11 +2464,6 @@ export default function RestaurantPage() {
                 <span className="font-semibold">Total:</span>
                 <span className="font-bold text-lg">${parseFloat(getUpdatedOrder()?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setOrderView("menu")} className="flex-1" data-testid="button-comanda-add-more">
-                  <Plus className="h-4 w-4 mr-1" /> Agregar Items
-                </Button>
-              </div>
             </div>
           )}
 
@@ -2802,59 +2828,49 @@ export default function RestaurantPage() {
           )}
 
           <DialogFooter className="flex-col sm:flex-row gap-2 border-t pt-4">
-            {orderView === "review" ? (
-              <>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="w-full sm:w-auto"
-                  onClick={() => setOrderView("menu")}
-                  data-testid="button-review-back"
-                >
-                  <ChevronLeft className="h-5 w-5 mr-1" />
-                  Agregar más
-                </Button>
-                <Button
-                  size="lg"
-                  className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white"
-                  onClick={() => setIsOrderDialogOpen(false)}
-                  data-testid="button-send-order"
-                >
-                  <CheckCircle2 className="h-5 w-5 mr-2" />
-                  Listo / Cerrar
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  variant="destructive"
-                  size="lg"
-                  className="w-full sm:w-auto"
-                  onClick={() => {
-                    setIsOrderDialogOpen(false);
-                    setCloseReceiptType("ticket");
-                    setClosePaymentMethod("efectivo");
-                    setIsCloseDialogOpen(true);
-                  }}
-                  data-testid="button-close-table"
-                >
-                  <CreditCard className="h-5 w-5 mr-2" />
-                  Cerrar Mesa
-                </Button>
-                <Button
-                  onClick={() => {
-                    if (getOrderItems().length > 0) {
-                      setOrderView("review");
-                    } else {
-                      setIsOrderDialogOpen(false);
-                    }
-                  }}
-                  className="w-full sm:w-auto"
-                  data-testid="button-done"
-                >
-                  Listo
-                </Button>
-              </>
+            {/* Agregar más — solo en vista comanda */}
+            {orderView === "comanda" && (
+              <Button
+                variant="outline"
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={() => setOrderView("menu")}
+                data-testid="button-comanda-add-more-footer"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Agregar más
+              </Button>
+            )}
+            {/* Listo / Cerrar — cierra el dialog sin cerrar la mesa */}
+            {orderView !== "delete" && !pendingItem && (
+              <Button
+                variant="outline"
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={() => setIsOrderDialogOpen(false)}
+                data-testid="button-done"
+              >
+                <CheckCircle2 className="h-4 w-4 mr-1" />
+                Listo / Cerrar
+              </Button>
+            )}
+            {/* Cerrar Mesa — siempre visible salvo cuando hay item pendiente o vista delete */}
+            {orderView !== "delete" && !pendingItem && (
+              <Button
+                variant="destructive"
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={() => {
+                  setIsOrderDialogOpen(false);
+                  setCloseReceiptType("ticket");
+                  setClosePaymentMethod("efectivo");
+                  setIsCloseDialogOpen(true);
+                }}
+                data-testid="button-close-table"
+              >
+                <CreditCard className="h-5 w-5 mr-2" />
+                Cerrar Mesa
+              </Button>
             )}
           </DialogFooter>
         </DialogContent>
