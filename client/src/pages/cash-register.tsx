@@ -447,6 +447,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [movCCEntityId, setMovCCEntityId] = useState("");
   const [movCCEntityName, setMovCCEntityName] = useState("");
   const [movCCOpen, setMovCCOpen] = useState(false);
+  const [movCCSearch, setMovCCSearch] = useState("");
   const [closingSummaryData, setClosingSummaryData] = useState<{ shift: CashShift; movements: CashMovement[]; turnoNuevo?: CashShift; efectivoContado: number; efectivoSistema: number } | null>(null);
 
   const efectivoContado =
@@ -939,6 +940,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           setMovCCEntityId("");
           setMovCCEntityName("");
           setMovCCEntityType("company");
+          setMovCCSearch("");
         }
       }}>
         <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
@@ -994,63 +996,68 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                   </Select>
                 </div>
 
-                {/* Selector de entidad — combobox buscable */}
+                {/* Selector de entidad — buscador inline (evita conflicto Popover+Dialog) */}
                 <div>
                   <label className="text-sm font-medium">
                     {movCCEntityType === "company" ? "Empresa" : movCCEntityType === "agency" ? "Agencia" : "Cliente"}
                   </label>
-                  <Popover open={movCCOpen} onOpenChange={setMovCCOpen}>
-                    <PopoverTrigger asChild>
+
+                  {/* Si ya hay una seleccionada, mostrar con botón para cambiar */}
+                  {movCCEntityId ? (
+                    <div className="flex items-center justify-between border rounded-md px-3 py-2 bg-muted/30 mt-1">
+                      <div>
+                        <span className="font-medium text-sm">{movCCEntityName}</span>
+                        {ccEntities.find(e => e.id === movCCEntityId) && (
+                          <span className={`ml-2 text-xs font-semibold ${ccEntities.find(e => e.id === movCCEntityId)!.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                            Saldo: ${ccEntities.find(e => e.id === movCCEntityId)!.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          </span>
+                        )}
+                      </div>
                       <Button
-                        variant="outline"
-                        role="combobox"
-                        className="w-full justify-between font-normal"
-                        data-testid={`combobox-cc-entity-${area}`}
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-xs"
+                        onClick={() => { setMovCCEntityId(""); setMovCCEntityName(""); setMovCCSearch(""); }}
+                        data-testid={`btn-cc-clear-${area}`}
                       >
-                        <span className={movCCEntityName ? "" : "text-muted-foreground"}>
-                          {movCCEntityName || "Seleccionar..."}
-                        </span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        Cambiar
                       </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[340px] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="Buscar..." />
-                        <CommandList>
-                          <CommandEmpty>Sin resultados</CommandEmpty>
-                          <CommandGroup>
-                            {ccEntities.map((e) => (
-                              <CommandItem
+                    </div>
+                  ) : (
+                    <div className="mt-1 space-y-1">
+                      <Input
+                        placeholder="Buscar por nombre..."
+                        value={movCCSearch}
+                        onChange={(e) => setMovCCSearch(e.target.value)}
+                        data-testid={`input-cc-search-${area}`}
+                        autoComplete="off"
+                      />
+                      {ccEntities.length > 0 && (
+                        <div className="border rounded-md max-h-40 overflow-y-auto bg-background">
+                          {ccEntities
+                            .filter(e => !movCCSearch || e.name.toLowerCase().includes(movCCSearch.toLowerCase()))
+                            .map(e => (
+                              <button
                                 key={e.id}
-                                value={e.name}
-                                onSelect={() => {
-                                  setMovCCEntityId(e.id);
-                                  setMovCCEntityName(e.name);
-                                  setMovCCOpen(false);
-                                }}
+                                type="button"
+                                className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-muted transition-colors text-left border-b last:border-b-0"
+                                onClick={() => { setMovCCEntityId(e.id); setMovCCEntityName(e.name); setMovCCSearch(""); }}
+                                data-testid={`btn-cc-entity-${e.id}`}
                               >
-                                <div className="flex items-center justify-between w-full">
-                                  <span>{e.name}</span>
-                                  {e.balance !== 0 && (
-                                    <span className={`text-xs font-semibold tabular-nums ml-2 ${e.balance > 0 ? "text-red-600" : "text-green-600"}`}>
-                                      ${e.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                                    </span>
-                                  )}
-                                </div>
-                              </CommandItem>
+                                <span>{e.name}</span>
+                                {e.balance !== 0 && (
+                                  <span className={`text-xs font-semibold tabular-nums ml-2 shrink-0 ${e.balance > 0 ? "text-red-600" : "text-green-600"}`}>
+                                    ${e.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                  </span>
+                                )}
+                              </button>
                             ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  {movCCEntityId && ccEntities.find(e => e.id === movCCEntityId) && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Saldo actual:{" "}
-                      <span className={`font-semibold ${(ccEntities.find(e => e.id === movCCEntityId)!.balance) > 0 ? "text-red-600" : "text-green-600"}`}>
-                        ${(ccEntities.find(e => e.id === movCCEntityId)!.balance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </span>
-                    </p>
+                          {ccEntities.filter(e => !movCCSearch || e.name.toLowerCase().includes(movCCSearch.toLowerCase())).length === 0 && (
+                            <p className="text-sm text-muted-foreground px-3 py-2">Sin resultados</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
