@@ -68,10 +68,13 @@ export default function MozoPage() {
     data: orderDetail,
     refetch: refetchDetail,
     isFetching: detailFetching,
+    isError: detailIsError,
+    error: detailError,
   } = useQuery<any>({
     queryKey: [`/api/restaurant/orders/${selectedOrderId}`],
     enabled: !!selectedOrderId,
     refetchInterval: 15000,
+    retry: 2,
   });
 
   const activeOrders = allOrders.filter((o: any) =>
@@ -89,6 +92,8 @@ export default function MozoPage() {
       return res.json();
     },
     onSuccess: async (order: any) => {
+      // Pre-populate cache so the detail view renders immediately without waiting
+      queryClient.setQueryData([`/api/restaurant/orders/${order.id}`], { ...order, items: [] });
       setSelectedOrderId(order.id);
       setCoversDialog(null);
       setView("detail");
@@ -97,7 +102,7 @@ export default function MozoPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] }),
       ]);
     },
-    onError: () => toast({ title: "Error al abrir mesa", variant: "destructive" }),
+    onError: (e: any) => toast({ title: `Error al abrir mesa: ${e?.message ?? ""}`, variant: "destructive" }),
   });
 
   const sendKitchenMutation = useMutation({
@@ -364,7 +369,14 @@ export default function MozoPage() {
             {servedItems.length > 0 && (
               <ItemGroup label="Servido" color="gray" items={servedItems} />
             )}
-            {!orderDetail && (
+            {!orderDetail && detailIsError && (
+              <div className="flex flex-col items-center justify-center h-32 gap-2">
+                <p className="text-sm text-destructive font-medium">Error al cargar pedido</p>
+                <p className="text-xs text-muted-foreground">{String((detailError as any)?.message ?? "")}</p>
+                <Button size="sm" variant="outline" onClick={() => refetchDetail()}>Reintentar</Button>
+              </div>
+            )}
+            {!orderDetail && !detailIsError && (
               <div className="flex items-center justify-center h-32">
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
