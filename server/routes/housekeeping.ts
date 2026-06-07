@@ -10,10 +10,50 @@ export function registerHousekeepingRoutes(app: Express) {
   app.get("/api/housekeeping", async (req, res) => {
     try {
       const date = req.query.date as string | undefined;
-      const tasks = await storage.getHousekeepingTasks(date);
+      const assignedTo = req.query.assignedTo as string | undefined;
+      const tasks = await storage.getHousekeepingTasks(date, assignedTo);
       res.json(tasks);
     } catch (error) {
       res.status(500).json({ error: "Error fetching housekeeping tasks" });
+    }
+  });
+
+  // Get housekeeping staff (mucamas + supervisors) — must be before /:id
+  app.get("/api/housekeeping/staff", async (req, res) => {
+    try {
+      const allUsers = await storage.getSystemUsers();
+      const staff = allUsers
+        .filter(u => ["housekeeping", "gobernanta", "responsable_area"].includes(u.role) && u.isActive === "true")
+        .map(u => ({ id: u.id, fullName: u.fullName, role: u.role, username: u.username }));
+      res.json(staff);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching staff" });
+    }
+  });
+
+  // Assign a room to a staff member for a given date
+  app.post("/api/housekeeping/assign", async (req, res) => {
+    try {
+      const { roomId, assignedTo, date } = req.body;
+      if (!roomId || !date) return res.status(400).json({ error: "roomId y date son obligatorios" });
+      const tasks = await storage.getHousekeepingTasks(date);
+      const existing = tasks.find(t => t.roomId === roomId);
+      if (existing) {
+        const updated = await storage.updateHousekeepingTask(existing.id, { assignedTo: assignedTo || null });
+        return res.json(updated);
+      }
+      const task = await storage.createHousekeepingTask({
+        roomId,
+        taskType: "checkout_clean",
+        status: "pending",
+        priority: "normal",
+        scheduledDate: date,
+        assignedTo: assignedTo || null,
+        createdAt: new Date(),
+      });
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({ error: "Error al asignar habitación" });
     }
   });
 

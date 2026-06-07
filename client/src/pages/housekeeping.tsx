@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/App";
 import {
   Sparkles,
   CheckCircle,
@@ -29,6 +30,9 @@ import {
   RotateCcw,
   CheckCheck,
   Trash2,
+  Users,
+  CalendarClock,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1187,7 +1191,10 @@ function MobileRoomCard({
 // ===================== HOUSEKEEPING MAIN =====================
 
 export default function Housekeeping() {
+  const { user } = useAuth();
   const { toast } = useToast();
+  const isSupervisor = ["admin", "manager", "gobernanta", "responsable_area"].includes(user?.role ?? "");
+  const isMucama = user?.role === "housekeeping";
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [mobileView, setMobileView] = useState(() => localStorage.getItem("hk_mobile_view") === "true");
@@ -1209,6 +1216,11 @@ export default function Housekeeping() {
     queryKey: ["/api/housekeeping", today],
     queryFn: () =>
       fetch(`/api/housekeeping?date=${today}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: hkStaff = [] } = useQuery<any[]>({
+    queryKey: ["/api/housekeeping/staff"],
+    enabled: isSupervisor,
   });
 
   const { data: checkouts = [] } = useQuery<any[]>({
@@ -1385,6 +1397,16 @@ export default function Housekeeping() {
     onError: () => toast({ title: "Error", description: "No se pudo iniciar la limpieza.", variant: "destructive" }),
   });
 
+  const assignMutation = useMutation({
+    mutationFn: (data: { roomId: string; assignedTo: string | null; date: string }) =>
+      apiRequest("POST", "/api/housekeeping/assign", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+      toast({ title: "Asignación guardada" });
+    },
+    onError: () => toast({ title: "Error al asignar", variant: "destructive" }),
+  });
+
   const floors = rooms ? Array.from(new Set(rooms.map(r => r.floor).filter((f): f is number => f != null))).sort((a, b) => a - b) : [];
   
   const filteredRooms = rooms?.filter(room => {
@@ -1392,6 +1414,14 @@ export default function Housekeeping() {
     if (statusFilter !== "all" && room.status !== statusFilter) return false;
     return true;
   }) || [];
+
+  // Para mucamas: solo muestran sus habitaciones asignadas. Si no tiene ninguna asignada, ve todas.
+  const myAssignedRoomIds = isMucama
+    ? new Set((tasks ?? []).filter(t => t.assignedTo === user?.id).map(t => t.roomId))
+    : null;
+  const mobileRooms = (isMucama && myAssignedRoomIds && myAssignedRoomIds.size > 0)
+    ? filteredRooms.filter(r => myAssignedRoomIds.has(r.id))
+    : filteredRooms;
 
   const roomsByFloor = filteredRooms.reduce((acc, room) => {
     if (!acc[room.floor]) acc[room.floor] = [];
@@ -1507,6 +1537,12 @@ export default function Housekeeping() {
       <Tabs defaultValue="rooms">
         <TabsList>
           <TabsTrigger value="rooms">Habitaciones</TabsTrigger>
+          {isSupervisor && (
+            <TabsTrigger value="turno" data-testid="tab-turno" className="gap-1">
+              <CalendarClock className="h-4 w-4" />
+              Turno
+            </TabsTrigger>
+          )}
           <TabsTrigger value="lost-found" data-testid="tab-lost-found" className="gap-1">
             <Package className="h-4 w-4" />
             Objetos Perdidos
@@ -1684,14 +1720,26 @@ export default function Housekeeping() {
       {mobileView ? (
         /* ── VISTA MÓVIL ── */
         <div className="space-y-3">
-          {filteredRooms.length === 0 && (
+          {isMucama && myAssignedRoomIds && myAssignedRoomIds.size > 0 && (
+            <div className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground border-b">
+              <Users className="h-4 w-4" />
+              <span>Mostrando tus <strong>{myAssignedRoomIds.size}</strong> habitaciones asignadas</span>
+            </div>
+          )}
+          {isMucama && myAssignedRoomIds && myAssignedRoomIds.size === 0 && (
+            <div className="flex items-center gap-2 px-1 py-2 text-sm text-amber-600 border-b border-amber-200 bg-amber-50 rounded-lg">
+              <Users className="h-4 w-4" />
+              <span>Sin asignación aún — mostrando todas las habitaciones</span>
+            </div>
+          )}
+          {mobileRooms.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
               <Sparkles className="h-12 w-12 mx-auto mb-3 opacity-30" />
               <p className="text-sm font-medium">No hay habitaciones que mostrar</p>
             </div>
           )}
           {/* Urgentes primero: checkout hoy + sucia/ocupada */}
-          {filteredRooms
+          {mobileRooms
             .slice()
             .sort((a, b) => {
               const urgentA = checkoutRoomIds.has(a.id) && (a.status === "dirty" || a.status === "occupied") ? 0 : 1;
@@ -1761,6 +1809,116 @@ export default function Housekeeping() {
       )}
           </div>
         </TabsContent>
+
+        {isSupervisor && (
+        <TabsContent value="turno">
+          <div className="mt-4 space-y-6">
+            {/* ── Cards por mucama ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                <Users className="h-4 w-4" /> Personal asignado hoy
+              </h3>
+              {hkStaff.length === 0 && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No hay mucamas/gobernanta registradas aún. Creá usuarios con perfil Housekeeping o Gobernanta.
+                </p>
+              )}
+              {hkStaff.map((staff: any) => {
+                const staffTasks = (tasks ?? []).filter(t => t.assignedTo === staff.id);
+                const roleLabel: Record<string, string> = { housekeeping: "Mucama", gobernanta: "Gobernanta", responsable_area: "Resp. Área" };
+                return (
+                  <Card key={staff.id} className="border">
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <span className="text-sm font-bold text-primary">{staff.fullName.charAt(0).toUpperCase()}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-sm truncate">{staff.fullName}</p>
+                            <Badge variant="outline" className="text-xs shrink-0">{roleLabel[staff.role] ?? staff.role}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            {staffTasks.length === 0 ? "Sin habitaciones asignadas" : `${staffTasks.length} hab. asignada${staffTasks.length !== 1 ? "s" : ""}`}
+                          </p>
+                          {staffTasks.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {staffTasks.map(t => (
+                                <div key={t.id} className="flex items-center gap-1 bg-muted rounded px-2 py-0.5 text-xs">
+                                  <span className="font-medium">Hab. {t.room?.roomNumber}</span>
+                                  <button
+                                    className="text-muted-foreground hover:text-destructive ml-0.5"
+                                    title="Desasignar"
+                                    onClick={() => assignMutation.mutate({ roomId: t.roomId, assignedTo: null, date: today })}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* ── Habitaciones a asignar ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                <Sparkles className="h-4 w-4" /> Habitaciones del turno
+              </h3>
+              {rooms
+                ?.filter(r => ["dirty", "cleaning", "occupied"].includes(r.status))
+                .sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber))
+                .map(room => {
+                  const task = (tasks ?? []).find(t => t.roomId === room.id);
+                  const assignedStaff = task?.assignedTo ? hkStaff.find((s: any) => s.id === task.assignedTo) : null;
+                  const statusLabel: Record<string, string> = { dirty: "Sucia", cleaning: "Limpiando", occupied: "Ocupada" };
+                  const statusColor: Record<string, string> = { dirty: "bg-orange-100 text-orange-700", cleaning: "bg-yellow-100 text-yellow-700", occupied: "bg-blue-100 text-blue-700" };
+                  return (
+                    <div key={room.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm">Hab. {room.roomNumber}</span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${statusColor[room.status] ?? "bg-muted text-muted-foreground"}`}>
+                            {statusLabel[room.status] ?? room.status}
+                          </span>
+                          {checkoutRoomIds.has(room.id) && (
+                            <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Checkout hoy</span>
+                          )}
+                        </div>
+                        {assignedStaff && (
+                          <p className="text-xs text-muted-foreground mt-0.5">Asignada a: <strong>{assignedStaff.fullName}</strong></p>
+                        )}
+                      </div>
+                      <Select
+                        value={task?.assignedTo ?? "__none__"}
+                        onValueChange={(val) => assignMutation.mutate({ roomId: room.id, assignedTo: val === "__none__" ? null : val, date: today })}
+                        disabled={assignMutation.isPending}
+                      >
+                        <SelectTrigger className="w-36 h-8 text-xs" data-testid={`select-assign-${room.id}`}>
+                          <SelectValue placeholder="Asignar a…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— Sin asignar —</SelectItem>
+                          {hkStaff.map((s: any) => (
+                            <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                })}
+              {rooms && rooms.filter(r => ["dirty", "cleaning", "occupied"].includes(r.status)).length === 0 && (
+                <p className="text-sm text-muted-foreground py-6 text-center">No hay habitaciones que requieran limpieza hoy.</p>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+        )}
 
         <TabsContent value="lost-found">
           <LostFoundTab />

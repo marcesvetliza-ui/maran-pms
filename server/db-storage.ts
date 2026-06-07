@@ -1689,9 +1689,13 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getHousekeepingTasks(date?: string): Promise<HousekeepingTaskWithRoom[]> {
+  async getHousekeepingTasks(date?: string, assignedTo?: string): Promise<HousekeepingTaskWithRoom[]> {
     let tasks: HousekeepingTask[];
-    if (date) {
+    if (date && assignedTo) {
+      tasks = await db.select().from(housekeepingTasks).where(
+        and(eq(housekeepingTasks.scheduledDate, date), eq(housekeepingTasks.assignedTo, assignedTo))
+      );
+    } else if (date) {
       tasks = await db.select().from(housekeepingTasks).where(eq(housekeepingTasks.scheduledDate, date));
     } else {
       tasks = await db.select().from(housekeepingTasks);

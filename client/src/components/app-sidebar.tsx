@@ -72,9 +72,10 @@ import type { SystemNotification } from "@shared/schema";
 
 // roles: qué roles pueden ver el ítem. Sin la propiedad = todos.
 // admin y manager siempre ven todo.
-const ALL_ROLES = ["admin", "manager", "reception", "housekeeping", "maintenance", "restaurant", "spa", "events"];
+const ALL_ROLES = ["admin", "manager", "reception", "housekeeping", "maintenance", "restaurant", "spa", "events", "gobernanta", "responsable_area"];
 const HOTEL_OPS  = ["admin", "manager", "reception"];
 const MGMT_ONLY  = ["admin", "manager"];
+const HK_SUPERVISORS = ["admin", "manager", "gobernanta", "responsable_area"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MÓDULOS DEL SISTEMA — cada sección corresponde a un módulo vendible.
@@ -92,7 +93,7 @@ const menuSections = [
       { label: "Reserva rápida", icon: Zap,             href: "/new-reservation",roles: HOTEL_OPS },
       { label: "Check in",       icon: LogIn,           href: "/check-in",       roles: HOTEL_OPS },
       { label: "Check out",      icon: LogOut,          href: "/check-out",      roles: HOTEL_OPS },
-      { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",          roles: [...HOTEL_OPS, "housekeeping", "maintenance"] },
+      { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",          roles: [...HOTEL_OPS, "housekeeping", "maintenance", "gobernanta", "responsable_area"] },
       { label: "Tarifas",        icon: Tag,             href: "/rate-plans",     roles: MGMT_ONLY },
       { label: "Huéspedes",      icon: User,            href: "/guests",         roles: HOTEL_OPS },
     ],
@@ -130,7 +131,7 @@ const menuSections = [
   {
     titulo: "Operaciones",
     items: [
-      { label: "Housekeeping",  icon: Brush,        href: "/housekeeping", roles: [...HOTEL_OPS, "housekeeping"] },
+      { label: "Housekeeping",  icon: Brush,        href: "/housekeeping", roles: [...HOTEL_OPS, "housekeeping", "gobernanta", "responsable_area"] },
       { label: "Mantenimiento", icon: Wrench,        href: "/maintenance",  roles: [...HOTEL_OPS, "maintenance"] },
       { label: "Inventario",    icon: Package,       href: "/inventory",    roles: [...MGMT_ONLY, "maintenance"] },
     ],
