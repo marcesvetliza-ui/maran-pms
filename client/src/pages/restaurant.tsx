@@ -57,7 +57,10 @@ import {
   CheckCircle2,
   Printer,
   ArrowRightLeft,
+  Smartphone,
+  MonitorSmartphone,
 } from "lucide-react";
+import { Link } from "wouter";
 
 type RestaurantArea = {
   id: string;
@@ -1183,6 +1186,18 @@ export default function RestaurantPage() {
           <p className="text-muted-foreground">Gestiona mesas, pedidos y menu</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Link href="/mozo">
+            <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-goto-mozo">
+              <Smartphone className="h-4 w-4" />
+              Vista Mozo
+            </Button>
+          </Link>
+          <Link href="/cocina">
+            <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-goto-cocina">
+              <MonitorSmartphone className="h-4 w-4" />
+              Pantalla Cocina
+            </Button>
+          </Link>
           <Button
             variant="outline"
             onClick={() => setIsDailyReservationsOpen(true)}
