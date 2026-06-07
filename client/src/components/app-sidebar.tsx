@@ -120,7 +120,6 @@ const menuSections = [
     items: [
       { label: "Restaurant",       icon: UtensilsCrossed,  href: "/restaurant",  roles: [...HOTEL_OPS, "restaurant"] },
       { label: "Vista Mozo",       icon: Smartphone,       href: "/mozo",        roles: [...HOTEL_OPS, "restaurant"] },
-      { label: "Pantalla Cocina",  icon: MonitorSmartphone, href: "/cocina",      roles: [...HOTEL_OPS, "restaurant"] },
       { label: "Spa",              icon: Sparkles,         href: "/spa",         roles: [...HOTEL_OPS, "spa"] },
       { label: "Clientes Spa", icon: Heart,           href: "/spa-clients", roles: [...HOTEL_OPS, "spa"] },
       { label: "Eventos",      icon: CalendarCheck,   href: "/events",      roles: [...HOTEL_OPS, "events"] },

@@ -68,7 +68,6 @@ const SeguridadPage = lazy(() => import("@/pages/seguridad"));
 const SurveyPage = lazy(() => import("@/pages/survey"));
 const HelpChat = lazy(() => import("@/components/help-chat"));
 const MozoPage = lazy(() => import("@/pages/mozo"));
-const CocinaPage = lazy(() => import("@/pages/cocina"));
 
 interface AuthUser {
   id: string;
@@ -183,7 +182,6 @@ function Router() {
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
         <Route path="/mozo" component={MozoPage} />
-        <Route path="/cocina" component={CocinaPage} />
         <Route component={NotFound} />
       </Switch>
     </Suspense>
@@ -226,7 +224,7 @@ function AppLayout() {
   useRadixScrollLockCleanup();
   const [location] = useLocation();
 
-  const isStandalone = location === "/mozo" || location === "/cocina";
+  const isStandalone = location === "/mozo";
 
   if (isStandalone) {
     return (

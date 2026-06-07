@@ -58,7 +58,6 @@ import {
   Printer,
   ArrowRightLeft,
   Smartphone,
-  MonitorSmartphone,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -1190,12 +1189,6 @@ export default function RestaurantPage() {
             <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-goto-mozo">
               <Smartphone className="h-4 w-4" />
               Vista Mozo
-            </Button>
-          </Link>
-          <Link href="/cocina">
-            <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-goto-cocina">
-              <MonitorSmartphone className="h-4 w-4" />
-              Pantalla Cocina
             </Button>
           </Link>
           <Button
