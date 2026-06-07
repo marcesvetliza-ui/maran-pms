@@ -1206,7 +1206,9 @@ export default function Housekeeping() {
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const { data: tasks, isLoading: tasksLoading } = useQuery<HousekeepingTaskWithRoom[]>({
-    queryKey: ["/api/housekeeping", { date: today }],
+    queryKey: ["/api/housekeeping", today],
+    queryFn: () =>
+      fetch(`/api/housekeeping?date=${today}`, { credentials: "include" }).then(r => r.json()),
   });
 
   const { data: checkouts = [] } = useQuery<any[]>({
