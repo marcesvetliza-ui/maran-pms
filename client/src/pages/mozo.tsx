@@ -84,7 +84,10 @@ export default function MozoPage() {
   const selectedTable = tables.find((t: any) => t.id === selectedTableId);
 
   const createOrderMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/restaurant/orders", data),
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/restaurant/orders", data);
+      return res.json();
+    },
     onSuccess: async (order: any) => {
       setSelectedOrderId(order.id);
       setCoversDialog(null);
