@@ -18,3 +18,9 @@ id = "QZ5IRql4uqd0EAuNzkol1"
 uri = "file://HANDOFF_TECNICO.md"
 type = "text"
 title = "Documento de Transferencia Técnica — Maran Suite System"
+
+[[outputs]]
+id = "NDXfkznPWIkCoGu87xHWh"
+uri = "file://certs/maran_arca_certs.zip"
+type = "unspecified"
+title = "Certificados ARCA — maran_suites.csr + maran_suites.key"
