@@ -661,6 +661,7 @@ export default function GroupDetailPage() {
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
+  const [showCancelledRes, setShowCancelledRes] = useState(false);
 
   // Cambiar habitación
   const [changingReservation, setChangingReservation] = useState<ReservationWithDetails | null>(null);
@@ -1526,21 +1527,24 @@ export default function GroupDetailPage() {
               <CardDescription>Habitaciones asignadas individualmente</CardDescription>
             </CardHeader>
             <CardContent>
-              {group.reservations.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Código</TableHead>
-                      <TableHead>Ocupante</TableHead>
-                      <TableHead>Habitación</TableHead>
-                      <TableHead>Fechas</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Tarifa</TableHead>
-                      <TableHead className="w-[100px]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {group.reservations.map((res) => (
+              {(() => {
+                const activeRes = group.reservations.filter(r => r.status !== "cancelled");
+                const cancelledRes = group.reservations.filter(r => r.status === "cancelled");
+                const renderTable = (rows: typeof group.reservations) => (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Código</TableHead>
+                        <TableHead>Ocupante</TableHead>
+                        <TableHead>Habitación</TableHead>
+                        <TableHead>Fechas</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Tarifa</TableHead>
+                        <TableHead className="w-[100px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((res) => (
                       <TableRow 
                         key={res.id} 
                         data-testid={`row-reservation-${res.id}`}
@@ -1656,17 +1660,40 @@ export default function GroupDetailPage() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <Users2 className="h-10 w-10 text-muted-foreground/50" />
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    No hay reservas asignadas. Use los bloques para asignar habitaciones.
-                  </p>
-                </div>
-              )}
+                      ))}
+                    </TableBody>
+                  </Table>
+                );
+                return (
+                  <div className="space-y-4">
+                    {activeRes.length > 0 ? renderTable(activeRes) : (
+                      <div className="flex flex-col items-center justify-center py-8 text-center">
+                        <Users2 className="h-10 w-10 text-muted-foreground/50" />
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          No hay reservas activas. Use los bloques para asignar habitaciones.
+                        </p>
+                      </div>
+                    )}
+                    {cancelledRes.length > 0 && (
+                      <div>
+                        <button
+                          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1"
+                          onClick={() => setShowCancelledRes(v => !v)}
+                          data-testid="button-toggle-cancelled-res"
+                        >
+                          <ChevronRight className={`h-4 w-4 transition-transform ${showCancelledRes ? "rotate-90" : ""}`} />
+                          Canceladas ({cancelledRes.length})
+                        </button>
+                        {showCancelledRes && (
+                          <div className="mt-2 opacity-60">
+                            {renderTable(cancelledRes)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>
