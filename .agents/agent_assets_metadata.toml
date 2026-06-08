@@ -24,3 +24,15 @@ id = "NDXfkznPWIkCoGu87xHWh"
 uri = "file://certs/maran_arca_certs.zip"
 type = "unspecified"
 title = "Certificados ARCA — maran_suites.csr + maran_suites.key"
+
+[[outputs]]
+id = "rhujgcpcPfwdv-UdxTaIh"
+uri = "file://certs/maran_suites_CSR.txt"
+type = "text"
+title = "maran_suites.csr — subir a ARCA"
+
+[[outputs]]
+id = "6bKlWwfRU5CFCh61zs-bR"
+uri = "file://certs/maran_suites_KEY.txt"
+type = "text"
+title = "maran_suites.key — GUARDAR SEGURO"
