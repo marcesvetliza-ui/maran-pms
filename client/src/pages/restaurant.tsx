@@ -60,6 +60,9 @@ import {
   Smartphone,
   FileX,
   AlertTriangle,
+  Building2,
+  UserPlus,
+  CheckCircle,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -411,6 +414,30 @@ export default function RestaurantPage() {
   const [ncMotivo, setNcMotivo] = useState("");
   const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0]);
   const [ncDateTo, setNcDateTo] = useState(new Date().toISOString().split("T")[0]);
+  const [billingSearch, setBillingSearch] = useState("");
+  const [billingSearchOpen, setBillingSearchOpen] = useState(false);
+  const [fbIsExento, setFbIsExento] = useState(false);
+  const [isNewClientDialogOpen, setIsNewClientDialogOpen] = useState(false);
+  const [newClientRazonSocial, setNewClientRazonSocial] = useState("");
+  const [newClientCuit, setNewClientCuit] = useState("");
+  const [newClientCondicionIva, setNewClientCondicionIva] = useState<"responsable_inscripto"|"exento"|"monotributista">("exento");
+
+  function validateCuit(cuit: string): boolean {
+    const clean = cuit.replace(/[-\s]/g, "");
+    if (!/^\d{11}$/.test(clean)) return false;
+    const mult = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+    const sum = mult.reduce((acc, m, i) => acc + m * parseInt(clean[i]), 0);
+    const rem = sum % 11;
+    const dv = rem === 0 ? 0 : rem === 1 ? 9 : 11 - rem;
+    return dv === parseInt(clean[10]);
+  }
+
+  function formatCuit(v: string): string {
+    const d = v.replace(/\D/g, "").slice(0, 11);
+    if (d.length <= 2) return d;
+    if (d.length <= 10) return `${d.slice(0,2)}-${d.slice(2)}`;
+    return `${d.slice(0,2)}-${d.slice(2,10)}-${d.slice(10)}`;
+  }
 
   const courseLabels: Record<number, string> = { 1: "Entradas", 2: "Platos Principales", 3: "Postres" };
   const courseShortLabels: Record<number, string> = { 1: "Entrada", 2: "Principal", 3: "Postre" };
@@ -806,6 +833,8 @@ export default function RestaurantPage() {
       setCloseBillingCompanyId("");
       setCloseCcEntityType("company");
       setCloseCcEntityId("");
+      setBillingSearch("");
+      setFbIsExento(false);
       toast({ title: "Pedido cerrado" });
     },
   });
@@ -993,6 +1022,30 @@ export default function RestaurantPage() {
       return res.json();
     },
     enabled: activeTab === "notas_credito",
+  });
+
+  const createQuickClientMutation = useMutation({
+    mutationFn: async (data: { razonSocial: string; cuilCuit: string; condicionIva: string }) => {
+      const res = await apiRequest("POST", "/api/companies", {
+        razonSocial: data.razonSocial,
+        cuilCuit: data.cuilCuit,
+        condicionIva: data.condicionIva,
+        isActive: "true",
+        pais: "Argentina",
+      });
+      return res.json();
+    },
+    onSuccess: (company) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      setCloseBillingName(company.razonSocial);
+      setCloseBillingCuit(company.cuilCuit);
+      setCloseBillingCompanyId(company.id);
+      setBillingSearch(company.razonSocial);
+      setIsNewClientDialogOpen(false);
+      setNewClientRazonSocial(""); setNewClientCuit(""); setNewClientCondicionIva("exento");
+      toast({ title: "Cliente creado y seleccionado" });
+    },
+    onError: () => toast({ title: "Error al crear cliente", variant: "destructive" }),
   });
 
   const emitirNCMutation = useMutation({
@@ -3086,8 +3139,69 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Quick-create client dialog */}
+      <Dialog open={isNewClientDialogOpen} onOpenChange={setIsNewClientDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5" /> Nuevo cliente fiscal
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label className="text-xs">Razón Social *</Label>
+              <Input
+                value={newClientRazonSocial}
+                onChange={e => setNewClientRazonSocial(e.target.value)}
+                placeholder="Empresa S.A."
+                data-testid="input-new-client-razon-social"
+              />
+            </div>
+            <div>
+              <Label className="text-xs flex items-center gap-2">
+                CUIT *
+                {newClientCuit && (
+                  <span className={`text-xs font-medium ${validateCuit(newClientCuit) ? "text-green-600" : "text-destructive"}`}>
+                    {validateCuit(newClientCuit) ? "✓ válido" : "✗ inválido"}
+                  </span>
+                )}
+              </Label>
+              <Input
+                value={newClientCuit}
+                onChange={e => setNewClientCuit(formatCuit(e.target.value))}
+                placeholder="30-12345678-9"
+                data-testid="input-new-client-cuit"
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Condición IVA</Label>
+              <Select value={newClientCondicionIva} onValueChange={(v) => setNewClientCondicionIva(v as typeof newClientCondicionIva)}>
+                <SelectTrigger data-testid="select-new-client-condicion-iva">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
+                  <SelectItem value="exento">Exento</SelectItem>
+                  <SelectItem value="monotributista">Monotributista</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewClientDialogOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!newClientRazonSocial.trim() || !newClientCuit || !validateCuit(newClientCuit) || createQuickClientMutation.isPending}
+              onClick={() => createQuickClientMutation.mutate({ razonSocial: newClientRazonSocial.trim(), cuilCuit: newClientCuit, condicionIva: newClientCondicionIva })}
+              data-testid="button-confirm-new-client"
+            >
+              {createQuickClientMutation.isPending ? "Creando..." : "Crear y seleccionar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -3290,66 +3404,161 @@ export default function RestaurantPage() {
                   </div>
                 )}
 
-                {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && closePaymentMethod !== "cuenta_habitacion" && (
-                  <div className="space-y-3 p-3 border rounded-md bg-muted/30">
-                    <p className="text-sm font-medium">Datos de facturación</p>
-                    {closeReceiptType === "factura_a" && (
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Empresa existente (opcional)</Label>
-                        <Select
-                          value={closeBillingCompanyId || "manual"}
-                          onValueChange={(v) => {
-                            if (v === "manual") {
-                              setCloseBillingCompanyId("");
-                              setCloseBillingName("");
-                              setCloseBillingCuit("");
-                            } else {
-                              setCloseBillingCompanyId(v);
-                              const company = companies.find(c => c.id === v);
-                              if (company) {
-                                setCloseBillingName(company.razonSocial);
-                                setCloseBillingCuit(company.cuilCuit);
+                {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && closePaymentMethod !== "cuenta_habitacion" && (() => {
+                  const isFactA = closeReceiptType === "factura_a";
+                  const showClientForm = isFactA || fbIsExento;
+                  const clientSelected = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
+                  const cuitValid = !closeBillingCuit || validateCuit(closeBillingCuit);
+                  const billingResults = billingSearch.length >= 2
+                    ? companies
+                        .filter(c => {
+                          const q = billingSearch.toLowerCase();
+                          return c.razonSocial.toLowerCase().includes(q)
+                            || (c.nombreFantasia?.toLowerCase() || "").includes(q)
+                            || c.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
+                        })
+                        .slice(0, 8)
+                    : [];
+
+                  return (
+                    <div className="space-y-3 p-3 border rounded-md bg-muted/30">
+                      <p className="text-sm font-medium">Datos de facturación</p>
+
+                      {!isFactA && (
+                        <div className="flex items-center gap-2">
+                          <input type="checkbox" id="fb-exento" checked={fbIsExento}
+                            onChange={e => {
+                              setFbIsExento(e.target.checked);
+                              if (!e.target.checked) {
+                                setCloseBillingName("CONSUMIDOR FINAL");
+                                setCloseBillingCuit("");
+                                setCloseBillingCompanyId("");
+                                setBillingSearch("");
+                              } else {
+                                setCloseBillingName("");
                               }
-                            }
-                          }}
-                        >
-                          <SelectTrigger data-testid="select-billing-company">
-                            <SelectValue placeholder="— Ingresar datos manualmente —" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="manual">— Ingresar datos manualmente —</SelectItem>
-                            {companies.length === 0 && (
-                              <div className="px-3 py-2 text-xs text-muted-foreground">Sin empresas cargadas</div>
-                            )}
-                            {companies.filter(c => c.id).map(c => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {c.razonSocial}{c.nombreFantasia ? ` (${c.nombreFantasia})` : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    <div>
-                      <Label className="text-xs">Razón social / Nombre</Label>
-                      <Input
-                        value={closeBillingName}
-                        onChange={(e) => { setCloseBillingName(e.target.value); setCloseBillingCompanyId(""); }}
-                        placeholder="Ej: Juan García / Empresa SA"
-                        data-testid="input-billing-name"
-                      />
+                            }}
+                            className="h-4 w-4 cursor-pointer"
+                          />
+                          <label htmlFor="fb-exento" className="text-sm cursor-pointer select-none">
+                            Empresa exenta / identificada (no es Consumidor Final)
+                          </label>
+                        </div>
+                      )}
+
+                      {!isFactA && !fbIsExento && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/40 rounded px-3 py-2">
+                          <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                          Consumidor Final
+                        </div>
+                      )}
+
+                      {showClientForm && (
+                        <>
+                          {clientSelected ? (
+                            <div className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-md">
+                              <Building2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{closeBillingName}</p>
+                                {closeBillingCuit && (
+                                  <p className={`text-xs ${cuitValid ? "text-muted-foreground" : "text-destructive font-medium"}`}>
+                                    CUIT: {closeBillingCuit}{!cuitValid ? " ⚠ inválido" : ""}
+                                  </p>
+                                )}
+                              </div>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0"
+                                onClick={() => { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setBillingSearch(""); }}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <Input
+                                    placeholder="Buscar empresa por nombre o CUIT..."
+                                    value={billingSearch}
+                                    onChange={e => { setBillingSearch(e.target.value); setCloseBillingCompanyId(""); }}
+                                    onFocus={() => setBillingSearchOpen(true)}
+                                    onBlur={() => setTimeout(() => setBillingSearchOpen(false), 150)}
+                                    data-testid="input-billing-search"
+                                    autoComplete="off"
+                                  />
+                                  {billingSearchOpen && billingResults.length > 0 && (
+                                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                      {billingResults.map(c => (
+                                        <button key={c.id} type="button"
+                                          className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
+                                          onMouseDown={() => {
+                                            setCloseBillingName(c.razonSocial);
+                                            setCloseBillingCuit(c.cuilCuit);
+                                            setCloseBillingCompanyId(c.id);
+                                            setBillingSearch(c.razonSocial);
+                                            setCloseCcEntityType("company");
+                                            setCloseCcEntityId(c.id);
+                                          }}
+                                        >
+                                          <span className="font-medium">{c.razonSocial}</span>
+                                          {c.nombreFantasia && <span className="text-muted-foreground"> ({c.nombreFantasia})</span>}
+                                          <span className="text-xs text-muted-foreground ml-2">{c.cuilCuit}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {billingSearchOpen && billingSearch.length >= 2 && billingResults.length === 0 && (
+                                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg px-3 py-2 text-sm text-muted-foreground">
+                                      Sin resultados para "{billingSearch}"
+                                    </div>
+                                  )}
+                                </div>
+                                <Button type="button" variant="outline" size="sm"
+                                  className="shrink-0 gap-1"
+                                  onClick={() => setIsNewClientDialogOpen(true)}
+                                  data-testid="button-new-billing-client"
+                                >
+                                  <UserPlus className="h-3.5 w-3.5" />
+                                  Nuevo
+                                </Button>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1">Escribí al menos 2 caracteres para buscar</p>
+                            </div>
+                          )}
+
+                          {!clientSelected && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <Label className="text-xs">O ingresá razón social</Label>
+                                <Input
+                                  value={closeBillingName}
+                                  onChange={e => { setCloseBillingName(e.target.value); setCloseBillingCompanyId(""); }}
+                                  placeholder="Empresa S.A."
+                                  data-testid="input-billing-name"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs flex items-center gap-1">
+                                  CUIT
+                                  {closeBillingCuit && (
+                                    <span className={`ml-1 text-xs font-medium ${cuitValid ? "text-green-600" : "text-destructive"}`}>
+                                      {cuitValid ? "✓ válido" : "✗ inválido"}
+                                    </span>
+                                  )}
+                                </Label>
+                                <Input
+                                  value={closeBillingCuit}
+                                  onChange={e => { setCloseBillingCuit(formatCuit(e.target.value)); setCloseBillingCompanyId(""); }}
+                                  placeholder="30-12345678-9"
+                                  data-testid="input-billing-cuit"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <div>
-                      <Label className="text-xs">CUIT / DNI</Label>
-                      <Input
-                        value={closeBillingCuit}
-                        onChange={(e) => { setCloseBillingCuit(e.target.value); setCloseBillingCompanyId(""); }}
-                        placeholder="20-12345678-9"
-                        data-testid="input-billing-cuit"
-                      />
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {closePaymentMethod === "cuenta_habitacion" && (
                   <div className="space-y-2">
