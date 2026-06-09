@@ -937,6 +937,7 @@ export const menuItems = pgTable("menu_items", {
   isEditable: text("is_editable").default("false"),
   allergens: text("allergens").array(),
   displayOrder: integer("display_order").default(0),
+  defaultCourse: integer("default_course"),
 });
 
 export const insertMenuItemSchema = createInsertSchema(menuItems).omit({ id: true });

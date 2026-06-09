@@ -269,6 +269,7 @@ const menuItemFormSchema = z.object({
   preparationTime: z.coerce.number().min(0).optional(),
   isAvailable: z.string().default("true"),
   isEditable: z.string().default("false"),
+  defaultCourse: z.coerce.number().int().min(0).max(3).optional(),
 });
 
 type MenuItemFormValues = z.infer<typeof menuItemFormSchema>;
@@ -1096,6 +1097,7 @@ export default function RestaurantPage() {
         preparationTime: item.preparationTime || 0,
         isAvailable: item.isAvailable || "true",
         isEditable: (item as any).isEditable || "false",
+        defaultCourse: item.defaultCourse ?? undefined,
       });
     } else {
       setEditingMenuItem(null);
@@ -1107,6 +1109,7 @@ export default function RestaurantPage() {
         preparationTime: 0,
         isAvailable: "true",
         isEditable: "false",
+        defaultCourse: undefined,
       });
     }
     setIsMenuItemDialogOpen(true);
@@ -2701,8 +2704,11 @@ export default function RestaurantPage() {
               {(() => {
                 const selectItem = (item: MenuItem) => {
                   const cat = menuCategories.find(c => c.id === item.categoryId);
-                  const inferred = inferCourseFromCategory(cat?.name || "");
-                  setItemCourse(inferred ?? 1);
+                  const isBeverage = cat && inferCourseFromCategory(cat.name) === null && ["bebida", "cerveza", "vino", "espumante", "jugo", "gaseosa"].some(b => cat.name.toLowerCase().includes(b));
+                  if (!isBeverage) {
+                    const course = item.defaultCourse ?? inferCourseFromCategory(cat?.name || "") ?? 1;
+                    setItemCourse(course);
+                  }
                   setPendingItem(item);
                   setMenuSearch("");
                   if ((item as any).isEditable === "true") {
@@ -4250,6 +4256,43 @@ export default function RestaurantPage() {
                   )}
                 />
               </div>
+              <FormField
+                control={menuItemForm.control}
+                name="defaultCourse"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Curso predeterminado <span className="text-xs font-normal text-muted-foreground">(se asigna automáticamente al agregar el plato al pedido)</span></FormLabel>
+                    <div className="flex gap-2">
+                      {[
+                        { value: 1, label: "1° Entradas" },
+                        { value: 2, label: "2° Principal" },
+                        { value: 3, label: "3° Postres" },
+                      ].map(({ value, label }) => (
+                        <Button
+                          key={value}
+                          type="button"
+                          variant={field.value === value ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => field.onChange(value)}
+                          data-testid={`button-default-course-${value}`}
+                        >
+                          {label}
+                        </Button>
+                      ))}
+                      <Button
+                        type="button"
+                        variant={!field.value ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => field.onChange(undefined)}
+                        data-testid="button-default-course-none"
+                      >
+                        Sin curso
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Usar "Sin curso" para bebidas o ítems que no tienen curso fijo.</p>
+                  </FormItem>
+                )}
+              />
               <div className="flex gap-4">
                 <FormField
                   control={menuItemForm.control}
