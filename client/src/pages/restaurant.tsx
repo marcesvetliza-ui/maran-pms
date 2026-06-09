@@ -2395,6 +2395,20 @@ export default function RestaurantPage() {
           setPendingItem(null);
           setItemNotes("");
           setSelectedCategory(null);
+          setCloseReceiptType("cierre_mesa");
+          setClosePaymentMethod("efectivo");
+          setCloseDiscount("");
+          setCloseDiscountType("percent");
+          setCloseRoomId("");
+          setRoomSearchFilter("");
+          setCloseBillingName("");
+          setCloseBillingCuit("");
+          setCloseBillingCompanyId("");
+          setCloseCcEntityType("company");
+          setCloseCcEntityId("");
+          setBillingSearch("");
+          setFbIsExento(false);
+          setIsSplitMode(false);
         }
       }}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
