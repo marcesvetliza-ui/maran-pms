@@ -382,6 +382,7 @@ export default function RestaurantPage() {
   const [coversInput, setCoversInput] = useState(1);
   const [showCancelOrderDialog, setShowCancelOrderDialog] = useState(false);
   const [cancelOrderReason, setCancelOrderReason] = useState("");
+  const [cancelledOrderSnapshot, setCancelledOrderSnapshot] = useState<{ order: any; items: any[] } | null>(null);
   const [splitReceiptType, setSplitReceiptType] = useState("ticket");
   const [splitPayMethod, setSplitPayMethod] = useState("efectivo");
   const [splitPayMethods, setSplitPayMethods] = useState<Record<string, string>>({});
@@ -699,15 +700,19 @@ export default function RestaurantPage() {
       return res.json();
     },
     onSuccess: () => {
+      if (cancelledOrderSnapshot && cancelledOrderSnapshot.items.length > 0) {
+        printCancellationComanda(cancelledOrderSnapshot.order, cancelledOrderSnapshot.items, cancelOrderReason);
+      }
+      setCancelledOrderSnapshot(null);
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       setShowCancelOrderDialog(false);
       setCancelOrderReason("");
       setIsOrderDialogOpen(false);
       setCurrentOrder(null);
-      toast({ title: "Ticket cancelado", description: "La mesa quedó disponible." });
+      toast({ title: "Pedido anulado", description: "La comanda de anulación fue enviada a cocina." });
     },
-    onError: (e: any) => toast({ title: e?.message || "Error al cancelar", variant: "destructive" }),
+    onError: (e: any) => toast({ title: e?.message || "Error al anular", variant: "destructive" }),
   });
 
   const transferItemsMutation = useMutation({
@@ -1164,6 +1169,46 @@ export default function RestaurantPage() {
     </tbody></table>
     <hr>
     <p style="text-align:center;font-size:11px;color:#666">Este no es el comprobante fiscal final.</p>
+    <script>window.onload=function(){window.print()}<\/script>
+    </body></html>`);
+    win.document.close();
+  };
+
+  const printCancellationComanda = (order: any, items: any[], reason: string) => {
+    const win = window.open("", "_blank", "width=400,height=600");
+    if (!win) return;
+    const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const rows = items.map((item: any) => `
+      <tr>
+        <td style="padding:5px 8px;font-size:13px">${esc(item.menuItem?.name || "Item")}</td>
+        <td style="padding:5px 8px;text-align:center;font-size:13px">${item.quantity}</td>
+        <td style="padding:5px 8px;text-align:left;font-size:11px;color:#888">${item.notes && !item.notes.startsWith("[") ? esc(item.notes) : ""}</td>
+      </tr>`).join("");
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ANULACIÓN</title>
+    <style>
+      body{font-family:Arial,sans-serif;max-width:400px;margin:20px auto;padding:16px}
+      h2,h3{text-align:center;margin:4px 0;font-size:14px}
+      .anulado{text-align:center;font-size:22px;font-weight:bold;color:#cc0000;border:3px solid #cc0000;padding:10px 16px;margin:14px 0;letter-spacing:3px}
+      table{width:100%;border-collapse:collapse;margin:10px 0}
+      th{background:#f0f0f0;padding:6px 8px;text-align:left;font-size:11px;font-weight:bold}
+      td{border-bottom:1px solid #eee}
+      hr{border:none;border-top:1px dashed #999;margin:8px 0}
+      .meta{font-size:12px;margin:3px 0}
+      .motivo{font-size:11px;color:#333;margin-top:10px;border-top:1px solid #ccc;padding-top:8px}
+      @media print{body{margin:4px}}
+    </style></head><body>
+    <h2>MARAN SUITES &amp; TOWERS</h2>
+    <h3>Restaurante — Cocina</h3>
+    <div class="anulado">⚠&nbsp;ANULACIÓN</div>
+    <hr>
+    <p class="meta"><b>Mesa/Pedido:</b> ${esc(order?.orderLabel || String(order?.orderNumber || ""))}</p>
+    <p class="meta"><b>Hora:</b> ${new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</p>
+    <hr>
+    <table>
+      <thead><tr><th>Ítem ANULADO</th><th style="text-align:center">Cant.</th><th>Obs.</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="motivo"><b>Motivo:</b> ${esc(reason)}</p>
     <script>window.onload=function(){window.print()}<\/script>
     </body></html>`);
     win.document.close();
@@ -2222,11 +2267,11 @@ export default function RestaurantPage() {
                   variant="ghost"
                   size="sm"
                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={() => { setCancelOrderReason(""); setShowCancelOrderDialog(true); }}
+                  onClick={() => { setCancelledOrderSnapshot({ order: getUpdatedOrder(), items: getOrderItems() }); setCancelOrderReason(""); setShowCancelOrderDialog(true); }}
                   data-testid="button-cancel-order"
                 >
                   <XCircle className="h-4 w-4 mr-1" />
-                  Cancelar
+                  Anular Pedido
                 </Button>
               </div>
             </div>
@@ -3446,10 +3491,10 @@ export default function RestaurantPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <XCircle className="h-5 w-5" />
-              Cancelar Ticket
+              Anular Pedido
             </DialogTitle>
             <DialogDescription>
-              Se cancelará el ticket <strong>{getUpdatedOrder()?.orderLabel || getUpdatedOrder()?.orderNumber}</strong>. La mesa quedará disponible. Esta acción no se puede deshacer.
+              Se anulará el pedido <strong>{getUpdatedOrder()?.orderLabel || getUpdatedOrder()?.orderNumber}</strong> y se imprimirá una comanda de anulación para cocina. La mesa quedará disponible. Esta acción no se puede deshacer.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
