@@ -31,6 +31,8 @@ export interface NewInvoiceData {
   operador?: string;
 }
 
+const TIPOS_CBT_WSFE: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8 };
+
 function calcularMontos(items: InvoiceItem[], tipo: string) {
   let montoNeto = 0;
   let montoIva21 = 0;
@@ -72,8 +74,8 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+/** Contador local — solo se usa en modo ficticio y homologación */
 async function getNextInvoiceNumber(tipo: string, puntoVenta: number): Promise<number> {
-  // Transactional — use raw SQL with FOR UPDATE to avoid race conditions
   const result = await db.execute(sql`
     INSERT INTO invoice_counters (tipo_comprobante, punto_venta, ultimo_numero)
     VALUES (${tipo}, ${puntoVenta}, 1)
@@ -84,38 +86,121 @@ async function getNextInvoiceNumber(tipo: string, puntoVenta: number): Promise<n
   return (result.rows[0] as any).ultimo_numero;
 }
 
+/**
+ * En producción: consulta AFIP cuál es el último número autorizado
+ * y devuelve ese + 1. Actualiza el contador local para mantenerlos sincronizados.
+ * Esto garantiza que siempre usamos el número correcto sin importar
+ * lo que tenga el contador local (ej. si se usó modo ficticio antes).
+ */
+async function getNextInvoiceNumberFromAfip(
+  tipo: string,
+  puntoVenta: number,
+  token: string,
+  sign: string,
+  cuit: string,
+  wsfeUrl: string
+): Promise<number> {
+  const cbteTipo = TIPOS_CBT_WSFE[tipo] ?? 6;
+  const cuitLimpio = cuit.replace(/-/g, "");
+
+  const envelope =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">` +
+    `<soapenv:Body><ar:FECompUltimoAutorizado>` +
+    `<ar:Auth><ar:Token>${token}</ar:Token><ar:Sign>${sign}</ar:Sign><ar:Cuit>${cuitLimpio}</ar:Cuit></ar:Auth>` +
+    `<ar:PtoVta>${puntoVenta}</ar:PtoVta><ar:CbteTipo>${cbteTipo}</ar:CbteTipo>` +
+    `</ar:FECompUltimoAutorizado></soapenv:Body></soapenv:Envelope>`;
+
+  const resp = await fetch(wsfeUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml; charset=utf-8",
+      SOAPAction: '"http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"',
+    },
+    body: envelope,
+    signal: AbortSignal.timeout(10000),
+  });
+  const text = await resp.text();
+  const nroM = text.match(/<CbteNro>(\d+)<\/CbteNro>/);
+  const ultimoAfip = nroM ? Number(nroM[1]) : 0;
+  const proximo = ultimoAfip + 1;
+
+  // Sincronizar contador local con AFIP
+  await db.execute(sql`
+    INSERT INTO invoice_counters (tipo_comprobante, punto_venta, ultimo_numero)
+    VALUES (${tipo}, ${puntoVenta}, ${proximo})
+    ON CONFLICT (tipo_comprobante, punto_venta)
+    DO UPDATE SET ultimo_numero = ${proximo}
+  `);
+
+  return proximo;
+}
+
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
   const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
 
-  // Use separate punto de venta for homologacion to avoid numbering collisions
   const puntoVenta =
     ambiente === "homologacion"
       ? ((config as any).puntoVentaHomolog ?? 99)
       : config.puntoVenta!;
 
-  const numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
   const montos = calcularMontos(data.items, data.tipoComprobante);
 
   let cae: string;
   let caeFechaVto: Date;
   let modoFicticio: boolean;
+  let numero: number;
 
   if (ambiente === "homologacion" || ambiente === "produccion") {
-    const resultado = await callARCA({
-      tipo: data.tipoComprobante,
-      puntoVenta,
-      numero,
-      ...montos,
-      cliente: {
-        cuit: data.cliente.cuit,
-        condicionIva: data.cliente.condicionIva,
+    // En producción/homologación: obtener token primero para poder
+    // consultar el último número directamente de AFIP
+    const { getTokenAuth } = await import("./wsaaClient");
+    const cuitAuth = config.arcaCuit || config.cuit || "";
+    const { token, sign } = await getTokenAuth(
+      config.arcaCert!,
+      config.arcaKey!,
+      ambiente as "homologacion" | "produccion"
+    );
+
+    const wsfeUrl = ambiente === "produccion"
+      ? "https://servicios1.afip.gov.ar/wsfev1/service.asmx"
+      : "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
+
+    // Número sincronizado con AFIP (evita desfasaje por uso previo de modo ficticio)
+    numero = await getNextInvoiceNumberFromAfip(
+      data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl
+    );
+
+    const { feCAESolicitar } = await import("./wsfevClient");
+    const now = new Date();
+    const fecha =
+      `${now.getFullYear()}` +
+      `${String(now.getMonth() + 1).padStart(2, "0")}` +
+      `${String(now.getDate()).padStart(2, "0")}`;
+
+    const resultado = await feCAESolicitar(
+      {
+        tipo: data.tipoComprobante,
+        puntoVenta,
+        numero,
+        cuitEmisor: cuitAuth,
+        token,
+        sign,
+        ...montos,
+        clienteCuit: data.cliente.cuit,
+        clienteCondicionIva: data.cliente.condicionIva,
+        fecha,
       },
-    });
+      ambiente as "homologacion" | "produccion"
+    );
+
     cae = resultado.cae;
     caeFechaVto = resultado.caeFechaVto;
     modoFicticio = false;
   } else {
+    // Modo ficticio: usa contador local, CAE simulado
+    numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
     const fake = generateFakeCAE();
     cae = fake.cae;
     caeFechaVto = fake.vencimiento;
