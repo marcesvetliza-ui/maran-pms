@@ -1151,12 +1151,31 @@ export default function RestaurantPage() {
     const win = window.open("", "_blank");
     if (!win) return;
     const esc = (s: string) => { const d = win.document.createElement("div"); d.textContent = s; return d.innerHTML; };
+
+    const subtotal = parseFloat(order.total || "0");
+    const disc = parseFloat(closeDiscount || "0");
+    const discAmount = disc > 0
+      ? (closeDiscountType === "percent" ? subtotal * disc / 100 : disc)
+      : 0;
+    const finalTotal = Math.max(0, subtotal - discAmount);
+
     const rows = items.map(item => `
       <tr>
         <td style="padding:4px 8px">${esc(item.menuItem?.name || "Item")}</td>
         <td style="padding:4px 8px;text-align:center">${item.quantity}</td>
         <td style="padding:4px 8px;text-align:right">$${parseFloat(item.subtotal).toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
       </tr>`).join("");
+
+    const discountRows = discAmount > 0 ? `
+      <tr>
+        <td colspan="2" style="padding:4px 8px;font-size:12px">Subtotal:</td>
+        <td style="padding:4px 8px;text-align:right;font-size:12px">$${subtotal.toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:4px 8px;font-size:12px;color:#2a7a2a">Descuento (${closeDiscountType === "percent" ? `${disc}%` : "$" + disc.toLocaleString("es-AR",{minimumFractionDigits:2})}):</td>
+        <td style="padding:4px 8px;text-align:right;font-size:12px;color:#2a7a2a">-$${discAmount.toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
+      </tr>` : "";
+
     win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cuenta</title>
     <style>body{font-family:Arial,sans-serif;max-width:500px;margin:30px auto;padding:16px}h2,h3{text-align:center;margin:4px 0}
     table{width:100%;border-collapse:collapse;margin:12px 0}th{background:#f0f0f0;padding:6px 8px;text-align:left;font-size:12px}
@@ -1175,7 +1194,11 @@ export default function RestaurantPage() {
     <tbody>${rows}</tbody></table>
     <hr>
     <table><tbody>
-      <tr class="total-row"><td>TOTAL:</td><td style="text-align:right;font-size:15px">$${parseFloat(order.total||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
+      ${discountRows}
+      <tr class="total-row">
+        <td colspan="2">TOTAL${discAmount > 0 ? " CON DESCUENTO" : ""}:</td>
+        <td style="text-align:right;font-size:15px">$${finalTotal.toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
+      </tr>
     </tbody></table>
     <hr>
     <p style="text-align:center;font-size:11px;color:#666">Este no es el comprobante fiscal final.</p>
