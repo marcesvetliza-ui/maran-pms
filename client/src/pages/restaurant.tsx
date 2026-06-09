@@ -58,6 +58,8 @@ import {
   Printer,
   ArrowRightLeft,
   Smartphone,
+  FileX,
+  AlertTriangle,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -242,12 +244,11 @@ const tableStatusLabels: Record<string, string> = {
 const SHOW_FACTURA_C = false;
 
 const receiptTypeLabels: Record<string, string> = {
-  ticket: "Ticket",
-  cierre_mesa: "Cierre de mesa",
+  cierre_mesa: "Cierre de Mesa",
   factura_a: "Factura A",
   factura_b: "Factura B",
-  voucher: "Voucher (No Fiscal)",
-  nota_credito: "Nota de Credito",
+  voucher: "Voucher Justo Resto",
+  voucher_pedidos_ya: "Voucher Pedidos Ya",
   ...(SHOW_FACTURA_C ? { factura_c: "Factura C" } : {}),
 };
 
@@ -338,7 +339,7 @@ export default function RestaurantPage() {
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<MenuCategory | null>(null);
   const [reservationSearch, setReservationSearch] = useState("");
-  const [closeReceiptType, setCloseReceiptType] = useState("ticket");
+  const [closeReceiptType, setCloseReceiptType] = useState("cierre_mesa");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
   const [closeDiscount, setCloseDiscount] = useState("");
   const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("percent");
@@ -406,6 +407,10 @@ export default function RestaurantPage() {
   const [closeBillingCompanyId, setCloseBillingCompanyId] = useState("");
   const [closeCcEntityType, setCloseCcEntityType] = useState<"company" | "agency">("company");
   const [closeCcEntityId, setCloseCcEntityId] = useState("");
+  const [invoiceForNC, setInvoiceForNC] = useState<any | null>(null);
+  const [ncMotivo, setNcMotivo] = useState("");
+  const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0]);
+  const [ncDateTo, setNcDateTo] = useState(new Date().toISOString().split("T")[0]);
 
   const courseLabels: Record<number, string> = { 1: "Entradas", 2: "Platos Principales", 3: "Postres" };
   const courseShortLabels: Record<number, string> = { 1: "Entrada", 2: "Principal", 3: "Postre" };
@@ -981,6 +986,32 @@ export default function RestaurantPage() {
     },
   });
 
+  const { data: billingInvoices = [], isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery<any[]>({
+    queryKey: ["/api/billing/invoices", ncDateFrom, ncDateTo],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/billing/invoices?desde=${ncDateFrom}&hasta=${ncDateTo}`);
+      return res.json();
+    },
+    enabled: activeTab === "notas_credito",
+  });
+
+  const emitirNCMutation = useMutation({
+    mutationFn: async ({ invoiceId, motivo }: { invoiceId: number; motivo: string }) => {
+      const res = await apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, { motivo });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Error al emitir NC"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      setInvoiceForNC(null);
+      setNcMotivo("");
+      refetchInvoices();
+      toast({ title: "Nota de Crédito emitida", description: "La factura original quedó anulada." });
+    },
+    onError: (e: any) => {
+      toast({ title: "Error al emitir NC", description: e.message, variant: "destructive" });
+    },
+  });
+
   const filteredTables = selectedArea === "all"
     ? tables
     : tables.filter((t) => t.areaId === selectedArea);
@@ -1308,6 +1339,10 @@ export default function RestaurantPage() {
           <TabsTrigger value="recipes" data-testid="tab-recipes">
             <ChefHat className="h-4 w-4 mr-2" />
             Recetas y Costos
+          </TabsTrigger>
+          <TabsTrigger value="notas_credito" data-testid="tab-notas-credito">
+            <FileX className="h-4 w-4 mr-2" />
+            Notas de Crédito
           </TabsTrigger>
         </TabsList>
 
@@ -2094,6 +2129,86 @@ export default function RestaurantPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        {/* ==================== NOTAS DE CRÉDITO TAB ==================== */}
+        <TabsContent value="notas_credito" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileX className="h-5 w-5" />
+                Notas de Crédito
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">Emitir notas de crédito sobre facturas A o B ya cerradas.</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm whitespace-nowrap">Desde:</Label>
+                  <Input type="date" value={ncDateFrom} onChange={e => setNcDateFrom(e.target.value)} className="w-36 h-8" data-testid="input-nc-date-from" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm whitespace-nowrap">Hasta:</Label>
+                  <Input type="date" value={ncDateTo} onChange={e => setNcDateTo(e.target.value)} className="w-36 h-8" data-testid="input-nc-date-to" />
+                </div>
+                <Button size="sm" variant="outline" onClick={() => refetchInvoices()} data-testid="button-nc-refresh">
+                  <Search className="h-3.5 w-3.5 mr-1" />Buscar
+                </Button>
+              </div>
+
+              {invoicesLoading ? (
+                <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : (() => {
+                const facturas = billingInvoices.filter((inv: any) => ["FA", "FB", "FC"].includes(inv.tipo_comprobante));
+                if (!facturas.length) return <p className="text-center text-muted-foreground py-8">No hay facturas en el período seleccionado.</p>;
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nro.</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {facturas.map((inv: any) => (
+                        <TableRow key={inv.id}>
+                          <TableCell className="font-mono text-sm">{inv.numero_completo || `${inv.tipo_comprobante}-${String(inv.numero).padStart(8,"0")}`}</TableCell>
+                          <TableCell><Badge variant="outline">{inv.tipo_comprobante}</Badge></TableCell>
+                          <TableCell className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</TableCell>
+                          <TableCell className="text-sm max-w-[160px] truncate">{inv.cliente_razon_social || "Consumidor Final"}</TableCell>
+                          <TableCell className="text-right font-semibold">${parseFloat(inv.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell>
+                            {inv.estado === "anulada"
+                              ? <Badge variant="destructive">Anulada</Badge>
+                              : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
+                            }
+                          </TableCell>
+                          <TableCell>
+                            {inv.estado !== "anulada" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                                onClick={() => { setInvoiceForNC(inv); setNcMotivo(""); }}
+                                data-testid={`button-emitir-nc-${inv.id}`}
+                              >
+                                <FileX className="h-3.5 w-3.5 mr-1" />Emitir NC
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                );
+              })()}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -3068,7 +3183,8 @@ export default function RestaurantPage() {
                   const updOrder = getUpdatedOrder();
                   const isTableless = updOrder && !updOrder.tableId;
                   const tablelessReceiptTypes: Record<string, string> = {
-                    voucher: "Voucher (No Fiscal)",
+                    voucher: "Voucher Justo Resto",
+                    voucher_pedidos_ya: "Voucher Pedidos Ya",
                   };
                   const tablelessPaymentMethods: Record<string, string> = {
                     cuenta_habitacion: "Cuenta Habitacion",
@@ -3526,6 +3642,42 @@ export default function RestaurantPage() {
                 </Button>
               );
             })()}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Nota de Crédito Confirmation Dialog */}
+      <Dialog open={!!invoiceForNC} onOpenChange={(open) => { if (!open) { setInvoiceForNC(null); setNcMotivo(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <FileX className="h-5 w-5" />
+              Emitir Nota de Crédito
+            </DialogTitle>
+            <DialogDescription>
+              Se emitirá una NC sobre la factura <strong>{invoiceForNC?.numero_completo || invoiceForNC?.tipo_comprobante}</strong> por <strong>${parseFloat(invoiceForNC?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>. La factura original quedará <strong>anulada</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className="text-sm font-medium">Motivo <span className="text-muted-foreground text-xs">(requerido)</span></label>
+            <Textarea
+              placeholder="Ej: Error en facturación, devolución de consumo..."
+              value={ncMotivo}
+              onChange={(e) => setNcMotivo(e.target.value)}
+              rows={3}
+              data-testid="input-nc-motivo"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setInvoiceForNC(null); setNcMotivo(""); }}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              disabled={!ncMotivo.trim() || emitirNCMutation.isPending}
+              onClick={() => { if (invoiceForNC) emitirNCMutation.mutate({ invoiceId: invoiceForNC.id, motivo: ncMotivo }); }}
+              data-testid="button-confirm-nc"
+            >
+              {emitirNCMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo...</> : "Confirmar NC"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
