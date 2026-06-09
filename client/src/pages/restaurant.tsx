@@ -383,6 +383,8 @@ export default function RestaurantPage() {
   const [showCancelOrderDialog, setShowCancelOrderDialog] = useState(false);
   const [cancelOrderReason, setCancelOrderReason] = useState("");
   const [cancelledOrderSnapshot, setCancelledOrderSnapshot] = useState<{ order: any; items: any[] } | null>(null);
+  const [itemToVoid, setItemToVoid] = useState<{ orderId: string; item: any } | null>(null);
+  const [itemVoidReason, setItemVoidReason] = useState("");
   const [splitReceiptType, setSplitReceiptType] = useState("ticket");
   const [splitPayMethod, setSplitPayMethod] = useState("efectivo");
   const [splitPayMethods, setSplitPayMethods] = useState<Record<string, string>>({});
@@ -756,11 +758,16 @@ export default function RestaurantPage() {
       return res.json();
     },
     onSuccess: () => {
+      if (itemToVoid) {
+        printCancellationComanda(getUpdatedOrder(), [itemToVoid.item], itemVoidReason || "Anulación de ítem");
+      }
+      setItemToVoid(null);
+      setItemVoidReason("");
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
-      toast({ title: "Item eliminado" });
+      toast({ title: "Ítem anulado", description: "La comanda de anulación fue enviada a cocina." });
     },
     onError: () => {
-      toast({ title: "Error al eliminar item", variant: "destructive" });
+      toast({ title: "Error al anular ítem", variant: "destructive" });
     },
   });
 
@@ -2508,7 +2515,7 @@ export default function RestaurantPage() {
                                 </div>
                               )}
                               <span className="text-sm font-semibold">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                              <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => { if (currentOrder) deleteItemMutation.mutate({ orderId: currentOrder.id, itemId: item.id }); }} data-testid={`button-comanda-void-${item.id}`}>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => { if (currentOrder) { setItemVoidReason(""); setItemToVoid({ orderId: currentOrder.id, item }); } }} data-testid={`button-comanda-void-${item.id}`}>
                                 <X className="h-3 w-3" />
                               </Button>
                             </div>
@@ -3481,6 +3488,44 @@ export default function RestaurantPage() {
                 </Button>
               );
             })()}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Item Void Confirmation Dialog */}
+      <Dialog open={!!itemToVoid} onOpenChange={(open) => { if (!open) { setItemToVoid(null); setItemVoidReason(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5" />
+              Anular ítem
+            </DialogTitle>
+            <DialogDescription>
+              Se anulará <strong>x{itemToVoid?.item?.quantity} {itemToVoid?.item?.menuItem?.name || "ítem"}</strong> y se imprimirá una comanda de anulación para cocina.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className="text-sm font-medium">Motivo <span className="text-muted-foreground text-xs">(opcional)</span></label>
+            <Textarea
+              placeholder="Ej: Pedido equivocado, el cliente cambió de opinión..."
+              value={itemVoidReason}
+              onChange={(e) => setItemVoidReason(e.target.value)}
+              rows={2}
+              data-testid="input-void-item-reason"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setItemToVoid(null); setItemVoidReason(""); }}>
+              Volver
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteItemMutation.isPending}
+              onClick={() => { if (itemToVoid) deleteItemMutation.mutate({ orderId: itemToVoid.orderId, itemId: itemToVoid.item.id }); }}
+              data-testid="button-confirm-void-item"
+            >
+              {deleteItemMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Anulando...</> : "Confirmar anulación"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
