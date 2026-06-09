@@ -138,8 +138,21 @@ export async function getTokenAuth(
     throw err;
   }
 
+  // Detectar faults en respuesta HTTP 200 (AFIP a veces devuelve faults con 200)
+  const faultCheck = resp.match(/<faultstring>([^<]+)<\/faultstring>/);
+  if (faultCheck) {
+    const faultText = faultCheck[1];
+    if (faultText.toLowerCase().includes("already") || resp.includes("alreadyAuthenticated")) {
+      throw new Error(
+        "AFIP indica que ya existe un TA válido para este certificado. " +
+        "El token expirará automáticamente (máx. 12h desde la última autenticación)."
+      );
+    }
+    throw new Error(`WSAA Fault: ${faultText}`);
+  }
+
   // AFIP devuelve el loginTicketResponse HTML-encoded dentro de <loginCmsReturn>
-  const returnM = resp.match(/<loginCmsReturn>([\s\S]*?)<\/loginCmsReturn>/);
+  const returnM = resp.match(/<loginCmsReturn[^>]*>([\s\S]*?)<\/loginCmsReturn>/);
   const inner = returnM
     ? returnM[1]
         .replace(/&lt;/g, "<")
@@ -148,11 +161,12 @@ export async function getTokenAuth(
         .replace(/&amp;/g, "&")
     : resp;
 
-  const tokenM = inner.match(/<token>([^<]+)<\/token>/);
-  const signM  = inner.match(/<sign>([^<]+)<\/sign>/);
+  const tokenM = inner.match(/<token>([\s\S]+?)<\/token>/);
+  const signM  = inner.match(/<sign>([\s\S]+?)<\/sign>/);
   if (!tokenM || !signM) {
-    const faultM = resp.match(/<faultstring>([^<]+)<\/faultstring>/);
-    throw new Error(`WSAA: respuesta inválida${faultM ? " — " + faultM[1] : ""}`);
+    // Incluir porción de respuesta para diagnóstico
+    const preview = resp.slice(0, 300).replace(/\s+/g, " ");
+    throw new Error(`WSAA: respuesta inválida. HTTP 200 sin token/sign. Preview: ${preview}`);
   }
 
   const token = tokenM[1];
