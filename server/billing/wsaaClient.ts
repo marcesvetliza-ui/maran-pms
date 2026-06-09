@@ -91,8 +91,19 @@ export async function getTokenAuth(
 
   const resp = await soapPost(url, envelope);
 
-  const tokenM = resp.match(/<token>([^<]+)<\/token>/);
-  const signM  = resp.match(/<sign>([^<]+)<\/sign>/);
+  // AFIP devuelve el loginTicketResponse HTML-encoded dentro de <loginCmsReturn>
+  // Decodificamos las entidades antes de parsear token/sign
+  const returnM = resp.match(/<loginCmsReturn>([\s\S]*?)<\/loginCmsReturn>/);
+  const inner = returnM
+    ? returnM[1]
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, "&")
+    : resp;
+
+  const tokenM = inner.match(/<token>([^<]+)<\/token>/);
+  const signM  = inner.match(/<sign>([^<]+)<\/sign>/);
   if (!tokenM || !signM) {
     const faultM = resp.match(/<faultstring>([^<]+)<\/faultstring>/);
     throw new Error(`WSAA: respuesta inválida${faultM ? " — " + faultM[1] : ""}`);
