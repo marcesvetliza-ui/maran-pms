@@ -271,5 +271,26 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // default_course en menu_items (agregado al schema pero faltaba la migración)
+  await withTimeout("menu_items.default_course", T, () =>
+    db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS default_course integer`)
+  );
+
+  // is_editable en menu_items (puede no existir en producción)
+  await withTimeout("menu_items.is_editable", T, () =>
+    db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS is_editable text DEFAULT 'false'`)
+  );
+
+  // billing_config: columnas de token WSAA persistente
+  await withTimeout("billing_config.arca_ta_cols", T, () =>
+    db.execute(sql`
+      ALTER TABLE billing_config
+        ADD COLUMN IF NOT EXISTS arca_ta_token text,
+        ADD COLUMN IF NOT EXISTS arca_ta_sign text,
+        ADD COLUMN IF NOT EXISTS arca_ta_expiry timestamp,
+        ADD COLUMN IF NOT EXISTS arca_ta_ambiente text
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
