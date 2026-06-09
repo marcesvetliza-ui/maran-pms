@@ -42,3 +42,9 @@ id = "P6nmeTZKQPq2thlu3f55z"
 uri = "file://certs/maran_arca_credenciales.zip"
 type = "unspecified"
 title = "Credenciales ARCA — cert + clave privada"
+
+[[outputs]]
+id = "DpdtFpnoWZdGpOOYYKe1A"
+uri = "file://certs/maran_suites_CERT.txt"
+type = "text"
+title = "Certificado ARCA (maran_suites_CERT.pem)"
