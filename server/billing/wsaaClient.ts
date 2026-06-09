@@ -1,15 +1,13 @@
 import forge from "node-forge";
+import { db } from "../db";
+import { billingConfig } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const WSAA_HOMOLOG = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms";
 const WSAA_PROD    = "https://wsaa.afip.gov.ar/ws/services/LoginCms";
 
-interface CachedTA {
-  token: string;
-  sign: string;
-  expiration: Date;
-}
-
-const taCache = new Map<string, CachedTA>();
+// Buffer: renovar 30 min antes de que expire
+const RENEW_BEFORE_MS = 30 * 60 * 1000;
 
 function toAR(d: Date): string {
   const offset = -3 * 60;
@@ -61,10 +59,46 @@ async function soapPost(url: string, body: string): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '""' },
     body,
+    signal: AbortSignal.timeout(15000),
   });
   const text = await resp.text();
-  if (!resp.ok) throw new Error(`WSAA HTTP ${resp.status}: ${text.slice(0, 400)}`);
+  if (!resp.ok) throw new Error(`WSAA HTTP ${resp.status}: ${text.slice(0, 600)}`);
   return text;
+}
+
+/** Lee el token persistido en DB; devuelve null si no existe o está por vencer */
+async function loadFromDb(ambiente: string): Promise<{ token: string; sign: string } | null> {
+  try {
+    const rows = await db.select({
+      arcaTaToken: billingConfig.arcaTaToken,
+      arcaTaSign: billingConfig.arcaTaSign,
+      arcaTaExpiry: billingConfig.arcaTaExpiry,
+      arcaTaAmbiente: billingConfig.arcaTaAmbiente,
+    }).from(billingConfig).limit(1);
+
+    const row = rows[0];
+    if (!row?.arcaTaToken || !row?.arcaTaSign || !row?.arcaTaExpiry) return null;
+    if (row.arcaTaAmbiente !== ambiente) return null;
+
+    const expiry = new Date(row.arcaTaExpiry);
+    if (expiry.getTime() - Date.now() < RENEW_BEFORE_MS) return null;
+
+    return { token: row.arcaTaToken, sign: row.arcaTaSign };
+  } catch {
+    return null;
+  }
+}
+
+/** Persiste el token en DB con expiración de 10 horas */
+async function saveToDb(token: string, sign: string, ambiente: string): Promise<void> {
+  try {
+    const expiry = new Date(Date.now() + 10 * 60 * 60 * 1000);
+    await db.update(billingConfig)
+      .set({ arcaTaToken: token, arcaTaSign: sign, arcaTaExpiry: expiry, arcaTaAmbiente: ambiente })
+      .where(eq(billingConfig.id, 1));
+  } catch {
+    // Silencioso: si falla el guardado, igual devolvemos el token
+  }
 }
 
 export async function getTokenAuth(
@@ -72,12 +106,11 @@ export async function getTokenAuth(
   keyPem: string,
   ambiente: "homologacion" | "produccion"
 ): Promise<{ token: string; sign: string }> {
-  const cacheKey = `${ambiente}:${certPem.slice(-40)}`;
-  const cached = taCache.get(cacheKey);
-  if (cached && cached.expiration > new Date(Date.now() + 10 * 60 * 1000)) {
-    return { token: cached.token, sign: cached.sign };
-  }
+  // 1. Intentar desde DB (persiste entre restarts)
+  const cached = await loadFromDb(ambiente);
+  if (cached) return cached;
 
+  // 2. Pedir nuevo token a WSAA
   const tra = buildTRA();
   const cms = signTRA(tra, certPem, keyPem);
   const url = ambiente === "homologacion" ? WSAA_HOMOLOG : WSAA_PROD;
@@ -89,10 +122,23 @@ export async function getTokenAuth(
     `<soapenv:Body><wsaa:loginCms><wsaa:in0>${cms}</wsaa:in0></wsaa:loginCms></soapenv:Body>` +
     `</soapenv:Envelope>`;
 
-  const resp = await soapPost(url, envelope);
+  let resp: string;
+  try {
+    resp = await soapPost(url, envelope);
+  } catch (err: unknown) {
+    const msg = (err as Error).message ?? "";
+    // alreadyAuthenticated: AFIP dice que el token anterior sigue vigente pero lo perdimos.
+    // El único remedio es esperar a que expire (~12h desde la última autenticación).
+    if (msg.includes("alreadyAuthenticated")) {
+      throw new Error(
+        "AFIP indica que ya existe un TA válido para este certificado. " +
+        "El token expirará automáticamente. Intentá de nuevo en unos minutos o esperá hasta que expire (máx. 12h)."
+      );
+    }
+    throw err;
+  }
 
   // AFIP devuelve el loginTicketResponse HTML-encoded dentro de <loginCmsReturn>
-  // Decodificamos las entidades antes de parsear token/sign
   const returnM = resp.match(/<loginCmsReturn>([\s\S]*?)<\/loginCmsReturn>/);
   const inner = returnM
     ? returnM[1]
@@ -109,11 +155,11 @@ export async function getTokenAuth(
     throw new Error(`WSAA: respuesta inválida${faultM ? " — " + faultM[1] : ""}`);
   }
 
-  const ta: CachedTA = {
-    token: tokenM[1],
-    sign: signM[1],
-    expiration: new Date(Date.now() + 10 * 60 * 60 * 1000),
-  };
-  taCache.set(cacheKey, ta);
-  return { token: ta.token, sign: ta.sign };
+  const token = tokenM[1];
+  const sign  = signM[1];
+
+  // 3. Persistir en DB para próximos requests
+  await saveToDb(token, sign, ambiente);
+
+  return { token, sign };
 }

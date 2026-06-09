@@ -2134,6 +2134,11 @@ export const billingConfig = pgTable("billing_config", {
   arcaCuit: text("arca_cuit"),
   logoUrl: text("logo_url"),
   updatedAt: timestamp("updated_at").defaultNow(),
+  // Token WSAA persistente (sobrevive restarts)
+  arcaTaToken: text("arca_ta_token"),
+  arcaTaSign: text("arca_ta_sign"),
+  arcaTaExpiry: timestamp("arca_ta_expiry"),
+  arcaTaAmbiente: text("arca_ta_ambiente"),
 });
 
 export const salesInvoices = pgTable("sales_invoices", {
