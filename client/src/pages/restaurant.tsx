@@ -63,6 +63,7 @@ import {
   Building2,
   UserPlus,
   CheckCircle,
+  BedDouble,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -252,17 +253,17 @@ const receiptTypeLabels: Record<string, string> = {
   factura_b: "Factura B",
   voucher: "Voucher Justo Resto",
   voucher_pedidos_ya: "Voucher Pedidos Ya",
+  cuenta_habitacion: "Cargo a Habitación",
   ...(SHOW_FACTURA_C ? { factura_c: "Factura C" } : {}),
 };
 
 const paymentMethodLabels: Record<string, string> = {
   efectivo: "Efectivo",
-  tarjeta_debito: "Tarjeta Debito",
-  tarjeta_credito: "Tarjeta Credito",
+  tarjeta_debito: "Tarjeta Débito",
+  tarjeta_credito: "Tarjeta Crédito",
   transferencia: "Transferencia",
-  cuenta_habitacion: "Cuenta Habitacion",
   mercadopago: "MercadoPago",
-  pedidos_ya: "Pedidos Ya",
+  cuenta_corriente: "Cuenta Corriente",
 };
 
 const menuItemFormSchema = z.object({
@@ -807,7 +808,7 @@ export default function RestaurantPage() {
   const closeOrderMutation = useMutation({
     mutationFn: async (data: { orderId: string; receiptType: string; paymentMethod: string; discount?: number; discountType?: string; roomReservationId?: string; billingName?: string; billingCuit?: string; ccEntityType?: string; ccEntityId?: string }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
-        chargeToRoom: data.paymentMethod === "cuenta_habitacion",
+        chargeToRoom: data.receiptType === "cuenta_habitacion",
         receiptType: data.receiptType,
         paymentMethod: data.paymentMethod,
         discount: data.discount,
@@ -3299,74 +3300,70 @@ export default function RestaurantPage() {
                   const tablelessReceiptTypes: Record<string, string> = {
                     voucher: "Voucher Justo Resto",
                     voucher_pedidos_ya: "Voucher Pedidos Ya",
+                    cuenta_habitacion: "Cargo a Habitación",
                   };
                   const tablelessPaymentMethods: Record<string, string> = {
-                    cuenta_habitacion: "Cuenta Habitacion",
                     efectivo: "Efectivo",
                     pedidos_ya: "Pedidos Ya",
                   };
                   const activeReceiptTypes = isTableless ? tablelessReceiptTypes : receiptTypeLabels;
                   const activePaymentMethods = isTableless ? tablelessPaymentMethods : paymentMethodLabels;
                   const effectiveReceiptType = isTableless && !activeReceiptTypes[closeReceiptType] ? "voucher" : closeReceiptType;
-                  const effectivePaymentMethod = isTableless && !activePaymentMethods[closePaymentMethod] ? "cuenta_habitacion" : closePaymentMethod;
+                  const effectivePaymentMethod = isTableless && !activePaymentMethods[closePaymentMethod] ? "efectivo" : closePaymentMethod;
                   if (effectiveReceiptType !== closeReceiptType) setTimeout(() => setCloseReceiptType(effectiveReceiptType), 0);
                   if (effectivePaymentMethod !== closePaymentMethod) setTimeout(() => setClosePaymentMethod(effectivePaymentMethod), 0);
+                  const isCuentaHabitacion = effectiveReceiptType === "cuenta_habitacion";
                   return (
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t">
                       <div className="space-y-2">
                         <Label>Tipo de Comprobante</Label>
-                        {effectivePaymentMethod === "cuenta_habitacion" ? (
-                          <div className="text-sm text-center text-muted-foreground bg-muted/50 rounded-md p-3">
-                            <Receipt className="h-4 w-4 mx-auto mb-1 text-blue-500" />
-                            Cargo a habitación.<br />
-                            <span className="text-xs">Se emitirá Voucher automáticamente.</span>
-                          </div>
-                        ) : (
-                          <>
-                            <Select value={effectiveReceiptType} onValueChange={(v) => {
-                              setCloseReceiptType(v);
-                              if (v === "factura_b") {
-                                setCloseBillingName("CONSUMIDOR FINAL");
-                                setCloseBillingCuit("");
-                                setCloseBillingCompanyId("");
-                              } else if (v !== "factura_a") {
-                                setCloseBillingName("");
-                                setCloseBillingCuit("");
-                                setCloseBillingCompanyId("");
-                              }
-                            }}>
-                              <SelectTrigger data-testid="select-receipt-type">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Object.entries(activeReceiptTypes).map(([value, label]) => (
-                                  <SelectItem key={value} value={value}>{label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {isTableless && (
-                              <p className="text-xs text-muted-foreground">Área sin mesas: solo Voucher</p>
-                            )}
-                          </>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Forma de Pago</Label>
-                        <Select value={effectivePaymentMethod} onValueChange={(v) => {
-                          setClosePaymentMethod(v);
-                          if (v === "cuenta_habitacion") {
-                            setCloseReceiptType("voucher");
+                        <Select value={effectiveReceiptType} onValueChange={(v) => {
+                          setCloseReceiptType(v);
+                          if (v === "factura_b") {
+                            setCloseBillingName("CONSUMIDOR FINAL");
+                            setCloseBillingCuit("");
+                            setCloseBillingCompanyId("");
+                            setBillingSearch("");
+                            setFbIsExento(false);
+                          } else if (v !== "factura_a") {
+                            setCloseBillingName("");
+                            setCloseBillingCuit("");
+                            setCloseBillingCompanyId("");
+                            setBillingSearch("");
                           }
                         }}>
-                          <SelectTrigger data-testid="select-payment-method">
+                          <SelectTrigger data-testid="select-receipt-type">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {Object.entries(activePaymentMethods).map(([value, label]) => (
+                            {Object.entries(activeReceiptTypes).map(([value, label]) => (
                               <SelectItem key={value} value={value}>{label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
+                        {isTableless && (
+                          <p className="text-xs text-muted-foreground">Área sin mesas</p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Forma de Pago</Label>
+                        {isCuentaHabitacion ? (
+                          <div className="text-sm text-muted-foreground bg-muted/40 rounded-md p-2.5 flex items-center gap-2">
+                            <BedDouble className="h-4 w-4 text-blue-500 shrink-0" />
+                            <span className="text-xs">Se carga al folio de la habitación</span>
+                          </div>
+                        ) : (
+                          <Select value={effectivePaymentMethod} onValueChange={setClosePaymentMethod}>
+                            <SelectTrigger data-testid="select-payment-method">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(activePaymentMethods).map(([value, label]) => (
+                                <SelectItem key={value} value={value}>{label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </div>
                     </div>
                   );
@@ -3404,7 +3401,7 @@ export default function RestaurantPage() {
                   </div>
                 )}
 
-                {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && closePaymentMethod !== "cuenta_habitacion" && (() => {
+                {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && (() => {
                   const isFactA = closeReceiptType === "factura_a";
                   const showClientForm = isFactA || fbIsExento;
                   const clientSelected = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
@@ -3560,7 +3557,7 @@ export default function RestaurantPage() {
                   );
                 })()}
 
-                {closePaymentMethod === "cuenta_habitacion" && (
+                {closeReceiptType === "cuenta_habitacion" && (
                   <div className="space-y-2">
                     <Label>Habitación</Label>
                     <Input
@@ -3821,11 +3818,11 @@ export default function RestaurantPage() {
                       const disc = parseFloat(closeDiscount || "0");
                       closeOrderMutation.mutate({
                         orderId: currentOrder.id,
-                        receiptType: closePaymentMethod === "cuenta_habitacion" ? "voucher" : closeReceiptType,
-                        paymentMethod: closePaymentMethod,
+                        receiptType: closeReceiptType,
+                        paymentMethod: closeReceiptType === "cuenta_habitacion" ? "room_charge" : closePaymentMethod,
                         discount: disc > 0 ? disc : undefined,
                         discountType: disc > 0 ? closeDiscountType : undefined,
-                        roomReservationId: closePaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
+                        roomReservationId: closeReceiptType === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
                         billingName: closeBillingName || undefined,
                         billingCuit: closeBillingCuit || undefined,
                         ccEntityType: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityType : undefined,
