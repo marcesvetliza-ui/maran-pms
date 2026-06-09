@@ -554,6 +554,8 @@ export default function RestaurantPage() {
     if (pa !== pb) return pa - pb;
     return (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
   });
+  // Si no hay categoría seleccionada, usar la primera automáticamente
+  const effectiveCategory = selectedCategory ?? sortedCategories[0]?.id ?? null;
 
   const createReservationMutation = useMutation({
     mutationFn: async (data: ReservationFormValues) => {
@@ -2867,7 +2869,7 @@ export default function RestaurantPage() {
                 {sortedCategories.map((cat) => (
                   <Button
                     key={cat.id}
-                    variant={selectedCategory === cat.id ? "default" : "outline"}
+                    variant={effectiveCategory === cat.id ? "default" : "outline"}
                     size="sm"
                     onClick={() => { setSelectedCategory(selectedCategory === cat.id ? null : cat.id); setMenuSearch(""); }}
                     data-testid={`button-category-${cat.id}`}
@@ -2954,11 +2956,11 @@ export default function RestaurantPage() {
                   );
                 }
 
-                if (selectedCategory) {
+                if (effectiveCategory) {
                   return (
                     <div className="grid gap-2 sm:grid-cols-2">
                       {menuItems
-                        .filter((item) => item.categoryId === selectedCategory && item.isAvailable !== "false")
+                        .filter((item) => item.categoryId === effectiveCategory && item.isAvailable !== "false")
                         .map((item) => (
                           <button
                             key={item.id}
