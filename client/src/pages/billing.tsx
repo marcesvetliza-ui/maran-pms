@@ -592,9 +592,15 @@ function BillingConfigPanel({ config }: { config: any }) {
     setTesting(true);
     setTestResult(null);
     try {
-      const resp = await fetch("/api/billing/test-connection", { method: "POST", credentials: "include" });
+      const resp = await fetch("/api/billing/test-arca", { credentials: "include" });
       const data = await resp.json();
-      setTestResult({ ok: data.ok, mensaje: data.mensaje ?? data.error ?? "Error desconocido" });
+      if (data.ok) {
+        const pv = data.proximoFB != null ? ` | Próximo FB: #${data.proximoFB}` : "";
+        const tipos = data.tiposComprobante?.length ? ` | ${data.tiposComprobante.length} tipos habilitados` : "";
+        setTestResult({ ok: true, mensaje: `ARCA OK — WSAA ✓ · WSFE ✓${tipos}${pv}` });
+      } else {
+        setTestResult({ ok: false, mensaje: data.error ?? "Error de conexión con ARCA" });
+      }
     } catch (e: any) {
       setTestResult({ ok: false, mensaje: e.message });
     } finally {

@@ -42,6 +42,86 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
+  // GET /api/billing/test-arca — diagnóstico de conexión ARCA (solo admin)
+  app.get("/api/billing/test-arca", requireAuth, async (req, res) => {
+    try {
+      const config = await getBillingConfig();
+      const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
+      const result: Record<string, any> = { ambiente };
+
+      if (ambiente === "ficticio") {
+        return res.json({ ok: false, ambiente, error: "Modo ficticio activo — no hay conexión real con ARCA" });
+      }
+      if (!config.arcaCert || !config.arcaKey) {
+        return res.json({ ok: false, ambiente, error: "Faltan certificado o clave privada" });
+      }
+
+      const { getTokenAuth } = await import("./wsaaClient");
+      const { token, sign } = await getTokenAuth(
+        config.arcaCert, config.arcaKey,
+        ambiente as "homologacion" | "produccion"
+      );
+      result.wsaa = "ok";
+      result.tokenPreview = token.slice(0, 30) + "...";
+
+      // FEParamGetTiposCbte — consulta de solo lectura al WSFE
+      const wsfeUrl = ambiente === "produccion"
+        ? "https://servicios1.afip.gov.ar/wsfev1/service.asmx"
+        : "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
+      const cuit = (config.arcaCuit || config.cuit || "").replace(/-/g, "");
+      const auth = `<ar:Auth><ar:Token>${token}</ar:Token><ar:Sign>${sign}</ar:Sign><ar:Cuit>${cuit}</ar:Cuit></ar:Auth>`;
+      const envelope =
+        `<?xml version="1.0" encoding="utf-8"?>` +
+        `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">` +
+        `<soapenv:Body><ar:FEParamGetTiposCbte>${auth}</ar:FEParamGetTiposCbte></soapenv:Body></soapenv:Envelope>`;
+
+      const wsfeResp = await fetch(wsfeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '"http://ar.gov.afip.dif.FEV1/FEParamGetTiposCbte"' },
+        body: envelope,
+        signal: AbortSignal.timeout(10000),
+      });
+      const wsfeText = await wsfeResp.text();
+      const tipos = [...wsfeText.matchAll(/<Desc>([^<]+)<\/Desc>/g)].map(m => m[1]);
+      const fault = wsfeText.match(/<faultstring>([^<]+)<\/faultstring>/);
+
+      if (tipos.length > 0) {
+        result.wsfe = "ok";
+        result.tiposComprobante = tipos;
+      } else if (fault) {
+        result.wsfe = "error";
+        result.wsfeError = fault[1];
+      } else {
+        result.wsfe = "error";
+        result.wsfeError = "Respuesta inválida de WSFE";
+      }
+
+      // FECompUltimoAutorizado para FB
+      const pv = config.puntoVenta ?? 1;
+      const ultEnv =
+        `<?xml version="1.0" encoding="utf-8"?>` +
+        `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">` +
+        `<soapenv:Body><ar:FECompUltimoAutorizado>${auth}<ar:PtoVta>${pv}</ar:PtoVta><ar:CbteTipo>6</ar:CbteTipo></ar:FECompUltimoAutorizado></soapenv:Body></soapenv:Envelope>`;
+      const ultResp = await fetch(wsfeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '"http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"' },
+        body: ultEnv,
+        signal: AbortSignal.timeout(10000),
+      });
+      const ultText = await ultResp.text();
+      const nroM = ultText.match(/<CbteNro>([^<]+)<\/CbteNro>/);
+      if (nroM) {
+        result.ultimoFB = Number(nroM[1]);
+        result.proximoFB = Number(nroM[1]) + 1;
+      }
+
+      result.ok = result.wsfe === "ok";
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   // GET /api/billing/next-number?tipo=FA
   app.get("/api/billing/next-number", requireAuth, async (req, res) => {
     try {
