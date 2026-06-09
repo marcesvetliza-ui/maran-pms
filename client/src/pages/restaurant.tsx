@@ -341,7 +341,7 @@ export default function RestaurantPage() {
   const [closeReceiptType, setCloseReceiptType] = useState("ticket");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
   const [closeDiscount, setCloseDiscount] = useState("");
-  const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("amount");
+  const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("percent");
   const [closeRoomId, setCloseRoomId] = useState("");
   const [roomSearchFilter, setRoomSearchFilter] = useState("");
   const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
@@ -2949,7 +2949,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setRoomSearchFilter(""); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -2958,6 +2958,15 @@ export default function RestaurantPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {getOrderItems().some(i => i.status === "waiting_course") && (
+              <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md p-3">
+                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <div className="text-sm text-amber-800 dark:text-amber-300">
+                  <p className="font-semibold">Hay ítems pendientes de curso</p>
+                  <p className="text-xs mt-0.5">Algunos platos están en espera y no fueron enviados a cocina. Verificá si corresponde avanzar el Sale antes de cerrar.</p>
+                </div>
+              </div>
+            )}
             <h3 className="font-semibold">Resumen de Consumos</h3>
             {getOrderItems().length === 0 ? (
               <p className="text-muted-foreground text-center py-4">No hay items en este pedido</p>
