@@ -559,6 +559,33 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Revertir check-in: reservation → confirmed, room → clean (solo mismo día)
+  app.post("/api/reservations/:id/undo-checkin", requireAuth, async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
+      if (reservation.status !== "checked_in") {
+        return res.status(400).json({ error: "La reserva no está en estado check-in" });
+      }
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      if (reservation.checkInDate !== today) {
+        return res.status(400).json({ error: "Solo se puede revertir el check-in el mismo día del ingreso" });
+      }
+      await storage.updateReservation(req.params.id, { status: "confirmed" });
+      if (reservation.roomId) {
+        await storage.updateRoom(reservation.roomId, { status: "clean" });
+      }
+      await audit(req, "update", "reservations",
+        `Check-in revertido: ${reservation.reservationCode} — el huésped salió temporalmente`,
+        { entityType: "reservation", entityId: req.params.id }
+      );
+      res.json({ success: true });
+    } catch (error) {
+      console.error("undo-checkin error:", error);
+      res.status(500).json({ error: "Error al revertir el check-in" });
+    }
+  });
+
   // Get reservation folio (charges summary)
   app.get("/api/reservations/:id/folio", async (req, res) => {
     try {

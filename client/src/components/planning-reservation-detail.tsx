@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote, Undo2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -181,6 +181,23 @@ export function ReservationDetailModal({
     },
   });
 
+  const undoCheckInMutation = useMutation({
+    mutationFn: async () => apiRequest("POST", `/api/reservations/${reservationId}/undo-checkin`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      toast({ title: "Check-in revertido", description: "La reserva volvió a Confirmada y la habitación quedó Limpia." });
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      let description = "No se pudo revertir el check-in.";
+      try { const b = JSON.parse(error.message.replace(/^\d+:\s*/, "")); if (b.error) description = b.error; } catch {}
+      toast({ title: "Error", description, variant: "destructive" });
+    },
+  });
+
   const cancelReservationMutation = useMutation({
     mutationFn: async () => apiRequest("POST", `/api/reservations/${reservationId}/cancel`, {
       reason: "Anulado desde Planning",
@@ -227,6 +244,7 @@ export function ReservationDetailModal({
     reservation?.status === "tentative"
   ) && isCheckInDateValid;
   const canCheckOut = reservation?.status === "checked_in" && isCheckOutDateValid;
+  const canUndoCheckIn = reservation?.status === "checked_in" && reservation?.checkInDate === todayLocal;
   const canCancel = reservation?.status === "confirmed" || reservation?.status === "pending" || reservation?.status === "tentative";
   const totalCharges = reservation?.charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
 
@@ -519,6 +537,11 @@ export function ReservationDetailModal({
             {canCheckOut && (
               <Button onClick={startCheckout} variant="secondary" className="w-full sm:w-auto" data-testid="button-checkout-quick">
                 <LogOut className="h-4 w-4 mr-2" />Check-out
+              </Button>
+            )}
+            {canUndoCheckIn && (
+              <Button variant="outline" size="sm" onClick={() => { if (window.confirm("¿Revertir el check-in? La reserva volverá a Confirmada y la habitación quedará Limpia.")) { undoCheckInMutation.mutate(); } }} disabled={undoCheckInMutation.isPending} className="w-full sm:w-auto text-orange-600 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/30" data-testid="button-undo-checkin">
+                <Undo2 className="h-4 w-4 mr-2" />{undoCheckInMutation.isPending ? "Revirtiendo..." : "Revertir Check-in"}
               </Button>
             )}
             {canCancel && (
