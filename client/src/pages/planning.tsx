@@ -297,6 +297,19 @@ export default function PlanningPage() {
     },
   });
 
+  const deleteGroupBlockMutation = useMutation({
+    mutationFn: async (blockId: string) => {
+      await apiRequest("DELETE", `/api/group-blocks/${blockId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      toast({ title: "Bloque eliminado del planning" });
+    },
+    onError: () => {
+      toast({ title: "Error al eliminar bloque", variant: "destructive" });
+    },
+  });
+
   const updateReservationColorMutation = useMutation({
     mutationFn: async ({ reservationId, color }: { reservationId: string; color: string | null }) => {
       const res = await apiRequest("PATCH", `/api/reservations/${reservationId}`, { color });
@@ -399,9 +412,9 @@ export default function PlanningPage() {
   // For each block, pick the first N available rooms of that type and mark their cells
   const groupBlockOverlay = useMemo(() => {
     if (!data?.unassignedGroupBlocks || !data.rooms || !data.days) {
-      return {} as Record<string, Record<string, { groupId: string; groupName: string; groupColor: string }>>;
+      return {} as Record<string, Record<string, { blockId: string; groupId: string; groupName: string; groupColor: string }>>;
     }
-    const overlay: Record<string, Record<string, { groupId: string; groupName: string; groupColor: string }>> = {};
+    const overlay: Record<string, Record<string, { blockId: string; groupId: string; groupName: string; groupColor: string }>> = {};
 
     for (const block of data.unassignedGroupBlocks) {
       const unassignedCount = block.quantity - block.assigned;
@@ -427,6 +440,7 @@ export default function PlanningPage() {
         if (!overlay[room.id]) overlay[room.id] = {};
         for (const day of blockDays) {
           overlay[room.id][day] = {
+            blockId: block.blockId,
             groupId: block.groupId,
             groupName: block.groupName,
             groupColor: block.groupColor,
@@ -1068,8 +1082,7 @@ export default function PlanningPage() {
                                         </div>
                                       ) : ghostBlock ? (
                                         <div
-                                          onClick={() => navigate(`/groups/${ghostBlock.groupId}`)}
-                                          className="h-8 rounded border-2 border-dashed flex items-center justify-center cursor-pointer transition-all hover:brightness-110 hover:scale-105"
+                                          className="h-8 rounded border-2 border-dashed flex items-center justify-between cursor-pointer transition-all hover:brightness-110 group/ghost relative px-1"
                                           style={(() => {
                                             const hex = ghostBlock.groupColor.replace("#", "");
                                             const r = parseInt(hex.substring(0, 2), 16);
@@ -1082,9 +1095,10 @@ export default function PlanningPage() {
                                           })()}
                                           title={`Bloque sin asignar — ${ghostBlock.groupName}`}
                                           data-testid={`cell-ghost-${room.id}-${day}`}
+                                          onClick={() => navigate(`/groups/${ghostBlock.groupId}`)}
                                         >
                                           <span
-                                            className="text-[9px] font-semibold truncate px-1 max-w-[56px] opacity-70"
+                                            className="text-[9px] font-semibold truncate max-w-[44px] opacity-70"
                                             style={(() => {
                                               const hex = ghostBlock.groupColor.replace("#", "");
                                               const r = parseInt(hex.substring(0, 2), 16);
@@ -1095,6 +1109,17 @@ export default function PlanningPage() {
                                           >
                                             {ghostBlock.groupName.substring(0, 5).toUpperCase()}
                                           </span>
+                                          <button
+                                            className="hidden group-hover/ghost:flex items-center justify-center w-4 h-4 rounded-full bg-destructive/80 text-white text-[9px] font-bold flex-shrink-0 hover:bg-destructive transition-colors"
+                                            title="Eliminar bloque"
+                                            data-testid={`button-delete-ghost-${ghostBlock.blockId}`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              deleteGroupBlockMutation.mutate(ghostBlock.blockId);
+                                            }}
+                                          >
+                                            ×
+                                          </button>
                                         </div>
                                       ) : (
                                         <div

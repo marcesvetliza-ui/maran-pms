@@ -1033,6 +1033,7 @@ export class DatabaseStorage implements IStorage {
     );
     
     const unassignedGroupBlocks: Array<{
+      blockId: string;
       groupId: string;
       groupName: string;
       groupCode: string;
@@ -1062,6 +1063,7 @@ export class DatabaseStorage implements IStorage {
         if (assignedCount < block.quantity) {
           const rt = roomTypesMap.get(block.roomTypeId);
           unassignedGroupBlocks.push({
+            blockId: block.id,
             groupId: group.id,
             groupName: group.name,
             groupCode: group.groupCode,
