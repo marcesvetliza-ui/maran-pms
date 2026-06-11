@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { useAuth } from "@/App";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -241,7 +242,16 @@ export default function MozoPage() {
       {/* Header */}
       <header className="sticky top-0 z-40 bg-primary text-primary-foreground px-4 py-3 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-3">
-          {view !== "tables" && (
+          {view === "tables" ? (
+            <Link href="/restaurant">
+              <button
+                className="p-1.5 rounded-full hover:bg-white/20 transition-colors"
+                data-testid="button-mozo-exit"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            </Link>
+          ) : (
             <button
               onClick={() => {
                 if (view === "menu") { setPending({}); setView("detail"); }

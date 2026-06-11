@@ -1457,12 +1457,6 @@ export default function RestaurantPage() {
               ))}
             </div>
             <div className="ml-auto flex items-center gap-2">
-              <Link href="/mozo">
-                <Button variant="outline" size="sm" data-testid="button-vista-mozo-floor">
-                  <UtensilsCrossed className="h-4 w-4 mr-2" />
-                  Vista Mozo
-                </Button>
-              </Link>
               {canEditLayout && (
                 <Button
                   variant={isEditMode ? "default" : "outline"}
