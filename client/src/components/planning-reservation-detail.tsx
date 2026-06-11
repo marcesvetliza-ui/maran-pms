@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -277,6 +277,15 @@ export function ReservationDetailModal({
                             — Tarifa: {(reservation as any).originalRoomType.name}
                           </span>
                         )}
+                      </div>
+                    )}
+                    {reservation.notes && (
+                      <div className="flex gap-2 px-3 py-2.5 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-700 rounded-md">
+                        <StickyNote className="h-4 w-4 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-0.5">Notas de la reserva</div>
+                          <div className="text-xs text-yellow-800 dark:text-yellow-300 whitespace-pre-wrap">{reservation.notes}</div>
+                        </div>
                       </div>
                     )}
                     <div className="p-3 bg-muted/50 rounded-md space-y-1">
