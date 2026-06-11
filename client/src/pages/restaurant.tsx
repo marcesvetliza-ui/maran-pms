@@ -1795,6 +1795,18 @@ export default function RestaurantPage() {
                           setCurrentOrder(order);
                           setCloseReceiptType("ticket");
                           setClosePaymentMethod("efectivo");
+                          setCloseDiscount("");
+                          setCloseDiscountType("percent");
+                          setCloseRoomId("");
+                          setRoomSearchFilter("");
+                          setCloseBillingName("");
+                          setCloseBillingCuit("");
+                          setCloseBillingCompanyId("");
+                          setCloseCcEntityType("company");
+                          setCloseCcEntityId("");
+                          setBillingSearch("");
+                          setFbIsExento(false);
+                          setIsSplitMode(false);
                           setIsCloseDialogOpen(true);
                         }}
                         data-testid={`button-close-${order.orderNumber}`}
@@ -3144,6 +3156,18 @@ export default function RestaurantPage() {
                   setIsOrderDialogOpen(false);
                   setCloseReceiptType("ticket");
                   setClosePaymentMethod("efectivo");
+                  setCloseDiscount("");
+                  setCloseDiscountType("percent");
+                  setCloseRoomId("");
+                  setRoomSearchFilter("");
+                  setCloseBillingName("");
+                  setCloseBillingCuit("");
+                  setCloseBillingCompanyId("");
+                  setCloseCcEntityType("company");
+                  setCloseCcEntityId("");
+                  setBillingSearch("");
+                  setFbIsExento(false);
+                  setIsSplitMode(false);
                   setIsCloseDialogOpen(true);
                 }}
                 data-testid="button-close-table"
