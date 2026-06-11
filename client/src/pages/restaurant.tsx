@@ -3603,25 +3603,55 @@ export default function RestaurantPage() {
                     <Input
                       placeholder="Buscar por número o nombre..."
                       value={roomSearchFilter}
-                      onChange={(e) => setRoomSearchFilter(e.target.value)}
-                      className="mb-1"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRoomSearchFilter(val);
+                        setCloseRoomId("");
+                        if (val !== "") {
+                          const matches = inHouseRooms.filter(r =>
+                            r.reservationId &&
+                            (r.roomNumber.includes(val) || r.guestName.toLowerCase().includes(val.toLowerCase()))
+                          );
+                          if (matches.length === 1) {
+                            setCloseRoomId(matches[0].reservationId);
+                            setRoomSearchFilter("");
+                          }
+                        }
+                      }}
                       data-testid="input-room-search"
                     />
-                    <Select value={closeRoomId} onValueChange={setCloseRoomId}>
-                      <SelectTrigger data-testid="select-room-charge"><SelectValue placeholder="Seleccionar habitación" /></SelectTrigger>
-                      <SelectContent>
-                        {inHouseRooms
-                          .filter((r) =>
-                            roomSearchFilter === "" ||
-                            r.roomNumber.includes(roomSearchFilter) ||
-                            r.guestName.toLowerCase().includes(roomSearchFilter.toLowerCase())
-                          )
-                          .filter(r => r.reservationId)
-                          .map(r => (
-                            <SelectItem key={r.roomId} value={r.reservationId}>{r.roomNumber} — {r.guestName}</SelectItem>
+                    {roomSearchFilter !== "" && (() => {
+                      const matches = inHouseRooms.filter(r =>
+                        r.reservationId &&
+                        (r.roomNumber.includes(roomSearchFilter) || r.guestName.toLowerCase().includes(roomSearchFilter.toLowerCase()))
+                      );
+                      return matches.length > 1 ? (
+                        <div className="border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
+                          {matches.map(r => (
+                            <button
+                              key={r.roomId}
+                              type="button"
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                              onClick={() => { setCloseRoomId(r.reservationId); setRoomSearchFilter(""); }}
+                              data-testid={`option-room-${r.roomNumber}`}
+                            >
+                              <span className="font-medium">{r.roomNumber}</span> — {r.guestName}
+                            </button>
                           ))}
-                      </SelectContent>
-                    </Select>
+                        </div>
+                      ) : matches.length === 0 ? (
+                        <p className="text-sm text-muted-foreground px-1">Sin resultados</p>
+                      ) : null;
+                    })()}
+                    {closeRoomId && (() => {
+                      const room = inHouseRooms.find(r => r.reservationId === closeRoomId);
+                      return room ? (
+                        <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm bg-accent/40" data-testid="selected-room-charge">
+                          <span><span className="font-medium">{room.roomNumber}</span> — {room.guestName}</span>
+                          <button type="button" onClick={() => { setCloseRoomId(""); setRoomSearchFilter(""); }} className="text-muted-foreground hover:text-foreground ml-2 text-xs">✕</button>
+                        </div>
+                      ) : null;
+                    })()}
                     {inHouseRooms.length === 0 && (
                       <p className="text-sm text-muted-foreground">No hay habitaciones ocupadas</p>
                     )}
@@ -3789,31 +3819,62 @@ export default function RestaurantPage() {
                                 <div className="space-y-1 p-2 bg-muted/50 rounded-md border">
                                   <Label className="text-xs text-muted-foreground">Habitación a cargar</Label>
                                   <Input
-                                    placeholder="Buscar por número o huésped..."
+                                    placeholder="Buscar por número o nombre..."
                                     value={splitRoomSearchFilters[split.id] || ""}
-                                    onChange={(e) => setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: e.target.value }))}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: val }));
+                                      setSplitRoomIds(prev => ({ ...prev, [split.id]: "" }));
+                                      if (val !== "") {
+                                        const matches = inHouseRooms.filter(r =>
+                                          r.reservationId &&
+                                          (r.roomNumber.includes(val) || r.guestName.toLowerCase().includes(val.toLowerCase()))
+                                        );
+                                        if (matches.length === 1) {
+                                          setSplitRoomIds(prev => ({ ...prev, [split.id]: matches[0].reservationId }));
+                                          setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: "" }));
+                                        }
+                                      }
+                                    }}
                                     className="h-7 text-sm"
                                     data-testid={`input-split-room-search-${split.splitNumber}`}
                                   />
-                                  <Select value={splitRoomIds[split.id] || ""} onValueChange={(v) => setSplitRoomIds(prev => ({ ...prev, [split.id]: v }))}>
-                                    <SelectTrigger className="h-8 text-sm" data-testid={`select-split-room-${split.splitNumber}`}>
-                                      <SelectValue placeholder="Seleccionar habitación..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {inHouseRooms
-                                        .filter((r) => {
-                                          const search = splitRoomSearchFilters[split.id] || "";
-                                          return search === "" || r.roomNumber.includes(search) || r.guestName.toLowerCase().includes(search.toLowerCase());
-                                        })
-                                        .filter(r => r.reservationId)
-                                        .map(r => (
-                                          <SelectItem key={r.roomId} value={r.reservationId}>{r.roomNumber} — {r.guestName}</SelectItem>
+                                  {(splitRoomSearchFilters[split.id] || "") !== "" && (() => {
+                                    const search = splitRoomSearchFilters[split.id] || "";
+                                    const matches = inHouseRooms.filter(r =>
+                                      r.reservationId &&
+                                      (r.roomNumber.includes(search) || r.guestName.toLowerCase().includes(search.toLowerCase()))
+                                    );
+                                    return matches.length > 1 ? (
+                                      <div className="border rounded-md bg-popover shadow-md max-h-32 overflow-y-auto">
+                                        {matches.map(r => (
+                                          <button
+                                            key={r.roomId}
+                                            type="button"
+                                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                                            onClick={() => {
+                                              setSplitRoomIds(prev => ({ ...prev, [split.id]: r.reservationId }));
+                                              setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: "" }));
+                                            }}
+                                            data-testid={`option-split-room-${r.roomNumber}`}
+                                          >
+                                            <span className="font-medium">{r.roomNumber}</span> — {r.guestName}
+                                          </button>
                                         ))}
-                                      {inHouseRooms.length === 0 && (
-                                        <SelectItem value="__empty__" disabled>No hay habitaciones ocupadas</SelectItem>
-                                      )}
-                                    </SelectContent>
-                                  </Select>
+                                      </div>
+                                    ) : matches.length === 0 ? (
+                                      <p className="text-xs text-muted-foreground px-1">Sin resultados</p>
+                                    ) : null;
+                                  })()}
+                                  {splitRoomIds[split.id] && (() => {
+                                    const room = inHouseRooms.find(r => r.reservationId === splitRoomIds[split.id]);
+                                    return room ? (
+                                      <div className="flex items-center justify-between rounded-md border px-2 py-1.5 text-sm bg-accent/40">
+                                        <span><span className="font-medium">{room.roomNumber}</span> — {room.guestName}</span>
+                                        <button type="button" onClick={() => { setSplitRoomIds(prev => ({ ...prev, [split.id]: "" })); setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: "" })); }} className="text-muted-foreground hover:text-foreground ml-2 text-xs">✕</button>
+                                      </div>
+                                    ) : null;
+                                  })()}
                                 </div>
                               )}
                             </div>
