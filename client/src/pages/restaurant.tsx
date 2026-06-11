@@ -3818,7 +3818,18 @@ export default function RestaurantPage() {
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
-              onClick={() => { setIsCloseDialogOpen(false); setIsSplitMode(false); }}
+              onClick={() => {
+                setIsCloseDialogOpen(false);
+                setIsSplitMode(false);
+                setCloseDiscount("");
+                setCloseDiscountType("percent");
+                setRoomSearchFilter("");
+                setBillingSearch("");
+                setFbIsExento(false);
+                setCloseBillingName("");
+                setCloseBillingCuit("");
+                setCloseBillingCompanyId("");
+              }}
               className="w-full sm:w-auto"
             >
               Volver
