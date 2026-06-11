@@ -14,7 +14,9 @@ import {
   Eye,
   DoorOpen,
   Hotel,
-  History,
+  ChevronDown,
+  ChevronRight,
+  Archive,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -687,6 +689,141 @@ function GroupFormDialog({
   );
 }
 
+// ─── Reusable table component ────────────────────────────────────────────────
+
+function GroupTable({
+  groups,
+  formatDate,
+  updateStatusMutation,
+  handleViewDetail,
+  handleEdit,
+  setDeleteConfirmGroup,
+  dimmed = false,
+}: {
+  groups: GroupWithDetails[];
+  formatDate: (d: string) => string;
+  updateStatusMutation: any;
+  handleViewDetail: (g: GroupWithDetails) => void;
+  handleEdit: (g: GroupWithDetails) => void;
+  setDeleteConfirmGroup: (g: GroupWithDetails) => void;
+  dimmed?: boolean;
+}) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Código</TableHead>
+          <TableHead>Nombre</TableHead>
+          <TableHead>Fechas</TableHead>
+          <TableHead>Contacto</TableHead>
+          <TableHead>Habitaciones</TableHead>
+          <TableHead>Estado</TableHead>
+          <TableHead className="w-[80px]">Acciones</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {groups.map((group) => (
+          <TableRow
+            key={group.id}
+            data-testid={`row-group-${group.id}`}
+            className={dimmed ? "opacity-60" : undefined}
+          >
+            <TableCell>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: group.color || "#6366f1" }}
+                />
+                <span className="font-mono text-sm">{group.groupCode}</span>
+              </div>
+            </TableCell>
+            <TableCell className="font-medium">{group.name}</TableCell>
+            <TableCell>
+              <div className="flex items-center gap-1 text-sm">
+                <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                {formatDate(group.checkInDate)} — {formatDate(group.checkOutDate)}
+              </div>
+            </TableCell>
+            <TableCell>
+              {group.contactName && (
+                <div className="flex flex-col gap-0.5 text-sm">
+                  <span>{group.contactName}</span>
+                  {group.contactPhone && (
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <Phone className="h-3 w-3" />
+                      {group.contactPhone}
+                    </span>
+                  )}
+                </div>
+              )}
+            </TableCell>
+            <TableCell>
+              <div className="flex items-center gap-2">
+                <DoorOpen className="h-4 w-4 text-muted-foreground" />
+                <span>{group.assignedRooms} / {group.totalRooms}</span>
+              </div>
+            </TableCell>
+            <TableCell>
+              <Select
+                value={group.status}
+                onValueChange={(value) =>
+                  updateStatusMutation.mutate({ id: group.id, status: value })
+                }
+              >
+                <SelectTrigger
+                  className="h-7 w-36 text-xs border-0 bg-transparent p-0 focus:ring-0"
+                  data-testid={`select-status-${group.id}`}
+                >
+                  <SelectValue>
+                    <GroupStatusBadge status={group.status} />
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tentative"><GroupStatusBadge status="tentative" /></SelectItem>
+                  <SelectItem value="blocked"><GroupStatusBadge status="blocked" /></SelectItem>
+                  <SelectItem value="confirmed"><GroupStatusBadge status="confirmed" /></SelectItem>
+                  <SelectItem value="inhouse"><GroupStatusBadge status="inhouse" /></SelectItem>
+                  <SelectItem value="finished"><GroupStatusBadge status="finished" /></SelectItem>
+                  <SelectItem value="cancelled"><GroupStatusBadge status="cancelled" /></SelectItem>
+                </SelectContent>
+              </Select>
+            </TableCell>
+            <TableCell>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" data-testid={`button-actions-${group.id}`}>
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleViewDetail(group)}>
+                    <Eye className="mr-2 h-4 w-4" />
+                    Ver Detalle
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleEdit(group)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Editar
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => setDeleteConfirmGroup(group)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Eliminar
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function GroupsPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -695,7 +832,7 @@ export default function GroupsPage() {
   const [showFormDialog, setShowFormDialog] = useState(false);
   const [editingGroup, setEditingGroup] = useState<GroupWithDetails | undefined>();
   const [deleteConfirmGroup, setDeleteConfirmGroup] = useState<GroupWithDetails | null>(null);
-  const [showGroupHistory, setShowGroupHistory] = useState(false);
+  const [showPastGroups, setShowPastGroups] = useState(false);
 
   const { data: groups, isLoading } = useQuery<GroupWithDetails[]>({
     queryKey: ["/api/groups"],
@@ -740,18 +877,23 @@ export default function GroupsPage() {
   });
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-  const filteredGroups = groups?.filter((group) => {
+
+  const matchesFilter = (group: GroupWithDetails) => {
     const matchesSearch =
       group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       group.groupCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      group.contactName?.toLowerCase().includes(searchQuery.toLowerCase());
+      (group.contactName?.toLowerCase() ?? "").includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || group.status === statusFilter;
-    if (!showGroupHistory) {
-      const isOld = group.checkOutDate < today && ["finished", "cancelled"].includes(group.status);
-      if (isOld) return false;
-    }
     return matchesSearch && matchesStatus;
-  })?.sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
+  };
+
+  const activeGroups = (groups ?? [])
+    .filter(g => g.checkOutDate >= today && matchesFilter(g))
+    .sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
+
+  const pastGroups = (groups ?? [])
+    .filter(g => g.checkOutDate < today && matchesFilter(g))
+    .sort((a, b) => b.checkOutDate.localeCompare(a.checkOutDate));
 
   const handleEdit = (group: GroupWithDetails) => {
     setEditingGroup(group);
@@ -808,15 +950,6 @@ export default function GroupsPage() {
               <SelectItem value="cancelled">Cancelado</SelectItem>
             </SelectContent>
           </Select>
-          <Button
-            variant={showGroupHistory ? "default" : "outline"}
-            size="sm"
-            onClick={() => setShowGroupHistory(!showGroupHistory)}
-            data-testid="button-toggle-group-history"
-          >
-            <History className="h-4 w-4 mr-1" />
-            {showGroupHistory ? "Ocultar historial" : "Ver historial"}
-          </Button>
         </div>
         <Button onClick={() => { setEditingGroup(undefined); setShowFormDialog(true); }} data-testid="button-new-group">
           <Plus className="mr-2 h-4 w-4" />
@@ -824,11 +957,17 @@ export default function GroupsPage() {
         </Button>
       </div>
 
+      {/* ── Active groups ──────────────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2">
             <Users2 className="h-5 w-5" />
-            Listado de Grupos
+            Grupos Activos
+            {!isLoading && (
+              <span className="ml-1 text-sm font-normal text-muted-foreground">
+                ({activeGroups.length})
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -838,127 +977,76 @@ export default function GroupsPage() {
                 <Skeleton key={i} className="h-16 w-full" />
               ))}
             </div>
-          ) : filteredGroups && filteredGroups.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Código</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Fechas</TableHead>
-                  <TableHead>Contacto</TableHead>
-                  <TableHead>Habitaciones</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="w-[80px]">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredGroups.map((group) => (
-                  <TableRow key={group.id} data-testid={`row-group-${group.id}`}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: group.color || "#6366f1" }}
-                          title={`Color del grupo: ${group.color || "#6366f1"}`}
-                        />
-                        <span className="font-mono text-sm">{group.groupCode}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-medium">{group.name}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 text-sm">
-                        <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                        {formatDate(group.checkInDate)} - {formatDate(group.checkOutDate)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {group.contactName && (
-                        <div className="flex flex-col gap-0.5 text-sm">
-                          <span>{group.contactName}</span>
-                          {group.contactPhone && (
-                            <span className="flex items-center gap-1 text-muted-foreground">
-                              <Phone className="h-3 w-3" />
-                              {group.contactPhone}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <DoorOpen className="h-4 w-4 text-muted-foreground" />
-                        <span>{group.assignedRooms} / {group.totalRooms}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Select
-                        value={group.status}
-                        onValueChange={(value) =>
-                          updateStatusMutation.mutate({ id: group.id, status: value })
-                        }
-                      >
-                        <SelectTrigger
-                          className="h-7 w-36 text-xs border-0 bg-transparent p-0 focus:ring-0"
-                          data-testid={`select-status-${group.id}`}
-                        >
-                          <SelectValue>
-                            <GroupStatusBadge status={group.status} />
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="tentative"><GroupStatusBadge status="tentative" /></SelectItem>
-                          <SelectItem value="blocked"><GroupStatusBadge status="blocked" /></SelectItem>
-                          <SelectItem value="confirmed"><GroupStatusBadge status="confirmed" /></SelectItem>
-                          <SelectItem value="inhouse"><GroupStatusBadge status="inhouse" /></SelectItem>
-                          <SelectItem value="finished"><GroupStatusBadge status="finished" /></SelectItem>
-                          <SelectItem value="cancelled"><GroupStatusBadge status="cancelled" /></SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" data-testid={`button-actions-${group.id}`}>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleViewDetail(group)}>
-                            <Eye className="mr-2 h-4 w-4" />
-                            Ver Detalle
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(group)}>
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => setDeleteConfirmGroup(group)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Eliminar
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          ) : activeGroups.length > 0 ? (
+            <GroupTable
+              groups={activeGroups}
+              formatDate={formatDate}
+              updateStatusMutation={updateStatusMutation}
+              handleViewDetail={handleViewDetail}
+              handleEdit={handleEdit}
+              setDeleteConfirmGroup={setDeleteConfirmGroup}
+            />
           ) : (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Users2 className="h-12 w-12 text-muted-foreground/50" />
-              <h3 className="mt-4 text-lg font-semibold">No hay grupos</h3>
+              <h3 className="mt-4 text-lg font-semibold">No hay grupos activos</h3>
               <p className="mt-2 text-sm text-muted-foreground">
                 {searchQuery || statusFilter !== "all"
                   ? "No se encontraron grupos con los filtros aplicados"
-                  : "Comience creando un nuevo grupo para gestionar reservas grupales"}
+                  : "Creá un nuevo grupo para comenzar"}
               </p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* ── Past groups (collapsible) ───────────────────────────────────── */}
+      {(isLoading || pastGroups.length > 0) && (
+        <div className="rounded-lg border bg-muted/20">
+          <button
+            className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-muted/30 transition-colors rounded-lg"
+            onClick={() => setShowPastGroups(v => !v)}
+            data-testid="button-toggle-past-groups"
+          >
+            <Archive className="h-4 w-4 text-muted-foreground shrink-0" />
+            <span className="font-medium text-sm text-muted-foreground flex-1">
+              Grupos Anteriores
+              {!isLoading && (
+                <span className="ml-2 text-xs font-normal">({pastGroups.length})</span>
+              )}
+            </span>
+            {showPastGroups
+              ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
+          </button>
+
+          {showPastGroups && (
+            <div className="px-4 pb-4">
+              {isLoading ? (
+                <div className="space-y-2 pt-2">
+                  {[...Array(3)].map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full" />
+                  ))}
+                </div>
+              ) : pastGroups.length > 0 ? (
+                <GroupTable
+                  groups={pastGroups}
+                  formatDate={formatDate}
+                  updateStatusMutation={updateStatusMutation}
+                  handleViewDetail={handleViewDetail}
+                  handleEdit={handleEdit}
+                  setDeleteConfirmGroup={setDeleteConfirmGroup}
+                  dimmed
+                />
+              ) : (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  No hay grupos anteriores con los filtros aplicados
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <GroupFormDialog
         group={editingGroup}
