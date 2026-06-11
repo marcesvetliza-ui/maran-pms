@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
@@ -847,6 +847,32 @@ export function registerReservationsRoutes(app: Express) {
       });
 
       await storage.updateReservation(req.params.id, { status: "cancelled" });
+
+      // Auto-adjust group block quantity: if this reservation belonged to a group,
+      // decrement the corresponding block so its ghost disappears from the planning.
+      try {
+        const [groupLink] = await db.select().from(groupReservationLinks)
+          .where(eq(groupReservationLinks.reservationId, req.params.id));
+        if (groupLink) {
+          const blocks = await db.select().from(groupRoomBlocks)
+            .where(eq(groupRoomBlocks.groupId, groupLink.groupId));
+          const matchingBlock = blocks.find(b => b.roomTypeId === reservation.roomTypeId);
+          if (matchingBlock) {
+            if (matchingBlock.quantity <= 1) {
+              await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, matchingBlock.id));
+            } else {
+              await db.update(groupRoomBlocks)
+                .set({ quantity: matchingBlock.quantity - 1 })
+                .where(eq(groupRoomBlocks.id, matchingBlock.id));
+            }
+          }
+          // Remove the group link so the slot is no longer counted
+          await db.delete(groupReservationLinks)
+            .where(eq(groupReservationLinks.reservationId, req.params.id));
+        }
+      } catch (e) {
+        console.error("[cancel] Error ajustando bloque de grupo:", e);
+      }
 
       if (reservation.room?.status === "occupied") {
         await storage.updateRoom(reservation.roomId, { status: "dirty" });

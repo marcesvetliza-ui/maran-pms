@@ -987,6 +987,24 @@ export function registerGroupsRoutes(app: Express) {
         await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
       }
 
+      // Auto-adjust group block: decrement quantity so ghost disappears from planning
+      try {
+        const blocks = await db.select().from(groupRoomBlocks)
+          .where(eq(groupRoomBlocks.groupId, groupId));
+        const matchingBlock = blocks.find(b => b.roomTypeId === (reservation as any).roomTypeId);
+        if (matchingBlock) {
+          if (matchingBlock.quantity <= 1) {
+            await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, matchingBlock.id));
+          } else {
+            await db.update(groupRoomBlocks)
+              .set({ quantity: matchingBlock.quantity - 1 })
+              .where(eq(groupRoomBlocks.id, matchingBlock.id));
+          }
+        }
+      } catch (e) {
+        console.error("[unassign] Error ajustando bloque de grupo:", e);
+      }
+
       // Remove the group link
       await db.delete(groupReservationLinks).where(eq(groupReservationLinks.reservationId, reservationId));
 
