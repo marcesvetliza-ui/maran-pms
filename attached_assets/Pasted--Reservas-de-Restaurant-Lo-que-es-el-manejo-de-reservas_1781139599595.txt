@@ -1,0 +1,49 @@
+
+Reservas de Restaurant
+Lo que es el manejo de reservas se tiene que dividir en dos partes
+Generación de reserva, con todo lo que eso conlleva
+Asignación de la reserva a una mesa en particular en el caso de que no se le haya asignado una previamente
+Generación de reserva
+Tendría que tener un sidebar aparte en donde, dependiendo del acceso que tenga el usuario, se puede:
+Reservas existentes 
+Configuración de los turnos
+Generar reservas
+
+Punto 1
+Lo bueno es que muestra todos los datos de cada reserva y se puede modificar los datos cargados. Lo malo es que: 
+Muestra todas las reservas sin filtrarlas previamente. Se necesita un filtro activo del día, por fecha, estado de la reserva, nombre y adelantos hechos según estado de la reserva
+No existen estados de las reservas que puedan ser editables
+No se visualiza los montos totales adelantados
+Las reservas nunca se eliminan, se cancelan
+Según lo diseñado, una vez realizada la reserva se puede emitir adelantos lo cual no está mal, pero emitir lo hecho no sirve. Emitir adelantos conlleva muchos puntos que no se tomaron en cuenta 
+Si se va a hacer un adelanto se debe de poder seleccionar un cliente de nuestra base de datos si es que no se seleccionó uno al momento de hacer la reserva
+poder cambiar ese cliente 
+tener en cuenta la inscripción ante el iva que tiene el cliente para poder emitir el comprobante correcto, pudiendo seleccionar un ticket no fiscal
+Poder seleccionar el punto de venta, sin este no se va a poder emitir facturas electrónicas
+Tener en cuenta la condición de venta al momento de hacer el adelanto
+tomar en cuenta que concepto o artículo se va a utilizar para emitir los adelantos 
+porque el monto de los adelantos tiene que ser debitado de los consumos de la mesa al momento que se presente el comensal y se comience a realizar la carga de las comandas. Cuando pasa esto el estado de la reserva pasa a check in o similar como, como en el hotel, por eso la importancia de los estados
+se debe poder emitir notas de crédito 
+Debido a la cantidad de datos que muestra ocupa mucho espacio en la pantalla lo que puede ocasionar algún tipo de problema si se tienen muchas reservas para un día
+Falta poder emitir distintos tipos de listados. En el sistema actual existen dos, pero puede haber más según se necesite 
+Punto 2
+Si se van a configurar los turnos le falta a que salón se le va a configurar, porque un salón puede tener horarios distintos al resto de los salones 
+¿Solo por horario y no por cantidad de mesa por salón? me parece que esto falta si se va a hacer esto
+Los turnos deben de afectar directamente al punto 3 
+Punto 3
+Aca se complica un poco el tema ya que no se consideró, lo que siempre me pidieron y que el sistema actual tiene, facturar adelantos los cuales pueden ser más de uno y la factura puede que no sea al nombre del que reserva. 
+Al realizar una nueva reserva el sistema debería pedir
+nombre para quien se le hace la reserva
+poder seleccionar de la base de datos el cliente a quien se le va a emitir los adelantos 
+si no se selecciona un cliente debe de quedar preseleccionado el cliente consumidor final para poder ser cambiado al momento de hacer los adelantos, si son necesarios
+teléfono como dato obligatorio 
+email no es un datos obligatorio
+fecha y hora de la reserva como dato obligatorio
+la mesa no es un dato obligatorio porque la mesa se puede asignar al momento de que llegue el comenzar como puede ser asignada en un futuro
+cantidad de personas es un dato obligatorio 
+observaciones, muy importantes
+asignar un estado de reserva
+en su momento habían pedido los datos de una tarjeta de crédito validada por si no se presentaba y poder cobrar  
+Desde el módulo del restaurante se debe de poder ver las reservas existentes para el día. Poder asignar la reserva a una mesa si no tiene una asignada o darle el ingreso si ya tiene una mesa asignada. Por cualquiera de estas opciones se tiene que cambiar el estado de la reserva y cuando se facture y se retire cambiar el estado a histórico.
+Los estados de reserva de mesa son casi iguales, sino iguales, al del hotel, donde se tiene distintos estados de reservas, cancelada, no show, ingreso y partida o histórica.
+No hay forma de asignar una reserva a una mesa, solo hay un apartado que informa que reservas hay en el día, próxima o pasadas, por lo cual el adelanto que se tiene no se traslada a la mesa para descontar de lo consumidos en las comandas que se carguen. 
