@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
+import { emitirFactura } from "../billing/invoiceService";
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -227,8 +228,10 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit } = req.body;
       const effectiveReservationId = reservationId || roomReservationId;
+      const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || paymentMethod === "cuenta_habitacion";
+      const effectivePaymentMethod = isRoomCharge ? "room_charge" : (paymentMethod || "cash");
 
       let finalTotal = parseFloat(order.total || "0");
       let discountAmount = 0;
@@ -244,15 +247,15 @@ export function registerRestaurantRoutes(app: Express) {
       const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
         status: "closed",
         closedAt: new Date(),
-        chargedToRoom: chargeToRoom ? "true" : "false",
+        chargedToRoom: isRoomCharge ? "true" : "false",
         roomNumber: roomNumber || null,
         receiptType: receiptType || null,
-        paymentMethod: paymentMethod || null,
+        paymentMethod: effectivePaymentMethod,
         total: String(finalTotal.toFixed(2)),
         notes: discountAmount > 0 ? `Descuento: $${discountAmount.toFixed(2)}` : undefined,
       });
 
-      if (chargeToRoom && effectiveReservationId) {
+      if (isRoomCharge && effectiveReservationId) {
         await storage.createCharge({
           reservationId: effectiveReservationId,
           description: `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`,
@@ -270,7 +273,7 @@ export function registerRestaurantRoutes(app: Express) {
         const label = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
         await storage.registerCashMovement(
           "restaurant", "restaurant_order", req.params.id, label,
-          paymentMethod || (chargeToRoom ? "room_charge" : "cash"),
+          effectivePaymentMethod,
           String(finalTotal.toFixed(2)), "income",
           undefined, receiptType
         );
@@ -281,8 +284,6 @@ export function registerRestaurantRoutes(app: Express) {
       // Motor financiero: escribir al folio del pedido
       {
         const ordLabel = `Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
-        const method = paymentMethod || (chargeToRoom ? "room_charge" : "cash");
-        // Primero cargo (el total del pedido) luego pago
         storage.addFolioCharge(
           "restaurant_order", req.params.id,
           parseFloat(order.total || "0"),
@@ -292,8 +293,8 @@ export function registerRestaurantRoutes(app: Express) {
         ).then(() => storage.addFolioPayment(
           "restaurant_order", req.params.id,
           finalTotal,
-          `Cobro — ${method}`,
-          method, "restaurant_payment", req.params.id,
+          `Cobro — ${effectivePaymentMethod}`,
+          effectivePaymentMethod, "restaurant_payment", req.params.id,
           undefined, (req as any).user?.username, receiptType,
         )).catch(e => console.error("[Folio] Error restaurant:", e));
       }
@@ -316,6 +317,35 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
+      // Emitir factura AFIP si se solicitó
+      let invoiceId: number | undefined;
+      if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
+        try {
+          const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
+          const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+          const invoice = await emitirFactura({
+            tipoComprobante: tipo as "FA" | "FB" | "FC",
+            cliente: {
+              razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
+              cuit: customerCuit || undefined,
+              condicionIva: condicion,
+            },
+            items: [{
+              descripcion: `Consumiciones Restaurante — Pedido ${order.orderNumber}`,
+              cantidad: 1,
+              precioUnitario: parseFloat((finalTotal / 1.21).toFixed(4)),
+              alicuotaIva: "21" as const,
+              subtotalNeto: parseFloat((finalTotal / 1.21).toFixed(4)),
+              subtotal: finalTotal,
+            }],
+            operador: (req as any).user?.fullName || (req as any).user?.username,
+          });
+          invoiceId = invoice.id;
+        } catch (e) {
+          console.error("[Billing] Error emitiendo factura restaurant:", e);
+        }
+      }
+
       try {
         const orderItemsList = await storage.getOrderItems(req.params.id);
         const stockResult = await storage.deductStockFromOrder(
@@ -325,10 +355,10 @@ export function registerRestaurantRoutes(app: Express) {
         if (stockResult.warnings.length > 0) {
           console.warn(`[Stock] Advertencias en orden ${req.params.id}:`, stockResult.warnings);
         }
-        return res.json({ ...updatedOrder, stockDeducted: stockResult.deducted, stockWarnings: stockResult.warnings });
+        return res.json({ ...updatedOrder, stockDeducted: stockResult.deducted, stockWarnings: stockResult.warnings, invoiceId });
       } catch (stockError) {
         console.error("[Stock] Error en descuento automático:", stockError);
-        return res.json(updatedOrder);
+        return res.json({ ...updatedOrder, invoiceId });
       }
     } catch (error) {
       res.status(500).json({ error: "Error closing order" });
@@ -595,7 +625,7 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.patch("/api/restaurant/orders/:id/split/:splitId", async (req, res) => {
     try {
-      const { method, receiptType, roomReservationId, amount } = req.body;
+      const { method, receiptType, roomReservationId, amount, emitInvoice, vatCondition, customerRazonSocial, customerCuit } = req.body;
 
       // Allow updating just the amount (without paying)
       if (amount !== undefined && !method) {
@@ -629,11 +659,41 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
+      // Emitir factura AFIP si se solicitó
+      let invoiceId: number | undefined;
+      if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
+        try {
+          const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
+          const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+          const splitOrder = await storage.getRestaurantOrder(req.params.id);
+          const invoice = await emitirFactura({
+            tipoComprobante: tipo as "FA" | "FB" | "FC",
+            cliente: {
+              razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
+              cuit: customerCuit || undefined,
+              condicionIva: condicion,
+            },
+            items: [{
+              descripcion: `Restaurante — Pedido ${splitOrder?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
+              cantidad: 1,
+              precioUnitario: parseFloat((parseFloat(split.amount) / 1.21).toFixed(4)),
+              alicuotaIva: "21" as const,
+              subtotalNeto: parseFloat((parseFloat(split.amount) / 1.21).toFixed(4)),
+              subtotal: parseFloat(split.amount),
+            }],
+            operador: (req as any).user?.fullName || (req as any).user?.username,
+          });
+          invoiceId = invoice.id;
+        } catch (e) {
+          console.error("[Billing] Error emitiendo factura split restaurant:", e);
+        }
+      }
+
       const allSplits = await storage.getOrderSplits(req.params.id);
       const allPaid = allSplits.every((s: any) => s.isPaid === "true");
 
       if (allPaid) {
-        const order = await storage.getRestaurantOrder(req.params.id);
+        const orderForClose = await storage.getRestaurantOrder(req.params.id);
         await storage.updateRestaurantOrder(req.params.id, {
           status: "closed",
           closedAt: new Date(),
@@ -641,12 +701,12 @@ export function registerRestaurantRoutes(app: Express) {
           receiptType: receiptType || null,
           chargedToRoom: method === "cuenta_habitacion" ? "true" : "false",
         });
-        if (order?.tableId) {
-          await storage.updateRestaurantTable(order.tableId, { status: "available" });
+        if (orderForClose?.tableId) {
+          await storage.updateRestaurantTable(orderForClose.tableId, { status: "available" });
         }
       }
 
-      res.json({ split, allPaid });
+      res.json({ split, allPaid, invoiceId });
     } catch (error) {
       res.status(500).json({ error: "Error paying split" });
     }

@@ -248,12 +248,11 @@ const tableStatusLabels: Record<string, string> = {
 const SHOW_FACTURA_C = false;
 
 const receiptTypeLabels: Record<string, string> = {
-  cierre_mesa: "Cierre de Mesa",
+  cierre_mesa: "Ticket / Cierre",
   factura_a: "Factura A",
   factura_b: "Factura B",
   voucher: "Voucher Justo Resto",
   voucher_pedidos_ya: "Voucher Pedidos Ya",
-  cuenta_habitacion: "Cargo a Habitación",
   ...(SHOW_FACTURA_C ? { factura_c: "Factura C" } : {}),
 };
 
@@ -264,6 +263,7 @@ const paymentMethodLabels: Record<string, string> = {
   transferencia: "Transferencia",
   mercadopago: "MercadoPago",
   cuenta_corriente: "Cuenta Corriente",
+  cuenta_habitacion: "Cargo a Habitación",
 };
 
 const menuItemFormSchema = z.object({
@@ -418,6 +418,11 @@ export default function RestaurantPage() {
   const [billingSearch, setBillingSearch] = useState("");
   const [billingSearchOpen, setBillingSearchOpen] = useState(false);
   const [fbIsExento, setFbIsExento] = useState(false);
+  const [splitCustomerNames, setSplitCustomerNames] = useState<Record<string, string>>({});
+  const [splitCustomerCuits, setSplitCustomerCuits] = useState<Record<string, string>>({});
+  const [splitVatConditions, setSplitVatConditions] = useState<Record<string, string>>({});
+  const [splitBillingSearches, setSplitBillingSearches] = useState<Record<string, string>>({});
+  const [splitFbIsExento, setSplitFbIsExento] = useState<Record<string, boolean>>({});
   const [isNewClientDialogOpen, setIsNewClientDialogOpen] = useState(false);
   const [newClientRazonSocial, setNewClientRazonSocial] = useState("");
   const [newClientCuit, setNewClientCuit] = useState("");
@@ -686,24 +691,34 @@ export default function RestaurantPage() {
   });
 
   const paySplitMutation = useMutation({
-    mutationFn: async (data: { orderId: string; splitId: string; method: string; receiptType: string; roomReservationId?: string }) => {
+    mutationFn: async (data: {
+      orderId: string; splitId: string; method: string; receiptType: string; roomReservationId?: string;
+      emitInvoice?: boolean; vatCondition?: string; customerRazonSocial?: string; customerCuit?: string;
+    }) => {
       const res = await apiRequest("PATCH", `/api/restaurant/orders/${data.orderId}/split/${data.splitId}`, {
         method: data.method,
         receiptType: data.receiptType,
         roomReservationId: data.roomReservationId,
+        emitInvoice: data.emitInvoice,
+        vatCondition: data.vatCondition,
+        customerRazonSocial: data.customerRazonSocial,
+        customerCuit: data.customerCuit,
       });
       return res.json();
     },
-    onSuccess: (data: { split: OrderSplit; allPaid: boolean }) => {
+    onSuccess: (data: { split: OrderSplit; allPaid: boolean; invoiceId?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+      if (data.invoiceId) {
+        window.open(`/api/billing/invoices/${data.invoiceId}/pdf`, "_blank");
+      }
       if (data.allPaid) {
         setCurrentOrder(null);
         setIsCloseDialogOpen(false);
         setIsSplitMode(false);
-        toast({ title: "Todas las partes pagadas — mesa cerrada" });
+        toast({ title: data.invoiceId ? "Mesa cerrada — Factura emitida" : "Todas las partes pagadas — mesa cerrada" });
       } else {
-        toast({ title: "Parte cobrada" });
+        toast({ title: data.invoiceId ? "Parte cobrada — Factura emitida" : "Parte cobrada" });
       }
     },
   });
@@ -808,9 +823,14 @@ export default function RestaurantPage() {
   });
 
   const closeOrderMutation = useMutation({
-    mutationFn: async (data: { orderId: string; receiptType: string; paymentMethod: string; discount?: number; discountType?: string; roomReservationId?: string; billingName?: string; billingCuit?: string; ccEntityType?: string; ccEntityId?: string }) => {
+    mutationFn: async (data: {
+      orderId: string; receiptType: string; paymentMethod: string;
+      discount?: number; discountType?: string; roomReservationId?: string;
+      billingName?: string; billingCuit?: string; ccEntityType?: string; ccEntityId?: string;
+      emitInvoice?: boolean; vatCondition?: string; customerRazonSocial?: string; customerCuit?: string;
+    }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
-        chargeToRoom: data.receiptType === "cuenta_habitacion",
+        chargeToRoom: data.paymentMethod === "cuenta_habitacion",
         receiptType: data.receiptType,
         paymentMethod: data.paymentMethod,
         discount: data.discount,
@@ -820,17 +840,22 @@ export default function RestaurantPage() {
         billingCuit: data.billingCuit,
         ccEntityType: data.ccEntityType,
         ccEntityId: data.ccEntityId,
+        emitInvoice: data.emitInvoice,
+        vatCondition: data.vatCondition,
+        customerRazonSocial: data.customerRazonSocial,
+        customerCuit: data.customerCuit,
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       setCurrentOrder(null);
       setIsCloseDialogOpen(false);
       setCloseDiscount("");
-      setCloseDiscountType("amount");
+      setCloseDiscountType("percent");
       setCloseRoomId("");
+      setRoomSearchFilter("");
       setCloseBillingName("");
       setCloseBillingCuit("");
       setCloseBillingCompanyId("");
@@ -838,7 +863,12 @@ export default function RestaurantPage() {
       setCloseCcEntityId("");
       setBillingSearch("");
       setFbIsExento(false);
-      toast({ title: "Pedido cerrado" });
+      if (data?.invoiceId) {
+        window.open(`/api/billing/invoices/${data.invoiceId}/pdf`, "_blank");
+        toast({ title: "Pedido cerrado — Factura emitida", description: "Se abrió el PDF en una nueva pestaña." });
+      } else {
+        toast({ title: "Pedido cerrado" });
+      }
     },
   });
 
@@ -1793,7 +1823,7 @@ export default function RestaurantPage() {
                         className="flex-1"
                         onClick={() => {
                           setCurrentOrder(order);
-                          setCloseReceiptType("ticket");
+                          setCloseReceiptType("cierre_mesa");
                           setClosePaymentMethod("efectivo");
                           setCloseDiscount("");
                           setCloseDiscountType("percent");
@@ -1806,6 +1836,10 @@ export default function RestaurantPage() {
                           setCloseCcEntityId("");
                           setBillingSearch("");
                           setFbIsExento(false);
+                          setSplitCustomerNames({});
+                          setSplitCustomerCuits({});
+                          setSplitVatConditions({});
+                          setSplitFbIsExento({});
                           setIsSplitMode(false);
                           setIsCloseDialogOpen(true);
                         }}
@@ -3154,7 +3188,7 @@ export default function RestaurantPage() {
                 className="w-full sm:w-auto"
                 onClick={() => {
                   setIsOrderDialogOpen(false);
-                  setCloseReceiptType("ticket");
+                  setCloseReceiptType("cierre_mesa");
                   setClosePaymentMethod("efectivo");
                   setCloseDiscount("");
                   setCloseDiscountType("percent");
@@ -3167,6 +3201,10 @@ export default function RestaurantPage() {
                   setCloseCcEntityId("");
                   setBillingSearch("");
                   setFbIsExento(false);
+                  setSplitCustomerNames({});
+                  setSplitCustomerCuits({});
+                  setSplitVatConditions({});
+                  setSplitFbIsExento({});
                   setIsSplitMode(false);
                   setIsCloseDialogOpen(true);
                 }}
@@ -3337,68 +3375,56 @@ export default function RestaurantPage() {
                 {(() => {
                   const updOrder = getUpdatedOrder();
                   const isTableless = updOrder && !updOrder.tableId;
-                  const tablelessReceiptTypes: Record<string, string> = {
-                    voucher: "Voucher Justo Resto",
-                    voucher_pedidos_ya: "Voucher Pedidos Ya",
-                    cuenta_habitacion: "Cargo a Habitación",
-                  };
-                  const tablelessPaymentMethods: Record<string, string> = {
-                    efectivo: "Efectivo",
-                    pedidos_ya: "Pedidos Ya",
-                  };
-                  const activeReceiptTypes = isTableless ? tablelessReceiptTypes : receiptTypeLabels;
-                  const activePaymentMethods = isTableless ? tablelessPaymentMethods : paymentMethodLabels;
-                  const effectiveReceiptType = isTableless && !activeReceiptTypes[closeReceiptType] ? "voucher" : closeReceiptType;
-                  const effectivePaymentMethod = isTableless && !activePaymentMethods[closePaymentMethod] ? "efectivo" : closePaymentMethod;
-                  if (effectiveReceiptType !== closeReceiptType) setTimeout(() => setCloseReceiptType(effectiveReceiptType), 0);
-                  if (effectivePaymentMethod !== closePaymentMethod) setTimeout(() => setClosePaymentMethod(effectivePaymentMethod), 0);
-                  const isCuentaHabitacion = effectiveReceiptType === "cuenta_habitacion";
+                  const activePaymentMethods = isTableless
+                    ? { efectivo: "Efectivo", pedidos_ya: "Pedidos Ya" }
+                    : paymentMethodLabels;
+                  const activeReceiptTypes = isTableless
+                    ? { voucher: "Voucher Justo Resto", voucher_pedidos_ya: "Voucher Pedidos Ya" }
+                    : receiptTypeLabels;
+                  const effPay = isTableless && !activePaymentMethods[closePaymentMethod] ? "efectivo" : closePaymentMethod;
+                  const effRec = isTableless && !activeReceiptTypes[closeReceiptType] ? "voucher" : closeReceiptType;
+                  if (effPay !== closePaymentMethod) setTimeout(() => setClosePaymentMethod(effPay), 0);
+                  if (effRec !== closeReceiptType) setTimeout(() => setCloseReceiptType(effRec), 0);
+                  const isRoomCharge = effPay === "cuenta_habitacion";
                   return (
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t">
                       <div className="space-y-2">
-                        <Label>Tipo de Comprobante</Label>
-                        <Select value={effectiveReceiptType} onValueChange={(v) => {
-                          setCloseReceiptType(v);
-                          if (v === "factura_b") {
-                            setCloseBillingName("CONSUMIDOR FINAL");
-                            setCloseBillingCuit("");
-                            setCloseBillingCompanyId("");
-                            setBillingSearch("");
-                            setFbIsExento(false);
-                          } else if (v !== "factura_a") {
-                            setCloseBillingName("");
-                            setCloseBillingCuit("");
-                            setCloseBillingCompanyId("");
-                            setBillingSearch("");
-                          }
+                        <Label>Forma de Cobro</Label>
+                        <Select value={effPay} onValueChange={(v) => {
+                          setClosePaymentMethod(v);
+                          if (v !== "cuenta_habitacion") { setCloseRoomId(""); setRoomSearchFilter(""); }
                         }}>
-                          <SelectTrigger data-testid="select-receipt-type">
-                            <SelectValue />
-                          </SelectTrigger>
+                          <SelectTrigger data-testid="select-payment-method"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {Object.entries(activeReceiptTypes).map(([value, label]) => (
+                            {Object.entries(activePaymentMethods).map(([value, label]) => (
                               <SelectItem key={value} value={value}>{label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        {isTableless && (
-                          <p className="text-xs text-muted-foreground">Área sin mesas</p>
-                        )}
+                        {isTableless && <p className="text-xs text-muted-foreground">Área sin mesas</p>}
                       </div>
                       <div className="space-y-2">
-                        <Label>Forma de Pago</Label>
-                        {isCuentaHabitacion ? (
+                        <Label>Comprobante</Label>
+                        {isRoomCharge ? (
                           <div className="text-sm text-muted-foreground bg-muted/40 rounded-md p-2.5 flex items-center gap-2">
                             <BedDouble className="h-4 w-4 text-blue-500 shrink-0" />
                             <span className="text-xs">Se carga al folio de la habitación</span>
                           </div>
                         ) : (
-                          <Select value={effectivePaymentMethod} onValueChange={setClosePaymentMethod}>
-                            <SelectTrigger data-testid="select-payment-method">
-                              <SelectValue />
-                            </SelectTrigger>
+                          <Select value={effRec} onValueChange={(v) => {
+                            setCloseReceiptType(v);
+                            if (v === "factura_b") {
+                              setCloseBillingName("CONSUMIDOR FINAL");
+                              setCloseBillingCuit(""); setCloseBillingCompanyId("");
+                              setBillingSearch(""); setFbIsExento(false);
+                            } else if (v !== "factura_a") {
+                              setCloseBillingName(""); setCloseBillingCuit("");
+                              setCloseBillingCompanyId(""); setBillingSearch("");
+                            }
+                          }}>
+                            <SelectTrigger data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              {Object.entries(activePaymentMethods).map(([value, label]) => (
+                              {Object.entries(activeReceiptTypes).map(([value, label]) => (
                                 <SelectItem key={value} value={value}>{label}</SelectItem>
                               ))}
                             </SelectContent>
@@ -3597,7 +3623,7 @@ export default function RestaurantPage() {
                   );
                 })()}
 
-                {closeReceiptType === "cuenta_habitacion" && (
+                {closePaymentMethod === "cuenta_habitacion" && (
                   <div className="space-y-2">
                     <Label>Habitación</Label>
                     <Input
@@ -3780,7 +3806,7 @@ export default function RestaurantPage() {
                                   </Select>
                                 </div>
                                 <div className="flex-1">
-                                  <Select value={splitReceiptTypes[split.id] || "ticket"} onValueChange={(v) => setSplitReceiptTypes(prev => ({ ...prev, [split.id]: v }))}>
+                                  <Select value={splitReceiptTypes[split.id] || "cierre_mesa"} onValueChange={(v) => setSplitReceiptTypes(prev => ({ ...prev, [split.id]: v }))}>
                                     <SelectTrigger className="h-8" data-testid={`select-split-receipt-${split.splitNumber}`}>
                                       <SelectValue />
                                     </SelectTrigger>
@@ -3800,12 +3826,21 @@ export default function RestaurantPage() {
                                         toast({ title: "Seleccioná una habitación", variant: "destructive" });
                                         return;
                                       }
+                                      const sReceipt = splitReceiptTypes[split.id] || "cierre_mesa";
+                                      const sIsFactura = ["factura_a","factura_b","factura_c"].includes(sReceipt);
+                                      const sVatCond = sReceipt === "factura_a"
+                                        ? "responsable_inscripto"
+                                        : splitFbIsExento[split.id] ? "exento" : "consumidor_final";
                                       paySplitMutation.mutate({
                                         orderId: currentOrder.id,
                                         splitId: split.id,
                                         method,
-                                        receiptType: splitReceiptTypes[split.id] || "ticket",
+                                        receiptType: sReceipt,
                                         roomReservationId: method === "cuenta_habitacion" ? splitRoomIds[split.id] : undefined,
+                                        emitInvoice: sIsFactura,
+                                        vatCondition: sIsFactura ? sVatCond : undefined,
+                                        customerRazonSocial: sIsFactura ? (splitCustomerNames[split.id] || undefined) : undefined,
+                                        customerCuit: sIsFactura ? (splitCustomerCuits[split.id] || undefined) : undefined,
                                       });
                                     }
                                   }}
@@ -3877,6 +3912,46 @@ export default function RestaurantPage() {
                                   })()}
                                 </div>
                               )}
+                              {(() => {
+                                const sRec = splitReceiptTypes[split.id] || "cierre_mesa";
+                                const isFactA = sRec === "factura_a";
+                                const isFactB = sRec === "factura_b";
+                                if (!isFactA && !isFactB) return null;
+                                const isExento = splitFbIsExento[split.id] || false;
+                                const showForm = isFactA || isExento;
+                                return (
+                                  <div className="mt-2 p-2 border rounded-md bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 space-y-2">
+                                    {isFactB && (
+                                      <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                        <input type="checkbox" checked={isExento} onChange={e => setSplitFbIsExento(prev => ({ ...prev, [split.id]: e.target.checked }))} />
+                                        Exento / IVA
+                                      </label>
+                                    )}
+                                    {showForm && (
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <Label className="text-xs">Razón Social</Label>
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={splitCustomerNames[split.id] || ""}
+                                            onChange={e => setSplitCustomerNames(prev => ({ ...prev, [split.id]: e.target.value }))}
+                                            placeholder="Empresa S.A."
+                                          />
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs">CUIT</Label>
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={splitCustomerCuits[split.id] || ""}
+                                            onChange={e => setSplitCustomerCuits(prev => ({ ...prev, [split.id]: formatCuit(e.target.value) }))}
+                                            placeholder="30-12345678-9"
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           )}
                         </div>
@@ -3908,12 +3983,18 @@ export default function RestaurantPage() {
                 setIsSplitMode(false);
                 setCloseDiscount("");
                 setCloseDiscountType("percent");
+                setCloseRoomId("");
                 setRoomSearchFilter("");
                 setBillingSearch("");
                 setFbIsExento(false);
                 setCloseBillingName("");
                 setCloseBillingCuit("");
                 setCloseBillingCompanyId("");
+                setSplitCustomerNames({});
+                setSplitCustomerCuits({});
+                setSplitVatConditions({});
+                setSplitBillingSearches({});
+                setSplitFbIsExento({});
               }}
               className="w-full sm:w-auto"
             >
@@ -3928,17 +4009,25 @@ export default function RestaurantPage() {
                   onClick={() => {
                     if (currentOrder) {
                       const disc = parseFloat(closeDiscount || "0");
+                      const isFactura = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
+                      const vatCond = closeReceiptType === "factura_a"
+                        ? "responsable_inscripto"
+                        : fbIsExento ? "exento" : "consumidor_final";
                       closeOrderMutation.mutate({
                         orderId: currentOrder.id,
                         receiptType: closeReceiptType,
-                        paymentMethod: closeReceiptType === "cuenta_habitacion" ? "room_charge" : closePaymentMethod,
+                        paymentMethod: closePaymentMethod,
                         discount: disc > 0 ? disc : undefined,
                         discountType: disc > 0 ? closeDiscountType : undefined,
-                        roomReservationId: closeReceiptType === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
+                        roomReservationId: closePaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
                         billingName: closeBillingName || undefined,
                         billingCuit: closeBillingCuit || undefined,
                         ccEntityType: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityType : undefined,
                         ccEntityId: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityId : undefined,
+                        emitInvoice: isFactura,
+                        vatCondition: isFactura ? vatCond : undefined,
+                        customerRazonSocial: isFactura ? (closeBillingName || undefined) : undefined,
+                        customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
                       });
                     }
                   }}
