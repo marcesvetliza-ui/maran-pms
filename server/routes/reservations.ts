@@ -300,12 +300,16 @@ export function registerReservationsRoutes(app: Express) {
       if (cambios.length > 0) {
         const operador = (req as any).user?.fullName || (req as any).user?.username || "Sistema";
         for (const cambio of cambios) {
-          await db.insert(reservationChangelog).values({
-            reservationId: req.params.id,
-            operador,
-            tipo: cambio.tipo,
-            descripcion: cambio.descripcion,
-          });
+          try {
+            await db.insert(reservationChangelog).values({
+              reservationId: req.params.id,
+              operador,
+              tipo: cambio.tipo,
+              descripcion: cambio.descripcion,
+            });
+          } catch (clErr: any) {
+            console.warn("[changelog] insert failed (non-fatal):", clErr?.message);
+          }
         }
       }
 

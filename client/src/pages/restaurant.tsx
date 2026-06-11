@@ -511,6 +511,7 @@ export default function RestaurantPage() {
   const [editingAreaName, setEditingAreaName] = useState("");
   const [isTimeSlotsDialogOpen, setIsTimeSlotsDialogOpen] = useState(false);
   const [newTimeSlot, setNewTimeSlot] = useState("");
+  const [newTimeSlotArea, setNewTimeSlotArea] = useState<string>("__none__");
   const [newTableNumber, setNewTableNumber] = useState("");
   const [newTableCapacity, setNewTableCapacity] = useState(4);
   const [newTableShape, setNewTableShape] = useState("square");
@@ -1163,13 +1164,14 @@ export default function RestaurantPage() {
   });
 
   const createTimeSlotMutation = useMutation({
-    mutationFn: async (time: string) => {
-      const res = await apiRequest("POST", "/api/restaurant/time-slots", { time });
+    mutationFn: async (data: { time: string; areaId?: string | null }) => {
+      const res = await apiRequest("POST", "/api/restaurant/time-slots", data);
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/time-slots"] });
       setNewTimeSlot("");
+      setNewTimeSlotArea("__none__");
       toast({ title: "Horario agregado" });
     },
   });
@@ -1255,6 +1257,45 @@ export default function RestaurantPage() {
         setOrderView(orderItems.length > 0 ? "comanda" : "menu");
         setSelectedCategory(null);
         setIsOrderDialogOpen(true);
+      }
+    }
+  };
+
+  const handleCheckIn = (reservation: TableReservation) => {
+    updateReservationMutation.mutate({ id: reservation.id, data: { status: "check_in" } });
+    if (reservation.tableId) {
+      const table = tables.find(t => t.id === reservation.tableId);
+      if (table) {
+        const advAmt = parseFloat(reservation.advanceAmount || "0");
+        if (table.status === "available") {
+          createOrderMutation.mutate({
+            tableId: reservation.tableId,
+            covers: reservation.partySize,
+            waiterName: "",
+          });
+          setActiveTab("floor");
+          toast({
+            title: `Check-in — ${reservation.guestName}`,
+            description: advAmt > 0
+              ? `Mesa ${table.tableNumber} abierta. Seña registrada: $${advAmt.toLocaleString("es-AR")}`
+              : `Mesa ${table.tableNumber} abierta.`,
+          });
+        } else if (table.status === "occupied") {
+          const tableOrder = orders.find(o => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
+          if (tableOrder) {
+            setCurrentOrder(tableOrder);
+            setOrderView(((tableOrder as any).items || []).length > 0 ? "comanda" : "menu");
+            setSelectedCategory(null);
+            setIsOrderDialogOpen(true);
+            setActiveTab("floor");
+          }
+          if (advAmt > 0) {
+            toast({
+              title: `Check-in — ${reservation.guestName}`,
+              description: `Seña registrada: $${advAmt.toLocaleString("es-AR")}`,
+            });
+          }
+        }
       }
     }
   };
@@ -2369,7 +2410,7 @@ export default function RestaurantPage() {
                               )}
                               {reservation.status === "confirmed" && (
                                 <Button size="sm" variant="default" className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700"
-                                  onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "check_in" } })}
+                                  onClick={() => handleCheckIn(reservation)}
                                   data-testid={`button-checkin-${reservation.id}`}>
                                   <CheckCircle2 className="h-3 w-3 mr-1" />Check-in
                                 </Button>
@@ -4396,24 +4437,31 @@ export default function RestaurantPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
-                <FormField control={reservationForm.control} name="reservationTime" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Hora *</FormLabel>
-                    {timeSlots.length > 0 ? (
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl><SelectTrigger data-testid="select-reservation-time"><SelectValue placeholder="Seleccionar turno" /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          {timeSlots.map((slot) => (
-                            <SelectItem key={slot.id} value={slot.time}>{slot.time}{slot.label ? ` (${slot.label})` : ""}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <FormControl><Input {...field} type="time" data-testid="input-reservation-time" /></FormControl>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <FormField control={reservationForm.control} name="reservationTime" render={({ field }) => {
+                  const selectedTblId = reservationForm.watch("tableId");
+                  const selectedTblAreaId = tables.find(t => t.id === selectedTblId)?.areaId;
+                  const visibleSlots = timeSlots.filter(s =>
+                    s.isActive === "true" && (!s.areaId || !selectedTblAreaId || s.areaId === selectedTblAreaId)
+                  );
+                  return (
+                    <FormItem>
+                      <FormLabel>Hora *</FormLabel>
+                      {visibleSlots.length > 0 ? (
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl><SelectTrigger data-testid="select-reservation-time"><SelectValue placeholder="Seleccionar turno" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            {visibleSlots.map((slot) => (
+                              <SelectItem key={slot.id} value={slot.time}>{slot.time}{slot.label ? ` (${slot.label})` : ""}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <FormControl><Input {...field} type="time" data-testid="input-reservation-time" /></FormControl>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={reservationForm.control} name="tableId" render={({ field }) => (
@@ -5201,7 +5249,7 @@ export default function RestaurantPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Input
                 type="time"
                 value={newTimeSlot}
@@ -5209,10 +5257,24 @@ export default function RestaurantPage() {
                 className="w-32"
                 data-testid="input-new-time-slot"
               />
+              <Select value={newTimeSlotArea} onValueChange={setNewTimeSlotArea}>
+                <SelectTrigger className="w-40" data-testid="select-new-time-slot-area">
+                  <SelectValue placeholder="Todos los salones" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Todos los salones</SelectItem>
+                  {areas.map(a => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button
                 size="sm"
                 onClick={() => {
-                  if (newTimeSlot) createTimeSlotMutation.mutate(newTimeSlot);
+                  if (newTimeSlot) createTimeSlotMutation.mutate({
+                    time: newTimeSlot,
+                    areaId: newTimeSlotArea === "__none__" ? null : newTimeSlotArea,
+                  });
                 }}
                 disabled={!newTimeSlot || createTimeSlotMutation.isPending}
                 data-testid="button-add-time-slot"

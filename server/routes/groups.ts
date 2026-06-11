@@ -322,25 +322,33 @@ export function registerGroupsRoutes(app: Express) {
         : await storage.createGuest({ firstName, lastName });
 
       const updates: Record<string, any> = { guestId: realGuest.id };
+      let oldRoomId: string | null = null;
+      let newRoomId: string | null = null;
 
-      // Handle optional room change
+      // Handle optional room change — collect changes but apply room status AFTER reservation update
       if (roomId && roomId !== reservation.roomId) {
         const hasConflict = await storage.checkOverbooking(roomId, reservation.checkInDate, reservation.checkOutDate, reservationId);
         if (hasConflict) {
           return res.status(400).json({ error: "La habitación ya tiene una reserva en esas fechas" });
         }
-        // Free old room
-        if (reservation.roomId) {
-          await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
-        }
         const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
         if (!newRoom) return res.status(404).json({ error: "Habitación no encontrada" });
         updates.roomId = roomId;
         updates.roomTypeId = newRoom.roomTypeId;
-        await db.update(roomsTable).set({ status: "occupied" }).where(eq(roomsTable.id, roomId));
+        oldRoomId = reservation.roomId || null;
+        newRoomId = roomId;
       }
 
       const updated = await storage.updateReservation(reservationId, updates);
+
+      // Apply room status changes only after the reservation update succeeds
+      if (newRoomId) {
+        if (oldRoomId) {
+          await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, oldRoomId));
+        }
+        await db.update(roomsTable).set({ status: "occupied" }).where(eq(roomsTable.id, newRoomId));
+      }
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Error al asignar pasajero" });
