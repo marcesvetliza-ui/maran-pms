@@ -1,11 +1,18 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -23,6 +30,8 @@ import {
   Users,
   Building2,
   Briefcase,
+  Ban,
+  FileCheck,
 } from "lucide-react";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -384,7 +393,13 @@ function ReservationDetailPanel({ reservationId }: { reservationId: string }) {
 
 // ─── Expandable movement row ──────────────────────────────────────────────────
 
-function MovementRow({ mov }: { mov: FolioMovement }) {
+function MovementRow({
+  mov, canVoid, onVoidClick,
+}: {
+  mov: FolioMovement;
+  canVoid?: boolean;
+  onVoidClick?: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const debit = isDebit(mov.type);
   const hasSource = !!mov.sourceId && mov.sourceType === "restaurant_order";
@@ -399,9 +414,23 @@ function MovementRow({ mov }: { mov: FolioMovement }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-sm font-medium truncate">{mov.description}</span>
-            <span className={`text-sm font-bold shrink-0 ${debit ? "text-red-600" : "text-green-600"}`}>
-              {debit ? "+" : "-"}{formatCurrency(mov.amount)}
-            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              {canVoid && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                  data-testid={`button-void-payment-${mov.id}`}
+                  onClick={e => { e.stopPropagation(); onVoidClick?.(); }}
+                >
+                  <Ban className="h-3 w-3 mr-1" />
+                  Anular
+                </Button>
+              )}
+              <span className={`text-sm font-bold ${debit ? "text-red-600" : "text-green-600"}`}>
+                {debit ? "+" : "-"}{formatCurrency(mov.amount)}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-muted-foreground">
@@ -449,10 +478,39 @@ function MovementRow({ mov }: { mov: FolioMovement }) {
 interface Props {
   entityType: string;
   entityId: string;
+  allowVoid?: boolean;
 }
 
-export default function FolioViewer({ entityType, entityId }: Props) {
+export default function FolioViewer({ entityType, entityId, allowVoid = false }: Props) {
   const [showSourceDetail, setShowSourceDetail] = useState(true);
+  const [voidingMovement, setVoidingMovement] = useState<FolioMovement | null>(null);
+  const [motivoAnulacion, setMotivoAnulacion] = useState("Error en forma de pago");
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+  const voidPaymentMutation = useMutation({
+    mutationFn: async ({ paymentId, motivo }: { paymentId: string; motivo: string }) => {
+      const res = await apiRequest("PATCH", `/api/payments/${paymentId}/anular`, { motivoAnulacion: motivo });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setVoidingMovement(null);
+      setMotivoAnulacion("Error en forma de pago");
+      queryClient.invalidateQueries({ queryKey: ["/api/folios", entityType, entityId] });
+      const nc = data?.notaCreditoGenerada;
+      toast({
+        title: "Pago anulado",
+        description: nc
+          ? "El pago fue anulado y se generó una nota de crédito automáticamente."
+          : "El pago fue anulado. El saldo del folio fue actualizado.",
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error al anular", description: err.message, variant: "destructive" });
+    },
+  });
 
   const { data: folio, isLoading } = useQuery<FolioData | null>({
     queryKey: ["/api/folios", entityType, entityId],
@@ -589,7 +647,24 @@ export default function FolioViewer({ entityType, entityId }: Props) {
         {folio.movements.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">Sin movimientos aún</p>
         ) : (
-          folio.movements.map(mov => <MovementRow key={mov.id} mov={mov} />)
+          folio.movements.map(mov => {
+            const movDateAR = new Date(mov.createdAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            const canVoid = allowVoid
+              && mov.type === "payment"
+              && !!mov.sourceId
+              && movDateAR === todayAR;
+            return (
+              <MovementRow
+                key={mov.id}
+                mov={mov}
+                canVoid={canVoid}
+                onVoidClick={() => {
+                  setVoidingMovement(mov);
+                  setMotivoAnulacion("Error en forma de pago");
+                }}
+              />
+            );
+          })
         )}
       </div>
 
@@ -598,6 +673,66 @@ export default function FolioViewer({ entityType, entityId }: Props) {
           Cerrado {formatDate(folio.closedAt)}
         </div>
       )}
+
+      {/* ── Void payment dialog ─────────────────────────────────────── */}
+      <Dialog open={!!voidingMovement} onOpenChange={open => { if (!open) setVoidingMovement(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Ban className="h-4 w-4 text-destructive" />
+              Anular pago
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción revertirá el pago del folio y registrará un contraasiento en la caja.
+              {voidingMovement && (
+                <span className="block mt-1 font-medium text-foreground">
+                  Importe: {formatCurrency(voidingMovement.amount)}
+                  {voidingMovement.paymentMethod && ` · ${PAYMENT_METHOD_LABELS[voidingMovement.paymentMethod] ?? voidingMovement.paymentMethod}`}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="motivo-anulacion" className="text-sm">Motivo de anulación</Label>
+              <Input
+                id="motivo-anulacion"
+                data-testid="input-motivo-anulacion"
+                value={motivoAnulacion}
+                onChange={e => setMotivoAnulacion(e.target.value)}
+                placeholder="Ej: Error en forma de pago"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setVoidingMovement(null)}
+              disabled={voidPaymentMutation.isPending}
+              data-testid="button-cancel-void"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={!motivoAnulacion.trim() || voidPaymentMutation.isPending}
+              data-testid="button-confirm-void"
+              onClick={() => {
+                if (voidingMovement?.sourceId) {
+                  voidPaymentMutation.mutate({
+                    paymentId: voidingMovement.sourceId,
+                    motivo: motivoAnulacion.trim(),
+                  });
+                }
+              }}
+            >
+              {voidPaymentMutation.isPending ? "Anulando…" : "Confirmar anulación"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

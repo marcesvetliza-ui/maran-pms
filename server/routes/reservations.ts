@@ -6,6 +6,7 @@ import { storage } from "../db-storage";
 import { db } from "../db";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
+import { emitirFactura } from "../billing/invoiceService";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
@@ -1472,17 +1473,104 @@ export function registerReservationsRoutes(app: Express) {
       const pay = payResult.rows?.[0] as any;
       if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
       if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
+
+      // Solo permite anular pagos del día de hoy
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      if (pay.date !== today) {
+        return res.status(400).json({ error: "Solo se pueden anular pagos registrados el día de hoy" });
+      }
+
       if (pay.reservation_id) {
         const reservation = await storage.getReservation(pay.reservation_id);
         if (reservation && isReservationLocked(reservation)) {
           return res.status(403).json({ error: "No se puede anular pagos de una reserva cerrada" });
         }
       }
+
+      const user = (req as any).user;
+      const operator = anuladoPor || user?.username || "sistema";
+
       const updated = await db.execute(sql`
-        UPDATE payments SET status = 'anulado', anulado_por = ${anuladoPor || null},
+        UPDATE payments SET status = 'anulado', anulado_por = ${operator},
         motivo_anulacion = ${motivoAnulacion}, anulado_at = NOW()
         WHERE id = ${req.params.id} RETURNING *
       `);
+
+      // ── 1. Contraasiento en el folio de la reserva ────────────────────────
+      if (pay.reservation_id) {
+        try {
+          const folioRows = await db.execute(sql`SELECT id FROM folios WHERE entity_type = 'reservation' AND entity_id = ${pay.reservation_id} LIMIT 1`);
+          const folio = folioRows.rows?.[0] as any;
+          if (folio) {
+            const methodLabel: Record<string, string> = {
+              efectivo: "Efectivo", tarjeta_debito: "Tarj. Débito", tarjeta_credito: "Tarj. Crédito",
+              transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente",
+            };
+            await storage.addFolioAdjustment(
+              folio.id, "void", parseFloat(pay.amount),
+              `Anulación pago ${methodLabel[pay.method] || pay.method} — ${motivoAnulacion}`,
+              operator, undefined, motivoAnulacion
+            );
+          }
+        } catch (e) { console.error("[anular-pago] folio void:", e); }
+
+        // ── 2. Contraasiento en caja (reversal de ingreso) ────────────────
+        try {
+          const reservation = await storage.getReservation(pay.reservation_id);
+          const label = reservation
+            ? `Anulación pago ${reservation.reservationCode} — ${pay.method}`
+            : `Anulación pago — ${pay.method}`;
+          await storage.registerCashMovement(
+            "reception", "payment_void", pay.id, label,
+            pay.method, String(pay.amount), "expense", operator
+          );
+        } catch (e) { console.error("[anular-pago] cash reversal:", e); }
+
+        // ── 3. Nota de crédito automática si el pago tenía factura ────────
+        let notaCreditoGenerada = false;
+        const facturaTypes: Record<string, string> = { factura_a: "FA", factura_b: "FB", factura_c: "FC" };
+        if (pay.receipt_type && facturaTypes[pay.receipt_type]) {
+          try {
+            const tipoComprobante = facturaTypes[pay.receipt_type];
+            const invRows = await db.execute(sql`
+              SELECT * FROM sales_invoices
+              WHERE entity_id = ${pay.reservation_id}
+                AND tipo_comprobante = ${tipoComprobante}
+                AND estado = 'activa'
+              ORDER BY id DESC LIMIT 1
+            `);
+            const invoice = invRows.rows?.[0] as any;
+            if (invoice) {
+              const tipoNC = tipoComprobante === "FA" ? "NCA" : "NCB";
+              const nc = await emitirFactura({
+                tipoComprobante: tipoNC as any,
+                cliente: {
+                  razonSocial: invoice.cliente_razon_social,
+                  cuit: invoice.cliente_cuit,
+                  dni: invoice.cliente_dni,
+                  condicionIva: invoice.cliente_condicion_iva,
+                  domicilio: invoice.cliente_domicilio,
+                },
+                items: invoice.items ?? [],
+                facturaOriginalId: invoice.id,
+                operador: user?.fullName || user?.username,
+              } as any);
+              await db.execute(sql`
+                UPDATE sales_invoices SET estado = 'anulada', nota_credito_id = ${nc.id}
+                WHERE id = ${invoice.id}
+              `);
+              notaCreditoGenerada = true;
+            }
+          } catch (e) { console.error("[anular-pago] nota-credito:", e); }
+        }
+
+        await audit(req, "update", "payments",
+          `Pago anulado: $${pay.amount} (${pay.method}) — ${motivoAnulacion}`,
+          { entityType: "payment", entityId: req.params.id }
+        );
+        return res.json({ ...updated.rows[0], notaCreditoGenerada });
+      }
+
       res.json(updated.rows[0]);
     } catch (e: any) {
       res.status(500).json({ error: e.message });

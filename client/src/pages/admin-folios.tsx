@@ -444,7 +444,7 @@ function MovimientosDiaTab({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <FolioViewer entityType={selectedFolio.entityType} entityId={selectedFolio.entityId} />
+                <FolioViewer entityType={selectedFolio.entityType} entityId={selectedFolio.entityId} allowVoid />
               </CardContent>
             </Card>
           ) : (
@@ -755,7 +755,7 @@ export default function AdminFoliosPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <FolioViewer entityType={selectedFolio.entityType} entityId={selectedFolio.entityId} />
+                    <FolioViewer entityType={selectedFolio.entityType} entityId={selectedFolio.entityId} allowVoid />
                   </CardContent>
                 </Card>
               ) : (
