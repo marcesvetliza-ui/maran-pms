@@ -237,7 +237,7 @@ export function ReservationDetailModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[560px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calendar className="h-5 w-5" />
@@ -485,7 +485,7 @@ export function ReservationDetailModal({
         ) : null}
 
         {!isEditing && (
-          <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:flex-wrap">
             {reservation && (
               <Button variant="outline" onClick={printConfirmation} className="w-full sm:w-auto" data-testid="button-print-confirmation">
                 <FileText className="h-4 w-4 mr-2" />Confirmación

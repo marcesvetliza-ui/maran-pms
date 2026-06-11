@@ -601,7 +601,7 @@ export function ReservationFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-[600px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Reserva" : "Nueva Reserva"}</DialogTitle>
           <DialogDescription>
@@ -1862,7 +1862,7 @@ function ReservationDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[680px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-[680px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Reserva {reservation.reservationCode}
@@ -2981,7 +2981,7 @@ function ReservationDetailDialog({
           setTargetReservationId("");
         }
       }}>
-        <DialogContent className="w-[95vw] max-w-[450px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-[450px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ArrowRightLeft className="h-5 w-5" />
@@ -3064,7 +3064,7 @@ function ReservationDetailDialog({
           setBulkTransferNote("");
         }
       }}>
-        <DialogContent className="w-[95vw] max-w-[520px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-[520px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ArrowRightLeft className="h-5 w-5 text-blue-600" />
@@ -3354,7 +3354,7 @@ function CancelReservationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-[500px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">
             <X className="h-5 w-5" />

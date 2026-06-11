@@ -228,7 +228,7 @@ export function QuickReservationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[520px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-[560px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle data-testid="title-quick-reservation">Nueva Reserva Rápida</DialogTitle>
           <DialogDescription>
