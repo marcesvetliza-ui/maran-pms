@@ -883,11 +883,11 @@ export type RestaurantTableWithArea = RestaurantTable & {
 };
 
 // Table Reservations
-export type TableReservationStatus = "pending" | "confirmed" | "seated" | "completed" | "cancelled" | "no_show";
+export type TableReservationStatus = "pending" | "confirmed" | "check_in" | "seated" | "completed" | "cancelled" | "no_show" | "historical";
 
 export const tableReservations = pgTable("table_reservations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  tableId: varchar("table_id").notNull(),
+  tableId: varchar("table_id"),
   guestName: text("guest_name").notNull(),
   guestPhone: text("guest_phone"),
   guestEmail: text("guest_email"),
@@ -896,6 +896,9 @@ export const tableReservations = pgTable("table_reservations", {
   reservationTime: text("reservation_time").notNull(),
   status: text("status").$type<TableReservationStatus>().notNull().default("pending"),
   notes: text("notes"),
+  clientId: varchar("client_id"),
+  cardLast4: text("card_last4"),
+  cardHolder: text("card_holder"),
   advanceAmount: decimal("advance_amount", { precision: 10, scale: 2 }).default("0"),
   advanceMethod: text("advance_method"),
   advanceDate: date("advance_date"),
@@ -908,8 +911,24 @@ export type InsertTableReservation = z.infer<typeof insertTableReservationSchema
 export type TableReservation = typeof tableReservations.$inferSelect;
 
 export type TableReservationWithTable = TableReservation & {
-  table: RestaurantTable;
+  table: RestaurantTable | null;
 };
+
+// Restaurant Reservation Advances (seña/anticipo con voucher)
+export const restaurantReservationAdvances = pgTable("restaurant_reservation_advances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reservationId: varchar("reservation_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  paymentMethod: text("payment_method").notNull().default("efectivo"),
+  voucherNumber: text("voucher_number"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  appliedToOrderId: varchar("applied_to_order_id"),
+});
+
+export const insertRestaurantReservationAdvanceSchema = createInsertSchema(restaurantReservationAdvances).omit({ id: true, createdAt: true });
+export type InsertRestaurantReservationAdvance = z.infer<typeof insertRestaurantReservationAdvanceSchema>;
+export type RestaurantReservationAdvance = typeof restaurantReservationAdvances.$inferSelect;
 
 // Menu Categories
 export const menuCategories = pgTable("menu_categories", {
@@ -1041,6 +1060,7 @@ export const restaurantTimeSlots = pgTable("restaurant_time_slots", {
   label: text("label"),
   isActive: text("is_active").default("true"),
   displayOrder: integer("display_order").default(0),
+  areaId: varchar("area_id"),
 });
 
 export const insertRestaurantTimeSlotSchema = createInsertSchema(restaurantTimeSlots).omit({ id: true });

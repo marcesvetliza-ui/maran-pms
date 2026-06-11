@@ -87,6 +87,8 @@ import {
   type TableReservation,
   type InsertTableReservation,
   type TableReservationWithTable,
+  type RestaurantReservationAdvance,
+  type InsertRestaurantReservationAdvance,
   type RestaurantTimeSlot,
   type InsertRestaurantTimeSlot,
   type OrderSplit,
@@ -474,6 +476,12 @@ export interface IStorage {
   createTableReservation(reservation: InsertTableReservation): Promise<TableReservation>;
   updateTableReservation(id: string, reservation: Partial<InsertTableReservation>): Promise<TableReservation | undefined>;
   deleteTableReservation(id: string): Promise<boolean>;
+
+  // Reservation Advances
+  getReservationAdvances(reservationId: string): Promise<RestaurantReservationAdvance[]>;
+  getReservationAdvancesByTable(tableId: string, date: string): Promise<RestaurantReservationAdvance[]>;
+  createReservationAdvance(data: InsertRestaurantReservationAdvance): Promise<RestaurantReservationAdvance>;
+  deleteReservationAdvance(id: string): Promise<boolean>;
 
   // Restaurant Time Slots
   getRestaurantTimeSlots(): Promise<RestaurantTimeSlot[]>;
@@ -3305,6 +3313,11 @@ export class MemStorage implements IStorage {
   async deleteTableReservation(id: string): Promise<boolean> {
     return this.tableReservations.delete(id);
   }
+
+  async getReservationAdvances(_reservationId: string): Promise<RestaurantReservationAdvance[]> { return []; }
+  async getReservationAdvancesByTable(_tableId: string, _date: string): Promise<RestaurantReservationAdvance[]> { return []; }
+  async createReservationAdvance(data: InsertRestaurantReservationAdvance): Promise<RestaurantReservationAdvance> { return { id: "", ...data, createdAt: new Date(), appliedToOrderId: null } as any; }
+  async deleteReservationAdvance(_id: string): Promise<boolean> { return true; }
 
   // Restaurant Time Slots
   async getRestaurantTimeSlots(): Promise<RestaurantTimeSlot[]> {

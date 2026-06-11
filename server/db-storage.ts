@@ -98,6 +98,8 @@ import {
   guestReviews, housekeepingTasks,
   restaurantAreas, restaurantTables, menuCategories, menuItems,
   restaurantOrders, orderItems, tableReservations, restaurantTimeSlots,
+  restaurantReservationAdvances,
+  type RestaurantReservationAdvance, type InsertRestaurantReservationAdvance,
   orderSplits, recipes, recipeIngredients,
   itemCategories, suppliers, inventoryItems, stockMovements,
   spaCabins, spaTreatmentCategories, spaTreatments, spaAppointments,
@@ -1989,13 +1991,17 @@ export class DatabaseStorage implements IStorage {
     const res = await db.select().from(tableReservations);
     const tables = await db.select().from(restaurantTables);
     const tablesMap = new Map(tables.map(t => [t.id, t]));
-    return res.map(r => ({ ...r, table: tablesMap.get(r.tableId)! }));
+    return res.map(r => ({ ...r, table: r.tableId ? (tablesMap.get(r.tableId) ?? null) : null }));
   }
 
   async getTableReservation(id: string): Promise<TableReservationWithTable | undefined> {
     const [res] = await db.select().from(tableReservations).where(eq(tableReservations.id, id));
     if (!res) return undefined;
-    const [table] = await db.select().from(restaurantTables).where(eq(restaurantTables.id, res.tableId));
+    let table = null;
+    if (res.tableId) {
+      const [t] = await db.select().from(restaurantTables).where(eq(restaurantTables.id, res.tableId));
+      table = t ?? null;
+    }
     return { ...res, table };
   }
 
@@ -2003,7 +2009,7 @@ export class DatabaseStorage implements IStorage {
     const res = await db.select().from(tableReservations).where(eq(tableReservations.reservationDate, date));
     const tables = await db.select().from(restaurantTables);
     const tablesMap = new Map(tables.map(t => [t.id, t]));
-    return res.map(r => ({ ...r, table: tablesMap.get(r.tableId)! }));
+    return res.map(r => ({ ...r, table: r.tableId ? (tablesMap.get(r.tableId) ?? null) : null }));
   }
 
   async getTableReservationsByTable(tableId: string): Promise<TableReservation[]> {
@@ -2022,6 +2028,34 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTableReservation(id: string): Promise<boolean> {
     const result = await db.delete(tableReservations).where(eq(tableReservations.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Reservation Advances
+  async getReservationAdvances(reservationId: string): Promise<RestaurantReservationAdvance[]> {
+    return db.select().from(restaurantReservationAdvances)
+      .where(eq(restaurantReservationAdvances.reservationId, reservationId))
+      .orderBy(restaurantReservationAdvances.createdAt);
+  }
+
+  async getReservationAdvancesByTable(tableId: string, date: string): Promise<RestaurantReservationAdvance[]> {
+    const reservs = await db.select().from(tableReservations).where(
+      and(eq(tableReservations.tableId, tableId), eq(tableReservations.reservationDate, date))
+    );
+    if (reservs.length === 0) return [];
+    const ids = reservs.map(r => r.id);
+    return db.select().from(restaurantReservationAdvances).where(
+      inArray(restaurantReservationAdvances.reservationId, ids)
+    );
+  }
+
+  async createReservationAdvance(data: InsertRestaurantReservationAdvance): Promise<RestaurantReservationAdvance> {
+    const [created] = await db.insert(restaurantReservationAdvances).values(data as any).returning();
+    return created;
+  }
+
+  async deleteReservationAdvance(id: string): Promise<boolean> {
+    const result = await db.delete(restaurantReservationAdvances).where(eq(restaurantReservationAdvances.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

@@ -159,17 +159,35 @@ type RestaurantOrder = {
 
 type TableReservation = {
   id: string;
-  tableId: string;
+  tableId: string | null;
   guestName: string;
   guestPhone: string | null;
   guestEmail: string | null;
   partySize: number;
   reservationDate: string;
   reservationTime: string;
-  status: "pending" | "confirmed" | "seated" | "completed" | "cancelled" | "no_show";
+  status: "pending" | "confirmed" | "check_in" | "seated" | "completed" | "cancelled" | "no_show" | "historical";
+  notes: string | null;
+  clientId: string | null;
+  cardLast4: string | null;
+  cardHolder: string | null;
+  advanceAmount: string | null;
+  advanceMethod: string | null;
+  advanceDate: string | null;
+  advanceNotes: string | null;
+  createdAt: string;
+  table?: RestaurantTable | null;
+};
+
+type RestaurantReservationAdvance = {
+  id: string;
+  reservationId: string;
+  amount: string;
+  paymentMethod: string;
+  voucherNumber: string | null;
   notes: string | null;
   createdAt: string;
-  table?: RestaurantTable;
+  appliedToOrderId: string | null;
 };
 
 type TimeSlot = {
@@ -178,13 +196,16 @@ type TimeSlot = {
   label: string | null;
   isActive: string | null;
   displayOrder: number | null;
+  areaId: string | null;
 };
 
 const reservationStatusColors: Record<string, string> = {
   pending: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400",
   confirmed: "bg-blue-500/20 text-blue-700 dark:text-blue-400",
+  check_in: "bg-green-500/20 text-green-700 dark:text-green-400",
   seated: "bg-green-500/20 text-green-700 dark:text-green-400",
   completed: "bg-gray-500/20 text-gray-700 dark:text-gray-400",
+  historical: "bg-gray-500/20 text-gray-700 dark:text-gray-400",
   cancelled: "bg-red-500/20 text-red-700 dark:text-red-400",
   no_show: "bg-orange-500/20 text-orange-700 dark:text-orange-400",
 };
@@ -192,21 +213,26 @@ const reservationStatusColors: Record<string, string> = {
 const reservationStatusLabels: Record<string, string> = {
   pending: "Pendiente",
   confirmed: "Confirmada",
-  seated: "Sentado",
+  check_in: "Check-in",
+  seated: "En mesa",
   completed: "Completada",
+  historical: "Histórica",
   cancelled: "Cancelada",
-  no_show: "No se presento",
+  no_show: "No se presentó",
 };
 
 const reservationFormSchema = z.object({
-  tableId: z.string().min(1, "Debe seleccionar una mesa"),
+  tableId: z.string().optional().nullable(),
   guestName: z.string().min(1, "El nombre es requerido"),
-  guestPhone: z.string().optional(),
+  guestPhone: z.string().min(1, "El teléfono es requerido"),
   guestEmail: z.string().email("Email invalido").optional().or(z.literal("")),
   partySize: z.coerce.number().min(1, "Minimo 1 persona"),
   reservationDate: z.string().min(1, "La fecha es requerida"),
   reservationTime: z.string().min(1, "La hora es requerida"),
   notes: z.string().optional(),
+  clientId: z.string().optional().nullable(),
+  cardLast4: z.string().optional().nullable(),
+  cardHolder: z.string().optional().nullable(),
 });
 
 type ReservationFormValues = z.infer<typeof reservationFormSchema>;
@@ -287,6 +313,156 @@ function TableElapsedBadge({ openedAt }: { openedAt: string }) {
   const elapsed = useElapsedTime(openedAt);
   if (!elapsed) return null;
   return <span className="text-[9px] opacity-70 font-medium">{elapsed}</span>;
+}
+
+type AdvanceDialogProps = {
+  reservationId: string | null;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  reservations: TableReservation[];
+  advanceAmount: string;
+  setAdvanceAmount: (v: string) => void;
+  advancePaymentMethod: string;
+  setAdvancePaymentMethod: (v: string) => void;
+  advanceNotes: string;
+  setAdvanceNotes: (v: string) => void;
+  createAdvanceMutation: any;
+  deleteAdvanceMutation: any;
+};
+
+function AdvanceDialog({
+  reservationId, open, onOpenChange, reservations,
+  advanceAmount, setAdvanceAmount, advancePaymentMethod, setAdvancePaymentMethod,
+  advanceNotes, setAdvanceNotes, createAdvanceMutation, deleteAdvanceMutation,
+}: AdvanceDialogProps) {
+  const reservation = reservations.find(r => r.id === reservationId);
+  const { data: advances = [], isLoading } = useQuery<RestaurantReservationAdvance[]>({
+    queryKey: ["/api/restaurant/advances", reservationId],
+    queryFn: async () => {
+      if (!reservationId) return [];
+      const res = await fetch(`/api/restaurant/table-reservations/${reservationId}/advances`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!reservationId && open,
+  });
+
+  const totalAdvances = advances.reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
+
+  const payMethodLabel: Record<string, string> = {
+    efectivo: "Efectivo", transferencia: "Transferencia",
+    tarjeta_debito: "Débito", tarjeta_credito: "Crédito", mercadopago: "MercadoPago",
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Señas / Anticipos
+          </DialogTitle>
+          {reservation && (
+            <p className="text-sm text-muted-foreground">
+              {reservation.guestName} — {reservation.reservationDate} {reservation.reservationTime}
+              {reservation.partySize > 1 ? ` (${reservation.partySize}p)` : ""}
+            </p>
+          )}
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Lista de adelantos */}
+          {isLoading ? (
+            <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : advances.length > 0 ? (
+            <div className="space-y-2">
+              {advances.map((adv) => (
+                <div key={adv.id} className="flex items-center justify-between px-3 py-2 rounded-lg border bg-muted/30">
+                  <div>
+                    <p className="text-sm font-medium">${parseFloat(adv.amount).toLocaleString("es-AR")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {payMethodLabel[adv.paymentMethod] || adv.paymentMethod}
+                      {adv.voucherNumber && <span className="ml-2 font-mono">{adv.voucherNumber}</span>}
+                      {adv.notes && <span className="ml-2">— {adv.notes}</span>}
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost" size="sm"
+                    className="text-destructive hover:text-destructive h-7 w-7 p-0"
+                    onClick={() => deleteAdvanceMutation.mutate(adv.id)}
+                    disabled={deleteAdvanceMutation.isPending}
+                    data-testid={`button-delete-advance-${adv.id}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <div className="text-right text-sm font-semibold pr-1 text-muted-foreground">
+                Total señado: ${totalAdvances.toLocaleString("es-AR")}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-2">Sin anticipos registrados</p>
+          )}
+
+          {/* Formulario nuevo adelanto */}
+          <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Registrar nuevo anticipo</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Monto *</Label>
+                <Input
+                  type="number" step="0.01" min="0.01"
+                  value={advanceAmount}
+                  onChange={(e) => setAdvanceAmount(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="input-advance-amount"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Forma de pago</Label>
+                <Select value={advancePaymentMethod} onValueChange={setAdvancePaymentMethod}>
+                  <SelectTrigger data-testid="select-advance-method"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="efectivo">Efectivo</SelectItem>
+                    <SelectItem value="transferencia">Transferencia</SelectItem>
+                    <SelectItem value="tarjeta_debito">Débito</SelectItem>
+                    <SelectItem value="tarjeta_credito">Crédito</SelectItem>
+                    <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Observación</Label>
+              <Input
+                value={advanceNotes}
+                onChange={(e) => setAdvanceNotes(e.target.value)}
+                placeholder="Referencia, nro. comprobante..."
+                data-testid="input-advance-notes"
+              />
+            </div>
+            <Button
+              className="w-full"
+              disabled={!advanceAmount || parseFloat(advanceAmount) <= 0 || createAdvanceMutation.isPending || !reservationId}
+              onClick={() => {
+                if (!reservationId || !advanceAmount) return;
+                createAdvanceMutation.mutate({ reservationId, amount: advanceAmount, paymentMethod: advancePaymentMethod, notes: advanceNotes });
+              }}
+              data-testid="button-submit-advance"
+            >
+              {createAdvanceMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
+              Registrar Anticipo
+            </Button>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function RestaurantPage() {
@@ -377,6 +553,14 @@ export default function RestaurantPage() {
     new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
   );
   const [reservationSearchText, setReservationSearchText] = useState("");
+  const [reservationStatusFilter, setReservationStatusFilter] = useState<string>("all");
+  const [advanceDialogReservationId, setAdvanceDialogReservationId] = useState<string | null>(null);
+  const [isAdvanceDialogOpen, setIsAdvanceDialogOpen] = useState(false);
+  const [advanceAmount, setAdvanceAmount] = useState("");
+  const [advancePaymentMethod, setAdvancePaymentMethod] = useState("efectivo");
+  const [advanceNotes, setAdvanceNotes] = useState("");
+  const [isAssignTableDialogOpen, setIsAssignTableDialogOpen] = useState(false);
+  const [assignTableReservation, setAssignTableReservation] = useState<TableReservation | null>(null);
   const [closeBillingName, setCloseBillingName] = useState("");
   const [closeBillingCuit, setCloseBillingCuit] = useState("");
   const [closeBillingCompanyId, setCloseBillingCompanyId] = useState("");
@@ -431,14 +615,17 @@ export default function RestaurantPage() {
   const reservationForm = useForm<ReservationFormValues>({
     resolver: zodResolver(reservationFormSchema),
     defaultValues: {
-      tableId: "",
+      tableId: null,
       guestName: "",
       guestPhone: "",
       guestEmail: "",
       partySize: 2,
-      reservationDate: new Date().toISOString().split("T")[0],
+      reservationDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
       reservationTime: "20:00",
       notes: "",
+      clientId: null,
+      cardLast4: null,
+      cardHolder: null,
     },
   });
 
@@ -502,7 +689,7 @@ export default function RestaurantPage() {
   const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const todayReservations = reservations.filter(r =>
     r.reservationDate === todayStr &&
-    r.status !== "cancelled" && r.status !== "completed"
+    !["cancelled", "completed", "historical", "no_show"].includes(r.status)
   );
 
   const getCategoryPriority = (name: string) => {
@@ -556,6 +743,31 @@ export default function RestaurantPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
       toast({ title: "Reserva eliminada" });
+    },
+  });
+
+  const createAdvanceMutation = useMutation({
+    mutationFn: async ({ reservationId, amount, paymentMethod, notes }: { reservationId: string; amount: string; paymentMethod: string; notes: string }) => {
+      const res = await apiRequest("POST", `/api/restaurant/table-reservations/${reservationId}/advances`, { amount, paymentMethod, notes });
+      return res.json();
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/advances", vars.reservationId] });
+      setAdvanceAmount("");
+      setAdvanceNotes("");
+      toast({ title: "Adelanto registrado", description: `Voucher generado` });
+    },
+  });
+
+  const deleteAdvanceMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/restaurant/reservation-advances/${id}`);
+    },
+    onSuccess: (_, __, ctx: any) => {
+      if (advanceDialogReservationId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/restaurant/advances", advanceDialogReservationId] });
+      }
+      toast({ title: "Adelanto eliminado" });
     },
   });
 
@@ -1116,8 +1328,17 @@ export default function RestaurantPage() {
   const todayForFilter = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const filteredReservations = reservations
     .filter(r => {
-      if (!showPastReservations && r.reservationDate < todayForFilter) return false;
-      if (reservationSearch) return r.guestName.toLowerCase().includes(reservationSearch.toLowerCase());
+      if (reservationViewMode === "day") {
+        if (r.reservationDate !== reservationDateFilter) return false;
+      } else if (reservationViewMode === "past") {
+        if (r.reservationDate >= todayForFilter) return false;
+      }
+      if (reservationStatusFilter !== "all" && r.status !== reservationStatusFilter) return false;
+      const search = (reservationSearch || reservationSearchText).toLowerCase();
+      if (search) {
+        return r.guestName.toLowerCase().includes(search) ||
+          (r.guestPhone && r.guestPhone.includes(search));
+      }
       return true;
     })
     .sort((a, b) => {
@@ -1126,6 +1347,11 @@ export default function RestaurantPage() {
       if (reservationSortBy === "time") return a.reservationTime.localeCompare(b.reservationTime);
       return a.guestName.localeCompare(b.guestName);
     });
+
+  const dayStats = reservations.filter(r => r.reservationDate === reservationDateFilter).reduce(
+    (acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; },
+    {} as Record<string, number>
+  );
 
   const openMenuItemDialog = (item?: MenuItem) => {
     if (item) {
@@ -1529,11 +1755,17 @@ export default function RestaurantPage() {
                           const table = areaTables.find(t => t.positionX === x && t.positionY === y);
 
                           if (table) {
-                            const today = new Date().toISOString().split("T")[0];
-                            const hasReservationToday = reservations.some(
-                              (r) => r.tableId === table.id && r.reservationDate === today && (r.status === "confirmed" || r.status === "pending")
-                            );
-                            const effectiveStatus = table.status === "available" && hasReservationToday ? "reserved" : table.status;
+                            const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                            const todayTableReservations = reservations.filter(
+                              (r) => r.tableId === table.id && r.reservationDate === todayISO &&
+                                ["pending", "confirmed", "check_in"].includes(r.status)
+                            ).sort((a, b) => a.reservationTime.localeCompare(b.reservationTime));
+                            const hasReservationToday = todayTableReservations.length > 0;
+                            const nextReservation = todayTableReservations[0];
+                            const isCheckedIn = todayTableReservations.some(r => r.status === "check_in");
+                            const effectiveStatus = table.status === "available" && hasReservationToday
+                              ? (isCheckedIn ? "occupied" : "reserved")
+                              : table.status;
                             return (
                               <button
                                 key={table.id}
@@ -1558,6 +1790,12 @@ export default function RestaurantPage() {
                                     <Eye className="h-2.5 w-2.5 text-white" />
                                   </div>
                                 )}
+                                {/* Reservation badge — top-left */}
+                                {hasReservationToday && !isCheckedIn && (
+                                  <div className="absolute -top-1.5 -left-1.5 min-w-[18px] h-[18px] bg-violet-600 text-white rounded-full text-[9px] font-bold flex items-center justify-center px-1 shadow-sm" title={`Reserva: ${nextReservation?.guestName} ${nextReservation?.reservationTime}`}>
+                                    {todayTableReservations.length > 1 ? todayTableReservations.length : nextReservation?.reservationTime?.slice(0, 5)}
+                                  </div>
+                                )}
                                 <span className="font-bold text-sm">{table.tableNumber}</span>
                                 <div className="flex items-center gap-0.5 text-[10px]">
                                   <Users className="h-2.5 w-2.5" />
@@ -1575,6 +1813,11 @@ export default function RestaurantPage() {
                                     </>
                                   );
                                 })()}
+                                {hasReservationToday && !table.status.includes("occupied") && nextReservation && (
+                                  <span className="text-[9px] truncate max-w-full opacity-90 font-medium">
+                                    {nextReservation.guestName.split(" ")[0]}
+                                  </span>
+                                )}
                                 {isEditMode && (
                                   <GripVertical className="h-3 w-3 opacity-50" />
                                 )}
@@ -1853,151 +2096,329 @@ export default function RestaurantPage() {
         </TabsContent>
 
         {/* ==================== RESERVATIONS TAB ==================== */}
-        <TabsContent value="reservations" className="space-y-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
+        <TabsContent value="reservations" className="space-y-3">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-lg font-semibold">Reservas de Mesa</h2>
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por nombre..."
-                  value={reservationSearch}
-                  onChange={(e) => setReservationSearch(e.target.value)}
-                  className="pl-8 w-48"
-                  data-testid="input-reservation-search"
-                />
-              </div>
               <Button
-                variant={showPastReservations ? "default" : "outline"}
+                variant="outline"
                 size="sm"
-                onClick={() => setShowPastReservations(!showPastReservations)}
-                data-testid="button-toggle-past-reservations"
+                onClick={() => {
+                  const date = reservationDateFilter;
+                  const dayReservations = reservations.filter(r => r.reservationDate === date && r.status !== "cancelled");
+                  const lines = dayReservations
+                    .sort((a, b) => a.reservationTime.localeCompare(b.reservationTime))
+                    .map(r => {
+                      const t = tables.find(x => x.id === r.tableId);
+                      return `${r.reservationTime}  ${r.guestName}  (${r.partySize}p)  Mesa: ${t?.tableNumber || "—"}  Tel: ${r.guestPhone || "—"}  ${reservationStatusLabels[r.status]}`;
+                    }).join("\n");
+                  const w = window.open("", "_blank", "width=600,height=700");
+                  if (w) {
+                    const [y,m,d] = date.split("-").map(Number);
+                    const dateStr = format(new Date(y,m-1,d), "EEEE d/MM/yyyy", { locale: es });
+                    w.document.write(`<html><head><title>Reservas ${date}</title><style>body{font-family:monospace;padding:20px}h1{font-size:16px}pre{white-space:pre;line-height:1.8}</style></head><body><h1>Reservas del día — ${dateStr}</h1><pre>${lines || "Sin reservas"}</pre></body></html>`);
+                    w.document.close();
+                    w.print();
+                  }
+                }}
+                data-testid="button-print-reservations"
               >
-                <CalendarDays className="h-4 w-4 mr-1" />
-                {showPastReservations ? "Ocultar históricas" : "Ver históricas"}
+                <Printer className="h-4 w-4 mr-1" />
+                Imprimir lista
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setReservationSortBy(reservationSortBy === "name" ? "time" : "name")}
-                data-testid="button-sort-reservations"
+                onClick={() => {
+                  const date = reservationDateFilter;
+                  const dayReservations = reservations
+                    .filter(r => r.reservationDate === date && r.status !== "cancelled")
+                    .sort((a, b) => a.reservationTime.localeCompare(b.reservationTime));
+                  const [y,m,d] = date.split("-").map(Number);
+                  const dateStr = format(new Date(y,m-1,d), "EEEE d 'de' MMMM yyyy", { locale: es });
+                  const rows = dayReservations.map(r => {
+                    const t = tables.find(x => x.id === r.tableId);
+                    const statusLabel = reservationStatusLabels[r.status] || r.status;
+                    const adv = parseFloat(r.advanceAmount || "0") > 0 ? `$${parseFloat(r.advanceAmount!).toLocaleString("es-AR")}` : "";
+                    return `<tr>
+                      <td>${r.reservationTime}</td>
+                      <td><strong>${r.guestName}</strong>${r.notes ? `<br><small style="color:#888">${r.notes}</small>` : ""}</td>
+                      <td style="text-align:center">${r.partySize}</td>
+                      <td style="text-align:center">${t ? `Mesa ${t.tableNumber}` : "—"}</td>
+                      <td>${r.guestPhone || "—"}</td>
+                      <td style="text-align:center"><span style="background:${r.status==="confirmed"?"#dbeafe":r.status==="check_in"?"#d1fae5":r.status==="pending"?"#fef9c3":"#f3f4f6"};padding:2px 8px;border-radius:12px;font-size:11px">${statusLabel}</span></td>
+                      <td style="text-align:center">${adv}</td>
+                    </tr>`;
+                  }).join("");
+                  const w = window.open("", "_blank", "width=900,height=750");
+                  if (w) {
+                    w.document.write(`<!DOCTYPE html><html><head><title>Reservas ${date}</title>
+                    <style>
+                      body{font-family:Arial,sans-serif;padding:30px;color:#111;font-size:13px}
+                      h1{font-size:20px;margin:0 0 4px}p.sub{color:#666;font-size:13px;margin:0 0 20px}
+                      table{width:100%;border-collapse:collapse}
+                      th{background:#1e3a5f;color:#fff;padding:8px 10px;text-align:left;font-size:12px}
+                      td{padding:7px 10px;border-bottom:1px solid #e5e7eb;vertical-align:top}
+                      tr:nth-child(even){background:#f9fafb}
+                      @media print{button{display:none}}
+                      .footer{margin-top:20px;font-size:11px;color:#999;text-align:right}
+                    </style></head><body>
+                    <h1>📋 Lista de Reservas — Maran Suites & Towers</h1>
+                    <p class="sub">${dateStr} &nbsp;·&nbsp; ${dayReservations.length} reservas</p>
+                    <table>
+                      <thead><tr><th>Hora</th><th>Huésped / Notas</th><th style="text-align:center">Pers.</th><th style="text-align:center">Mesa</th><th>Teléfono</th><th style="text-align:center">Estado</th><th style="text-align:center">Seña</th></tr></thead>
+                      <tbody>${rows || "<tr><td colspan='7' style='text-align:center;padding:20px;color:#999'>Sin reservas para este día</td></tr>"}</tbody>
+                    </table>
+                    <div class="footer">Generado: ${new Date().toLocaleString("es-AR")}</div>
+                    </body></html>`);
+                    w.document.close();
+                    w.print();
+                  }
+                }}
+                data-testid="button-print-reservations-styled"
               >
-                <ArrowUpDown className="h-4 w-4 mr-1" />
-                {reservationSortBy === "name" ? "A-Z" : "Hora"}
+                <Printer className="h-4 w-4 mr-1" />
+                Hoja del día
               </Button>
-              <Button variant="outline" size="icon" onClick={() => setIsTimeSlotsDialogOpen(true)} data-testid="button-config-time-slots">
+              <Button variant="outline" size="icon" onClick={() => setIsTimeSlotsDialogOpen(true)} data-testid="button-config-time-slots" title="Configurar turnos">
                 <Settings className="h-4 w-4" />
               </Button>
-              <Button onClick={() => setIsReservationDialogOpen(true)} data-testid="button-new-reservation">
+              <Button onClick={() => {
+                reservationForm.reset({
+                  tableId: null, guestName: "", guestPhone: "", guestEmail: "", partySize: 2,
+                  reservationDate: reservationDateFilter,
+                  reservationTime: timeSlots.find(s => s.isActive === "true")?.time || "20:00",
+                  notes: "", clientId: null, cardLast4: null, cardHolder: null,
+                });
+                setIsReservationDialogOpen(true);
+              }} data-testid="button-new-reservation">
                 <Plus className="h-4 w-4 mr-2" />
                 Nueva Reserva
               </Button>
             </div>
           </div>
 
+          {/* Filters row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Input
+              type="date"
+              value={reservationDateFilter}
+              onChange={(e) => { setReservationDateFilter(e.target.value); setReservationViewMode("day"); }}
+              className="w-40"
+              data-testid="input-reservation-date-filter"
+            />
+            <Button
+              variant={reservationViewMode === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setReservationViewMode(reservationViewMode === "all" ? "day" : "all")}
+              data-testid="button-view-all"
+            >
+              Todas
+            </Button>
+            <Select value={reservationStatusFilter} onValueChange={setReservationStatusFilter}>
+              <SelectTrigger className="w-36" data-testid="select-status-filter">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los estados</SelectItem>
+                <SelectItem value="pending">Pendiente</SelectItem>
+                <SelectItem value="confirmed">Confirmada</SelectItem>
+                <SelectItem value="check_in">Check-in</SelectItem>
+                <SelectItem value="no_show">No se presentó</SelectItem>
+                <SelectItem value="cancelled">Cancelada</SelectItem>
+                <SelectItem value="historical">Histórica</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Nombre o teléfono..."
+                value={reservationSearch}
+                onChange={(e) => setReservationSearch(e.target.value)}
+                className="pl-8 w-44"
+                data-testid="input-reservation-search"
+              />
+            </div>
+          </div>
+
+          {/* Stats badges for the selected day */}
+          {reservationViewMode === "day" && (
+            <div className="flex items-center gap-2 flex-wrap text-sm">
+              {Object.entries(dayStats).map(([status, count]) => count > 0 && (
+                <span key={status} className={`px-2 py-0.5 rounded-full text-xs font-medium border ${reservationStatusColors[status]}`}>
+                  {reservationStatusLabels[status] || status}: {count}
+                </span>
+              ))}
+              {Object.keys(dayStats).length === 0 && (
+                <span className="text-muted-foreground text-xs">Sin reservas para esta fecha</span>
+              )}
+            </div>
+          )}
+
+          {/* Compact list */}
           {filteredReservations.length === 0 ? (
             <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <CalendarDays className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Sin reservas para esta fecha</h3>
-                <p className="text-muted-foreground mb-4">No hay reservas programadas</p>
-                <Button onClick={() => setIsReservationDialogOpen(true)} data-testid="button-add-first-reservation">
+              <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                <CalendarDays className="h-10 w-10 text-muted-foreground mb-3" />
+                <h3 className="font-semibold mb-1">Sin reservas</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {reservationViewMode === "day" ? `No hay reservas para ${reservationDateFilter === todayForFilter ? "hoy" : reservationDateFilter}` : "No hay reservas que coincidan con los filtros"}
+                </p>
+                <Button size="sm" onClick={() => setIsReservationDialogOpen(true)} data-testid="button-add-first-reservation">
                   <Plus className="h-4 w-4 mr-2" />
                   Crear Reserva
                 </Button>
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredReservations.map((reservation) => {
-                const table = tables.find(t => t.id === reservation.tableId);
-                return (
-                  <Card key={reservation.id} data-testid={`reservation-card-${reservation.id}`}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <CardTitle className="text-base">{reservation.guestName}</CardTitle>
-                        <Badge className={reservationStatusColors[reservation.status]}>
-                          {reservationStatusLabels[reservation.status]}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm font-medium">
-                        <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                        <span>{(() => { const [y,m,d] = reservation.reservationDate.split("-").map(Number); return format(new Date(y,m-1,d), "EEEE d/MM/yyyy", { locale: es }); })()}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span>{reservation.reservationTime}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <MapPin className="h-4 w-4 text-muted-foreground" />
-                        <span>Mesa {table?.tableNumber || "?"}</span>
-                        {table?.hasWindow === "true" && (
-                          <Badge variant="outline" className="text-xs gap-1">
-                            <Eye className="h-3 w-3" /> Ventana
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                        <span>{reservation.partySize} personas</span>
-                      </div>
-                      {reservation.guestPhone && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Phone className="h-4 w-4" />
-                          <span>{reservation.guestPhone}</span>
-                        </div>
-                      )}
-                      {reservation.notes && (
-                        <p className="text-sm text-muted-foreground mt-2">{reservation.notes}</p>
-                      )}
-                      <div className="flex items-center gap-2 pt-2">
-                        {reservation.status === "pending" && (
-                          <Button
-                            size="sm"
-                            onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}
-                            data-testid={`button-confirm-${reservation.id}`}
-                          >
-                            <Check className="h-4 w-4 mr-1" />
-                            Confirmar
-                          </Button>
-                        )}
-                        {reservation.status !== "cancelled" && reservation.status !== "completed" && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => { setEditingReservation(reservation); setIsEditReservationOpen(true); }}
-                              data-testid={`button-edit-reservation-${reservation.id}`}
-                            >
-                              <Pencil className="h-4 w-4 mr-1" />
-                              Editar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "cancelled" } })}
-                              data-testid={`button-cancel-${reservation.id}`}
-                            >
-                              <XCircle className="h-4 w-4" />
-                            </Button>
-                          </>
-                        )}
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => deleteReservationMutation.mutate(reservation.id)}
-                          data-testid={`button-delete-${reservation.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
+            <Card>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-16">Hora</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead className="w-28">Teléfono</TableHead>
+                      <TableHead className="w-12 text-center">Pax</TableHead>
+                      <TableHead className="w-20">Mesa</TableHead>
+                      {reservationViewMode === "all" && <TableHead className="w-24">Fecha</TableHead>}
+                      <TableHead className="w-24">Estado</TableHead>
+                      <TableHead className="w-24">Seña</TableHead>
+                      <TableHead className="w-40 text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredReservations.map((reservation) => {
+                      const tbl = tables.find(t => t.id === reservation.tableId);
+                      const advanceAmt = parseFloat(reservation.advanceAmount || "0");
+                      const isActive = !["cancelled", "no_show", "historical", "completed"].includes(reservation.status);
+                      return (
+                        <TableRow key={reservation.id} data-testid={`reservation-row-${reservation.id}`}
+                          className={!isActive ? "opacity-60" : ""}>
+                          <TableCell className="font-mono text-sm font-medium">{reservation.reservationTime}</TableCell>
+                          <TableCell>
+                            <div className="font-medium">{reservation.guestName}</div>
+                            {reservation.notes && (
+                              <div className="text-xs text-muted-foreground truncate max-w-[160px]" title={reservation.notes}>
+                                {reservation.notes}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{reservation.guestPhone || "—"}</TableCell>
+                          <TableCell className="text-center text-sm">{reservation.partySize}</TableCell>
+                          <TableCell>
+                            {tbl ? (
+                              <span className="text-sm">Mesa {tbl.tableNumber}</span>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-muted-foreground"
+                                onClick={() => { setAssignTableReservation(reservation); setIsAssignTableDialogOpen(true); }}
+                                data-testid={`button-assign-table-${reservation.id}`}
+                              >
+                                <MapPin className="h-3 w-3 mr-1" />
+                                Asignar
+                              </Button>
+                            )}
+                          </TableCell>
+                          {reservationViewMode === "all" && (
+                            <TableCell className="text-xs text-muted-foreground">
+                              {(() => { const [y,m,d] = reservation.reservationDate.split("-").map(Number); return format(new Date(y,m-1,d), "dd/MM/yy", { locale: es }); })()}
+                            </TableCell>
+                          )}
+                          <TableCell>
+                            <Badge className={`text-xs ${reservationStatusColors[reservation.status]}`}>
+                              {reservationStatusLabels[reservation.status] || reservation.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {advanceAmt > 0 ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-green-700 dark:text-green-400"
+                                onClick={() => { setAdvanceDialogReservationId(reservation.id); setIsAdvanceDialogOpen(true); }}
+                                data-testid={`button-view-advance-${reservation.id}`}
+                              >
+                                <CreditCard className="h-3 w-3 mr-1" />
+                                ${advanceAmt.toLocaleString("es-AR")}
+                              </Button>
+                            ) : isActive ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-muted-foreground"
+                                onClick={() => { setAdvanceDialogReservationId(reservation.id); setIsAdvanceDialogOpen(true); }}
+                                data-testid={`button-add-advance-${reservation.id}`}
+                              >
+                                <Plus className="h-3 w-3 mr-1" />
+                                Seña
+                              </Button>
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {reservation.status === "pending" && (
+                                <Button size="sm" className="h-7 px-2 text-xs"
+                                  onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "confirmed" } })}
+                                  data-testid={`button-confirm-${reservation.id}`}>
+                                  <Check className="h-3 w-3 mr-1" />Confirmar
+                                </Button>
+                              )}
+                              {reservation.status === "confirmed" && (
+                                <Button size="sm" variant="default" className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700"
+                                  onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "check_in" } })}
+                                  data-testid={`button-checkin-${reservation.id}`}>
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />Check-in
+                                </Button>
+                              )}
+                              {reservation.status === "check_in" && (
+                                <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+                                  onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "historical" } })}
+                                  data-testid={`button-complete-${reservation.id}`}>
+                                  <CheckCircle className="h-3 w-3 mr-1" />Completar
+                                </Button>
+                              )}
+                              {isActive && (
+                                <>
+                                  <Button size="icon" variant="ghost" className="h-7 w-7"
+                                    onClick={() => { setEditingReservation(reservation); setIsEditReservationOpen(true); }}
+                                    data-testid={`button-edit-${reservation.id}`}>
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                  {reservation.status !== "check_in" && (
+                                    <Button size="icon" variant="ghost" className="h-7 w-7 text-orange-500"
+                                      onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "no_show" } })}
+                                      data-testid={`button-noshow-${reservation.id}`}
+                                      title="No se presentó">
+                                      <XCircle className="h-3 w-3" />
+                                    </Button>
+                                  )}
+                                  <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive"
+                                    onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "cancelled" } })}
+                                    data-testid={`button-cancel-${reservation.id}`}
+                                    title="Cancelar">
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground"
+                                onClick={() => deleteReservationMutation.mutate(reservation.id)}
+                                data-testid={`button-delete-${reservation.id}`}
+                                title="Eliminar">
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
           )}
         </TabsContent>
 
@@ -3935,160 +4356,117 @@ export default function RestaurantPage() {
 
       {/* Reservation Dialog */}
       <Dialog open={isReservationDialogOpen} onOpenChange={setIsReservationDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Nueva Reserva</DialogTitle>
           </DialogHeader>
           <Form {...reservationForm}>
-            <form onSubmit={reservationForm.handleSubmit((data) => createReservationMutation.mutate(data))} className="space-y-4">
-              <FormField
-                control={reservationForm.control}
-                name="guestName"
-                render={({ field }) => (
+            <form onSubmit={reservationForm.handleSubmit((data) => {
+              const payload = { ...data, tableId: data.tableId || null, status: "confirmed" };
+              createReservationMutation.mutate(payload as any);
+            })} className="space-y-4">
+              <FormField control={reservationForm.control} name="guestName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nombre *</FormLabel>
+                  <FormControl><Input {...field} placeholder="Nombre completo" data-testid="input-guest-name" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={reservationForm.control} name="guestPhone" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Nombre del huésped / cliente *</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="Nombre completo" data-testid="input-guest-name" />
-                    </FormControl>
+                    <FormLabel>Teléfono *</FormLabel>
+                    <FormControl><Input {...field} placeholder="+54 11 xxxx-xxxx" data-testid="input-guest-phone" /></FormControl>
                     <FormMessage />
                   </FormItem>
-                )}
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={reservationForm.control}
-                  name="guestPhone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Telefono</FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="+54 11 xxxx-xxxx" data-testid="input-guest-phone" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={reservationForm.control}
-                  name="guestEmail"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input {...field} type="email" placeholder="email@ejemplo.com" data-testid="input-guest-email" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                )} />
+                <FormField control={reservationForm.control} name="guestEmail" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email</FormLabel>
+                    <FormControl><Input {...field} type="email" placeholder="email@ejemplo.com" data-testid="input-guest-email" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={reservationForm.control}
-                  name="reservationDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Fecha *</FormLabel>
-                      <FormControl>
-                        <Input {...field} type="date" data-testid="input-reservation-date" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={reservationForm.control}
-                  name="reservationTime"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Hora *</FormLabel>
-                      {timeSlots.length > 0 ? (
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-reservation-time">
-                              <SelectValue placeholder="Seleccionar turno" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {timeSlots.map((slot) => (
-                              <SelectItem key={slot.id} value={slot.time}>
-                                {slot.time} {slot.label ? `(${slot.label})` : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <FormControl>
-                          <Input {...field} type="time" data-testid="input-reservation-time" />
-                        </FormControl>
-                      )}
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={reservationForm.control}
-                  name="tableId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Mesa *</FormLabel>
+                <FormField control={reservationForm.control} name="reservationDate" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fecha *</FormLabel>
+                    <FormControl><Input {...field} type="date" data-testid="input-reservation-date" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={reservationForm.control} name="reservationTime" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Hora *</FormLabel>
+                    {timeSlots.length > 0 ? (
                       <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-table">
-                            <SelectValue placeholder="Seleccionar mesa" />
-                          </SelectTrigger>
-                        </FormControl>
+                        <FormControl><SelectTrigger data-testid="select-reservation-time"><SelectValue placeholder="Seleccionar turno" /></SelectTrigger></FormControl>
                         <SelectContent>
-                          {tables.filter(t => t.isActive === "true").map((table) => (
-                            <SelectItem key={table.id} value={table.id}>
-                              Mesa {table.tableNumber} ({table.capacity} pers.)
-                              {table.hasWindow === "true" ? " - Ventana" : ""}
-                            </SelectItem>
+                          {timeSlots.map((slot) => (
+                            <SelectItem key={slot.id} value={slot.time}>{slot.time}{slot.label ? ` (${slot.label})` : ""}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={reservationForm.control}
-                  name="partySize"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Personas *</FormLabel>
-                      <FormControl>
-                        <Input {...field} type="number" min={1} data-testid="input-party-size" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <FormField
-                control={reservationForm.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notas</FormLabel>
-                    <FormControl>
-                      <Textarea {...field} placeholder="Preferencias, alergias, ocasion especial..." data-testid="input-reservation-notes" />
-                    </FormControl>
+                    ) : (
+                      <FormControl><Input {...field} type="time" data-testid="input-reservation-time" /></FormControl>
+                    )}
                     <FormMessage />
                   </FormItem>
-                )}
-              />
+                )} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={reservationForm.control} name="tableId" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mesa <span className="text-muted-foreground text-xs">(opcional)</span></FormLabel>
+                    <Select onValueChange={(v) => field.onChange(v === "__none__" ? null : v)} value={field.value || "__none__"}>
+                      <FormControl><SelectTrigger data-testid="select-table"><SelectValue /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Sin asignar</SelectItem>
+                        {tables.filter(t => t.isActive === "true").map((t) => (
+                          <SelectItem key={t.id} value={t.id}>Mesa {t.tableNumber} ({t.capacity}p){t.hasWindow === "true" ? " 🪟" : ""}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={reservationForm.control} name="partySize" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Personas *</FormLabel>
+                    <FormControl><Input {...field} type="number" min={1} data-testid="input-party-size" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+              <FormField control={reservationForm.control} name="notes" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Notas</FormLabel>
+                  <FormControl><Textarea {...field} rows={2} placeholder="Preferencias, alergias, ocasión especial..." data-testid="input-reservation-notes" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              {/* Tarjeta de garantía (opcional) */}
+              <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tarjeta de garantía (opcional)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={reservationForm.control} name="cardLast4" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Últimos 4 dígitos</FormLabel>
+                      <FormControl><Input {...field} value={field.value || ""} maxLength={4} placeholder="1234" data-testid="input-card-last4" /></FormControl>
+                    </FormItem>
+                  )} />
+                  <FormField control={reservationForm.control} name="cardHolder" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Titular</FormLabel>
+                      <FormControl><Input {...field} value={field.value || ""} placeholder="Nombre en tarjeta" data-testid="input-card-holder" /></FormControl>
+                    </FormItem>
+                  )} />
+                </div>
+              </div>
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsReservationDialogOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={createReservationMutation.isPending}
-                  data-testid="button-save-reservation"
-                >
+                <Button type="button" variant="outline" onClick={() => setIsReservationDialogOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={createReservationMutation.isPending} data-testid="button-save-reservation">
                   {createReservationMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   Guardar Reserva
                 </Button>
@@ -4100,15 +4478,25 @@ export default function RestaurantPage() {
 
       {/* Edit Reservation Dialog */}
       <Dialog open={isEditReservationOpen} onOpenChange={setIsEditReservationOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Editar Reserva</DialogTitle>
           </DialogHeader>
           {editingReservation && (
             <div className="space-y-4">
               <div className="grid gap-2">
-                <Label>Nombre</Label>
+                <Label>Nombre *</Label>
                 <Input value={editingReservation.guestName} onChange={(e) => setEditingReservation({...editingReservation, guestName: e.target.value})} data-testid="input-edit-guest-name" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Teléfono *</Label>
+                  <Input value={editingReservation.guestPhone || ""} onChange={(e) => setEditingReservation({...editingReservation, guestPhone: e.target.value})} data-testid="input-edit-phone" />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Email</Label>
+                  <Input type="email" value={editingReservation.guestEmail || ""} onChange={(e) => setEditingReservation({...editingReservation, guestEmail: e.target.value})} data-testid="input-edit-email" />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
@@ -4122,7 +4510,7 @@ export default function RestaurantPage() {
                       <SelectTrigger data-testid="select-edit-time"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {timeSlots.map((slot) => (
-                          <SelectItem key={slot.id} value={slot.time}>{slot.time} {slot.label ? `(${slot.label})` : ""}</SelectItem>
+                          <SelectItem key={slot.id} value={slot.time}>{slot.time}{slot.label ? ` (${slot.label})` : ""}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -4133,12 +4521,16 @@ export default function RestaurantPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Mesa</Label>
-                  <Select value={editingReservation.tableId} onValueChange={(v) => setEditingReservation({...editingReservation, tableId: v})}>
+                  <Label>Mesa <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                  <Select
+                    value={editingReservation.tableId || "__none__"}
+                    onValueChange={(v) => setEditingReservation({...editingReservation, tableId: v === "__none__" ? null : v})}
+                  >
                     <SelectTrigger data-testid="select-edit-table"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {tables.filter(t => t.isActive === "true").map((table) => (
-                        <SelectItem key={table.id} value={table.id}>Mesa {table.tableNumber} ({table.capacity} pers.)</SelectItem>
+                      <SelectItem value="__none__">Sin asignar</SelectItem>
+                      {tables.filter(t => t.isActive === "true").map((t) => (
+                        <SelectItem key={t.id} value={t.id}>Mesa {t.tableNumber} ({t.capacity}p)</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -4150,77 +4542,94 @@ export default function RestaurantPage() {
               </div>
               <div className="grid gap-2">
                 <Label>Notas</Label>
-                <Textarea value={editingReservation.notes || ""} onChange={(e) => setEditingReservation({...editingReservation, notes: e.target.value})} data-testid="input-edit-notes" />
+                <Textarea rows={2} value={editingReservation.notes || ""} onChange={(e) => setEditingReservation({...editingReservation, notes: e.target.value})} data-testid="input-edit-notes" />
               </div>
-              <div className="border-t pt-4 space-y-3">
-                <Label className="text-sm font-medium">Anticipo / Seña</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Monto</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={(editingReservation as any).advanceAmount || ""}
-                      onChange={(e) => setEditingReservation({ ...editingReservation, advanceAmount: e.target.value } as any)}
-                      placeholder="0.00"
-                      data-testid="input-advance-amount"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Método</Label>
-                    <Select
-                      value={(editingReservation as any).advanceMethod || ""}
-                      onValueChange={(v) => setEditingReservation({ ...editingReservation, advanceMethod: v } as any)}
-                    >
-                      <SelectTrigger data-testid="select-advance-method"><SelectValue placeholder="Forma de pago" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="efectivo">Efectivo</SelectItem>
-                        <SelectItem value="transferencia">Transferencia</SelectItem>
-                        <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                        <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                        <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs">Notas del anticipo</Label>
-                  <Input
-                    value={(editingReservation as any).advanceNotes || ""}
-                    onChange={(e) => setEditingReservation({ ...editingReservation, advanceNotes: e.target.value } as any)}
-                    placeholder="Referencia, comprobante, observación..."
-                    data-testid="input-advance-notes"
-                  />
-                </div>
-                {parseFloat((editingReservation as any).advanceAmount || "0") > 0 && (
-                  <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
-                    Anticipo registrado: ${parseFloat((editingReservation as any).advanceAmount).toLocaleString("es-AR")}
-                    {(editingReservation as any).advanceMethod && ` — ${(editingReservation as any).advanceMethod}`}
-                  </div>
-                )}
-              </div>
-              <DialogFooter>
+              <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setIsEditReservationOpen(false)}>Cancelar</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditReservationOpen(false);
+                    setAdvanceDialogReservationId(editingReservation.id);
+                    setIsAdvanceDialogOpen(true);
+                  }}
+                  data-testid="button-open-advance-from-edit"
+                >
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  Seña/Adelanto
+                </Button>
                 <Button onClick={() => {
                   updateReservationMutation.mutate({ id: editingReservation.id, data: {
                     guestName: editingReservation.guestName,
+                    guestPhone: editingReservation.guestPhone,
+                    guestEmail: editingReservation.guestEmail,
                     reservationDate: editingReservation.reservationDate,
                     reservationTime: editingReservation.reservationTime,
                     tableId: editingReservation.tableId,
                     partySize: editingReservation.partySize,
                     notes: editingReservation.notes,
-                    advanceAmount: (editingReservation as any).advanceAmount || null,
-                    advanceMethod: (editingReservation as any).advanceMethod || null,
-                    advanceNotes: (editingReservation as any).advanceNotes || null,
                   }});
                   setIsEditReservationOpen(false);
                 }} disabled={updateReservationMutation.isPending} data-testid="button-save-edit-reservation">
-                  {updateReservationMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  {updateReservationMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   Guardar Cambios
                 </Button>
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Advance Dialog — Seña / Anticipo */}
+      <AdvanceDialog
+        reservationId={advanceDialogReservationId}
+        open={isAdvanceDialogOpen}
+        onOpenChange={(v) => { setIsAdvanceDialogOpen(v); if (!v) setAdvanceDialogReservationId(null); }}
+        reservations={reservations}
+        advanceAmount={advanceAmount}
+        setAdvanceAmount={setAdvanceAmount}
+        advancePaymentMethod={advancePaymentMethod}
+        setAdvancePaymentMethod={setAdvancePaymentMethod}
+        advanceNotes={advanceNotes}
+        setAdvanceNotes={setAdvanceNotes}
+        createAdvanceMutation={createAdvanceMutation}
+        deleteAdvanceMutation={deleteAdvanceMutation}
+      />
+
+      {/* Assign Table Dialog */}
+      <Dialog open={isAssignTableDialogOpen} onOpenChange={setIsAssignTableDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Asignar Mesa</DialogTitle>
+            <DialogDescription>
+              {assignTableReservation && `Reserva: ${assignTableReservation.guestName} — ${assignTableReservation.partySize} personas`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            {tables.filter(t => t.isActive === "true").sort((a,b) => a.tableNumber.localeCompare(b.tableNumber, undefined, {numeric: true})).map((t) => {
+              const hasOrder = orders.some(o => o.tableId === t.id && ["open","in_progress","served"].includes(o.status));
+              return (
+                <button
+                  key={t.id}
+                  className={`w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between ${hasOrder ? "opacity-40 cursor-not-allowed bg-muted" : "hover:bg-accent cursor-pointer"}`}
+                  disabled={hasOrder}
+                  onClick={() => {
+                    if (!assignTableReservation) return;
+                    updateReservationMutation.mutate({ id: assignTableReservation.id, data: { tableId: t.id } });
+                    setIsAssignTableDialogOpen(false);
+                    setAssignTableReservation(null);
+                  }}
+                  data-testid={`button-assign-table-option-${t.id}`}
+                >
+                  <span className="font-medium">Mesa {t.tableNumber}</span>
+                  <span className="text-sm text-muted-foreground">{t.capacity} pers.{hasOrder ? " — Ocupada" : ""}</span>
+                </button>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAssignTableDialogOpen(false)}>Cancelar</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

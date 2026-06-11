@@ -1004,4 +1004,57 @@ export function registerRestaurantRoutes(app: Express) {
       res.status(500).json({ error: "Error fetching kitchen orders" });
     }
   });
+
+  // Reservation Advances
+  app.get("/api/restaurant/table-reservations/:id/advances", requireAuth, async (req, res) => {
+    try {
+      const advances = await storage.getReservationAdvances(req.params.id);
+      res.json(advances);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching advances" });
+    }
+  });
+
+  app.post("/api/restaurant/table-reservations/:id/advances", requireAuth, async (req, res) => {
+    try {
+      const { amount, paymentMethod, notes } = req.body;
+      // Generate voucher number ADV-YYYY-NNNN
+      const year = new Date().getFullYear();
+      const existing = await storage.getReservationAdvances(req.params.id);
+      const allAdvances = await storage.getReservationAdvances(req.params.id);
+      const seq = String(allAdvances.length + 1).padStart(4, "0");
+      const voucherNumber = `ADV-${year}-${seq}`;
+      const advance = await storage.createReservationAdvance({
+        reservationId: req.params.id,
+        amount: String(amount),
+        paymentMethod: paymentMethod || "efectivo",
+        voucherNumber,
+        notes: notes || null,
+        appliedToOrderId: null,
+      });
+      res.status(201).json(advance);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating advance" });
+    }
+  });
+
+  app.delete("/api/restaurant/reservation-advances/:id", requireAuth, async (req, res) => {
+    try {
+      await storage.deleteReservationAdvance(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Error deleting advance" });
+    }
+  });
+
+  // Advances for a table (used by close dialog to auto-apply credit)
+  app.get("/api/restaurant/tables/:tableId/advances", requireAuth, async (req, res) => {
+    try {
+      const { date } = req.query;
+      const advances = await storage.getReservationAdvancesByTable(req.params.tableId, date as string);
+      res.json(advances);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching table advances" });
+    }
+  });
 }

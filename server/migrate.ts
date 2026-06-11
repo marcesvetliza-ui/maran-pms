@@ -292,5 +292,39 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // table_reservations: make table_id nullable, add new columns
+  await withTimeout("table_reservations.table_id_nullable", T, () =>
+    db.execute(sql`ALTER TABLE table_reservations ALTER COLUMN table_id DROP NOT NULL`)
+  );
+  await withTimeout("table_reservations.new_cols", T, () =>
+    db.execute(sql`
+      ALTER TABLE table_reservations
+        ADD COLUMN IF NOT EXISTS client_id varchar,
+        ADD COLUMN IF NOT EXISTS card_last4 text,
+        ADD COLUMN IF NOT EXISTS card_holder text
+    `)
+  );
+
+  // restaurant_time_slots: add area_id for per-salon turn configuration
+  await withTimeout("restaurant_time_slots.area_id", T, () =>
+    db.execute(sql`ALTER TABLE restaurant_time_slots ADD COLUMN IF NOT EXISTS area_id varchar`)
+  );
+
+  // restaurant_reservation_advances: advances/deposits on reservations
+  await withTimeout("restaurant_reservation_advances (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS restaurant_reservation_advances (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        reservation_id varchar NOT NULL,
+        amount decimal(10,2) NOT NULL,
+        payment_method text NOT NULL DEFAULT 'efectivo',
+        voucher_number text,
+        notes text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        applied_to_order_id varchar
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
