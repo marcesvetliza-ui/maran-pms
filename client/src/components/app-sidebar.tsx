@@ -46,6 +46,7 @@ import {
   Megaphone,
   ChevronDown,
   KeyRound,
+  ChefHat,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -119,10 +120,11 @@ const menuSections = [
   {
     titulo: "Servicios",
     items: [
-      { label: "Restaurant",       icon: UtensilsCrossed,  href: "/restaurant",  roles: [...HOTEL_OPS, "restaurant"] },
-      { label: "Spa",              icon: Sparkles,         href: "/spa",         roles: [...HOTEL_OPS, "spa"] },
-      { label: "Clientes Spa", icon: Heart,           href: "/spa-clients", roles: [...HOTEL_OPS, "spa"] },
-      { label: "Eventos",      icon: CalendarCheck,   href: "/events",      roles: [...HOTEL_OPS, "events"] },
+      { label: "Restaurant",         icon: UtensilsCrossed, href: "/restaurant",        roles: [...HOTEL_OPS, "restaurant"] },
+      { label: "Recetas y Costos",  icon: ChefHat,         href: "/restaurant/recetas", roles: MGMT_ONLY },
+      { label: "Spa",               icon: Sparkles,        href: "/spa",               roles: [...HOTEL_OPS, "spa"] },
+      { label: "Clientes Spa",      icon: Heart,           href: "/spa-clients",        roles: [...HOTEL_OPS, "spa"] },
+      { label: "Eventos",           icon: CalendarCheck,   href: "/events",             roles: [...HOTEL_OPS, "events"] },
     ],
   },
 

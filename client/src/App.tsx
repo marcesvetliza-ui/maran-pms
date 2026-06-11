@@ -68,6 +68,7 @@ const SeguridadPage = lazy(() => import("@/pages/seguridad"));
 const SurveyPage = lazy(() => import("@/pages/survey"));
 const HelpChat = lazy(() => import("@/components/help-chat"));
 const MozoPage = lazy(() => import("@/pages/mozo"));
+const RecetasCostosPage = lazy(() => import("@/pages/recetas-costos"));
 
 interface AuthUser {
   id: string;
@@ -150,6 +151,7 @@ function Router() {
         <Route path="/housekeeping" component={HousekeepingPage} />
         <Route path="/presupuestos" component={PresupuestosPage} />
         <Route path="/restaurant" component={RestaurantPage} />
+        <Route path="/restaurant/recetas" component={RecetasCostosPage} />
         <Route path="/inventory" component={InventoryPage} />
         <Route path="/spa" component={SpaPage} />
         <Route path="/spa-clients" component={SpaClientsPage} />
