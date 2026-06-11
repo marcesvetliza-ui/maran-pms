@@ -21,7 +21,10 @@ import {
   Loader2,
   RotateCcw,
   Building2,
+  ListChecks,
+  X,
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,6 +104,29 @@ export default function CheckOutPage() {
   const [finalSummary, setFinalSummary] = useState<{ guestName: string; roomNumber: string; checkOutDate: string; totalPaid: number; methods: string[] } | null>(null);
   const [ccCompanyId, setCcCompanyId] = useState("");
   const [ccAgencyId, setCcAgencyId] = useState("");
+  const [itemPayMode, setItemPayMode] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+
+  const handleToggleItem = (id: string, amount: number) => {
+    const next = new Set(selectedItemIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedItemIds(next);
+    if (folio) {
+      let total = 0;
+      if (next.has("accommodation")) total += folio.roomTotal;
+      (folio.charges || []).forEach((c: any) => {
+        if (next.has(c.id)) total += parseFloat(c.amount);
+      });
+      setPaymentAmount(total > 0 ? total.toFixed(2) : "");
+    }
+  };
+
+  const exitItemPayMode = () => {
+    setItemPayMode(false);
+    setSelectedItemIds(new Set());
+    setPaymentAmount("");
+  };
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations/check-out"],
@@ -166,6 +192,8 @@ export default function CheckOutPage() {
       setPaymentBillingTarget("guest");
       setCcCompanyId("");
       setCcAgencyId("");
+      setItemPayMode(false);
+      setSelectedItemIds(new Set());
       toast({ title: "Pago registrado" });
     },
     onError: (error: any) => {
@@ -547,9 +575,77 @@ export default function CheckOutPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4">
+
+                    {/* Panel de selección por ítem */}
+                    {itemPayMode && folio && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800">
+                        <div className="flex items-center justify-between px-3 py-2 border-b border-amber-200 dark:border-amber-800">
+                          <div className="flex items-center gap-2">
+                            <ListChecks className="h-4 w-4 text-amber-700 dark:text-amber-400" />
+                            <span className="text-sm font-medium text-amber-800 dark:text-amber-300">Seleccionar ítems a cobrar</span>
+                          </div>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-700 hover:text-amber-900 dark:text-amber-400" onClick={exitItemPayMode}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        <div className="divide-y divide-amber-100 dark:divide-amber-800/40">
+                          {/* Alojamiento */}
+                          {folio.roomTotal > 0 && (
+                            <label className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-amber-100/60 dark:hover:bg-amber-800/20 transition-colors">
+                              <Checkbox
+                                checked={selectedItemIds.has("accommodation")}
+                                onCheckedChange={() => handleToggleItem("accommodation", folio.roomTotal)}
+                                data-testid="checkbox-item-accommodation"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">Alojamiento ({folio.nights} noche{folio.nights !== 1 ? "s" : ""})</p>
+                                <p className="text-xs text-muted-foreground">${folio.roomRate ? parseFloat(folio.roomRate).toFixed(0) : "—"}/noche</p>
+                              </div>
+                              <span className="text-sm font-semibold text-foreground shrink-0">${folio.roomTotal.toFixed(2)}</span>
+                            </label>
+                          )}
+                          {/* Cargos adicionales */}
+                          {(folio.charges || []).map((c: any) => (
+                            <label key={c.id} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-amber-100/60 dark:hover:bg-amber-800/20 transition-colors">
+                              <Checkbox
+                                checked={selectedItemIds.has(c.id)}
+                                onCheckedChange={() => handleToggleItem(c.id, parseFloat(c.amount))}
+                                data-testid={`checkbox-item-${c.id}`}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">{c.description}</p>
+                                {c.date && <p className="text-xs text-muted-foreground">{c.date}</p>}
+                              </div>
+                              <span className="text-sm font-semibold text-foreground shrink-0">${parseFloat(c.amount).toFixed(2)}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {selectedItemIds.size > 0 && (
+                          <div className="flex items-center justify-between px-3 py-2 border-t border-amber-200 dark:border-amber-800 bg-amber-100/50 dark:bg-amber-900/20">
+                            <span className="text-xs text-amber-800 dark:text-amber-400">{selectedItemIds.size} ítem{selectedItemIds.size !== 1 ? "s" : ""} seleccionado{selectedItemIds.size !== 1 ? "s" : ""}</span>
+                            <span className="text-sm font-bold text-amber-900 dark:text-amber-300">${paymentAmount || "0.00"}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label>Monto</Label>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <Label>Monto</Label>
+                          {!itemPayMode && folio && ((folio.charges || []).length > 0 || folio.roomTotal > 0) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
+                              onClick={() => { setItemPayMode(true); setPaymentAmount(""); setSelectedItemIds(new Set()); }}
+                              data-testid="button-item-pay-mode"
+                            >
+                              <ListChecks className="h-3 w-3 mr-1" />
+                              Por ítem
+                            </Button>
+                          )}
+                        </div>
                         <Input
                           type="number"
                           step="0.01"
