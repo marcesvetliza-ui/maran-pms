@@ -19,6 +19,8 @@ import {
   ArrowLeft,
   AlertCircle,
   Loader2,
+  RotateCcw,
+  Building2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -97,9 +99,18 @@ export default function CheckOutPage() {
   const [paymentBillingTarget, setPaymentBillingTarget] = useState<"guest" | "company" | "agency">("guest");
   const [checkoutComplete, setCheckoutComplete] = useState(false);
   const [finalSummary, setFinalSummary] = useState<{ guestName: string; roomNumber: string; checkOutDate: string; totalPaid: number; methods: string[] } | null>(null);
+  const [ccCompanyId, setCcCompanyId] = useState("");
+  const [ccAgencyId, setCcAgencyId] = useState("");
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations/check-out"],
+  });
+
+  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/companies"],
+  });
+  const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/agencies"],
   });
 
   const { data: folio, refetch: refetchFolio } = useQuery<FolioData>({
@@ -134,7 +145,7 @@ export default function CheckOutPage() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; receiptType: string; billingTarget: "guest" | "company" | "agency" }) => {
+    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; receiptType: string; billingTarget: "guest" | "company" | "agency"; companyId?: string; agencyId?: string }) => {
       return apiRequest("POST", "/api/payments", {
         reservationId: selectedReservation!.id,
         amount: data.amount,
@@ -143,6 +154,8 @@ export default function CheckOutPage() {
         reference: data.reference || null,
         receiptType: data.receiptType,
         billingTarget: data.billingTarget,
+        companyId: data.companyId || null,
+        agencyId: data.agencyId || null,
       });
     },
     onSuccess: () => {
@@ -151,6 +164,8 @@ export default function CheckOutPage() {
       setPaymentReference("");
       setPaymentReceiptType("cierre_habitacion");
       setPaymentBillingTarget("guest");
+      setCcCompanyId("");
+      setCcAgencyId("");
       toast({ title: "Pago registrado" });
     },
     onError: (error: any) => {
@@ -161,6 +176,25 @@ export default function CheckOutPage() {
         variant: "destructive",
       });
       console.error("Payment error:", error);
+    },
+  });
+
+  const undoCheckoutMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/reservations/${id}/undo-checkout`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: "Check-out anulado", description: "El huésped permanece en la habitación." });
+      cancelWizard();
+    },
+    onError: async (error: any) => {
+      let message = "No se pudo anular el check-out.";
+      try { if (error?.message) message = error.message; } catch {}
+      toast({ title: "Error", description: message, variant: "destructive" });
     },
   });
 
@@ -557,7 +591,7 @@ export default function CheckOutPage() {
                       </div>
                       <div>
                         <Label>Facturar a</Label>
-                        <Select value={paymentBillingTarget} onValueChange={(v) => setPaymentBillingTarget(v as "guest" | "company" | "agency")}>
+                        <Select value={paymentBillingTarget} onValueChange={(v) => { setPaymentBillingTarget(v as "guest" | "company" | "agency"); setCcCompanyId(""); setCcAgencyId(""); }}>
                           <SelectTrigger data-testid="select-billing-target">
                             <SelectValue />
                           </SelectTrigger>
@@ -569,6 +603,47 @@ export default function CheckOutPage() {
                         </Select>
                       </div>
                     </div>
+
+                    {/* Selector de entidad cuando el método es Cuenta Corriente */}
+                    {paymentMethod === "cuenta_corriente" && paymentBillingTarget === "company" && (
+                      <div className="rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800 p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          <Label className="text-sm font-medium text-blue-800 dark:text-blue-300">Empresa — Cuenta Corriente</Label>
+                        </div>
+                        <Select value={ccCompanyId} onValueChange={setCcCompanyId}>
+                          <SelectTrigger data-testid="select-cc-company">
+                            <SelectValue placeholder="Seleccionar empresa..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {companies.map(c => (
+                              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!ccCompanyId && <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">Seleccioná la empresa para cargar a su cuenta corriente.</p>}
+                      </div>
+                    )}
+                    {paymentMethod === "cuenta_corriente" && paymentBillingTarget === "agency" && (
+                      <div className="rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800 p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          <Label className="text-sm font-medium text-blue-800 dark:text-blue-300">Agencia — Cuenta Corriente</Label>
+                        </div>
+                        <Select value={ccAgencyId} onValueChange={setCcAgencyId}>
+                          <SelectTrigger data-testid="select-cc-agency">
+                            <SelectValue placeholder="Seleccionar agencia..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {agencies.map(a => (
+                              <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!ccAgencyId && <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">Seleccioná la agencia para cargar a su cuenta corriente.</p>}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 gap-3">
                       <div>
                         <Label>Referencia (opcional)</Label>
@@ -587,12 +662,22 @@ export default function CheckOutPage() {
                           toast({ title: "Ingresá un monto válido", variant: "destructive" });
                           return;
                         }
+                        if (paymentMethod === "cuenta_corriente" && paymentBillingTarget === "company" && !ccCompanyId) {
+                          toast({ title: "Seleccioná una empresa", description: "Elegí a qué empresa cargar la cuenta corriente.", variant: "destructive" });
+                          return;
+                        }
+                        if (paymentMethod === "cuenta_corriente" && paymentBillingTarget === "agency" && !ccAgencyId) {
+                          toast({ title: "Seleccioná una agencia", description: "Elegí a qué agencia cargar la cuenta corriente.", variant: "destructive" });
+                          return;
+                        }
                         addPaymentMutation.mutate({
                           amount,
                           method: paymentMethod,
                           reference: paymentReference,
                           receiptType: paymentReceiptType,
                           billingTarget: paymentBillingTarget,
+                          companyId: paymentBillingTarget === "company" ? ccCompanyId : undefined,
+                          agencyId: paymentBillingTarget === "agency" ? ccAgencyId : undefined,
                         });
                       }}
                       disabled={addPaymentMutation.isPending}
@@ -725,7 +810,19 @@ export default function CheckOutPage() {
               </CardContent>
             </Card>
 
-            <div className="flex justify-center">
+            <div className="flex flex-col sm:flex-row justify-center gap-3">
+              <Button
+                variant="outline"
+                className="border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
+                onClick={() => selectedReservation && undoCheckoutMutation.mutate(selectedReservation.id)}
+                disabled={undoCheckoutMutation.isPending}
+                data-testid="button-undo-checkout"
+              >
+                {undoCheckoutMutation.isPending
+                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Anulando...</>
+                  : <><RotateCcw className="h-4 w-4 mr-2" />Anular check-out</>
+                }
+              </Button>
               <Button onClick={() => setLocation("/planning")} data-testid="button-back-to-planning">
                 Volver al Planning
               </Button>
