@@ -1846,6 +1846,7 @@ export const cashMovements = pgTable("cash_movements", {
   proveedor: text("proveedor"),
   expenseCategory: text("expense_category"),
   registeredBy: text("registered_by"),
+  paymentId: varchar("payment_id"),
   createdAt: timestamp("created_at").defaultNow(),
   anulado: boolean("anulado").notNull().default(false),
   motivoAnulacion: text("motivo_anulacion"),

@@ -4168,7 +4168,7 @@ export class DatabaseStorage implements IStorage {
     return movement;
   }
 
-  async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string): Promise<CashMovement> {
+  async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<CashMovement> {
     const turno = await this.getOrCreateActiveTurno(area);
     const [movement] = await db.insert(cashMovements).values({
       id: randomUUID(),
@@ -4182,6 +4182,7 @@ export class DatabaseStorage implements IStorage {
       movementType,
       registeredBy: registeredBy || null,
       receiptType: receiptType || null,
+      paymentId: paymentId || null,
     }).returning();
     return movement;
   }

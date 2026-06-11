@@ -220,6 +220,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Cash movements: payment_id para vincular movimiento de caja con pago de reserva
+  await withTimeout("cash_movements_payment_id_col", T, () =>
+    db.execute(sql`
+      ALTER TABLE cash_movements
+        ADD COLUMN IF NOT EXISTS payment_id varchar
+    `)
+  );
+
   // Security: brute-force columns on system_users + failed_login_attempts table
   await withTimeout("system_users_security_cols", T, () =>
     db.execute(sql`

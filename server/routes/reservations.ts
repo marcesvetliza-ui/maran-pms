@@ -1423,7 +1423,7 @@ export function registerReservationsRoutes(app: Express) {
         await storage.registerCashMovement(
           "reception", "reservation", req.body.reservationId || null, label,
           cashMethod, String(req.body.amount), "income",
-          undefined, req.body.receiptType
+          undefined, req.body.receiptType, payment.id
         );
       } catch (e) {
         console.error("Error registrando movimiento de caja:", e);

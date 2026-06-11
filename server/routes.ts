@@ -1674,9 +1674,52 @@ export async function registerRoutes(
           return res.status(403).json({ error: "Solo administradores pueden forzar anulación en turnos cerrados" });
         }
       }
+
+      const user = req.user as any;
+      const operator = anuladoPor || user?.username || "sistema";
+
       await db.update(cashMovements)
-        .set({ anulado: true, motivoAnulacion, anuladoPor: anuladoPor || null, anuladoAt: new Date() })
+        .set({ anulado: true, motivoAnulacion, anuladoPor: operator, anuladoAt: new Date() })
         .where(eq(cashMovements.id, req.params.id));
+
+      // ── Si el movimiento tiene payment_id, propagar la anulación al folio de la reserva ──
+      if (mov.paymentId) {
+        try {
+          const payResult = await db.execute(sql`SELECT * FROM payments WHERE id = ${mov.paymentId}`);
+          const pay = payResult.rows?.[0] as any;
+          if (pay && pay.status !== "anulado") {
+            // Marcar el pago como anulado
+            await db.execute(sql`
+              UPDATE payments SET status = 'anulado',
+                anulado_por = ${operator},
+                motivo_anulacion = ${motivoAnulacion},
+                anulado_at = NOW()
+              WHERE id = ${mov.paymentId}
+            `);
+            // Contraasiento en el folio de la reserva
+            if (pay.reservation_id) {
+              const folioRows = await db.execute(sql`
+                SELECT id FROM folios WHERE entity_type = 'reservation' AND entity_id = ${pay.reservation_id} LIMIT 1
+              `);
+              const folio = folioRows.rows?.[0] as any;
+              if (folio) {
+                const methodLabel: Record<string, string> = {
+                  efectivo: "Efectivo", tarjeta_debito: "Tarj. Débito", tarjeta_credito: "Tarj. Crédito",
+                  transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente",
+                };
+                await storage.addFolioAdjustment(
+                  folio.id, "void", parseFloat(pay.amount),
+                  `Anulación caja — ${methodLabel[pay.method] || pay.method} — ${motivoAnulacion}`,
+                  operator, undefined, motivoAnulacion
+                );
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[anular-caja] propagación al folio:", e);
+        }
+      }
+
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

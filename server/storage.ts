@@ -772,7 +772,7 @@ export interface IStorage {
   getShiftDetail(shiftId: string): Promise<any>;
   getCashMovements(shiftId: string): Promise<any[]>;
   createCashMovement(data: any): Promise<any>;
-  registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType?: string, registeredBy?: string, receiptType?: string): Promise<any>;
+  registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType?: string, registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<any>;
   getCashSummary(area?: string, from?: string, to?: string): Promise<any[]>;
 
   getAccountMovements(entityType: AccountEntityType, entityId: string): Promise<AccountMovement[]>;
@@ -5162,7 +5162,7 @@ export class MemStorage implements IStorage {
   async getShiftDetail(_shiftId: string): Promise<any> { return {}; }
   async getCashMovements(_shiftId: string): Promise<any[]> { return []; }
   async createCashMovement(_data: any): Promise<any> { return {}; }
-  async registerCashMovement(_area: string, _sourceType: string, _sourceId: string | null, _sourceLabel: string, _paymentMethod: string, _amount: string, _movementType?: string, _registeredBy?: string, _receiptType?: string): Promise<any> { return {}; }
+  async registerCashMovement(_area: string, _sourceType: string, _sourceId: string | null, _sourceLabel: string, _paymentMethod: string, _amount: string, _movementType?: string, _registeredBy?: string, _receiptType?: string, _paymentId?: string | null): Promise<any> { return {}; }
   async getCashSummary(_area?: string, _from?: string, _to?: string): Promise<any[]> { return []; }
   async getAccountMovements(_entityType: AccountEntityType, _entityId: string): Promise<AccountMovement[]> { return []; }
   async getAccountMovementsByReservation(_reservationId: string): Promise<AccountMovement[]> { return []; }
