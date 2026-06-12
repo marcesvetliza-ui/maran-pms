@@ -154,7 +154,7 @@ export function PlanningFiltersPanel({
 
       {/* Room status */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Estado limpieza</Label>
+        <Label className="text-xs font-medium text-muted-foreground">Estado</Label>
         <Select
           value={filters.statusFilter || "__all__"}
           onValueChange={v => setFilters(f => ({ ...f, statusFilter: v === "__all__" ? "" : v as PlanningCellStatus }))}
@@ -164,9 +164,12 @@ export function PlanningFiltersPanel({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">Todos los estados</SelectItem>
-            {(Object.keys(PLANNING_COLORS) as PlanningCellStatus[]).map(s => (
-              <SelectItem key={s} value={s}>{PLANNING_COLORS[s].label}</SelectItem>
-            ))}
+            <SelectItem value="dirty">Sucias</SelectItem>
+            <SelectItem value="cleaning">Limpias</SelectItem>
+            <SelectItem value="checked_in">Ocupadas (in house)</SelectItem>
+            <SelectItem value="available">Libres</SelectItem>
+            <SelectItem value="booked">Reservadas</SelectItem>
+            <SelectItem value="checkin_today">Check In hoy</SelectItem>
           </SelectContent>
         </Select>
       </div>
