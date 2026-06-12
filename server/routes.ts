@@ -1002,6 +1002,15 @@ export async function registerRoutes(
           confirmedPhone: webCheckin.confirmedPhone,
           confirmedEmail: webCheckin.confirmedEmail,
         },
+        guest: reservation?.guest ? {
+          firstName: reservation.guest.firstName,
+          lastName: reservation.guest.lastName,
+          documentType: reservation.guest.documentType,
+          documentNumber: reservation.guest.documentNumber,
+          nationality: reservation.guest.nationality,
+          phone: reservation.guest.phone,
+          email: reservation.guest.email,
+        } : null,
         reservation: reservation ? {
           checkInDate: reservation.checkInDate,
           checkOutDate: reservation.checkOutDate,

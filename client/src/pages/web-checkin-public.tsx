@@ -94,15 +94,17 @@ export default function WebCheckinPublicPage() {
   });
 
   useEffect(() => {
-    if (data?.webCheckin) {
+    if (data) {
       const wc = data.webCheckin;
-      if (wc.confirmedFirstName) setFirstName(wc.confirmedFirstName);
-      if (wc.confirmedLastName) setLastName(wc.confirmedLastName);
-      if (wc.confirmedDocumentType) setDocumentType(wc.confirmedDocumentType);
-      if (wc.confirmedDocumentNumber) setDocumentNumber(wc.confirmedDocumentNumber);
-      if (wc.confirmedNationality) setNationality(wc.confirmedNationality);
-      if (wc.confirmedPhone) setPhone(wc.confirmedPhone);
-      if (wc.confirmedEmail) setEmail(wc.confirmedEmail);
+      const g = data.guest;
+      // Priority: confirmed data from previous submission > guest profile from DB
+      setFirstName(wc?.confirmedFirstName || g?.firstName || "");
+      setLastName(wc?.confirmedLastName || g?.lastName || "");
+      setDocumentType(wc?.confirmedDocumentType || g?.documentType || "DNI");
+      setDocumentNumber(wc?.confirmedDocumentNumber || g?.documentNumber || "");
+      setNationality(wc?.confirmedNationality || g?.nationality || "Argentina");
+      setPhone(wc?.confirmedPhone || g?.phone || "");
+      setEmail(wc?.confirmedEmail || g?.email || "");
     }
   }, [data]);
 
