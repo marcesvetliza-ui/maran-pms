@@ -1308,6 +1308,7 @@ export default function RestaurantPage() {
     if (isEditMode) return;
     setSelectedTable(table);
     if (table.status === "available") {
+      setCurrentOrder(null);
       setNewCovers(table.capacity);
       setNewWaiterName("");
       setIsNewOrderDialogOpen(true);
@@ -3446,14 +3447,50 @@ export default function RestaurantPage() {
           )}
 
           <DialogFooter className="flex-col sm:flex-row gap-2 border-t pt-4">
-            {/* Agregar más — solo en vista comanda */}
-            {orderView === "comanda" && (
+            {/* Cerrar sin cobrar — atajo para comandas vacías con total $0 */}
+            {orderView !== "delete" && !pendingItem && getOrderItems().length === 0 && parseFloat(getUpdatedOrder()?.total || "0") === 0 && (
+              <Button
+                variant="destructive"
+                size="lg"
+                className="w-full sm:w-auto"
+                disabled={closeOrderMutation.isPending}
+                onClick={() => {
+                  if (currentOrder) {
+                    closeOrderMutation.mutate({
+                      orderId: currentOrder.id,
+                      receiptType: "cierre_mesa",
+                      paymentMethod: "efectivo",
+                    });
+                    setIsOrderDialogOpen(false);
+                  }
+                }}
+                data-testid="button-close-empty-order"
+              >
+                {closeOrderMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CreditCard className="h-5 w-5 mr-2" />}
+                Cerrar esta mesa (sin cobrar)
+              </Button>
+            )}
+            {/* Agregar más — solo en vista comanda con ítems */}
+            {orderView === "comanda" && getOrderItems().length > 0 && (
               <Button
                 variant="outline"
                 size="lg"
                 className="w-full sm:w-auto"
                 onClick={() => setOrderView("menu")}
                 data-testid="button-comanda-add-more-footer"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Agregar más
+              </Button>
+            )}
+            {/* Agregar más (primera vez) — cuando no hay ítems */}
+            {orderView === "comanda" && getOrderItems().length === 0 && (
+              <Button
+                variant="outline"
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={() => setOrderView("menu")}
+                data-testid="button-comanda-add-more-empty"
               >
                 <Plus className="h-4 w-4 mr-1" />
                 Agregar más
@@ -3472,8 +3509,8 @@ export default function RestaurantPage() {
                 Listo / Cerrar
               </Button>
             )}
-            {/* Cerrar Mesa — siempre visible salvo cuando hay item pendiente o vista delete */}
-            {orderView !== "delete" && !pendingItem && (
+            {/* Cerrar Mesa — visible cuando hay ítems o cuando el total no es cero */}
+            {orderView !== "delete" && !pendingItem && (getOrderItems().length > 0 || parseFloat(getUpdatedOrder()?.total || "0") > 0) && (
               <Button
                 variant="destructive"
                 size="lg"
@@ -3591,8 +3628,17 @@ export default function RestaurantPage() {
               </div>
             )}
             <h3 className="font-semibold">Resumen de Consumos</h3>
+            {getOrderItems().length === 0 && (
+              <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
+                <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                <div className="text-sm text-blue-800 dark:text-blue-200">
+                  <p className="font-semibold">Esta comanda está vacía</p>
+                  <p className="text-xs mt-0.5">Los ítems fueron cobrados o transferidos. Confirmá el cierre con el botón de abajo para liberar la mesa.</p>
+                </div>
+              </div>
+            )}
             {getOrderItems().length === 0 ? (
-              <p className="text-muted-foreground text-center py-4">No hay items en este pedido</p>
+              <p className="text-muted-foreground text-center py-2">No hay items en este pedido</p>
             ) : (
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {getOrderItems().map((item) => (
@@ -4647,51 +4693,56 @@ export default function RestaurantPage() {
             </Button>
             {!isSplitMode && (() => {
               const updatedOrder = orders?.find((o: RestaurantOrder) => o.id === currentOrder?.id);
-              const hasSplits = ((updatedOrder as any)?.splits || []).length > 0;
-              return !hasSplits ? (
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    if (currentOrder) {
-                      const disc = parseFloat(closeDiscount || "0");
-                      const isFactura = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
-                      const vatCond = closeReceiptType === "factura_a"
-                        ? "responsable_inscripto"
-                        : fbIsExento ? "exento" : "consumidor_final";
-                      closeOrderMutation.mutate({
-                        orderId: currentOrder.id,
-                        receiptType: closeReceiptType,
-                        paymentMethod: closePaymentMethod,
-                        discount: disc > 0 ? disc : undefined,
-                        discountType: disc > 0 ? closeDiscountType : undefined,
-                        roomReservationId: closePaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
-                        billingName: closeBillingName || undefined,
-                        billingCuit: closeBillingCuit || undefined,
-                        ccEntityType: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityType : undefined,
-                        ccEntityId: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityId : undefined,
-                        emitInvoice: isFactura,
-                        vatCondition: isFactura ? vatCond : undefined,
-                        customerRazonSocial: isFactura ? (closeBillingName || undefined) : undefined,
-                        customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
-                      });
-                    }
-                  }}
-                  disabled={closeOrderMutation.isPending}
-                  className="w-full sm:w-auto"
-                  data-testid="button-confirm-close"
-                >
-                  {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Confirmar Cierre
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  onClick={() => setIsSplitMode(true)}
-                  className="w-full sm:w-auto"
-                  data-testid="button-view-splits"
-                >
-                  Ver División ({((updatedOrder as any)?.splits || []).filter((s: OrderSplit) => s.isPaid === "true").length}/{((updatedOrder as any)?.splits || []).length} pagadas)
-                </Button>
+              const splits = (updatedOrder as any)?.splits || [];
+              const hasSplits = splits.length > 0;
+              const handleConfirmClose = () => {
+                if (currentOrder) {
+                  const disc = parseFloat(closeDiscount || "0");
+                  const isFactura = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
+                  const vatCond = closeReceiptType === "factura_a"
+                    ? "responsable_inscripto"
+                    : fbIsExento ? "exento" : "consumidor_final";
+                  closeOrderMutation.mutate({
+                    orderId: currentOrder.id,
+                    receiptType: closeReceiptType,
+                    paymentMethod: closePaymentMethod,
+                    discount: disc > 0 ? disc : undefined,
+                    discountType: disc > 0 ? closeDiscountType : undefined,
+                    roomReservationId: closePaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
+                    billingName: closeBillingName || undefined,
+                    billingCuit: closeBillingCuit || undefined,
+                    ccEntityType: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityType : undefined,
+                    ccEntityId: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityId : undefined,
+                    emitInvoice: isFactura,
+                    vatCondition: isFactura ? vatCond : undefined,
+                    customerRazonSocial: isFactura ? (closeBillingName || undefined) : undefined,
+                    customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
+                  });
+                }
+              };
+              return (
+                <>
+                  {hasSplits && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsSplitMode(true)}
+                      className="w-full sm:w-auto"
+                      data-testid="button-view-splits"
+                    >
+                      Ver División ({splits.filter((s: OrderSplit) => s.isPaid === "true").length}/{splits.length} pagadas)
+                    </Button>
+                  )}
+                  <Button
+                    variant="destructive"
+                    onClick={handleConfirmClose}
+                    disabled={closeOrderMutation.isPending}
+                    className="w-full sm:w-auto"
+                    data-testid="button-confirm-close"
+                  >
+                    {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Confirmar Cierre
+                  </Button>
+                </>
               );
             })()}
           </DialogFooter>
