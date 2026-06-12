@@ -1198,6 +1198,17 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  app.post("/api/restaurant/table-reservations/:id/apply-advances", requireAuth, async (req, res) => {
+    try {
+      const { orderId } = req.body;
+      if (!orderId) return res.status(400).json({ error: "orderId requerido" });
+      await (storage as any).applyReservationAdvancesToOrder(req.params.id, orderId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error applying advances" });
+    }
+  });
+
   // Advances for a table (used by close dialog to auto-apply credit)
   app.get("/api/restaurant/tables/:tableId/advances", requireAuth, async (req, res) => {
     try {

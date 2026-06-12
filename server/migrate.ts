@@ -362,5 +362,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // table_reservations: add area_id for per-salon filtering
+  await withTimeout("table_reservations.area_id", T, () =>
+    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS area_id varchar`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

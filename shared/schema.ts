@@ -890,6 +890,7 @@ export type TableReservationStatus = "pending" | "confirmed" | "check_in" | "sea
 export const tableReservations = pgTable("table_reservations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tableId: varchar("table_id"),
+  areaId: varchar("area_id"),
   guestName: text("guest_name").notNull(),
   guestPhone: text("guest_phone"),
   guestEmail: text("guest_email"),

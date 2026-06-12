@@ -2061,6 +2061,17 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async applyReservationAdvancesToOrder(reservationId: string, orderId: string): Promise<void> {
+    await db.update(restaurantReservationAdvances)
+      .set({ appliedToOrderId: orderId })
+      .where(
+        and(
+          eq(restaurantReservationAdvances.reservationId, reservationId),
+          isNull(restaurantReservationAdvances.appliedToOrderId)
+        )
+      );
+  }
+
   async getRestaurantTimeSlots(): Promise<RestaurantTimeSlot[]> {
     return db.select().from(restaurantTimeSlots);
   }

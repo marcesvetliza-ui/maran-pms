@@ -224,6 +224,7 @@ const reservationStatusLabels: Record<string, string> = {
 
 const reservationFormSchema = z.object({
   tableId: z.string().optional().nullable(),
+  areaId: z.string().optional().nullable(),
   guestName: z.string().min(1, "El nombre es requerido"),
   guestPhone: z.string().min(1, "El teléfono es requerido"),
   guestEmail: z.string().email("Email invalido").optional().or(z.literal("")),
@@ -502,6 +503,8 @@ export default function RestaurantPage() {
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<MenuCategory | null>(null);
   const [reservationSearch, setReservationSearch] = useState("");
+  const [reservationAreaFilter, setReservationAreaFilter] = useState<string>("all");
+  const pendingCheckInReservationRef = useRef<TableReservation | null>(null);
   const [closeReceiptType, setCloseReceiptType] = useState("cierre_mesa");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
   const [closeDiscount, setCloseDiscount] = useState("");
@@ -643,6 +646,7 @@ export default function RestaurantPage() {
     resolver: zodResolver(reservationFormSchema),
     defaultValues: {
       tableId: null,
+      areaId: null,
       guestName: "",
       guestPhone: "",
       guestEmail: "",
@@ -798,6 +802,16 @@ export default function RestaurantPage() {
     },
   });
 
+  const applyAdvancesMutation = useMutation({
+    mutationFn: async ({ reservationId, orderId }: { reservationId: string; orderId: string }) => {
+      const res = await apiRequest("POST", `/api/restaurant/table-reservations/${reservationId}/apply-advances`, { orderId });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
+    },
+  });
+
   const createOrderMutation = useMutation({
     mutationFn: async (data: { tableId?: string; areaId?: string; covers: number; waiterName: string; orderLabel?: string }) => {
       const res = await apiRequest("POST", "/api/restaurant/orders", data);
@@ -806,6 +820,21 @@ export default function RestaurantPage() {
     onSuccess: (order: RestaurantOrder) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+      const pendingReservation = pendingCheckInReservationRef.current;
+      if (pendingReservation) {
+        pendingCheckInReservationRef.current = null;
+        const advAmt = parseFloat(pendingReservation.advanceAmount || "0");
+        if (advAmt > 0) {
+          applyAdvancesMutation.mutate({ reservationId: pendingReservation.id, orderId: order.id });
+        }
+        toast({
+          title: `Check-in — ${pendingReservation.guestName}`,
+          description: advAmt > 0
+            ? `Comanda abierta. Seña aplicada: $${advAmt.toLocaleString("es-AR")}`
+            : `Comanda abierta correctamente.`,
+        });
+        return;
+      }
       setCurrentOrder(order);
       setIsNewOrderDialogOpen(false);
       setIsDirectOrderDialogOpen(false);
@@ -1331,35 +1360,35 @@ export default function RestaurantPage() {
       if (table) {
         const advAmt = parseFloat(reservation.advanceAmount || "0");
         if (table.status === "available") {
+          pendingCheckInReservationRef.current = reservation;
           createOrderMutation.mutate({
             tableId: reservation.tableId,
             covers: reservation.partySize,
             waiterName: "",
           });
-          setActiveTab("floor");
-          toast({
-            title: `Check-in — ${reservation.guestName}`,
-            description: advAmt > 0
-              ? `Mesa ${table.tableNumber} abierta. Seña registrada: $${advAmt.toLocaleString("es-AR")}`
-              : `Mesa ${table.tableNumber} abierta.`,
-          });
         } else if (table.status === "occupied") {
           const tableOrder = orders.find(o => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
+          if (advAmt > 0 && tableOrder) {
+            applyAdvancesMutation.mutate({ reservationId: reservation.id, orderId: tableOrder.id });
+          }
           if (tableOrder) {
             setCurrentOrder(tableOrder);
             setOrderView(((tableOrder as any).items || []).length > 0 ? "comanda" : "menu");
             setSelectedCategory(null);
             setIsOrderDialogOpen(true);
-            setActiveTab("floor");
           }
-          if (advAmt > 0) {
-            toast({
-              title: `Check-in — ${reservation.guestName}`,
-              description: `Seña registrada: $${advAmt.toLocaleString("es-AR")}`,
-            });
-          }
+          toast({
+            title: `Check-in — ${reservation.guestName}`,
+            description: advAmt > 0
+              ? `Seña aplicada a la comanda: $${advAmt.toLocaleString("es-AR")}`
+              : `Check-in registrado.`,
+          });
+        } else {
+          toast({ title: `Check-in — ${reservation.guestName}`, description: `Mesa ${table.tableNumber} marcada.` });
         }
       }
+    } else {
+      toast({ title: `Check-in — ${reservation.guestName}`, description: "Reserva sin mesa asignada. Asignar mesa para abrir comanda." });
     }
   };
 
@@ -1438,6 +1467,12 @@ export default function RestaurantPage() {
         if (r.reservationDate >= todayForFilter) return false;
       }
       if (reservationStatusFilter !== "all" && r.status !== reservationStatusFilter) return false;
+      if (reservationAreaFilter !== "all") {
+        const resAreaId = (r as any).areaId;
+        const tableAreaId = tables.find(t => t.id === r.tableId)?.areaId;
+        const effectiveArea = resAreaId || tableAreaId;
+        if (effectiveArea !== reservationAreaFilter) return false;
+      }
       const search = (reservationSearch || reservationSearchText).toLowerCase();
       if (search) {
         return r.guestName.toLowerCase().includes(search) ||
@@ -2297,7 +2332,7 @@ export default function RestaurantPage() {
               </Button>
               <Button onClick={() => {
                 reservationForm.reset({
-                  tableId: null, guestName: "", guestPhone: "", guestEmail: "", partySize: 2,
+                  tableId: null, areaId: null, guestName: "", guestPhone: "", guestEmail: "", partySize: 2,
                   reservationDate: reservationDateFilter,
                   reservationTime: timeSlots.find(s => s.isActive === "true")?.time || "20:00",
                   notes: "", clientId: null, cardLast4: null, cardHolder: null,
@@ -2341,6 +2376,19 @@ export default function RestaurantPage() {
                 <SelectItem value="historical">Histórica</SelectItem>
               </SelectContent>
             </Select>
+            {areas.filter(a => a.isActive === "true").length > 1 && (
+              <Select value={reservationAreaFilter} onValueChange={setReservationAreaFilter}>
+                <SelectTrigger className="w-36" data-testid="select-area-filter">
+                  <SelectValue placeholder="Salón" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los salones</SelectItem>
+                  {areas.filter(a => a.isActive === "true").map(a => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -2393,6 +2441,7 @@ export default function RestaurantPage() {
                       <TableHead className="w-28">Teléfono</TableHead>
                       <TableHead className="w-12 text-center">Pax</TableHead>
                       <TableHead className="w-20">Mesa</TableHead>
+                      {areas.length > 1 && <TableHead className="w-24">Salón</TableHead>}
                       {reservationViewMode === "all" && <TableHead className="w-24">Fecha</TableHead>}
                       <TableHead className="w-24">Estado</TableHead>
                       <TableHead className="w-24">Seña</TableHead>
@@ -2434,6 +2483,14 @@ export default function RestaurantPage() {
                               </Button>
                             )}
                           </TableCell>
+                          {areas.length > 1 && (() => {
+                            const resAreaId = (reservation as any).areaId;
+                            const areaId = resAreaId || tbl?.areaId;
+                            const area = areas.find(a => a.id === areaId);
+                            return (
+                              <TableCell className="text-xs text-muted-foreground">{area?.name || "—"}</TableCell>
+                            );
+                          })()}
                           {reservationViewMode === "all" && (
                             <TableCell className="text-xs text-muted-foreground">
                               {(() => { const [y,m,d] = reservation.reservationDate.split("-").map(Number); return format(new Date(y,m-1,d), "dd/MM/yy", { locale: es }); })()}
@@ -4905,6 +4962,22 @@ export default function RestaurantPage() {
                   </FormItem>
                 )} />
               </div>
+              {areas.filter(a => a.isActive === "true").length > 1 && (
+                <FormField control={reservationForm.control} name="areaId" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Salón <span className="text-muted-foreground text-xs">(opcional)</span></FormLabel>
+                    <Select onValueChange={(v) => field.onChange(v === "__none__" ? null : v)} value={field.value || "__none__"}>
+                      <FormControl><SelectTrigger data-testid="select-reservation-area"><SelectValue /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Sin especificar</SelectItem>
+                        {areas.filter(a => a.isActive === "true").map(a => (
+                          <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                )} />
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={reservationForm.control} name="reservationDate" render={({ field }) => (
                   <FormItem>
@@ -4915,9 +4988,11 @@ export default function RestaurantPage() {
                 )} />
                 <FormField control={reservationForm.control} name="reservationTime" render={({ field }) => {
                   const selectedTblId = reservationForm.watch("tableId");
+                  const selectedAreaId = reservationForm.watch("areaId");
                   const selectedTblAreaId = tables.find(t => t.id === selectedTblId)?.areaId;
+                  const effectiveAreaId = selectedAreaId || selectedTblAreaId;
                   const visibleSlots = timeSlots.filter(s =>
-                    s.isActive === "true" && (!s.areaId || !selectedTblAreaId || s.areaId === selectedTblAreaId)
+                    s.isActive === "true" && (!s.areaId || !effectiveAreaId || s.areaId === effectiveAreaId)
                   );
                   return (
                     <FormItem>
@@ -5064,6 +5139,23 @@ export default function RestaurantPage() {
                   <Input type="number" min={1} value={editingReservation.partySize} onChange={(e) => setEditingReservation({...editingReservation, partySize: parseInt(e.target.value) || 1})} data-testid="input-edit-party-size" />
                 </div>
               </div>
+              {areas.filter(a => a.isActive === "true").length > 1 && (
+                <div className="grid gap-2">
+                  <Label>Salón <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                  <Select
+                    value={(editingReservation as any).areaId || "__none__"}
+                    onValueChange={(v) => setEditingReservation({...editingReservation, areaId: v === "__none__" ? null : v} as any)}
+                  >
+                    <SelectTrigger data-testid="select-edit-area"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Sin especificar</SelectItem>
+                      {areas.filter(a => a.isActive === "true").map(a => (
+                        <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="grid gap-2">
                 <Label>Notas</Label>
                 <Textarea rows={2} value={editingReservation.notes || ""} onChange={(e) => setEditingReservation({...editingReservation, notes: e.target.value})} data-testid="input-edit-notes" />
@@ -5090,6 +5182,7 @@ export default function RestaurantPage() {
                     reservationDate: editingReservation.reservationDate,
                     reservationTime: editingReservation.reservationTime,
                     tableId: editingReservation.tableId,
+                    areaId: (editingReservation as any).areaId || null,
                     partySize: editingReservation.partySize,
                     notes: editingReservation.notes,
                   }});
