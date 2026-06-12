@@ -93,6 +93,16 @@ export default function WebCheckinPublicPage() {
     enabled: !!token,
   });
 
+  const normalizeDocType = (raw: string | null | undefined): string => {
+    if (!raw) return "DNI";
+    const v = raw.trim().toUpperCase();
+    if (v === "DNI") return "DNI";
+    if (v === "PASSPORT" || v === "PASAPORTE") return "Passport";
+    if (v === "CUIT" || v === "CUIL" || v === "CUIT/CUIL") return "CUIT/CUIL";
+    if (v === "CI" || v === "CEDULA" || v === "CÉDULA") return "CI";
+    return "DNI";
+  };
+
   useEffect(() => {
     if (data) {
       const wc = data.webCheckin;
@@ -100,7 +110,7 @@ export default function WebCheckinPublicPage() {
       // Priority: confirmed data from previous submission > guest profile from DB
       setFirstName(wc?.confirmedFirstName || g?.firstName || "");
       setLastName(wc?.confirmedLastName || g?.lastName || "");
-      setDocumentType(wc?.confirmedDocumentType || g?.documentType || "DNI");
+      setDocumentType(normalizeDocType(wc?.confirmedDocumentType || g?.documentType));
       setDocumentNumber(wc?.confirmedDocumentNumber || g?.documentNumber || "");
       setNationality(wc?.confirmedNationality || g?.nationality || "Argentina");
       setPhone(wc?.confirmedPhone || g?.phone || "");
