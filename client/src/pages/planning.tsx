@@ -1003,7 +1003,7 @@ export default function PlanningPage() {
                               key={day}
                               roomId={reubRoom.id}
                               day={day}
-                              className={`p-0.5 border-b border-amber-200/60 dark:border-amber-800/40 ${info.isToday ? "bg-amber-100/60 dark:bg-amber-900/20" : "bg-amber-50/40 dark:bg-amber-950/20"}`}
+                              className={`p-0.5 border-b border-r border-amber-200/60 dark:border-amber-800/40 ${info.isToday ? "bg-amber-100/60 dark:bg-amber-900/20" : "bg-amber-50/40 dark:bg-amber-950/20"}`}
                             >
                               {reservation ? (
                                 <DraggableReservationCell
@@ -1027,7 +1027,7 @@ export default function PlanningPage() {
                                 </DraggableReservationCell>
                               ) : (
                                 <div
-                                  className="h-8 rounded"
+                                  className="h-8 rounded border border-dashed border-amber-300/50 dark:border-amber-700/40"
                                   data-testid={`cell-reub-empty-${day}`}
                                 />
                               )}
