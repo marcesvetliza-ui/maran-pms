@@ -124,7 +124,7 @@ export default function WebCheckinPublicPage() {
           documentPhotoUrl: documentPhoto,
           estimatedArrivalTime: arrivalTime,
           requestEarlyCheckIn,
-          earlyCheckInTime: requestEarlyCheckIn ? earlyCheckInTime : null,
+          earlyCheckInTime: requestEarlyCheckIn ? arrivalTime : null,
           termsAccepted,
         }),
       });
@@ -375,17 +375,7 @@ export default function WebCheckinPublicPage() {
                 </Label>
               </div>
               {requestEarlyCheckIn && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="earlyTime">¿A qué hora llegarías?</Label>
-                  <Input
-                    id="earlyTime"
-                    type="time"
-                    value={earlyCheckInTime}
-                    onChange={(e) => setEarlyCheckInTime(e.target.value)}
-                    data-testid="input-wc-early-time"
-                  />
-                  <p className="text-xs text-muted-foreground">El early check-in está sujeto a disponibilidad y puede tener cargo adicional.</p>
-                </div>
+                <p className="text-xs text-muted-foreground px-1">El early check-in está sujeto a disponibilidad y puede tener cargo adicional.</p>
               )}
               <div className="border-t pt-4 mt-4">
                 <div className="flex items-start space-x-2">
