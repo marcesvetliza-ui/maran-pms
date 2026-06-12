@@ -999,7 +999,8 @@ export function registerGroupsRoutes(app: Express) {
       try {
         const blocks = await db.select().from(groupRoomBlocks)
           .where(eq(groupRoomBlocks.groupId, groupId));
-        const matchingBlock = blocks.find(b => b.roomTypeId === (reservation as any).roomTypeId);
+        const resRoomTypeId = (reservation as any).room?.roomTypeId ?? (reservation as any).roomTypeId;
+        const matchingBlock = blocks.find(b => b.roomTypeId === resRoomTypeId);
         if (matchingBlock) {
           if (matchingBlock.quantity <= 1) {
             await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, matchingBlock.id));
