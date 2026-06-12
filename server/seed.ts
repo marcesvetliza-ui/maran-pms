@@ -791,12 +791,19 @@ export async function refreshRealData() {
     }
 
     const realRoomIds = realRooms.map(r => r.id);
-    const extraRooms = existingRoomIds.filter(id => !realRoomIds.includes(id));
-    for (const extraId of extraRooms) {
+    const extraRooms = existingRoomsFull.filter(r => !realRoomIds.includes(r.id) && !(r as any).isVirtual);
+    for (const extra of extraRooms) {
       try {
-        await db.delete(rooms).where(eq(rooms.id, extraId));
+        await db.delete(rooms).where(eq(rooms.id, extra.id));
       } catch (e) {}
     }
+
+    // Ensure the REUB virtual room exists (comodín — never deleted by seed)
+    await db.execute(sql`
+      INSERT INTO rooms (id, room_number, room_type_id, floor, status, is_virtual)
+      SELECT gen_random_uuid(), 'REUB', 'rt1', 0, 'available', true
+      WHERE NOT EXISTS (SELECT 1 FROM rooms WHERE room_number = 'REUB')
+    `);
 
     const realAreas = [
       { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor" as const, capacity: 72, hasTables: "true" as const, isActive: "true" as const },
