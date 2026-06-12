@@ -946,7 +946,7 @@ export function registerReservationsRoutes(app: Express) {
           `Anulación reserva ${reservation.reservationCode} — ${guestName} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
           "cash",
           reservation.totalRoomAmount || "0",
-          "anulacion_reserva",
+          "informational",
           (req as any).user?.username || "sistema"
         );
       } catch (e) {

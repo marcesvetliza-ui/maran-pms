@@ -186,10 +186,11 @@ function buildSummaryFromMovements(movements: CashMovement[]) {
     if (!summary[m.paymentMethod]) {
       summary[m.paymentMethod] = { count: 0, total: 0, items: [] };
     }
+    summary[m.paymentMethod].items.push(m);
+    if (m.movementType === "informational") continue; // solo registro, no impacta saldo
     summary[m.paymentMethod].count += 1;
     const amt = parseFloat(String(m.amount)) || 0;
     summary[m.paymentMethod].total += m.movementType === "income" ? amt : -amt;
-    summary[m.paymentMethod].items.push(m);
   }
   return summary;
 }
@@ -241,7 +242,7 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
                         <span className="flex-1 truncate font-medium">
                           {(m as any).sourceLabel || (m as any).description || "—"}
                         </span>
-                        <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : ""}`}>
+                        <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : m.movementType === "informational" ? "text-muted-foreground line-through" : ""}`}>
                           {m.movementType === "expense" ? "- " : ""}{formatCurrency(Math.abs(parseFloat(String(m.amount))))}
                         </span>
                       </div>
@@ -285,20 +286,24 @@ function printClosingSummary(
 
   const methodBoxes = Object.entries(byMethod).map(([method, movs]) => {
     const label = PAYMENT_METHOD_MAP[method] || method;
-    const total = movs.reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+    const total = movs.filter(m => m.movementType !== "informational").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
     const isEfectivo = method === "cash";
     const borderColor = isEfectivo ? "#2b6cb0" : "#553c9a";
     const headerBg = isEfectivo ? "#ebf8ff" : "#faf5ff";
     const rows = movs.map(m => {
       const amt = parseFloat(String(m.amount));
+      const esInformational = m.movementType === "informational";
       const esIngreso = m.movementType === "income";
-      return `<tr>
+      return `<tr style="${esInformational ? "opacity:0.65;font-style:italic;" : ""}">
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${formatTime(m.createdAt)}</td>
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${m.description || (m as any).sourceLabel || "-"}</td>
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:center">
-          <span style="background:${esIngreso ? "#c6f6d5" : "#fed7d7"};color:${esIngreso ? "#276749" : "#9b2c2c"};padding:1px 6px;border-radius:3px;font-size:10px">${esIngreso ? "Ingreso" : "Egreso"}</span>
+          ${esInformational
+            ? `<span style="background:#e2e8f0;color:#64748b;padding:1px 6px;border-radius:3px;font-size:10px">Solo registro</span>`
+            : `<span style="background:${esIngreso ? "#c6f6d5" : "#fed7d7"};color:${esIngreso ? "#276749" : "#9b2c2c"};padding:1px 6px;border-radius:3px;font-size:10px">${esIngreso ? "Ingreso" : "Egreso"}</span>`
+          }
         </td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;text-align:right;font-weight:${esIngreso ? "600" : "normal"};color:${esIngreso ? "#276749" : "#9b2c2c"}">${esIngreso ? "" : "-"}${formatCurrency(amt)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;text-align:right;font-weight:${esIngreso ? "600" : "normal"};color:${esInformational ? "#94a3b8" : esIngreso ? "#276749" : "#9b2c2c"}">${esIngreso ? "" : ""}${formatCurrency(amt)}</td>
       </tr>`;
     }).join("");
 
@@ -519,7 +524,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   })();
 
   const isEfectivo = (method: string) => method === "cash" || method === "efectivo";
-  const efectivoSistema = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod)).reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+  const efectivoSistema = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod) && m.movementType !== "informational").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
   const diferencia = efectivoContado - efectivoSistema;
 
   const openShiftMutation = useMutation({
@@ -622,7 +627,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       });
     },
     onSuccess: (result: any) => {
-      const sysEfect = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod)).reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+      const sysEfect = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod) && m.movementType !== "informational").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
       setClosingSummaryData({ shift: { ...currentShift!, closedBy, closedAt: new Date().toISOString() }, movements, turnoNuevo: result.turnoNuevo, efectivoContado, efectivoSistema: sysEfect });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
@@ -1716,7 +1721,9 @@ function HistorialTab() {
                         <TableCell>{m.description || m.sourceLabel || "-"}</TableCell>
                         <TableCell>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
                         <TableCell>
-                          {m.movementType === "income" ? (
+                          {m.movementType === "informational" ? (
+                            <Badge className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Solo registro</Badge>
+                          ) : m.movementType === "income" ? (
                             <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">Ingreso</Badge>
                           ) : (
                             <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Egreso</Badge>

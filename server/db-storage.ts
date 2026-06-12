@@ -4012,12 +4012,15 @@ export class DatabaseStorage implements IStorage {
       mercadopago: 0, current_account: 0, room_charge: 0,
     };
     let totalGeneral = 0;
+    let transactionCount = 0;
     for (const m of movements) {
+      if (m.movementType === "informational") continue; // solo registro, no impacta saldo
       const amt = parseFloat(m.amount);
       const sign = m.movementType === "expense" ? -1 : 1;
       const method = methodNorm[m.paymentMethod] ?? m.paymentMethod;
       if (totals[method] !== undefined) totals[method] += amt * sign;
       totalGeneral += amt * sign;
+      transactionCount++;
     }
 
     const diferencia = efectivoContado - totals.cash;
@@ -4034,7 +4037,7 @@ export class DatabaseStorage implements IStorage {
       totalCurrentAccount: totals.current_account.toFixed(2),
       totalRoomCharge: totals.room_charge.toFixed(2),
       totalGeneral: totalGeneral.toFixed(2),
-      transactionCount: movements.length,
+      transactionCount,
       closedBy,
       notes: notes || (diferencia !== 0 ? `Diferencia efectivo: $${diferencia.toFixed(2)}` : null),
     }).returning();
