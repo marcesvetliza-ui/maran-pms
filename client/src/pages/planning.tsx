@@ -992,8 +992,8 @@ export default function PlanningPage() {
                     )}
                   </thead>
                   <tbody>
-                    {/* ── FILA REUB — comodín siempre visible arriba ── */}
-                    {reubRoom && (
+                    {/* ── FILA REUB — visible según filtro ── */}
+                    {reubRoom && filters.showReub && (
                       <DroppableRoomRow key="reub" roomId={reubRoom.id} className="border-b-2 border-amber-300 dark:border-amber-700" data-testid="row-reub">
                         <td className="sticky left-0 z-10 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 border-r border-amber-300 dark:border-amber-700">
                           <div className="flex flex-col leading-tight">

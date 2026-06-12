@@ -14,6 +14,7 @@ import type { PlanningCellStatus } from "@shared/schema";
 export type PlanningFilter = {
   showEmpty: boolean;
   showOccupied: boolean;
+  showReub: boolean;
   roomTypeIds: string[];
   floorFilter: string;
   statusFilter: PlanningCellStatus | "";
@@ -25,6 +26,7 @@ export type PlanningFilter = {
 export const DEFAULT_PLANNING_FILTER: PlanningFilter = {
   showEmpty: true,
   showOccupied: true,
+  showReub: true,
   roomTypeIds: [],
   floorFilter: "",
   statusFilter: "",
@@ -40,6 +42,7 @@ export function countActiveFilters(filters: PlanningFilter): number {
     filters.statusFilter,
     !filters.showEmpty,
     !filters.showOccupied,
+    !filters.showReub,
     filters.guestSearch,
     filters.compareRoom1,
     filters.compareRoom2,
@@ -97,7 +100,7 @@ export function PlanningFiltersPanel({
       <div className="flex flex-col gap-2">
         <Label className="text-xs font-medium text-muted-foreground">Comparar habitaciones</Label>
         <p className="text-[10px] text-muted-foreground leading-tight -mt-1">
-          Muestra solo esas habitaciones + REUB en el planning
+          Muestra solo esas habitaciones. Tocá REUB para mostrarlo/ocultarlo.
         </p>
         <div className="flex gap-2 items-center">
           {/* Room 1 */}
@@ -136,14 +139,19 @@ export function PlanningFiltersPanel({
               </button>
             )}
           </div>
-          {/* REUB fixed cell */}
-          <div
-            className="flex-1 h-8 flex items-center justify-center rounded-md border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 text-xs font-bold select-none"
-            title="La fila REUB siempre está visible en el planning"
-            data-testid="filter-reub-badge"
+          {/* REUB toggle */}
+          <button
+            onClick={() => setFilters(f => ({ ...f, showReub: !f.showReub }))}
+            title={filters.showReub ? "Ocultar fila REUB" : "Mostrar fila REUB"}
+            data-testid="filter-toggle-reub"
+            className={`flex-1 h-8 flex items-center justify-center rounded-md border-2 text-xs font-bold transition-colors select-none cursor-pointer ${
+              filters.showReub
+                ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400"
+                : "border-muted bg-muted/30 text-muted-foreground line-through"
+            }`}
           >
             REUB
-          </div>
+          </button>
         </div>
       </div>
 
