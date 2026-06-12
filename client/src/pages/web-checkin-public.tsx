@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { format, parseISO } from "date-fns";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -206,7 +207,13 @@ export default function WebCheckinPublicPage() {
           <div className="flex items-center gap-4 text-sm text-muted-foreground bg-white dark:bg-gray-900 rounded-lg p-3 border">
             <div className="flex items-center gap-1.5">
               <CalendarDays className="h-4 w-4" />
-              <span>{reservation.checkInDate} → {reservation.checkOutDate}</span>
+              <span>
+                {(() => {
+                  try { return format(parseISO(reservation.checkInDate), "dd/MM/yyyy"); } catch { return reservation.checkInDate; }
+                })()} → {(() => {
+                  try { return format(parseISO(reservation.checkOutDate), "dd/MM/yyyy"); } catch { return reservation.checkOutDate; }
+                })()}
+              </span>
             </div>
             <span className="text-muted-foreground/50">|</span>
             <span>{reservation.roomType}</span>
