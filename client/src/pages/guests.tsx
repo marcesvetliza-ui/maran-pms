@@ -101,7 +101,13 @@ function GuestFormDialog({
     lastName: g?.lastName || "",
     email: g?.email || "",
     phone: g?.phone || "",
-    documentType: g?.documentType || "dni",
+    documentType: (() => {
+      const raw = g?.documentType?.trim().toLowerCase() || "";
+      if (raw === "dni") return "dni";
+      if (raw === "passport" || raw === "pasaporte") return "passport";
+      if (raw === "cedula" || raw === "cédula" || raw === "ci") return "cedula";
+      return "dni";
+    })(),
     documentNumber: g?.documentNumber || "",
     nationality: g?.nationality || "",
     direccion: g?.direccion || "",
