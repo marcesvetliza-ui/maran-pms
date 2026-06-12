@@ -4400,15 +4400,11 @@ export default function ReservationsPage() {
             </DialogDescription>
           </DialogHeader>
           {selectedReservation && (() => {
-            const checkInDate = duplicateCheckIn ? new Date(duplicateCheckIn) : null;
-            const checkOutDate = duplicateCheckOut ? new Date(duplicateCheckOut) : null;
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            const isCheckInPast = checkInDate && checkInDate < today;
-            const isCheckOutBeforeCheckIn = checkInDate && checkOutDate && checkOutDate <= checkInDate;
-            const nights = checkInDate && checkOutDate && !isCheckOutBeforeCheckIn
-              ? Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
+            const todayLocal = getLocalToday();
+            const isCheckInPast = duplicateCheckIn ? duplicateCheckIn < todayLocal : false;
+            const isCheckOutBeforeCheckIn = duplicateCheckIn && duplicateCheckOut ? duplicateCheckOut <= duplicateCheckIn : false;
+            const nights = duplicateCheckIn && duplicateCheckOut && !isCheckOutBeforeCheckIn
+              ? Math.ceil((new Date(duplicateCheckOut + "T12:00:00").getTime() - new Date(duplicateCheckIn + "T12:00:00").getTime()) / (1000 * 60 * 60 * 24))
               : 0;
             const hasValidDates = duplicateCheckIn && duplicateCheckOut && !isCheckInPast && !isCheckOutBeforeCheckIn && nights > 0;
 
