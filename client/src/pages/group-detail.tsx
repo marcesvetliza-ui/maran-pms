@@ -713,6 +713,10 @@ export default function GroupDetailPage() {
     queryKey: ["/api/groups", groupId],
   });
 
+  const { data: bedTypesList } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/bed-types"],
+  });
+
   const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
     queryKey: ["/api/groups", groupId, "folio"],
     queryFn: async () => {
@@ -1089,14 +1093,13 @@ export default function GroupDetailPage() {
       (a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || "")
     );
 
-    const statusLabel = (status: string) => {
-      switch (status) {
-        case "checked_in": return "En Casa";
-        case "confirmed": return "Confirmado";
-        case "checked_out": return "Salió";
-        case "cancelled": return "Cancelado";
-        default: return status;
-      }
+    const bedTypeMap: Record<string, string> = {};
+    (bedTypesList || []).forEach(bt => { bedTypeMap[bt.id] = bt.name; });
+
+    const getBedLabel = (res: any) => {
+      const btId = res.room?.bedTypeId;
+      if (btId && bedTypeMap[btId]) return bedTypeMap[btId];
+      return res.room?.roomType?.name || "-";
     };
 
     const rows = sortedReservations.map((res, idx) => {
@@ -1107,12 +1110,11 @@ export default function GroupDetailPage() {
       <tr>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};text-align:center;">${idx + 1}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-weight:bold;">${res.room?.roomNumber || "-"}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.room?.roomType?.name || "-"}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${getBedLabel(res)}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.guest?.lastName || ""} ${res.guest?.firstName || ""}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${fmtDate(res.checkInDate)}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${lateCheckout ? `${fmtDate(res.checkOutDate)} <span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : fmtDate(res.checkOutDate)}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${statusLabel(res.status)}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;max-width:120px;">${res.notes || ""}</td>
       </tr>`;
       const companionRows = companions.map((c: any) => `
@@ -1122,7 +1124,6 @@ export default function GroupDetailPage() {
         <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;color:#888;">Acompañante</td>
         <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.lastName || ""} ${c.firstName || ""}</td>
         <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.documentNumber ? `${c.documentType || "DOC"}: ${c.documentNumber}` : "-"}</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
         <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
         <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
         <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.notes || ""}</td>
@@ -1194,12 +1195,11 @@ export default function GroupDetailPage() {
       <tr>
         <th>#</th>
         <th>Hab.</th>
-        <th>Tipo</th>
+        <th>Camaje</th>
         <th>Hu&eacute;sped</th>
         <th>Documento</th>
         <th>Check-in</th>
         <th>Check-out</th>
-        <th>Estado</th>
         <th>Notas</th>
       </tr>
     </thead>
