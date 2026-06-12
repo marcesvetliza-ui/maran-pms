@@ -361,10 +361,10 @@ function AssignBlockDialog({
   let offset = 0;
   for (let i = 0; i < blockIndex; i++) offset += sameTypeBlocks[i].quantity;
 
-  const allActiveOfType = group.reservations.filter(r =>
-    r.room?.roomTypeId === block.roomTypeId &&
-    !["cancelled", "checked_out"].includes(r.status)
-  );
+  const allActiveOfType = group.reservations.filter(r => {
+    const rTypeId = r.room?.roomTypeId ?? (r as any).roomTypeId;
+    return rTypeId === block.roomTypeId && !["cancelled", "checked_out"].includes(r.status);
+  });
   const thisBlockReservations = allActiveOfType.slice(offset, offset + block.quantity);
   const placeholderReservations = thisBlockReservations.filter(r => r.guest?.codigo === placeholderCode);
   const realAssignedCount = thisBlockReservations.filter(r => r.guest?.codigo !== placeholderCode).length;
