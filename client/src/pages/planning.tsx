@@ -632,7 +632,14 @@ export default function PlanningPage() {
     const hasReservation = roomOcc.some(s => s !== "available" && s !== "dirty" && s !== "cleaning" && s !== "inspected");
     if (!filters.showEmpty && !hasReservation) return false;
     if (!filters.showOccupied && hasReservation) return false;
-    if (filters.statusFilter && !roomOcc.includes(filters.statusFilter as PlanningCellStatus)) return false;
+    if (filters.statusFilter) {
+      const cleanlinessStatuses = ["dirty", "cleaning", "inspected"];
+      if (cleanlinessStatuses.includes(filters.statusFilter)) {
+        if ((room as any).status !== filters.statusFilter) return false;
+      } else {
+        if (!roomOcc.includes(filters.statusFilter as PlanningCellStatus)) return false;
+      }
+    }
     // Filter by guest name — check all reservations assigned to this room in the visible period
     if (filters.guestSearch) {
       const cellRes = data?.cellReservations[room.id] ?? {};
