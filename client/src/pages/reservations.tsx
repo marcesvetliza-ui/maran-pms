@@ -1856,7 +1856,9 @@ function ReservationDetailDialog({
   const activeConsumptionCharges = consumptionCharges.filter((c) => (c as any).status !== "anulado");
   const totalConsumptions = activeConsumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
   const totalPayments = payments?.filter((p) => (p as any).status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
-  const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0");
+  const earlyCharge = parseFloat(reservation.earlyCheckInCharge || "0");
+  const lateCharge = parseFloat(reservation.lateCheckOutCharge || "0");
+  const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyCharge + lateCharge;
   const totalToPay = subtotalRoom + totalConsumptions;
   const balance = totalToPay - totalPayments;
 
@@ -2302,6 +2304,18 @@ function ReservationDetailDialog({
                   <span>Cantidad de noches</span>
                   <span>x {reservation.nights}</span>
                 </div>
+                {earlyCharge > 0 && (
+                  <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
+                    <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
+                    <span>${earlyCharge.toFixed(2)}</span>
+                  </div>
+                )}
+                {lateCharge > 0 && (
+                  <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
+                    <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
+                    <span>${lateCharge.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between font-semibold pt-2 border-t">
                   <span>Subtotal Alojamiento</span>
                   <span data-testid="text-subtotal-room">${subtotalRoom.toFixed(2)}</span>
@@ -2779,8 +2793,20 @@ function ReservationDetailDialog({
               <div className="p-4">
                 <div className="flex justify-between text-sm mb-1">
                   <span>Subtotal Alojamiento</span>
-                  <span>${subtotalRoom.toFixed(2)}</span>
+                  <span>${parseFloat(reservation.totalRoomAmount || "0").toFixed(2)}</span>
                 </div>
+                {earlyCharge > 0 && (
+                  <div className="flex justify-between text-sm mb-1 text-amber-600 dark:text-amber-400">
+                    <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
+                    <span>${earlyCharge.toFixed(2)}</span>
+                  </div>
+                )}
+                {lateCharge > 0 && (
+                  <div className="flex justify-between text-sm mb-1 text-amber-600 dark:text-amber-400">
+                    <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
+                    <span>${lateCharge.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm mb-1">
                   <span>+ Consumos</span>
                   <span>${totalConsumptions.toFixed(2)}</span>
