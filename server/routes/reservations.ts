@@ -937,22 +937,6 @@ export function registerReservationsRoutes(app: Express) {
         await storage.updateRoom(reservation.roomId, { status: "dirty" });
       }
 
-      try {
-        const guestName = `${reservation.guest?.firstName || ""} ${reservation.guest?.lastName || ""}`.trim();
-        await storage.registerCashMovement(
-          "reception",
-          "reservation_cancellation",
-          reservation.id,
-          `Anulación reserva ${reservation.reservationCode} — ${guestName} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
-          "cash",
-          reservation.totalRoomAmount || "0",
-          "informational",
-          (req as any).user?.username || "sistema"
-        );
-      } catch (e) {
-        console.error("[cancel] Error registrando en caja:", e);
-      }
-
       await audit(req, "cancel", "reservations",
         `Anulación: ${reservation.reservationCode} — Motivo: ${req.body.reason || "Sin motivo"}`,
         { entityType: "reservation", entityId: req.params.id }
