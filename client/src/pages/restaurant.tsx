@@ -20,6 +20,7 @@ import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -579,6 +580,31 @@ export default function RestaurantPage() {
   const [splitVatConditions, setSplitVatConditions] = useState<Record<string, string>>({});
   const [splitBillingSearches, setSplitBillingSearches] = useState<Record<string, string>>({});
   const [splitFbIsExento, setSplitFbIsExento] = useState<Record<string, boolean>>({});
+
+  // Split dialog mode: "equal_parts" | "move_items" | "pay_items"
+  const [splitDialogMode, setSplitDialogMode] = useState<"equal_parts" | "move_items" | "pay_items">("equal_parts");
+
+  // Mover ítems mode (in split dialog)
+  const [moveItemSelectedIds, setMoveItemSelectedIds] = useState<Set<string>>(new Set());
+  const [moveItemTargetOrderId, setMoveItemTargetOrderId] = useState("");
+
+  // Cobrar ítems mode (in split dialog)
+  const [payItemSelectedIds, setPayItemSelectedIds] = useState<Set<string>>(new Set());
+  const [payItemMethod, setPayItemMethod] = useState("efectivo");
+  const [payItemReceipt, setPayItemReceipt] = useState("cierre_mesa");
+  const [payItemRoomId, setPayItemRoomId] = useState("");
+  const [payItemRoomSearch, setPayItemRoomSearch] = useState("");
+  const [payItemCcEntityType, setPayItemCcEntityType] = useState<"company" | "agency">("company");
+  const [payItemCcEntityId, setPayItemCcEntityId] = useState("");
+  const [payItemBillingName, setPayItemBillingName] = useState("");
+  const [payItemBillingCuit, setPayItemBillingCuit] = useState("");
+  const [payItemBillingSearch, setPayItemBillingSearch] = useState("");
+  const [payItemBillingSearchOpen, setPayItemBillingSearchOpen] = useState(false);
+  const [payItemFbIsExento, setPayItemFbIsExento] = useState(false);
+  const [payItemDiscount, setPayItemDiscount] = useState("");
+  const [payItemDiscountType, setPayItemDiscountType] = useState<"percent" | "amount">("percent");
+  const [payItemCompanyId, setPayItemCompanyId] = useState("");
+
   const [isNewClientDialogOpen, setIsNewClientDialogOpen] = useState(false);
   const [newClientRazonSocial, setNewClientRazonSocial] = useState("");
   const [newClientCuit, setNewClientCuit] = useState("");
@@ -853,6 +879,42 @@ export default function RestaurantPage() {
     if (!editingAreaName.trim()) return;
     updateAreaNameMutation.mutate({ id, name: editingAreaName.trim() });
   };
+
+  const transferItemsInSplitMutation = useMutation({
+    mutationFn: async ({ orderId, itemIds, targetOrderId }: { orderId: string; itemIds: string[]; targetOrderId: string }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/transfer-items`, { itemIds, targetOrderId });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      setMoveItemSelectedIds(new Set());
+      setMoveItemTargetOrderId("");
+      setIsSplitMode(false);
+      setIsCloseDialogOpen(false);
+      toast({ title: "Ítems transferidos", description: "Los ítems se movieron a la otra comanda." });
+    },
+    onError: (err: any) => toast({ title: "Error al mover ítems", description: err.message, variant: "destructive" }),
+  });
+
+  const payItemsMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/pay-items`, data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      setPayItemSelectedIds(new Set());
+      setPayItemDiscount("");
+      setIsSplitMode(false);
+      if (data?.allPaid) {
+        setIsCloseDialogOpen(false);
+        toast({ title: "Cuenta cerrada", description: "Todos los ítems fueron cobrados." });
+      } else {
+        toast({ title: "Ítems cobrados", description: `$${parseFloat(data?.amount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })} procesado. Saldo pendiente: $${parseFloat(data?.remainingTotal || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}` });
+      }
+    },
+    onError: (err: any) => toast({ title: "Error al cobrar ítems", description: err.message, variant: "destructive" }),
+  });
 
   const createSplitMutation = useMutation({
     mutationFn: async (data: { orderId: string; parts: number }) => {
@@ -3510,7 +3572,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -3919,7 +3981,7 @@ export default function RestaurantPage() {
                     variant="outline"
                     size="sm"
                     className="w-full"
-                    onClick={() => setIsSplitMode(true)}
+                    onClick={() => { setIsSplitMode(true); setSplitDialogMode("equal_parts"); }}
                     data-testid="button-split-bill"
                   >
                     <Banknote className="h-4 w-4 mr-2" />
@@ -3933,7 +3995,39 @@ export default function RestaurantPage() {
                   <Banknote className="h-4 w-4" />
                   Dividir Cuenta
                 </h4>
-                {(() => {
+
+                {/* Mode selector */}
+                <div className="grid grid-cols-3 gap-1.5">
+                  <Button
+                    variant={splitDialogMode === "equal_parts" ? "default" : "outline"}
+                    size="sm"
+                    className="text-xs h-8 px-2"
+                    onClick={() => setSplitDialogMode("equal_parts")}
+                    data-testid="button-split-mode-equal"
+                  >
+                    <Banknote className="h-3 w-3 mr-1 shrink-0" />Partes iguales
+                  </Button>
+                  <Button
+                    variant={splitDialogMode === "move_items" ? "default" : "outline"}
+                    size="sm"
+                    className="text-xs h-8 px-2"
+                    onClick={() => { setSplitDialogMode("move_items"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); }}
+                    data-testid="button-split-mode-move"
+                  >
+                    <ArrowRightLeft className="h-3 w-3 mr-1 shrink-0" />Mover mesa
+                  </Button>
+                  <Button
+                    variant={splitDialogMode === "pay_items" ? "default" : "outline"}
+                    size="sm"
+                    className="text-xs h-8 px-2"
+                    onClick={() => { setSplitDialogMode("pay_items"); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); }}
+                    data-testid="button-split-mode-pay"
+                  >
+                    <CreditCard className="h-3 w-3 mr-1 shrink-0" />Cobrar ítems
+                  </Button>
+                </div>
+
+                {splitDialogMode === "equal_parts" && (() => {
                   const updatedOrder = orders?.find((o: RestaurantOrder) => o.id === currentOrder?.id);
                   const splits: OrderSplit[] = (updatedOrder as any)?.splits || [];
                   if (splits.length === 0) {
@@ -4202,6 +4296,327 @@ export default function RestaurantPage() {
                     </div>
                   );
                 })()}
+
+                {/* ── Modo: Mover ítems a otra mesa ─────────────────── */}
+                {splitDialogMode === "move_items" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">Seleccioná los ítems a mover a otra comanda:</p>
+                    <div className="border rounded-md divide-y max-h-44 overflow-y-auto">
+                      {getOrderItems().filter((i: any) => !i.paid).map((item: any) => (
+                        <label key={item.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/30">
+                          <Checkbox
+                            checked={moveItemSelectedIds.has(item.id)}
+                            onCheckedChange={() => {
+                              const next = new Set(moveItemSelectedIds);
+                              if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                              setMoveItemSelectedIds(next);
+                            }}
+                          />
+                          <span className="flex-1 text-sm">{item.menuItem?.name || "Ítem"} <span className="text-muted-foreground text-xs">x{item.quantity}</span></span>
+                          <span className="text-sm font-medium">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">Comanda destino</Label>
+                      <Select value={moveItemTargetOrderId} onValueChange={setMoveItemTargetOrderId}>
+                        <SelectTrigger data-testid="select-move-target-order">
+                          <SelectValue placeholder="Seleccionar comanda..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {((orders || []) as RestaurantOrder[])
+                            .filter((o: RestaurantOrder) => o.id !== currentOrder?.id && o.status === "open")
+                            .map((o: RestaurantOrder) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {(o as any).orderLabel || o.orderNumber}
+                                {(o as any).table ? ` — Mesa ${(o as any).table.tableNumber}` : ""}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); }}>
+                        Cancelar
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        disabled={moveItemSelectedIds.size === 0 || !moveItemTargetOrderId || transferItemsInSplitMutation.isPending}
+                        onClick={() => {
+                          if (currentOrder && moveItemTargetOrderId) {
+                            transferItemsInSplitMutation.mutate({ orderId: currentOrder.id, itemIds: Array.from(moveItemSelectedIds), targetOrderId: moveItemTargetOrderId });
+                          }
+                        }}
+                        data-testid="button-confirm-move-items"
+                      >
+                        {transferItemsInSplitMutation.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                        Mover {moveItemSelectedIds.size > 0 ? `(${moveItemSelectedIds.size})` : ""}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Modo: Cobrar ítems seleccionados ─────────────────── */}
+                {splitDialogMode === "pay_items" && (() => {
+                  const allItems = getOrderItems().filter((i: any) => !i.paid);
+                  const selectedItems = allItems.filter((i: any) => payItemSelectedIds.has(i.id));
+                  const rawSub = selectedItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
+                  const disc = parseFloat(payItemDiscount || "0");
+                  const discAmt = payItemDiscountType === "percent" ? rawSub * disc / 100 : disc;
+                  const finalTotal = Math.max(0, rawSub - discAmt);
+                  const isFactura = ["factura_a", "factura_b", "factura_c"].includes(payItemReceipt);
+                  const isFactA = payItemReceipt === "factura_a";
+                  const showBillingForm = isFactA || (payItemReceipt === "factura_b" && payItemFbIsExento);
+                  const billingResults = payItemBillingSearch.length >= 2
+                    ? companies.filter((c: any) => {
+                        const q = payItemBillingSearch.toLowerCase();
+                        return (c.razonSocial || "").toLowerCase().includes(q)
+                          || (c.nombreFantasia || "").toLowerCase().includes(q)
+                          || (c.cuilCuit || "").replace(/-/g, "").includes(payItemBillingSearch.replace(/-/g, ""));
+                      }).slice(0, 8)
+                    : [];
+                  return (
+                    <div className="space-y-3">
+                      {/* Item selection */}
+                      <p className="text-sm text-muted-foreground">Seleccioná los ítems a cobrar:</p>
+                      <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
+                        {allItems.length === 0 && <p className="text-sm text-muted-foreground text-center py-3">No hay ítems pendientes</p>}
+                        {allItems.map((item: any) => (
+                          <label key={item.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/30">
+                            <Checkbox
+                              checked={payItemSelectedIds.has(item.id)}
+                              onCheckedChange={() => {
+                                const next = new Set(payItemSelectedIds);
+                                if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                                setPayItemSelectedIds(next);
+                              }}
+                            />
+                            <span className="flex-1 text-sm">{item.menuItem?.name || "Ítem"} <span className="text-muted-foreground text-xs">x{item.quantity}</span></span>
+                            <span className="text-sm font-medium">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </label>
+                        ))}
+                      </div>
+
+                      {/* Subtotal + discount */}
+                      {payItemSelectedIds.size > 0 && (
+                        <div className="p-2.5 bg-muted/40 rounded-md space-y-1.5 text-sm border">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground text-xs whitespace-nowrap">Descuento:</span>
+                            <Input type="number" min={0} placeholder="0" value={payItemDiscount} onChange={e => setPayItemDiscount(e.target.value)} className="h-7 w-20 text-xs" data-testid="input-payitem-discount" />
+                            <Select value={payItemDiscountType} onValueChange={v => setPayItemDiscountType(v as any)}>
+                              <SelectTrigger className="h-7 w-16 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="amount">$</SelectItem>
+                                <SelectItem value="percent">%</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {disc > 0 && (
+                            <div className="flex justify-between text-xs text-green-600">
+                              <span>Descuento:</span>
+                              <span>-${discAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between font-bold text-base border-t pt-1">
+                            <span>Total a cobrar:</span>
+                            <span>${finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Payment method + receipt */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Forma de cobro</Label>
+                          <Select value={payItemMethod} onValueChange={v => { setPayItemMethod(v); if (v !== "cuenta_habitacion") { setPayItemRoomId(""); setPayItemRoomSearch(""); } if (v !== "cuenta_corriente") { setPayItemCcEntityId(""); } }}>
+                            <SelectTrigger className="h-8 text-sm" data-testid="select-payitem-method"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(paymentMethodLabels).map(([v, l]) => <SelectItem key={v} value={v}>{l as string}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Comprobante</Label>
+                          {payItemMethod === "cuenta_habitacion" ? (
+                            <div className="h-8 flex items-center text-xs text-muted-foreground bg-muted/40 rounded-md px-2.5 gap-1.5 border">
+                              <BedDouble className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                              <span>Folio habitación</span>
+                            </div>
+                          ) : (
+                            <Select value={payItemReceipt} onValueChange={v => { setPayItemReceipt(v); if (v === "factura_b") { setPayItemBillingName("CONSUMIDOR FINAL"); setPayItemBillingCuit(""); setPayItemFbIsExento(false); } else if (v !== "factura_a") { setPayItemBillingName(""); setPayItemBillingCuit(""); } }}>
+                              <SelectTrigger className="h-8 text-sm" data-testid="select-payitem-receipt"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(receiptTypeLabels).map(([v, l]) => <SelectItem key={v} value={v}>{l as string}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Room selection */}
+                      {payItemMethod === "cuenta_habitacion" && (
+                        <div className="space-y-1.5 p-2.5 bg-blue-50/60 dark:bg-blue-950/20 rounded-md border border-blue-200 dark:border-blue-800">
+                          <Label className="text-xs text-muted-foreground">Habitación a cargar</Label>
+                          <Input placeholder="Buscar por número o nombre..." value={payItemRoomSearch} onChange={e => { setPayItemRoomSearch(e.target.value); setPayItemRoomId(""); }} className="h-7 text-sm" data-testid="input-payitem-room-search" />
+                          {payItemRoomSearch && (() => {
+                            const matches = inHouseRooms.filter((r: any) => r.reservationId && (r.roomNumber.includes(payItemRoomSearch) || r.guestName.toLowerCase().includes(payItemRoomSearch.toLowerCase())));
+                            return matches.length > 0 ? (
+                              <div className="border rounded bg-popover shadow-md max-h-32 overflow-y-auto">
+                                {matches.map((r: any) => (
+                                  <button key={r.roomId} type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors" onClick={() => { setPayItemRoomId(r.reservationId); setPayItemRoomSearch(""); }}>
+                                    <span className="font-medium">{r.roomNumber}</span> — {r.guestName}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : <p className="text-xs text-muted-foreground mt-1">Sin resultados</p>;
+                          })()}
+                          {payItemRoomId && (() => {
+                            const room = inHouseRooms.find((r: any) => r.reservationId === payItemRoomId);
+                            return room ? (
+                              <div className="flex items-center justify-between rounded border px-2.5 py-1.5 text-sm bg-accent/40">
+                                <span><span className="font-medium">{(room as any).roomNumber}</span> — {(room as any).guestName}</span>
+                                <button type="button" onClick={() => setPayItemRoomId("")} className="text-muted-foreground hover:text-foreground text-xs ml-2">✕</button>
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
+                      )}
+
+                      {/* CC entity */}
+                      {payItemMethod === "cuenta_corriente" && (
+                        <div className="p-2.5 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 space-y-2">
+                          <p className="text-xs font-medium text-blue-800 dark:text-blue-200">Cuenta Corriente — ¿A quién se carga?</p>
+                          <div className="flex gap-2">
+                            <Select value={payItemCcEntityType} onValueChange={v => { setPayItemCcEntityType(v as any); setPayItemCcEntityId(""); }}>
+                              <SelectTrigger className="w-28 h-8 text-sm" data-testid="select-payitem-cc-type"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="company">Empresa</SelectItem>
+                                <SelectItem value="agency">Agencia</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Select value={payItemCcEntityId} onValueChange={setPayItemCcEntityId}>
+                              <SelectTrigger className="flex-1 h-8 text-sm" data-testid="select-payitem-cc-entity"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                              <SelectContent>
+                                {payItemCcEntityType === "company"
+                                  ? companies.filter((c: any) => c.id).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
+                                  : agencies.filter((a: any) => a.id).map((a: any) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                                }
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {!payItemCcEntityId && <p className="text-xs text-amber-600 dark:text-amber-400">Si no seleccionás entidad, no se registra en ninguna Cuenta Corriente.</p>}
+                        </div>
+                      )}
+
+                      {/* Billing data for facturas */}
+                      {isFactura && payItemMethod !== "cuenta_habitacion" && (
+                        <div className="p-2.5 border rounded-md bg-muted/30 space-y-2">
+                          <p className="text-xs font-medium">Datos de facturación</p>
+                          {!isFactA && (
+                            <label className="flex items-center gap-2 text-xs cursor-pointer">
+                              <input type="checkbox" checked={payItemFbIsExento}
+                                onChange={e => { setPayItemFbIsExento(e.target.checked); if (!e.target.checked) { setPayItemBillingName("CONSUMIDOR FINAL"); setPayItemBillingCuit(""); } else { setPayItemBillingName(""); } }}
+                                className="h-3.5 w-3.5 cursor-pointer"
+                              />
+                              Exento / empresa identificada (no es Consumidor Final)
+                            </label>
+                          )}
+                          {!isFactA && !payItemFbIsExento && (
+                            <div className="text-xs text-muted-foreground bg-muted/40 rounded px-2.5 py-1.5 flex items-center gap-1.5">
+                              <CheckCircle className="h-3.5 w-3.5 text-green-500" />Consumidor Final
+                            </div>
+                          )}
+                          {showBillingForm && (
+                            <>
+                              {payItemBillingName && payItemBillingName !== "CONSUMIDOR FINAL" ? (
+                                <div className="flex items-center gap-2 p-1.5 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-md">
+                                  <Building2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium truncate">{payItemBillingName}</p>
+                                    {payItemBillingCuit && <p className="text-xs text-muted-foreground">CUIT: {payItemBillingCuit}</p>}
+                                  </div>
+                                  <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={() => { setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemCompanyId(""); setPayItemBillingSearch(""); }}>
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="relative">
+                                  <Input
+                                    className="h-7 text-xs"
+                                    placeholder="Buscar empresa o ingresar razón social..."
+                                    value={payItemBillingSearch}
+                                    onChange={e => { setPayItemBillingSearch(e.target.value); setPayItemBillingName(e.target.value); setPayItemCompanyId(""); }}
+                                    onFocus={() => setPayItemBillingSearchOpen(true)}
+                                    onBlur={() => setTimeout(() => setPayItemBillingSearchOpen(false), 150)}
+                                    data-testid="input-payitem-billing-search"
+                                    autoComplete="off"
+                                  />
+                                  {payItemBillingSearchOpen && billingResults.length > 0 && (
+                                    <div className="absolute z-50 w-full mt-1 border rounded-md bg-popover shadow-md max-h-36 overflow-y-auto">
+                                      {billingResults.map((c: any) => (
+                                        <button key={c.id} type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors"
+                                          onClick={() => { setPayItemBillingName(c.razonSocial); setPayItemBillingCuit(c.cuilCuit || ""); setPayItemCompanyId(c.id); setPayItemBillingSearch(""); }}>
+                                          <span className="font-medium">{c.razonSocial}</span>
+                                          {c.cuilCuit && <span className="text-muted-foreground ml-2">{c.cuilCuit}</span>}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <Label className="text-xs">Razón Social</Label>
+                                  <Input className="h-7 text-xs" value={payItemBillingName === "CONSUMIDOR FINAL" ? "" : (payItemBillingName || "")} onChange={e => setPayItemBillingName(e.target.value)} placeholder="Empresa S.A." />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">CUIT</Label>
+                                  <Input className="h-7 text-xs" value={payItemBillingCuit} onChange={e => setPayItemBillingCuit(formatCuit(e.target.value))} placeholder="30-12345678-9" />
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 pt-1">
+                        <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSplitDialogMode("equal_parts"); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); }}>
+                          Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1"
+                          disabled={payItemSelectedIds.size === 0 || payItemsMutation.isPending || (payItemMethod === "cuenta_habitacion" && !payItemRoomId)}
+                          onClick={() => {
+                            if (!currentOrder) return;
+                            const vatCond = payItemReceipt === "factura_a" ? "responsable_inscripto" : (payItemFbIsExento ? "exento" : "consumidor_final");
+                            payItemsMutation.mutate({
+                              orderId: currentOrder.id,
+                              itemIds: Array.from(payItemSelectedIds),
+                              method: payItemMethod,
+                              receiptType: payItemReceipt,
+                              roomReservationId: payItemMethod === "cuenta_habitacion" ? payItemRoomId : undefined,
+                              ccEntityType: payItemMethod === "cuenta_corriente" ? payItemCcEntityType : undefined,
+                              ccEntityId: payItemMethod === "cuenta_corriente" ? payItemCcEntityId : undefined,
+                              emitInvoice: isFactura,
+                              vatCondition: isFactura ? vatCond : undefined,
+                              customerRazonSocial: isFactura ? (payItemBillingName || undefined) : undefined,
+                              customerCuit: isFactura ? (payItemBillingCuit || undefined) : undefined,
+                              discount: payItemDiscount || undefined,
+                              discountType: payItemDiscountType,
+                            });
+                          }}
+                          data-testid="button-confirm-pay-items"
+                        >
+                          {payItemsMutation.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                          Cobrar {payItemSelectedIds.size > 0 ? `(${payItemSelectedIds.size})` : ""}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
               </div>
             )}
           </div>

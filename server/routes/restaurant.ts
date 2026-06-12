@@ -749,6 +749,157 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  // Pay selected items (partial payment)
+  app.post("/api/restaurant/orders/:id/pay-items", async (req, res) => {
+    try {
+      const {
+        itemIds, method, receiptType, roomReservationId,
+        emitInvoice, vatCondition, customerRazonSocial, customerCuit,
+        ccEntityType, ccEntityId, discount, discountType,
+      } = req.body;
+
+      if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
+        return res.status(400).json({ error: "Seleccioná al menos un ítem" });
+      }
+      if (!method) return res.status(400).json({ error: "Método de pago requerido" });
+
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Orden no encontrada" });
+      if (order.status === "closed") return res.status(400).json({ error: "La orden ya está cerrada" });
+
+      const allItems = await storage.getOrderItems(req.params.id);
+      const selectedItems = allItems.filter((i: any) => itemIds.includes(i.id) && !i.paid);
+      if (selectedItems.length === 0) {
+        return res.status(400).json({ error: "Los ítems seleccionados ya fueron cobrados o no existen" });
+      }
+
+      // Calculate amount with optional discount
+      let subtotal = selectedItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
+      if (discount) {
+        const discNum = parseFloat(discount) || 0;
+        const discAmount = discountType === "percent" ? subtotal * discNum / 100 : discNum;
+        subtotal = Math.max(0, subtotal - discAmount);
+      }
+      const amount = subtotal.toFixed(2);
+
+      // Mark selected items as paid
+      for (const item of selectedItems) {
+        await storage.updateOrderItem(item.id, { paid: true } as any);
+      }
+
+      // Register in caja (skip for room charges)
+      if (method !== "cuenta_habitacion") {
+        try {
+          await storage.registerCashMovement(
+            "restaurant", "restaurant_partial", req.params.id,
+            `Restaurante — Pedido ${order.orderNumber} (cobro parcial)`,
+            method, amount, "income",
+            (req as any).user?.username, receiptType || "cierre_mesa"
+          );
+        } catch (e) {
+          console.error("[pay-items] caja:", e);
+        }
+      }
+
+      // If CC: account movement
+      if (method === "cuenta_corriente" && ccEntityType && ccEntityId) {
+        try {
+          await storage.createAccountMovement({
+            entityType: ccEntityType,
+            entityId: ccEntityId,
+            date: new Date().toISOString().split("T")[0],
+            type: "cargo",
+            description: `Restaurante — Pedido ${order.orderNumber} (pago parcial)`,
+            amount,
+            reference: `Orden: ${order.orderNumber}`,
+            createdBy: (req as any).user?.id || null,
+          } as any);
+        } catch (e) {
+          console.error("[pay-items] CC movement:", e);
+        }
+      }
+
+      // If room charge
+      if (method === "cuenta_habitacion" && roomReservationId) {
+        try {
+          await storage.createCharge({
+            reservationId: roomReservationId,
+            description: `Restaurante — Pedido ${order.orderNumber} (${selectedItems.length} ítem${selectedItems.length !== 1 ? "s" : ""})`,
+            amount,
+            category: "restaurant",
+            date: new Date().toISOString().split("T")[0],
+          });
+        } catch (e) {
+          console.error("[pay-items] room charge:", e);
+        }
+      }
+
+      // Emit AFIP invoice if requested
+      let invoiceId: number | undefined;
+      if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
+        try {
+          const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
+          const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+          const invoice = await emitirFactura({
+            tipoComprobante: tipo as "FA" | "FB" | "FC",
+            cliente: {
+              razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
+              cuit: customerCuit || undefined,
+              condicionIva: condicion,
+            },
+            items: selectedItems.map((i: any) => ({
+              descripcion: i.menuItem?.name || `Ítem restaurante`,
+              cantidad: i.quantity || 1,
+              precioUnitario: parseFloat((parseFloat(i.subtotal) / 1.21 / (i.quantity || 1)).toFixed(4)),
+              alicuotaIva: "21" as const,
+              subtotalNeto: parseFloat((parseFloat(i.subtotal) / 1.21).toFixed(4)),
+              subtotal: parseFloat(i.subtotal),
+            })),
+            operador: (req as any).user?.fullName || (req as any).user?.username,
+          });
+          invoiceId = invoice.id;
+        } catch (e) {
+          console.error("[pay-items] AFIP invoice:", e);
+        }
+      }
+
+      // Recalculate order total from fresh data
+      const freshItems = await storage.getOrderItems(req.params.id);
+      const unpaidItems = freshItems.filter((i: any) => !i.paid);
+      const newTotal = unpaidItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
+      const newNeto = parseFloat((newTotal / 1.21).toFixed(2));
+      const newTax = parseFloat((newTotal - newNeto).toFixed(2));
+      const allPaid = unpaidItems.length === 0;
+
+      if (allPaid) {
+        await storage.updateRestaurantOrder(req.params.id, {
+          status: "closed",
+          closedAt: new Date(),
+          paymentMethod: method,
+          receiptType: receiptType || null,
+          chargedToRoom: method === "cuenta_habitacion" ? "true" : "false",
+          subtotal: "0",
+          tax: "0",
+          total: "0",
+        });
+        if (order.tableId) {
+          await storage.updateRestaurantTable(order.tableId, { status: "available" });
+        }
+      } else {
+        await storage.updateRestaurantOrder(req.params.id, {
+          subtotal: newNeto.toFixed(2),
+          tax: newTax.toFixed(2),
+          total: newTotal.toFixed(2),
+        });
+      }
+
+      res.json({ allPaid, invoiceId, amount, remainingTotal: newTotal.toFixed(2) });
+    } catch (error) {
+      console.error("[pay-items] Error:", error);
+      res.status(500).json({ error: "Error al procesar pago por ítems" });
+    }
+  });
+
   // Transfer items between orders
   app.post("/api/restaurant/orders/:id/transfer-items", async (req, res) => {
     try {

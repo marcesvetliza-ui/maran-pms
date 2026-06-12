@@ -1019,6 +1019,7 @@ export const orderItems = pgTable("order_items", {
   course: integer("course").default(1),
   notes: text("notes"),
   sentAt: timestamp("sent_at"),
+  paid: boolean("paid").notNull().default(false),
 });
 
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
