@@ -2146,8 +2146,8 @@ export default function EventsPage() {
                                     </SelectTrigger>
                                     <SelectContent>
                                       {paymentCcEntityType === "company"
-                                        ? companies.filter(c => c.id).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
-                                        : agencies.filter(a => a.id).map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                                        ? companies.filter((c: any) => c.id).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.razonSocial || c.nombreFantasia || c.name || c.id}</SelectItem>)
+                                        : agencies.filter((a: any) => a.id).map((a: any) => <SelectItem key={a.id} value={a.id}>{a.razonSocial || a.nombreFantasia || a.name || a.id}</SelectItem>)
                                       }
                                     </SelectContent>
                                   </Select>

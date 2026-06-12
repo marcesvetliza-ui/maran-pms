@@ -712,9 +712,14 @@ export default function CheckOutPage() {
                             <SelectValue placeholder="Seleccionar empresa..." />
                           </SelectTrigger>
                           <SelectContent>
-                            {companies.map(c => (
-                              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                            {companies.filter((c: any) => c.id).map((c: any) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.razonSocial || c.nombreFantasia || c.name || c.id}
+                              </SelectItem>
                             ))}
+                            {companies.length === 0 && (
+                              <div className="py-3 px-2 text-sm text-muted-foreground text-center">No hay empresas registradas</div>
+                            )}
                           </SelectContent>
                         </Select>
                         {!ccCompanyId && <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">Seleccioná la empresa para cargar a su cuenta corriente.</p>}
@@ -731,9 +736,14 @@ export default function CheckOutPage() {
                             <SelectValue placeholder="Seleccionar agencia..." />
                           </SelectTrigger>
                           <SelectContent>
-                            {agencies.map(a => (
-                              <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                            {agencies.filter((a: any) => a.id).map((a: any) => (
+                              <SelectItem key={a.id} value={a.id}>
+                                {a.razonSocial || a.nombreFantasia || a.name || a.id}
+                              </SelectItem>
                             ))}
+                            {agencies.length === 0 && (
+                              <div className="py-3 px-2 text-sm text-muted-foreground text-center">No hay agencias registradas</div>
+                            )}
                           </SelectContent>
                         </Select>
                         {!ccAgencyId && <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">Seleccioná la agencia para cargar a su cuenta corriente.</p>}

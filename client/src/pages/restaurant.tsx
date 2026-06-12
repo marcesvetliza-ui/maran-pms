@@ -3860,8 +3860,8 @@ export default function RestaurantPage() {
                         </SelectTrigger>
                         <SelectContent>
                           {closeCcEntityType === "company"
-                            ? companies.filter(c => c.id).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
-                            : agencies.filter(a => a.id).map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                            ? companies.filter((c: any) => c.id).map((c: any) => <SelectItem key={c.id} value={c.id}>{(c as any).razonSocial || (c as any).nombreFantasia || (c as any).name || c.id}</SelectItem>)
+                            : agencies.filter((a: any) => a.id).map((a: any) => <SelectItem key={a.id} value={a.id}>{(a as any).razonSocial || (a as any).nombreFantasia || (a as any).name || a.id}</SelectItem>)
                           }
                         </SelectContent>
                       </Select>
@@ -4612,8 +4612,8 @@ export default function RestaurantPage() {
                               <SelectTrigger className="flex-1 h-8 text-sm" data-testid="select-payitem-cc-entity"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
                               <SelectContent>
                                 {payItemCcEntityType === "company"
-                                  ? companies.filter((c: any) => c.id).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)
-                                  : agencies.filter((a: any) => a.id).map((a: any) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)
+                                  ? companies.filter((c: any) => c.id).map((c: any) => <SelectItem key={c.id} value={c.id}>{(c as any).razonSocial || (c as any).nombreFantasia || (c as any).name || c.id}</SelectItem>)
+                                  : agencies.filter((a: any) => a.id).map((a: any) => <SelectItem key={a.id} value={a.id}>{(a as any).razonSocial || (a as any).nombreFantasia || (a as any).name || a.id}</SelectItem>)
                                 }
                               </SelectContent>
                             </Select>
