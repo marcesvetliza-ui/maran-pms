@@ -1908,12 +1908,19 @@ export default function RestaurantPage() {
                                 {table.status === "occupied" && (() => {
                                   const tableOrder = activeOrders.find(o => o.tableId === table.id);
                                   if (!tableOrder) return null;
+                                  const tableSplits = (tableOrder as any)?.splits || [];
+                                  const paidSplits = tableSplits.filter((s: any) => s.isPaid === "true").length;
                                   return (
                                     <>
                                       {tableOrder.waiterName && (
                                         <span className="text-[9px] truncate max-w-full opacity-80">{tableOrder.waiterName}</span>
                                       )}
                                       <TableElapsedBadge openedAt={tableOrder.openedAt} />
+                                      {tableSplits.length > 0 && (
+                                        <span className={`text-[8px] font-bold px-1 py-0.5 rounded leading-none ${paidSplits < tableSplits.length ? "bg-amber-400/90 text-amber-900" : "bg-green-500/90 text-white"}`}>
+                                          DIV {paidSplits}/{tableSplits.length}
+                                        </span>
+                                      )}
                                     </>
                                   );
                                 })()}
@@ -3516,6 +3523,9 @@ export default function RestaurantPage() {
                 size="lg"
                 className="w-full sm:w-auto"
                 onClick={() => {
+                  const updOrder = orders.find((o: RestaurantOrder) => o.id === currentOrder?.id);
+                  const existingSplits = (updOrder as any)?.splits || [];
+                  const hasActiveSplits = existingSplits.length > 0 && existingSplits.some((s: any) => s.isPaid !== "true");
                   setIsOrderDialogOpen(false);
                   setCloseReceiptType("cierre_mesa");
                   setClosePaymentMethod("efectivo");
@@ -3534,7 +3544,7 @@ export default function RestaurantPage() {
                   setSplitCustomerCuits({});
                   setSplitVatConditions({});
                   setSplitFbIsExento({});
-                  setIsSplitMode(false);
+                  setIsSplitMode(hasActiveSplits);
                   setIsCloseDialogOpen(true);
                 }}
                 data-testid="button-close-table"
