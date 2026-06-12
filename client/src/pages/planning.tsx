@@ -599,16 +599,33 @@ export default function PlanningPage() {
     }
   }
 
-  // Available room types and floors for filter UI
+  // REUB virtual room (always shown separately at top)
+  const reubRoom = data?.rooms.find(r => (r as any).isVirtual === true || r.roomNumber === "REUB") ?? null;
+
+  // Available room types and floors for filter UI — exclude REUB
   const availableRoomTypes = data?.rooms
-    ? Array.from(new Map(data.rooms.map(r => [r.roomTypeId, r.roomType])).entries()).map(([id, rt]) => ({ id, name: rt?.name ?? id }))
+    ? Array.from(new Map(data.rooms.filter(r => !(r as any).isVirtual).map(r => [r.roomTypeId, r.roomType])).entries()).map(([id, rt]) => ({ id, name: rt?.name ?? id }))
     : [];
   const availableFloors = data?.rooms
-    ? Array.from(new Set(data.rooms.map(r => String(r.floor)))).sort((a, b) => Number(a) - Number(b))
+    ? Array.from(new Set(data.rooms.filter(r => !(r as any).isVirtual).map(r => String(r.floor)))).sort((a, b) => Number(a) - Number(b))
     : [];
 
-  // Apply filters to rooms
+  const isCompareMode = !!(filters.compareRoom1 || filters.compareRoom2);
+
+  // Apply filters to rooms (REUB excluded — shown separately)
   const filteredRooms = (data?.rooms ?? []).filter(room => {
+    // REUB is handled separately
+    if ((room as any).isVirtual || room.roomNumber === "REUB") return false;
+
+    // Compare mode: show only the specified rooms
+    if (isCompareMode) {
+      const num = room.roomNumber.toLowerCase();
+      return (
+        (filters.compareRoom1 && num === filters.compareRoom1.toLowerCase()) ||
+        (filters.compareRoom2 && num === filters.compareRoom2.toLowerCase())
+      );
+    }
+
     if (filters.roomTypeIds.length > 0 && !filters.roomTypeIds.includes(room.roomTypeId)) return false;
     if (filters.floorFilter && String(room.floor) !== filters.floorFilter) return false;
     const roomOcc = data?.occupancy[room.id] ?? [];
@@ -616,8 +633,6 @@ export default function PlanningPage() {
     if (!filters.showEmpty && !hasReservation) return false;
     if (!filters.showOccupied && hasReservation) return false;
     if (filters.statusFilter && !roomOcc.includes(filters.statusFilter as PlanningCellStatus)) return false;
-    // Filter by room number
-    if (filters.roomNumberSearch && !room.roomNumber.toLowerCase().includes(filters.roomNumberSearch.toLowerCase())) return false;
     // Filter by guest name — check all reservations assigned to this room in the visible period
     if (filters.guestSearch) {
       const cellRes = data?.cellReservations[room.id] ?? {};
@@ -792,7 +807,10 @@ export default function PlanningPage() {
             <div className="flex items-center gap-2">
               <Info className="h-4 w-4 text-muted-foreground" />
               <span>
-                {data ? `${filteredRooms.length} habitaciones${filteredRooms.length !== data.rooms.length ? ` (de ${data.rooms.length})` : ""}` : "Cargando..."} | {" "}
+                {data ? (() => {
+                  const totalReal = data.rooms.filter(r => !(r as any).isVirtual && r.roomNumber !== "REUB").length;
+                  return `${filteredRooms.length} habitaciones${filteredRooms.length !== totalReal ? ` (de ${totalReal})` : ""}`;
+                })() : "Cargando..."} | {" "}
                 {dateRange.start} — {dateRange.end}
               </span>
             </div>
@@ -967,6 +985,57 @@ export default function PlanningPage() {
                     )}
                   </thead>
                   <tbody>
+                    {/* ── FILA REUB — comodín siempre visible arriba ── */}
+                    {reubRoom && (
+                      <DroppableRoomRow key="reub" roomId={reubRoom.id} className="border-b-2 border-amber-300 dark:border-amber-700" data-testid="row-reub">
+                        <td className="sticky left-0 z-10 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 border-r border-amber-300 dark:border-amber-700">
+                          <div className="flex flex-col leading-tight">
+                            <span className="text-xs font-bold text-amber-700 dark:text-amber-400">REUB</span>
+                            <span className="text-[9px] text-amber-600/70 dark:text-amber-500/60">comodín</span>
+                          </div>
+                        </td>
+                        {data.days.map((day) => {
+                          const reservationId = data.cellReservations[reubRoom.id]?.[day];
+                          const reservation = reservationId ? data.reservations[reservationId] : null;
+                          const info = formatDate(day);
+                          return (
+                            <DroppableCell
+                              key={day}
+                              roomId={reubRoom.id}
+                              day={day}
+                              className={`p-0.5 border-b border-amber-200/60 dark:border-amber-800/40 ${info.isToday ? "bg-amber-100/60 dark:bg-amber-900/20" : "bg-amber-50/40 dark:bg-amber-950/20"}`}
+                            >
+                              {reservation ? (
+                                <DraggableReservationCell
+                                  id={`drag-${reservationId}-${reubRoom.id}-${day}`}
+                                  reservationId={reservationId!}
+                                  roomId={reubRoom.id}
+                                  onClick={() => handleCellClick(reubRoom as any, day, "booked", reservationId)}
+                                  onContextMenu={(e: React.MouseEvent) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setColorContextMenu({ x: e.clientX, y: e.clientY, reservationId: reservationId! });
+                                  }}
+                                  className={`h-8 rounded flex items-center justify-center transition-all cursor-grab active:cursor-grabbing border-2 border-amber-400 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 hover:ring-2 hover:ring-amber-400/50`}
+                                  data-testid={`cell-reub-${day}`}
+                                >
+                                  <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
+                                    {reservation.guestName === "Sin Asignar" || !reservation.guestName
+                                      ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
+                                      : reservation.guestName.split(" ")[0]}
+                                  </span>
+                                </DraggableReservationCell>
+                              ) : (
+                                <div
+                                  className="h-8 rounded"
+                                  data-testid={`cell-reub-empty-${day}`}
+                                />
+                              )}
+                            </DroppableCell>
+                          );
+                        })}
+                      </DroppableRoomRow>
+                    )}
                     {floors.map((floor) => (
                       <Fragment key={`floor-${floor}`}>
                         <tr className="bg-muted/30">

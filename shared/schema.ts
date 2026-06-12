@@ -59,6 +59,7 @@ export const rooms = pgTable("rooms", {
   features: text("features").array(),
   maxOccupancy: integer("max_occupancy").default(2),
   notes: text("notes"),
+  isVirtual: boolean("is_virtual").default(false),
 });
 
 export const insertRoomSchema = createInsertSchema(rooms).omit({ id: true });
