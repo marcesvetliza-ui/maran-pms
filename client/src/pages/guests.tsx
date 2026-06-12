@@ -1032,17 +1032,21 @@ export default function GuestsPage() {
     onError: () => toast({ title: "Error al limpiar huéspedes", variant: "destructive" }),
   });
 
-  const deleteMutation = useMutation({
+  const deactivateMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/guests/${id}`, undefined);
+      const res = await apiRequest("PATCH", `/api/guests/${id}/deactivate`, {});
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Error al desactivar");
+      }
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Huésped eliminado", description: "El huésped ha sido eliminado del sistema." });
+      toast({ title: "Huésped desactivado", description: "El huésped fue desactivado y no aparecerá en búsquedas." });
     },
     onError: (error: any) => {
-      toast({ title: "Error", description: error?.message || "No se pudo eliminar el huésped", variant: "destructive" });
+      toast({ title: "No se pudo desactivar", description: error?.message || "Error al desactivar el huésped", variant: "destructive" });
     },
   });
 
@@ -1194,11 +1198,15 @@ export default function GuestsPage() {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => deleteMutation.mutate(guest.id)}
+                          className="text-orange-600"
+                          onClick={() => {
+                            if (confirm(`¿Desactivar a ${guest.firstName} ${guest.lastName}? Solo es posible si no tiene reservas activas.`)) {
+                              deactivateMutation.mutate(guest.id);
+                            }
+                          }}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
-                          Eliminar
+                          Desactivar
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

@@ -156,6 +156,7 @@ export const guests = pgTable("guests", {
   vehiculoMarca: text("vehiculo_marca"),
   vehiculoModelo: text("vehiculo_modelo"),
   vehiculoColor: text("vehiculo_color"),
+  active: boolean("active").notNull().default(true),
 });
 
 export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, codigo: true, fechaAlta: true });

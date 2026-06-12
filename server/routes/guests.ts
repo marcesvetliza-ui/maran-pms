@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { db } from "../db";
-import { guests } from "../../shared/schema";
-import { eq } from "drizzle-orm";
+import { guests, reservations } from "../../shared/schema";
+import { eq, and, inArray, gte } from "drizzle-orm";
 
 export function registerGuestsRoutes(app: Express) {
   // Companies
@@ -422,15 +422,40 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/guests/:id", async (req, res) => {
+  app.delete("/api/guests/:id", requireAuth, async (req, res) => {
+    // Guests are NEVER deleted — only deactivated when they have no active stays.
+    return res.status(403).json({ error: "Los huéspedes no pueden eliminarse. Use la opción Desactivar." });
+  });
+
+  app.patch("/api/guests/:id/deactivate", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteGuest(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: "Guest not found" });
+      const guest = await storage.getGuest(req.params.id);
+      if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
+
+      // Block if there's an active reservation (checked_in or confirmed with future dates)
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const activeRes = await db
+        .select({ id: reservations.id })
+        .from(reservations)
+        .where(
+          and(
+            eq(reservations.guestId, guest.id),
+            inArray(reservations.status, ["checked_in", "confirmed", "pending"] as any),
+            gte(reservations.checkOutDate, today)
+          )
+        )
+        .limit(1);
+
+      if (activeRes.length > 0) {
+        return res.status(400).json({
+          error: "No se puede desactivar un huésped con reservas activas o alojamiento en curso."
+        });
       }
-      res.status(204).send();
+
+      await db.update(guests).set({ active: false }).where(eq(guests.id, guest.id));
+      res.json({ success: true, message: "Huésped desactivado correctamente." });
     } catch (error) {
-      res.status(500).json({ error: "Error deleting guest" });
+      res.status(500).json({ error: "Error al desactivar huésped" });
     }
   });
 
