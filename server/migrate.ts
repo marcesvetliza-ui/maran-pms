@@ -375,5 +375,133 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS provincia text`)
   );
 
+  // guests: libro de registro + fiscal + migratorio + FCE
+  await withTimeout("guests.estado_civil", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS estado_civil text`)
+  );
+  await withTimeout("guests.procedencia", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS procedencia text`)
+  );
+  await withTimeout("guests.nationality_code", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS nationality_code text`)
+  );
+  await withTimeout("guests.fecha_ingreso_argentina", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS fecha_ingreso_argentina date`)
+  );
+  await withTimeout("guests.fecha_salida_argentina", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS fecha_salida_argentina date`)
+  );
+  await withTimeout("guests.es_empresa_grande", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS es_empresa_grande boolean DEFAULT false`)
+  );
+  await withTimeout("guests.monto_base_fce", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS monto_base_fce text`)
+  );
+  await withTimeout("guests.codigo_postal", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS codigo_postal text`)
+  );
+
+  // table_reservations: advance fields (legacy single-advance snapshot)
+  await withTimeout("table_reservations.advance_amount", T, () =>
+    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_amount numeric(10,2) DEFAULT 0`)
+  );
+  await withTimeout("table_reservations.advance_method", T, () =>
+    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_method text`)
+  );
+  await withTimeout("table_reservations.advance_date", T, () =>
+    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_date date`)
+  );
+  await withTimeout("table_reservations.advance_notes", T, () =>
+    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_notes text`)
+  );
+
+  // Tabla countries (nomenclador AFIP)
+  await withTimeout("countries.create", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS countries (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        afip_code integer NOT NULL UNIQUE,
+        name text NOT NULL,
+        is_active boolean NOT NULL DEFAULT true,
+        display_order integer DEFAULT 0
+      )
+    `)
+  );
+
+  // Seed países AFIP si la tabla está vacía
+  await withTimeout("countries.seed", T, async () => {
+    const existing = await db.execute(sql`SELECT COUNT(*) as cnt FROM countries`);
+    const count = parseInt((existing.rows[0] as any).cnt || "0");
+    if (count === 0) {
+      await db.execute(sql`
+        INSERT INTO countries (id, afip_code, name, is_active, display_order) VALUES
+        (gen_random_uuid(), 200, 'Argentina', true, 1),
+        (gen_random_uuid(), 225, 'Uruguay', true, 2),
+        (gen_random_uuid(), 101, 'Brasil', true, 3),
+        (gen_random_uuid(), 209, 'Chile', true, 4),
+        (gen_random_uuid(), 220, 'Paraguay', true, 5),
+        (gen_random_uuid(), 202, 'Bolivia', true, 6),
+        (gen_random_uuid(), 218, 'Perú', true, 7),
+        (gen_random_uuid(), 203, 'Colombia', true, 8),
+        (gen_random_uuid(), 226, 'Venezuela', true, 9),
+        (gen_random_uuid(), 210, 'Ecuador', true, 10),
+        (gen_random_uuid(), 123, 'Estados Unidos', true, 11),
+        (gen_random_uuid(), 174, 'Canadá', true, 12),
+        (gen_random_uuid(), 116, 'España', true, 13),
+        (gen_random_uuid(), 130, 'Italia', true, 14),
+        (gen_random_uuid(), 117, 'Francia', true, 15),
+        (gen_random_uuid(), 120, 'Alemania', true, 16),
+        (gen_random_uuid(), 222, 'Portugal', true, 17),
+        (gen_random_uuid(), 172, 'Reino Unido', true, 18),
+        (gen_random_uuid(), 126, 'Irlanda', true, 19),
+        (gen_random_uuid(), 102, 'Bélgica', true, 20),
+        (gen_random_uuid(), 142, 'Países Bajos', true, 21),
+        (gen_random_uuid(), 166, 'Suiza', true, 22),
+        (gen_random_uuid(), 147, 'Austria', true, 23),
+        (gen_random_uuid(), 163, 'Suecia', true, 24),
+        (gen_random_uuid(), 144, 'Noruega', true, 25),
+        (gen_random_uuid(), 112, 'Dinamarca', true, 26),
+        (gen_random_uuid(), 115, 'Finlandia', true, 27),
+        (gen_random_uuid(), 121, 'Grecia', true, 28),
+        (gen_random_uuid(), 168, 'Turquía', true, 29),
+        (gen_random_uuid(), 150, 'Rusia', true, 30),
+        (gen_random_uuid(), 107, 'China', true, 31),
+        (gen_random_uuid(), 131, 'Japón', true, 32),
+        (gen_random_uuid(), 109, 'Corea del Sur', true, 33),
+        (gen_random_uuid(), 129, 'India', true, 34),
+        (gen_random_uuid(), 134, 'Israel', true, 35),
+        (gen_random_uuid(), 146, 'Australia', true, 36),
+        (gen_random_uuid(), 143, 'Nueva Zelanda', true, 37),
+        (gen_random_uuid(), 141, 'México', true, 38),
+        (gen_random_uuid(), 206, 'Cuba', true, 39),
+        (gen_random_uuid(), 214, 'Costa Rica', true, 40),
+        (gen_random_uuid(), 215, 'Haití', true, 41),
+        (gen_random_uuid(), 216, 'Jamaica', true, 42),
+        (gen_random_uuid(), 219, 'Panamá', true, 43),
+        (gen_random_uuid(), 217, 'Honduras', true, 44),
+        (gen_random_uuid(), 213, 'Guatemala', true, 45),
+        (gen_random_uuid(), 223, 'El Salvador', true, 46),
+        (gen_random_uuid(), 224, 'Nicaragua', true, 47),
+        (gen_random_uuid(), 221, 'República Dominicana', true, 48),
+        (gen_random_uuid(), 204, 'Guyana', true, 49),
+        (gen_random_uuid(), 208, 'Surinam', true, 50),
+        (gen_random_uuid(), 138, 'Marruecos', true, 51),
+        (gen_random_uuid(), 104, 'Argelia', true, 52),
+        (gen_random_uuid(), 170, 'Túnez', true, 53),
+        (gen_random_uuid(), 160, 'Sudáfrica', true, 54),
+        (gen_random_uuid(), 145, 'Nigeria', true, 55),
+        (gen_random_uuid(), 118, 'Ghana', true, 56),
+        (gen_random_uuid(), 133, 'Kenia', true, 57),
+        (gen_random_uuid(), 103, 'Arabia Saudita', true, 58),
+        (gen_random_uuid(), 108, 'Irak', true, 59),
+        (gen_random_uuid(), 110, 'Irán', true, 60),
+        (gen_random_uuid(), 136, 'Líbano', true, 61),
+        (gen_random_uuid(), 161, 'Siria', true, 62),
+        (gen_random_uuid(), 111, 'Emiratos Árabes Unidos', true, 63),
+        (gen_random_uuid(), 999, 'Otros', true, 99)
+      `);
+    }
+  });
+
   logger.info("Migraciones incrementales completadas.");
 }

@@ -160,11 +160,35 @@ export const guests = pgTable("guests", {
   active: boolean("active").notNull().default(true),
   vatCondition: text("vat_condition"),
   provincia: text("provincia"),
+  // Libro de Registro de Pasajeros (obligatorio ley provincial)
+  estadoCivil: text("estado_civil"),
+  procedencia: text("procedencia"),           // ciudad desde donde viaja (≠ domicilio)
+  // Identificación fiscal (AFIP/ARCA)
+  nationalityCode: text("nationality_code"),  // código AFIP del país
+  // Datos migratorios para extranjeros (Ley 25.871)
+  fechaIngresoArgentina: date("fecha_ingreso_argentina"),
+  fechaSalidaArgentina: date("fecha_salida_argentina"),
+  // FCE MiPyME
+  esEmpresaGrande: boolean("es_empresa_grande").default(false),
+  montoBaseFce: text("monto_base_fce"),
 });
 
 export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, codigo: true, fechaAlta: true });
 export type InsertGuest = z.infer<typeof insertGuestSchema>;
 export type Guest = typeof guests.$inferSelect;
+
+// ─── Países (Nomenclador AFIP) ──────────────────────────────────────────────
+export const countries = pgTable("countries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  afipCode: integer("afip_code").notNull().unique(),
+  name: text("name").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  displayOrder: integer("display_order").default(0),
+});
+
+export const insertCountrySchema = createInsertSchema(countries).omit({ id: true });
+export type InsertCountry = z.infer<typeof insertCountrySchema>;
+export type Country = typeof countries.$inferSelect;
 
 // Bed Types (Tipos de Camaje)
 export const bedTypes = pgTable("bed_types", {

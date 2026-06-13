@@ -389,15 +389,63 @@ function AdvanceDialog({
                       {adv.notes && <span className="ml-2">— {adv.notes}</span>}
                     </p>
                   </div>
-                  <Button
-                    variant="ghost" size="sm"
-                    className="text-destructive hover:text-destructive h-7 w-7 p-0"
-                    onClick={() => deleteAdvanceMutation.mutate(adv.id)}
-                    disabled={deleteAdvanceMutation.isPending}
-                    data-testid={`button-delete-advance-${adv.id}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground"
+                      title="Imprimir voucher"
+                      data-testid={`button-print-advance-${adv.id}`}
+                      onClick={() => {
+                        const w = window.open("", "_blank", "width=380,height=500");
+                        if (!w || !reservation) return;
+                        const amt = parseFloat(adv.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 });
+                        const metodoPago = payMethodLabel[adv.paymentMethod] || adv.paymentMethod;
+                        const fecha = adv.createdAt ? new Date(adv.createdAt).toLocaleDateString("es-AR") : new Date().toLocaleDateString("es-AR");
+                        w.document.write(`<!DOCTYPE html><html><head><title>Voucher Anticipo</title>
+                        <style>
+                          body{font-family:Arial,sans-serif;padding:20px;max-width:340px;margin:0 auto;font-size:13px;color:#111}
+                          h1{font-size:15px;text-align:center;margin:0 0 2px}
+                          .sub{text-align:center;font-size:11px;color:#666;margin:0 0 14px}
+                          .sep{border:none;border-top:1px dashed #aaa;margin:10px 0}
+                          .row{display:flex;justify-content:space-between;margin:4px 0}
+                          .label{color:#555;font-size:12px}
+                          .val{font-weight:600}
+                          .total{font-size:16px;font-weight:bold;text-align:center;margin:12px 0 4px;border:1px solid #333;padding:6px;border-radius:4px}
+                          .voucher{text-align:center;font-size:11px;color:#888;font-family:monospace;margin-top:10px}
+                          .nota{font-size:10px;color:#999;text-align:center;margin-top:12px;border-top:1px dashed #ccc;padding-top:8px}
+                          @media print{button{display:none}}
+                        </style></head><body>
+                        <h1>Maran Suites &amp; Towers</h1>
+                        <p class="sub">Restaurante — Voucher Anticipo (No Fiscal)</p>
+                        <hr class="sep">
+                        <div class="row"><span class="label">Reserva a nombre de:</span></div>
+                        <div class="row"><span class="val">${reservation.guestName}</span></div>
+                        <div class="row"><span class="label">Fecha reserva:</span><span class="val">${reservation.reservationDate} ${reservation.reservationTime}</span></div>
+                        <div class="row"><span class="label">Cubiertos:</span><span class="val">${reservation.partySize}</span></div>
+                        <hr class="sep">
+                        <div class="row"><span class="label">Fecha pago:</span><span class="val">${fecha}</span></div>
+                        <div class="row"><span class="label">Forma de pago:</span><span class="val">${metodoPago}</span></div>
+                        ${adv.notes ? `<div class="row"><span class="label">Ref.:</span><span class="val">${adv.notes}</span></div>` : ""}
+                        <div class="total">$ ${amt}</div>
+                        ${adv.voucherNumber ? `<div class="voucher">Voucher: ${adv.voucherNumber}</div>` : ""}
+                        <p class="nota">Este comprobante no tiene valor fiscal.<br>Acreditable al momento del consumo.</p>
+                        <br><button onclick="window.print()">Imprimir</button>
+                        </body></html>`);
+                        w.document.close();
+                      }}
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="text-destructive hover:text-destructive h-7 w-7 p-0"
+                      onClick={() => deleteAdvanceMutation.mutate(adv.id)}
+                      disabled={deleteAdvanceMutation.isPending}
+                      data-testid={`button-delete-advance-${adv.id}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               ))}
               <div className="text-right text-sm font-semibold pr-1 text-muted-foreground">

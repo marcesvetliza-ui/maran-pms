@@ -86,7 +86,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference, Company } from "@shared/schema";
+import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference, Company, Country } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 
@@ -139,30 +139,37 @@ export function formatCuit(value: string): string {
   return digits;
 }
 
-function NationalityCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function NationalityCombobox({
+  value, afipCode, onChange,
+}: { value: string; afipCode?: string; onChange: (name: string, code: string) => void }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const filtered = COUNTRIES_AFIP.filter(c => c.toLowerCase().includes(search.toLowerCase())).slice(0, 30);
+  const { data: countriesList = [] } = useQuery<Country[]>({ queryKey: ["/api/countries"] });
+  const filtered = countriesList.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 40);
   return (
     <div className="grid gap-2">
-      <Label>Nacionalidad / País</Label>
+      <Label>Nacionalidad / País <span className="text-xs text-muted-foreground">(Nomenclador AFIP)</span></Label>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal" data-testid="select-nationality">
-            {value || "Seleccionar país..."}
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            <span>{value || "Seleccionar país..."}</span>
+            <div className="flex items-center gap-2">
+              {afipCode && <span className="text-xs text-muted-foreground font-mono">AFIP:{afipCode}</span>}
+              <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+            </div>
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-full p-0" align="start">
           <Command>
             <CommandInput placeholder="Buscar país..." value={search} onValueChange={setSearch} />
             <CommandList>
-              <CommandEmpty>Sin resultados.</CommandEmpty>
+              <CommandEmpty>Sin resultados. Podés agregar países en Configuración.</CommandEmpty>
               <CommandGroup>
-                {filtered.map(country => (
-                  <CommandItem key={country} value={country} onSelect={(v) => { onChange(v); setOpen(false); setSearch(""); }}>
-                    <Check className={`mr-2 h-4 w-4 ${value === country ? "opacity-100" : "opacity-0"}`} />
-                    {country}
+                {filtered.map(c => (
+                  <CommandItem key={c.id} value={c.name} onSelect={() => { onChange(c.name, String(c.afipCode)); setOpen(false); setSearch(""); }}>
+                    <Check className={`mr-2 h-4 w-4 ${value === c.name ? "opacity-100" : "opacity-0"}`} />
+                    <span className="flex-1">{c.name}</span>
+                    <span className="text-xs text-muted-foreground font-mono ml-2">{c.afipCode}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -209,7 +216,14 @@ function GuestFormDialog({
     })(),
     documentNumber: g?.documentNumber || "",
     nationality: g?.nationality || "",
-    vatCondition: (g as any)?.vatCondition || "",
+    nationalityCode: g?.nationalityCode || "",
+    vatCondition: g?.vatCondition || "",
+    estadoCivil: g?.estadoCivil || "",
+    procedencia: g?.procedencia || "",
+    fechaIngresoArgentina: g?.fechaIngresoArgentina || "",
+    fechaSalidaArgentina: g?.fechaSalidaArgentina || "",
+    esEmpresaGrande: g?.esEmpresaGrande || false,
+    montoBaseFce: g?.montoBaseFce || "",
     direccion: g?.direccion || "",
     provincia: g?.provincia || "",
     localidad: g?.localidad || "",
@@ -423,10 +437,93 @@ function GuestFormDialog({
                 </Select>
               </div>
             </div>
+            {/* Estado Civil */}
+            <div className="grid gap-2">
+              <Label>Estado Civil</Label>
+              <Select
+                value={(formData as any).estadoCivil || ""}
+                onValueChange={(v) => setFormData({ ...formData, estadoCivil: v } as any)}
+              >
+                <SelectTrigger data-testid="select-estado-civil">
+                  <SelectValue placeholder="Seleccionar..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="soltero">Soltero/a</SelectItem>
+                  <SelectItem value="casado">Casado/a</SelectItem>
+                  <SelectItem value="divorciado">Divorciado/a</SelectItem>
+                  <SelectItem value="viudo">Viudo/a</SelectItem>
+                  <SelectItem value="union_convivencial">Unión Convivencial</SelectItem>
+                  <SelectItem value="otro">Otro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Nacionalidad con código AFIP */}
             <NationalityCombobox
               value={formData.nationality || ""}
-              onChange={(v) => setFormData({ ...formData, nationality: v })}
+              afipCode={(formData as any).nationalityCode || ""}
+              onChange={(name, code) => setFormData({ ...formData, nationality: name, nationalityCode: code } as any)}
             />
+
+            {/* Datos migratorios — solo para extranjeros (Ley 25.871) */}
+            {formData.nationality && formData.nationality !== "Argentina" && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-3">
+                <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                  ⚠️ Datos migratorios requeridos por Ley 25.871 (Migraciones)
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-2">
+                    <Label htmlFor="fechaIngresoArg" className="text-xs">Fecha Ingreso a Argentina</Label>
+                    <Input
+                      id="fechaIngresoArg"
+                      type="date"
+                      value={(formData as any).fechaIngresoArgentina || ""}
+                      onChange={(e) => setFormData({ ...formData, fechaIngresoArgentina: e.target.value } as any)}
+                      data-testid="input-fecha-ingreso-argentina"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="fechaSalidaArg" className="text-xs">Fecha Salida de Argentina</Label>
+                    <Input
+                      id="fechaSalidaArg"
+                      type="date"
+                      value={(formData as any).fechaSalidaArgentina || ""}
+                      onChange={(e) => setFormData({ ...formData, fechaSalidaArgentina: e.target.value } as any)}
+                      data-testid="input-fecha-salida-argentina"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Procedencia (ciudad desde donde viaja, ≠ domicilio permanente) */}
+            <div className="grid gap-2">
+              <Label htmlFor="procedencia">
+                Procedencia <span className="text-xs text-muted-foreground">(ciudad desde donde viaja)</span>
+              </Label>
+              <Input
+                id="procedencia"
+                value={(formData as any).procedencia || ""}
+                onChange={(e) => setFormData({ ...formData, procedencia: e.target.value } as any)}
+                placeholder="Ej: Rosario (aunque viva en Córdoba)"
+                data-testid="input-procedencia"
+              />
+            </div>
+
+            {/* Domicilio permanente */}
+            <div className="pt-1 border-t">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Domicilio Permanente</Label>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="direccion">Dirección</Label>
+              <Input
+                id="direccion"
+                value={formData.direccion || ""}
+                onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
+                placeholder="Av. Siempreviva 742"
+                data-testid="input-direccion"
+              />
+            </div>
             <ProvinciaCiudadSelect
               provincia={formData.provincia || ""}
               localidad={formData.localidad || ""}
@@ -435,6 +532,51 @@ function GuestFormDialog({
               testIdProvincia="select-guest-provincia"
               testIdLocalidad="select-guest-localidad"
             />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="codigoPostal">Código Postal</Label>
+                <Input
+                  id="codigoPostal"
+                  value={formData.codigoPostal || ""}
+                  onChange={(e) => setFormData({ ...formData, codigoPostal: e.target.value })}
+                  placeholder="3100"
+                  data-testid="input-codigo-postal"
+                />
+              </div>
+            </div>
+
+            {/* FCE MiPyME */}
+            <div className="pt-1 border-t">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Factura de Crédito Electrónica (FCE / MiPyME)</Label>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label className="text-sm">¿Es empresa grande?</Label>
+                <div className="flex items-center gap-3 mt-1">
+                  <input
+                    type="checkbox"
+                    id="esEmpresaGrande"
+                    checked={(formData as any).esEmpresaGrande || false}
+                    onChange={(e) => setFormData({ ...formData, esEmpresaGrande: e.target.checked } as any)}
+                    className="h-4 w-4 rounded border-input"
+                    data-testid="check-es-empresa-grande"
+                  />
+                  <label htmlFor="esEmpresaGrande" className="text-sm text-muted-foreground">Sí, es empresa grande</label>
+                </div>
+              </div>
+              {(formData as any).esEmpresaGrande && (
+                <div className="grid gap-2">
+                  <Label htmlFor="montoBaseFce">Monto Base FCE ($)</Label>
+                  <Input
+                    id="montoBaseFce"
+                    value={(formData as any).montoBaseFce || ""}
+                    onChange={(e) => setFormData({ ...formData, montoBaseFce: e.target.value } as any)}
+                    placeholder="Ej: 400000"
+                    data-testid="input-monto-base-fce"
+                  />
+                </div>
+              )}
+            </div>
 
             <div className="grid gap-2">
               <Label>Empresa asociada</Label>

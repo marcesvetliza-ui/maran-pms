@@ -39,6 +39,7 @@ import { registerMaintenanceRoutes } from "./routes/maintenance";
 import { registerFolioRoutes } from "./routes/folios";
 import { registerPublicBookingRoutes } from "./routes/publicBooking";
 import { registerEmailRoutes } from "./routes/emails";
+import { registerCountriesRoutes } from "./routes/countries";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -2921,6 +2922,7 @@ export async function registerRoutes(
   registerFolioRoutes(app);
   registerPublicBookingRoutes(app);
   registerEmailRoutes(app);
+  registerCountriesRoutes(app);
   registerGuestsRoutes(app);
   registerReservationsRoutes(app);
   registerGroupsRoutes(app);
