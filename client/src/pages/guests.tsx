@@ -49,6 +49,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -709,6 +719,7 @@ function GuestPreferencesSection({ guestId }: { guestId: string }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("normal");
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const { data: preferences = [], isLoading } = useQuery<GuestPreference[]>({
     queryKey: ["/api/guests", guestId, "preferences"],
@@ -890,7 +901,7 @@ function GuestPreferencesSection({ guestId }: { guestId: string }) {
                 </Button>
                 <Button
                   size="icon" variant="ghost" className="h-6 w-6 text-destructive"
-                  onClick={() => deleteMutation.mutate(pref.id)}
+                  onClick={() => setDeleteConfirmId(pref.id)}
                   data-testid={`btn-delete-pref-${pref.id}`}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -900,6 +911,27 @@ function GuestPreferencesSection({ guestId }: { guestId: string }) {
           ))
         )}
       </div>
+
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(o) => { if (!o) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar preferencia?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. La preferencia será eliminada permanentemente del perfil del huésped.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="btn-cancel-delete-pref">Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (deleteConfirmId) { deleteMutation.mutate(deleteConfirmId); setDeleteConfirmId(null); } }}
+              data-testid="btn-confirm-delete-pref"
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
