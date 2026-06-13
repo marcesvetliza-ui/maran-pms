@@ -1875,7 +1875,13 @@ export class DatabaseStorage implements IStorage {
 
   async getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]> {
     const conditions = [];
-    if (status) conditions.push(eq(restaurantOrders.status, status));
+    if (status) {
+      conditions.push(eq(restaurantOrders.status, status));
+    } else if (!from && !to) {
+      // Sin filtros explícitos: excluir pedidos cerrados/cancelados para que la vista de mesas
+      // no muestre pedidos históricos de días anteriores que no se cerraron correctamente.
+      conditions.push(not(inArray(restaurantOrders.status, ["closed", "cancelled"])));
+    }
     if (from) conditions.push(gte(restaurantOrders.openedAt, new Date(from)));
     if (to) conditions.push(lte(restaurantOrders.openedAt, new Date(to)));
 
