@@ -223,7 +223,7 @@ export function registerSpaRoutes(app: Express) {
 
   app.post("/api/spa/appointments", async (req, res) => {
     try {
-      const { cabinId, treatmentId, professionalId, guestName, guestLastName, guestPhone, guestEmail, reservationId, appointmentDate, startTime, endTime, status, notes } = req.body;
+      const { cabinId, treatmentId, professionalId, guestId, guestName, guestLastName, guestPhone, guestEmail, reservationId, appointmentDate, startTime, endTime, status, notes } = req.body;
 
       if (!cabinId || !treatmentId || !guestName || !appointmentDate || !startTime || !endTime) {
         return res.status(400).json({ error: "cabinId, treatmentId, guestName, appointmentDate, startTime, and endTime are required" });
@@ -251,6 +251,7 @@ export function registerSpaRoutes(app: Express) {
         cabinId,
         treatmentId,
         professionalId: professionalId || null,
+        guestId: guestId || null,
         guestName,
         guestLastName: guestLastName || null,
         guestPhone: guestPhone || null,

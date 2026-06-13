@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format, addDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks } from "date-fns";
 import { es } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
+import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { 
   Plus, 
   ChevronLeft, 
@@ -202,6 +203,7 @@ const appointmentFormSchema = z.object({
   cabinId: z.string().min(1, "Seleccione un gabinete"),
   treatmentId: z.string().min(1, "Seleccione un tratamiento"),
   professionalId: z.string().optional(),
+  guestId: z.string().optional().nullable(),
   guestName: z.string().min(1, "El nombre es requerido"),
   guestLastName: z.string().optional(),
   guestPhone: z.string().optional(),
@@ -347,12 +349,15 @@ export default function SpaPage() {
 
   const activeCabins = cabins.filter((c) => c.isActive === "true");
 
+  const [selectedSpaGuest, setSelectedSpaGuest] = useState<{ id: string; firstName: string; lastName: string | null } | null>(null);
+
   const form = useForm<AppointmentFormValues>({
     resolver: zodResolver(appointmentFormSchema),
     defaultValues: {
       cabinId: "",
       treatmentId: "",
       professionalId: "",
+      guestId: null,
       guestName: "",
       guestLastName: "",
       guestPhone: "",
@@ -381,6 +386,7 @@ export default function SpaPage() {
         body: JSON.stringify({
           ...data,
           professionalId: data.professionalId || null,
+          guestId: data.guestId || null,
           endTime,
           status: "confirmed",
         }),
@@ -396,8 +402,9 @@ export default function SpaPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
       toast({ title: "Turno creado — imprimiendo comanda..." });
       setIsNewDialogOpen(false);
+      setSelectedSpaGuest(null);
       form.reset({
-        cabinId: "", treatmentId: "", professionalId: "", guestName: "", guestLastName: "",
+        cabinId: "", treatmentId: "", professionalId: "", guestId: null, guestName: "", guestLastName: "",
         guestPhone: "", guestEmail: "", appointmentDate: dateStr,
         startTime: "", reservationId: "", notes: "",
       });
@@ -425,6 +432,7 @@ export default function SpaPage() {
           cabinId: data.cabinId,
           treatmentId: data.treatmentId,
           professionalId: data.professionalId || null,
+          guestId: data.guestId || null,
           guestName: data.guestName,
           guestLastName: data.guestLastName || null,
           guestPhone: data.guestPhone || null,
@@ -449,6 +457,7 @@ export default function SpaPage() {
       setIsEditMode(false);
       setEditingAppointmentId(null);
       setSelectedAppointment(null);
+      setSelectedSpaGuest(null);
     },
     onError: (error: Error) => {
       toast({ title: error.message, variant: "destructive" });
@@ -1588,19 +1597,25 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </FormItem>
               )} />
 
-              {spaClients.length > 0 && (
-                <div>
-                  <Label className="text-sm font-medium">Cliente SPA (opcional)</Label>
-                  <Select onValueChange={handleSpaClientAutoFill}>
-                    <SelectTrigger data-testid="select-spa-client"><SelectValue placeholder="Seleccionar cliente registrado" /></SelectTrigger>
-                    <SelectContent>
-                      {spaClients.filter(c => c.id).map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.firstName} {c.lastName || ""} {c.phone ? `- ${c.phone}` : ""}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <GuestSearchCombobox
+                label="Buscar cliente (opcional)"
+                selectedGuestId={selectedSpaGuest?.id ?? null}
+                selectedGuestName={selectedSpaGuest ? `${selectedSpaGuest.firstName} ${selectedSpaGuest.lastName || ""}`.trim() : null}
+                onGuestSelect={(g) => {
+                  setSelectedSpaGuest({ id: g.id, firstName: g.firstName, lastName: g.lastName ?? null });
+                  form.setValue("guestId", g.id);
+                  form.setValue("guestName", g.firstName);
+                  form.setValue("guestLastName", g.lastName || "");
+                  form.setValue("guestPhone", g.phone || "");
+                  form.setValue("guestEmail", g.email || "");
+                }}
+                onClear={() => {
+                  setSelectedSpaGuest(null);
+                  form.setValue("guestId", null);
+                }}
+                placeholder="Nombre, teléfono o email..."
+                data-testid="spa-guest-search"
+              />
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="guestName" render={({ field }) => (

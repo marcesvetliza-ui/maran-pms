@@ -1362,6 +1362,7 @@ export const spaAppointments = pgTable("spa_appointments", {
   cabinId: varchar("cabin_id").notNull(),
   treatmentId: varchar("treatment_id").notNull(),
   professionalId: varchar("professional_id"),
+  guestId: varchar("guest_id"),
   guestName: text("guest_name").notNull(),
   guestLastName: text("guest_last_name"),
   guestPhone: text("guest_phone"),

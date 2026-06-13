@@ -22,6 +22,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Plus,
@@ -4939,6 +4940,22 @@ export default function RestaurantPage() {
               const payload = { ...data, tableId: data.tableId || null, status: "confirmed" };
               createReservationMutation.mutate(payload as any);
             })} className="space-y-4">
+              <GuestSearchCombobox
+                label="Buscar cliente registrado (opcional)"
+                selectedGuestId={reservationForm.watch("clientId") ?? null}
+                selectedGuestName={reservationForm.watch("clientId") ? reservationForm.watch("guestName") : null}
+                onGuestSelect={(g) => {
+                  reservationForm.setValue("clientId", g.id);
+                  reservationForm.setValue("guestName", [g.firstName, g.lastName].filter(Boolean).join(" "));
+                  reservationForm.setValue("guestPhone", g.phone || "");
+                  reservationForm.setValue("guestEmail", g.email || "");
+                }}
+                onClear={() => {
+                  reservationForm.setValue("clientId", null);
+                }}
+                placeholder="Nombre, teléfono o email..."
+                data-testid="reservation-guest-search"
+              />
               <FormField control={reservationForm.control} name="guestName" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Nombre *</FormLabel>
