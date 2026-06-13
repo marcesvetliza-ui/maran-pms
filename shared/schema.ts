@@ -158,6 +158,8 @@ export const guests = pgTable("guests", {
   vehiculoModelo: text("vehiculo_modelo"),
   vehiculoColor: text("vehiculo_color"),
   active: boolean("active").notNull().default(true),
+  vatCondition: text("vat_condition"),
+  provincia: text("provincia"),
 });
 
 export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, codigo: true, fechaAlta: true });

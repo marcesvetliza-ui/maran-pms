@@ -367,5 +367,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS area_id varchar`)
   );
 
+  // guests: vat_condition and provincia
+  await withTimeout("guests.vat_condition", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS vat_condition text`)
+  );
+  await withTimeout("guests.provincia", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS provincia text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

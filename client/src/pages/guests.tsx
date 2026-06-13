@@ -80,6 +80,90 @@ import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, Gue
 import { Badge } from "@/components/ui/badge";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 
+// ─── Constantes normalizadas para AFIP ──────────────────────────────────────
+
+export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  dni: "DNI",
+  cuit: "CUIT",
+  cuil: "CUIL",
+  passport: "Pasaporte",
+  cedula: "Cédula (CI)",
+  lc: "Libreta Cívica",
+  le: "Libreta de Enrolamiento",
+  other: "Otro",
+};
+
+export const VAT_CONDITION_LABELS: Record<string, string> = {
+  consumidor_final: "Consumidor Final",
+  responsable_inscripto: "Responsable Inscripto",
+  monotributista: "Monotributista",
+  exento: "Exento",
+  no_responsable: "No Responsable",
+  no_categorizado: "No Categorizado (Extranjero)",
+};
+
+export const COUNTRIES_AFIP = [
+  "Argentina","Uruguay","Brasil","Chile","Paraguay","Bolivia","Perú","Colombia","Venezuela","Ecuador",
+  "Estados Unidos","España","Italia","Francia","Alemania","Portugal","México","Cuba","Costa Rica",
+  "Panamá","Honduras","Nicaragua","Guatemala","El Salvador","República Dominicana","Haití","Jamaica",
+  "Trinidad y Tobago","Barbados","Bahamas","Belice","Guyana","Surinam","Guyana Francesa",
+  "Reino Unido","Irlanda","Bélgica","Países Bajos","Luxemburgo","Suiza","Austria","Suecia","Noruega",
+  "Dinamarca","Finlandia","Polonia","República Checa","Hungría","Rumania","Bulgaria","Grecia","Turquía",
+  "Rusia","Ucrania","Bielorrusia","Croacia","Serbia","Eslovenia","Eslovaquia","Estonia","Letonia","Lituania",
+  "China","Japón","Corea del Sur","India","Israel","Líbano","Siria","Irán","Irak","Arabia Saudita",
+  "Emiratos Árabes","Egipto","Marruecos","Argelia","Túnez","Sudáfrica","Nigeria","Kenia","Ghana",
+  "Australia","Nueva Zelanda","Canadá","Otros",
+];
+
+/** Normaliza CUIT/CUIL: elimina guiones y espacios, deja solo dígitos */
+export function normalizeCuit(value: string): string {
+  return value.replace(/[-\s]/g, "");
+}
+
+/** Formatea CUIT para mostrar: XX-XXXXXXXX-X */
+export function formatCuit(value: string): string {
+  const digits = normalizeCuit(value);
+  if (digits.length === 11) {
+    return `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits[10]}`;
+  }
+  return digits;
+}
+
+function NationalityCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const filtered = COUNTRIES_AFIP.filter(c => c.toLowerCase().includes(search.toLowerCase())).slice(0, 30);
+  return (
+    <div className="grid gap-2">
+      <Label>Nacionalidad / País</Label>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal" data-testid="select-nationality">
+            {value || "Seleccionar país..."}
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-full p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Buscar país..." value={search} onValueChange={setSearch} />
+            <CommandList>
+              <CommandEmpty>Sin resultados.</CommandEmpty>
+              <CommandGroup>
+                {filtered.map(country => (
+                  <CommandItem key={country} value={country} onSelect={(v) => { onChange(v); setOpen(false); setSearch(""); }}>
+                    <Check className={`mr-2 h-4 w-4 ${value === country ? "opacity-100" : "opacity-0"}`} />
+                    {country}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
 function GuestFormDialog({
   guest,
   open,
@@ -104,12 +188,18 @@ function GuestFormDialog({
     documentType: (() => {
       const raw = g?.documentType?.trim().toLowerCase() || "";
       if (raw === "dni") return "dni";
+      if (raw === "cuit") return "cuit";
+      if (raw === "cuil") return "cuil";
       if (raw === "passport" || raw === "pasaporte") return "passport";
       if (raw === "cedula" || raw === "cédula" || raw === "ci") return "cedula";
+      if (raw === "lc") return "lc";
+      if (raw === "le") return "le";
+      if (raw === "other" || raw === "otro") return "other";
       return "dni";
     })(),
     documentNumber: g?.documentNumber || "",
     nationality: g?.nationality || "",
+    vatCondition: (g as any)?.vatCondition || "",
     direccion: g?.direccion || "",
     provincia: g?.provincia || "",
     localidad: g?.localidad || "",
@@ -117,7 +207,7 @@ function GuestFormDialog({
     fechaNacimiento: g?.fechaNacimiento || "",
     sexo: g?.sexo || "no_especifica",
     segment: g?.segment || "LEISURE",
-    cuilCuit: g?.cuilCuit || "",
+    cuilCuit: g?.cuilCuit ? normalizeCuit(g.cuilCuit) : "",
     companyId: g?.companyId || null,
     agencyId: g?.agencyId || null,
     vehiculoPatente: g?.vehiculoPatente || "",
@@ -189,7 +279,12 @@ function GuestFormDialog({
       return;
     }
     setFormErrors({});
-    mutation.mutate(formData);
+    // Normalizar CUIT: guardar siempre sin guiones (formato ARCA/AFIP)
+    const payload = {
+      ...formData,
+      cuilCuit: formData.cuilCuit ? normalizeCuit(formData.cuilCuit) : formData.cuilCuit,
+    };
+    mutation.mutate(payload);
   };
 
   return (
@@ -269,10 +364,9 @@ function GuestFormDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="dni">DNI</SelectItem>
-                    <SelectItem value="passport">Pasaporte</SelectItem>
-                    <SelectItem value="cedula">Cédula</SelectItem>
-                    <SelectItem value="other">Otro</SelectItem>
+                    {Object.entries(DOCUMENT_TYPE_LABELS).map(([val, label]) => (
+                      <SelectItem key={val} value={val}>{label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -287,16 +381,42 @@ function GuestFormDialog({
                 />
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="nationality">Nacionalidad</Label>
-              <Input
-                id="nationality"
-                value={formData.nationality || ""}
-                onChange={(e) => setFormData({ ...formData, nationality: e.target.value })}
-                placeholder="Argentina"
-                data-testid="input-nationality"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="cuilCuit">CUIT / CUIL</Label>
+                <Input
+                  id="cuilCuit"
+                  value={formData.cuilCuit || ""}
+                  onChange={(e) => setFormData({ ...formData, cuilCuit: normalizeCuit(e.target.value) })}
+                  placeholder="20123456789"
+                  maxLength={13}
+                  data-testid="input-cuil-cuit"
+                />
+                {formData.cuilCuit && normalizeCuit(formData.cuilCuit).length === 11 && (
+                  <p className="text-xs text-muted-foreground">{formatCuit(formData.cuilCuit)}</p>
+                )}
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="vatCondition">Condición ante IVA</Label>
+                <Select
+                  value={(formData as any).vatCondition || "consumidor_final"}
+                  onValueChange={(value) => setFormData({ ...formData, vatCondition: value } as any)}
+                >
+                  <SelectTrigger data-testid="select-vat-condition">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
+                      <SelectItem key={val} value={val}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+            <NationalityCombobox
+              value={formData.nationality || ""}
+              onChange={(v) => setFormData({ ...formData, nationality: v })}
+            />
             <ProvinciaCiudadSelect
               provincia={formData.provincia || ""}
               localidad={formData.localidad || ""}
@@ -838,7 +958,7 @@ function GuestDetailDialog({
                   );
                 })()}
               </div>
-              <p className="text-sm text-muted-foreground">{guest.nationality || "Sin nacionalidad"}</p>
+              <p className="text-sm text-muted-foreground">{guest.nationality || "Sin nacionalidad registrada"}</p>
             </div>
           </div>
 
@@ -884,9 +1004,29 @@ function GuestDetailDialog({
                   <FileText className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <p className="text-xs text-muted-foreground">
-                      {guest.documentType?.toUpperCase() || "Documento"}
+                      {DOCUMENT_TYPE_LABELS[guest.documentType?.toLowerCase() || ""] || guest.documentType?.toUpperCase() || "Documento"}
                     </p>
                     <p className="font-medium text-sm">{guest.documentNumber}</p>
+                  </div>
+                </div>
+              )}
+              {guest.cuilCuit && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <CreditCard className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">CUIT / CUIL</p>
+                    <p className="font-medium text-sm font-mono">{formatCuit(guest.cuilCuit)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {(guest as any).vatCondition && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Condición IVA</p>
+                    <p className="font-medium text-sm">{VAT_CONDITION_LABELS[(guest as any).vatCondition] || (guest as any).vatCondition}</p>
                   </div>
                 </div>
               )}
@@ -1176,7 +1316,7 @@ export default function GuestsPage() {
                   <TableCell>{guest.phone || "-"}</TableCell>
                   <TableCell>
                     {guest.documentType && guest.documentNumber
-                      ? `${guest.documentType.toUpperCase()}: ${guest.documentNumber}`
+                      ? `${DOCUMENT_TYPE_LABELS[guest.documentType.toLowerCase()] || guest.documentType.toUpperCase()}: ${guest.documentNumber}`
                       : "-"}
                   </TableCell>
                   <TableCell>{guest.nationality || "-"}</TableCell>
