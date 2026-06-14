@@ -771,13 +771,16 @@ export class DatabaseStorage implements IStorage {
     const allRooms = await db.select().from(rooms);
     const today = getArgentinaToday();
 
-    const totalRooms = allRooms.length;
-    const availableRooms = allRooms.filter(r => r.status === "available").length;
-    const occupiedRooms = allRooms.filter(r => r.status === "occupied").length;
-    const dirtyRooms = allRooms.filter(r => r.status === "dirty").length;
-    const cleaningRooms = allRooms.filter(r => r.status === "cleaning").length;
-    const maintenanceRooms = allRooms.filter(r => r.status === "maintenance").length;
-    const oosRooms = allRooms.filter(r => r.status === "oos").length;
+    // Excluir habitaciones virtuales (REUB y similares) de todas las estadísticas
+    const realRooms = allRooms.filter(r => !r.isVirtual);
+
+    const totalRooms = realRooms.length;
+    const availableRooms = realRooms.filter(r => r.status === "available").length;
+    const occupiedRooms = realRooms.filter(r => r.status === "occupied").length;
+    const dirtyRooms = realRooms.filter(r => r.status === "dirty").length;
+    const cleaningRooms = realRooms.filter(r => r.status === "cleaning").length;
+    const maintenanceRooms = realRooms.filter(r => r.status === "maintenance").length;
+    const oosRooms = realRooms.filter(r => r.status === "oos").length;
 
     const todayCheckInsResult = await db.select({ cnt: count() }).from(reservations).where(
       and(
@@ -802,28 +805,31 @@ export class DatabaseStorage implements IStorage {
     );
     const pendingReservations = pendingResult[0]?.cnt ?? 0;
 
-    // Desayunos mañana = total pax alojados esta noche
-    // (checkIn <= hoy AND checkOut > hoy, status checked_in o confirmed/pending)
-    const tonightRows = await db.select({
-      pax: sql<number>`COALESCE(SUM(${reservations.numberOfGuests}), 0)`,
-      rooms: sql<number>`COUNT(*)`,
-    }).from(reservations).where(
-      and(
-        lte(reservations.checkInDate, today),
-        gt(reservations.checkOutDate, today),
-        inArray(reservations.status, ["checked_in", "confirmed", "pending"] as any)
-      )
-    );
-    const breakfastsTomorrow = Number(tonightRows[0]?.pax ?? 0);
-    const roomsTonight = Number(tonightRows[0]?.rooms ?? 0);
+    // Desayunos mañana = pax en reservas activas (checked_in) que pasan la noche de hoy
+    // Solo reservas con check-in ya realizado (status = checked_in) para habitaciones reales
+    const tonightRows = await db.execute(sql`
+      SELECT
+        COALESCE(SUM(r.number_of_guests), 0) AS pax,
+        COUNT(*) AS rooms_count
+      FROM reservations r
+      JOIN rooms rm ON rm.id = r.room_id
+      WHERE r.check_in_date <= ${today}
+        AND r.check_out_date > ${today}
+        AND r.status = 'checked_in'
+        AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
+    `);
+    const breakfastsTomorrow = Number((tonightRows.rows[0] as any)?.pax ?? 0);
+    const roomsTonight = Number((tonightRows.rows[0] as any)?.rooms_count ?? 0);
 
-    // Personas in house = sum(numberOfGuests) de habitaciones ocupadas
+    // Personas in house = sum(numberOfGuests) de reservas checked_in en habitaciones reales ocupadas
+    // Solo status = 'checked_in' para evitar contar reservas históricas múltiples por cuarto
     const inHouseRows = await db.execute(sql`
       SELECT COALESCE(SUM(r.number_of_guests), 0) AS pax
       FROM rooms rm
       JOIN reservations r ON r.room_id = rm.id
       WHERE rm.status = 'occupied'
-        AND r.status NOT IN ('cancelled', 'checked_out')
+        AND r.status = 'checked_in'
+        AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
     `);
     const inHouseGuests = Number((inHouseRows.rows[0] as any)?.pax ?? 0);
 
@@ -3481,10 +3487,11 @@ export class DatabaseStorage implements IStorage {
 
   async getExecutiveStats(from: string, to: string): Promise<any> {
     const allRooms = await db.select().from(rooms);
-    const totalRooms = allRooms.length;
+    const realRooms = allRooms.filter(r => !r.isVirtual);
+    const totalRooms = realRooms.length;
 
     const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, dirty: 0, cleaning: 0, maintenance: 0, oos: 0 };
-    for (const r of allRooms) {
+    for (const r of realRooms) {
       const s = r.status || "available";
       if (s in roomsByStatus) roomsByStatus[s]++;
       else roomsByStatus[s] = (roomsByStatus[s] || 0) + 1;
@@ -3574,7 +3581,7 @@ export class DatabaseStorage implements IStorage {
   async getReportOccupancy(from: string, to: string): Promise<any[]> {
     const result: any[] = [];
     const allRooms = await db.select().from(rooms);
-    const totalRooms = allRooms.length;
+    const totalRooms = allRooms.filter(r => !r.isVirtual).length;
     const start = new Date(from);
     const end = new Date(to);
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
