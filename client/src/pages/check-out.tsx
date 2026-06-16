@@ -104,6 +104,7 @@ export default function CheckOutPage() {
   const [finalSummary, setFinalSummary] = useState<{ guestName: string; roomNumber: string; checkOutDate: string; totalPaid: number; methods: string[] } | null>(null);
   const [ccCompanyId, setCcCompanyId] = useState("");
   const [ccAgencyId, setCcAgencyId] = useState("");
+  const [earlyCheckoutDialog, setEarlyCheckoutDialog] = useState(false);
   const [itemPayMode, setItemPayMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
 
@@ -321,6 +322,7 @@ export default function CheckOutPage() {
 
   const balance = folio?.balance || 0;
   const isHistorical = selectedReservation ? selectedReservation.checkOutDate < today : false;
+  const isEarlyCheckout = selectedReservation ? selectedReservation.checkOutDate > today : false;
 
   if (wizardStep > 0 && selectedReservation) {
     return (
@@ -357,6 +359,18 @@ export default function CheckOutPage() {
                 La fecha de salida original era {formatDateAR(selectedReservation.checkOutDate)}.
                 El sistema cerrará la habitación tal como está, sin permitir modificaciones.
                 El cierre quedará registrado con fecha de hoy.
+              </p>
+            </div>
+          </div>
+        )}
+        {isEarlyCheckout && (
+          <div className="flex items-start gap-3 rounded-lg border border-orange-300 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/40 px-4 py-3" data-testid="banner-early-checkout">
+            <AlertCircle className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold text-orange-800 dark:text-orange-300">Salida anticipada</p>
+              <p className="text-sm text-orange-700 dark:text-orange-400">
+                La fecha de salida programada era <strong>{formatDateAR(selectedReservation.checkOutDate)}</strong>.
+                Se registrará el check-out con la fecha de hoy.
               </p>
             </div>
           </div>
@@ -845,14 +859,18 @@ export default function CheckOutPage() {
                 <ChevronLeft className="h-4 w-4 mr-1" /> Volver al resumen
               </Button>
               <Button
-                onClick={() => selectedReservation && checkOutMutation.mutate(selectedReservation.id)}
+                onClick={() => {
+                  if (isEarlyCheckout) { setEarlyCheckoutDialog(true); return; }
+                  selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+                }}
                 disabled={(!isHistorical && balance > 0.01) || checkOutMutation.isPending}
-                variant={isHistorical ? "destructive" : "default"}
+                variant={isHistorical ? "destructive" : isEarlyCheckout ? "outline" : "default"}
+                className={isEarlyCheckout ? "border-orange-400 text-orange-700 hover:bg-orange-50 dark:border-orange-600 dark:text-orange-300" : ""}
                 data-testid="button-confirm-checkout"
               >
                 {checkOutMutation.isPending ? (
                   <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
-                ) : isHistorical ? "Cerrar Habitación Histórica" : "Confirmar Check-out"}
+                ) : isHistorical ? "Cerrar Habitación Histórica" : isEarlyCheckout ? "Confirmar salida anticipada" : "Confirmar Check-out"}
               </Button>
             </div>
           </div>
@@ -1191,6 +1209,41 @@ export default function CheckOutPage() {
               </>
             )}
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Diálogo confirmación salida anticipada */}
+      <Dialog open={earlyCheckoutDialog} onOpenChange={(open) => { if (!open) setEarlyCheckoutDialog(false); }}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-400">
+              <AlertCircle className="h-5 w-5" />
+              Salida anticipada
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground space-y-2">
+            <p>
+              La fecha de salida programada era{" "}
+              <strong className="text-orange-700 dark:text-orange-400">
+                {selectedReservation ? formatDateAR(selectedReservation.checkOutDate) : ""}
+              </strong>.
+            </p>
+            <p>El check-out se registrará con la fecha de hoy. ¿Confirmar salida anticipada?</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setEarlyCheckoutDialog(false)} data-testid="button-cancel-early-checkout">
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                setEarlyCheckoutDialog(false);
+                selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+              }}
+              disabled={checkOutMutation.isPending}
+              data-testid="button-confirm-early-checkout"
+            >
+              Confirmar salida anticipada
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,4 +1,4 @@
-import { Move, ArrowLeftRight, Calendar, User, Palette, X } from "lucide-react";
+import { Move, ArrowLeftRight, Calendar, User, Palette, X, AlertTriangle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ export interface MoveConfirmData {
   reservationId: string;
   guestName: string;
   fromRoomNumber: string;
+  fromRoomType: string;
   toRoomId: string;
   toRoomNumber: string;
   toRoomType: string;
@@ -81,9 +82,21 @@ export function PlanningMoveConfirmDialog({
                 </Badge>
               </div>
             )}
-            <p className="text-sm text-muted-foreground">
-              Tipo: {moveConfirm.toRoomType}
-            </p>
+            {moveConfirm.fromRoomType !== moveConfirm.toRoomType ? (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-3 py-2 text-sm" data-testid="banner-category-change">
+                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium text-amber-800 dark:text-amber-300">Cambio de categoría</p>
+                  <p className="text-amber-700 dark:text-amber-400">
+                    <span className="line-through">{moveConfirm.fromRoomType}</span>
+                    {" → "}
+                    <strong>{moveConfirm.toRoomType}</strong>
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Tipo: {moveConfirm.toRoomType}</p>
+            )}
           </div>
         )}
         <DialogFooter className="flex flex-col sm:flex-row gap-2">

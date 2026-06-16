@@ -249,6 +249,7 @@ export default function PlanningPage() {
     reservationId: string;
     guestName: string;
     fromRoomNumber: string;
+    fromRoomType: string;
     toRoomId: string;
     toRoomNumber: string;
     toRoomType: string;
@@ -381,6 +382,7 @@ export default function PlanningPage() {
       reservationId,
       guestName: reservation.guestName,
       fromRoomNumber: fromRoom.roomNumber,
+      fromRoomType: fromRoom.roomType?.name ?? "",
       toRoomId: toRoom.id,
       toRoomNumber: toRoom.roomNumber,
       toRoomType: toRoom.roomType?.name ?? "",

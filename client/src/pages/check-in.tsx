@@ -85,7 +85,9 @@ export default function CheckInPage() {
   const [numberOfGuests, setNumberOfGuests] = useState<number>(1);
   const [walkInNotes, setWalkInNotes] = useState<string>("");
   const [checkInNotes, setCheckInNotes] = useState<string>("");
-  
+  const [dirtyRoomDialog, setDirtyRoomDialog] = useState(false);
+  const [anticipadoDialog, setAnticipadorDialog] = useState(false);
+
   const [historyDate, setHistoryDate] = useState<string>(() => {
     return getLocalToday();
   });
@@ -359,6 +361,11 @@ export default function CheckInPage() {
     setConfirmDialogOpen(true);
   };
 
+  const doCheckIn = () => {
+    if (!selectedReservation) return;
+    checkInMutation.mutate({ id: selectedReservation.id });
+  };
+
   const performCheckIn = async () => {
     if (!selectedReservation) return;
     
@@ -367,8 +374,30 @@ export default function CheckInPage() {
         notes: checkInNotes,
       });
     }
+
+    const roomStatus = selectedReservation.room?.status;
+    if (roomStatus === "dirty" || roomStatus === "cleaning") {
+      setDirtyRoomDialog(true);
+      return;
+    }
+
+    const today = getLocalToday();
+    if (selectedReservation.checkInDate > today) {
+      setAnticipadorDialog(true);
+      return;
+    }
     
     checkInMutation.mutate({ id: selectedReservation.id });
+  };
+
+  const confirmDirtyRoom = () => {
+    setDirtyRoomDialog(false);
+    const today = getLocalToday();
+    if (selectedReservation && selectedReservation.checkInDate > today) {
+      setAnticipadorDialog(true);
+      return;
+    }
+    doCheckIn();
   };
 
   const canSubmitWalkIn = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0;
@@ -1254,6 +1283,75 @@ export default function CheckInPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Aviso: Habitación sucia */}
+      <Dialog open={dirtyRoomDialog} onOpenChange={(open) => { if (!open) setDirtyRoomDialog(false); }}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-400">
+              <AlertTriangle className="h-5 w-5" />
+              Habitación no disponible
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground space-y-2">
+            <p>
+              La habitación <strong>{selectedReservation?.room?.roomNumber}</strong> figura como{" "}
+              <strong className="text-orange-700 dark:text-orange-400">
+                {selectedReservation?.room?.status === "dirty" ? "sucia" : "en limpieza"}
+              </strong>{" "}
+              en el sistema.
+            </p>
+            <p>¿Desea registrar el check-in de todas formas?</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDirtyRoomDialog(false)} data-testid="button-cancel-dirty-warning">
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDirtyRoom}
+              disabled={checkInMutation.isPending}
+              data-testid="button-confirm-dirty-checkin"
+            >
+              Confirmar de todas formas
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Aviso: Check-in anticipado */}
+      <Dialog open={anticipadoDialog} onOpenChange={(open) => { if (!open) setAnticipadorDialog(false); }}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="h-5 w-5" />
+              Check-in anticipado
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground space-y-2">
+            <p>
+              La fecha de entrada programada es{" "}
+              <strong className="text-amber-700 dark:text-amber-400">
+                {selectedReservation ? formatDateAR(selectedReservation.checkInDate) : ""}
+              </strong>
+              , que es posterior a hoy.
+            </p>
+            <p>¿Desea registrar el check-in antes de la fecha prevista?</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setAnticipadorDialog(false)} data-testid="button-cancel-anticipado">
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => { setAnticipadorDialog(false); doCheckIn(); }}
+              disabled={checkInMutation.isPending}
+              data-testid="button-confirm-anticipado"
+            >
+              Confirmar check-in anticipado
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={retroactivoDialog} onOpenChange={(open) => { setRetroactivoDialog(open); if (!open) { setRetroactivoMotivo(""); setPendingCheckInId(null); } }}>
         <DialogContent className="sm:max-w-[420px]">
