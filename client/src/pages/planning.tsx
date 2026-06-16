@@ -476,6 +476,27 @@ export default function PlanningPage() {
       .filter(Boolean)
   );
 
+  // Rooms that have a maintenance block AND an active reservation overlapping — persistent warning
+  const maintenanceConflictRoomIds = useMemo(() => {
+    const result = new Set<string>();
+    if (!data) return result;
+    for (const wo of planningWorkOrders) {
+      const block = (wo as any).maintenanceBlock;
+      if (!block) continue;
+      const roomId = block.roomId as string;
+      const cellRes = data.cellReservations[roomId] ?? {};
+      for (const [day, resId] of Object.entries(cellRes)) {
+        if (day < block.blockFrom || day >= block.blockTo) continue;
+        const res = data.reservations[resId as string];
+        if (res && !["cancelled", "checked_out"].includes(res.status)) {
+          result.add(roomId);
+          break;
+        }
+      }
+    }
+    return result;
+  }, [data, planningWorkOrders]);
+
   const saveNoteMutation = useMutation({
     mutationFn: async ({ date, note }: { date: string; note: string }) => {
       const res = await apiRequest("PUT", `/api/planning/day-notes/${date}`, { note });
@@ -1068,6 +1089,7 @@ export default function PlanningPage() {
                                 onUpdateStatus={({ roomId, status }) => updateRoomStatusMutation.mutate({ roomId, status })}
                                 isPendingStatusUpdate={updateRoomStatusMutation.isPending}
                                 maintenanceAlertRoomIds={maintenanceAlertRoomIds}
+                                maintenanceConflictRoomIds={maintenanceConflictRoomIds}
                               />
                             </td>
                             {data.days.map((day, dayIndex) => {

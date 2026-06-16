@@ -3071,6 +3071,23 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+  async checkMaintenanceBlockConflicts(roomId: string, blockFrom: string, blockTo: string) {
+    return db.select({
+      id: reservations.id,
+      guestName: reservations.guestName,
+      checkInDate: reservations.checkInDate,
+      checkOutDate: reservations.checkOutDate,
+      status: reservations.status,
+    }).from(reservations).where(
+      and(
+        eq(reservations.roomId, roomId),
+        lt(reservations.checkInDate, blockTo),
+        gt(reservations.checkOutDate, blockFrom),
+        not(inArray(reservations.status, ["cancelled", "checked_out"] as any))
+      )
+    );
+  }
+
   async createMaintenanceBlock(block: InsertMaintenanceBlock): Promise<MaintenanceBlock> {
     const [created] = await db.insert(maintenanceBlocks).values(block as any).returning();
     return created;

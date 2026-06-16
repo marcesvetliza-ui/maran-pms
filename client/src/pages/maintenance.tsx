@@ -467,6 +467,14 @@ export default function MaintenancePage() {
   const { toast } = useToast();
   const { user } = useAuth();
 
+  type ConflictRes = { id: string; guestName: string; checkInDate: string; checkOutDate: string; status: string };
+  const [blockConflicts, setBlockConflicts] = useState<ConflictRes[]>([]);
+  const [pendingBlockAction, setPendingBlockAction] = useState<
+    | { type: "add_block"; payload: { workOrderId: string; roomId: string; blockFrom: string; blockTo: string; blockedBy: string } }
+    | { type: "new_order"; orderData: any }
+    | null
+  >(null);
+
   const { data: dashboardStats, isLoading: isLoadingStats } = useQuery<DashboardStats>({
     queryKey: ["/api/maintenance/dashboard"],
   });
@@ -661,6 +669,41 @@ export default function MaintenancePage() {
       toast({ title: "Error", description: "No se pudo actualizar la habitación", variant: "destructive" });
     },
   });
+
+  // Helper: execute the pending block action after conflict confirmation
+  const executeBlockAction = (action: NonNullable<typeof pendingBlockAction>) => {
+    if (action.type === "add_block") {
+      addBlockMutation.mutate(action.payload);
+    } else {
+      createOrderMutation.mutate(action.orderData);
+    }
+    setBlockConflicts([]);
+    setPendingBlockAction(null);
+  };
+
+  // Helper: check conflicts, then either proceed or show warning dialog
+  const checkConflictsAndProceed = async (
+    roomId: string,
+    from: string,
+    to: string,
+    action: NonNullable<typeof pendingBlockAction>
+  ) => {
+    try {
+      const res = await fetch(
+        `/api/maintenance/blocks/check-conflicts?roomId=${encodeURIComponent(roomId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+        { credentials: "include" }
+      );
+      const conflicts: ConflictRes[] = await res.json();
+      if (Array.isArray(conflicts) && conflicts.length > 0) {
+        setBlockConflicts(conflicts);
+        setPendingBlockAction(action);
+      } else {
+        executeBlockAction(action);
+      }
+    } catch {
+      executeBlockAction(action); // If check fails, proceed anyway
+    }
+  };
 
   const filteredOrders = workOrders.filter((order) => {
     if (statusFilter === "active") {
@@ -1050,7 +1093,14 @@ export default function MaintenancePage() {
             <DialogDescription>Complete los datos para crear una nueva orden de trabajo</DialogDescription>
           </DialogHeader>
           <Form {...orderForm}>
-            <form onSubmit={orderForm.handleSubmit((data) => createOrderMutation.mutate(data))} className="space-y-4">
+            <form onSubmit={orderForm.handleSubmit(async (data) => {
+              const roomIdClean = data.roomId && data.roomId !== "none" ? data.roomId : null;
+              if (blockRoom && roomIdClean && blockFrom && blockTo) {
+                await checkConflictsAndProceed(roomIdClean, blockFrom, blockTo, { type: "new_order", orderData: data });
+              } else {
+                createOrderMutation.mutate(data);
+              }
+            })} className="space-y-4">
               <FormField
                 control={orderForm.control}
                 name="title"
@@ -1379,13 +1429,18 @@ export default function MaintenancePage() {
                         size="sm"
                         disabled={!detailBlockFrom || !detailBlockTo || detailBlockTo < detailBlockFrom || addBlockMutation.isPending}
                         onClick={() => {
-                          addBlockMutation.mutate({
-                            workOrderId: selectedOrder.id,
-                            roomId: selectedOrder.roomId!,
-                            blockFrom: detailBlockFrom,
-                            blockTo: detailBlockTo,
-                            blockedBy: user?.username || "Sistema",
-                          });
+                          checkConflictsAndProceed(
+                            selectedOrder.roomId!,
+                            detailBlockFrom,
+                            detailBlockTo,
+                            { type: "add_block", payload: {
+                              workOrderId: selectedOrder.id,
+                              roomId: selectedOrder.roomId!,
+                              blockFrom: detailBlockFrom,
+                              blockTo: detailBlockTo,
+                              blockedBy: user?.username || "Sistema",
+                            }}
+                          );
                         }}
                       >
                         <Lock className="mr-2 h-3.5 w-3.5" />
@@ -1546,6 +1601,47 @@ export default function MaintenancePage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de conflictos — se muestra cuando el bloqueo se superpone con reservas activas */}
+      <Dialog open={blockConflicts.length > 0} onOpenChange={(open) => { if (!open) { setBlockConflicts([]); setPendingBlockAction(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600 dark:text-orange-400">
+              <AlertTriangle className="h-5 w-5" />
+              Reservas activas en esa habitación
+            </DialogTitle>
+            <DialogDescription>
+              Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar el bloqueo de todas formas o cancelar para reubicar primero a los huéspedes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 divide-y divide-orange-100 dark:divide-orange-900">
+            {blockConflicts.map((c) => (
+              <div key={c.id} className="px-3 py-2">
+                <p className="font-medium text-sm">{c.guestName || "Sin nombre"}</p>
+                <p className="text-xs text-muted-foreground">
+                  Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                </p>
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => { setBlockConflicts([]); setPendingBlockAction(null); }}
+              data-testid="button-conflict-cancel"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => pendingBlockAction && executeBlockAction(pendingBlockAction)}
+              data-testid="button-conflict-confirm"
+            >
+              Confirmar bloqueo de todas formas
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

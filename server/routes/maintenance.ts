@@ -153,6 +153,18 @@ export function registerMaintenanceRoutes(app: Express) {
   });
 
   // Maintenance Blocks
+  // Check conflicts BEFORE creating a block (must be before /blocks to avoid route collision)
+  app.get("/api/maintenance/blocks/check-conflicts", requireAuth, async (req, res) => {
+    try {
+      const { roomId, from, to } = req.query as { roomId: string; from: string; to: string };
+      if (!roomId || !from || !to) return res.status(400).json({ error: "roomId, from, to son requeridos" });
+      const conflicts = await storage.checkMaintenanceBlockConflicts(roomId, from, to);
+      res.json(conflicts);
+    } catch (error) {
+      res.status(500).json({ error: "Error verificando conflictos" });
+    }
+  });
+
   app.get("/api/maintenance/blocks", async (req, res) => {
     try {
       const { roomId, from, to } = req.query;

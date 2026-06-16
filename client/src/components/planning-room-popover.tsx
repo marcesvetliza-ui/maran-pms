@@ -1,4 +1,4 @@
-import { AlertCircle, RefreshCw, CheckCircle2, Wrench } from "lucide-react";
+import { AlertCircle, RefreshCw, CheckCircle2, Wrench, TriangleAlert } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { featureIconMap, bedConfigLabels, ROOM_STATUS_OPTIONS } from "@/lib/planning-utils";
 import type { RoomWithType } from "@shared/schema";
@@ -11,6 +11,7 @@ interface RoomPopoverProps {
   onUpdateStatus: (data: { roomId: string; status: string }) => void;
   isPendingStatusUpdate: boolean;
   maintenanceAlertRoomIds: Set<string>;
+  maintenanceConflictRoomIds?: Set<string>;
 }
 
 export function RoomPopover({
@@ -21,6 +22,7 @@ export function RoomPopover({
   onUpdateStatus,
   isPendingStatusUpdate,
   maintenanceAlertRoomIds,
+  maintenanceConflictRoomIds,
 }: RoomPopoverProps) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -44,6 +46,11 @@ export function RoomPopover({
           )}
           {room.status !== "maintenance" && maintenanceAlertRoomIds.has(room.id) && (
             <span title="Orden de mantenimiento pendiente"><Wrench className="h-3 w-3 text-orange-400 shrink-0" /></span>
+          )}
+          {maintenanceConflictRoomIds?.has(room.id) && (
+            <span title="⚠️ Tiene reservas activas durante el bloqueo de mantenimiento">
+              <TriangleAlert className="h-3 w-3 text-red-500 shrink-0 animate-pulse" />
+            </span>
           )}
           {room.features && room.features.slice(0, 2).map((feature) => {
             const mapped = featureIconMap[feature];
