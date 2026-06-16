@@ -644,9 +644,13 @@ export default function PlanningPage() {
     if (filters.guestSearch) {
       const cellRes = data?.cellReservations[room.id] ?? {};
       const resIds = Array.from(new Set(Object.values(cellRes)));
+      const q = filters.guestSearch.toLowerCase();
       const hasMatch = resIds.some(resId => {
         const res = data?.reservations[resId];
-        return res?.guestName?.toLowerCase().includes(filters.guestSearch.toLowerCase());
+        return (
+          res?.guestName?.toLowerCase().includes(q) ||
+          res?.groupName?.toLowerCase().includes(q)
+        );
       });
       if (!hasMatch) return false;
     }
@@ -727,7 +731,7 @@ export default function PlanningPage() {
                   )}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-80 p-4" align="end">
+              <PopoverContent className="w-80 p-4 max-h-[85vh] overflow-y-auto" align="end">
                 <div className="mb-3">
                   <h4 className="font-semibold text-sm">Filtros</h4>
                   <p className="text-xs text-muted-foreground">Reducí la vista del planning</p>
