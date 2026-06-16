@@ -1095,8 +1095,12 @@ export default function MaintenancePage() {
           <Form {...orderForm}>
             <form onSubmit={orderForm.handleSubmit(async (data) => {
               const roomIdClean = data.roomId && data.roomId !== "none" ? data.roomId : null;
-              if (blockRoom && roomIdClean && blockFrom && blockTo) {
-                await checkConflictsAndProceed(roomIdClean, blockFrom, blockTo, { type: "new_order", orderData: data });
+              if (roomIdClean) {
+                const todayStr = format(new Date(), "yyyy-MM-dd");
+                const tomorrowStr = format(new Date(new Date().setDate(new Date().getDate() + 1)), "yyyy-MM-dd");
+                const fromDate = blockRoom && blockFrom ? blockFrom : todayStr;
+                const toDate = blockRoom && blockTo ? blockTo : tomorrowStr;
+                await checkConflictsAndProceed(roomIdClean, fromDate, toDate, { type: "new_order", orderData: data });
               } else {
                 createOrderMutation.mutate(data);
               }
@@ -1604,7 +1608,7 @@ export default function MaintenancePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog de conflictos — se muestra cuando el bloqueo se superpone con reservas activas */}
+      {/* Dialog de conflictos — se muestra cuando hay reservas activas en la habitación */}
       <Dialog open={blockConflicts.length > 0} onOpenChange={(open) => { if (!open) { setBlockConflicts([]); setPendingBlockAction(null); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1613,7 +1617,9 @@ export default function MaintenancePage() {
               Reservas activas en esa habitación
             </DialogTitle>
             <DialogDescription>
-              Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar el bloqueo de todas formas o cancelar para reubicar primero a los huéspedes.
+              {blockRoom
+                ? "Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar el bloqueo de todas formas o cancelar para reubicar primero a los huéspedes."
+                : "La habitación tiene reservas activas. Informá a recepción antes de ingresar. Podés confirmar la orden de todas formas o cancelar."}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 divide-y divide-orange-100 dark:divide-orange-900">
@@ -1639,7 +1645,7 @@ export default function MaintenancePage() {
               onClick={() => pendingBlockAction && executeBlockAction(pendingBlockAction)}
               data-testid="button-conflict-confirm"
             >
-              Confirmar bloqueo de todas formas
+              {blockRoom ? "Confirmar bloqueo de todas formas" : "Crear orden de todas formas"}
             </Button>
           </DialogFooter>
         </DialogContent>
