@@ -1402,7 +1402,12 @@ export function registerReservationsRoutes(app: Express) {
         const cashMethod = methodMap[rawMethod] || rawMethod;
         const reservation = req.body.reservationId ? await storage.getReservation(req.body.reservationId) : null;
         const label = reservation
-          ? `Reserva ${reservation.reservationCode} - Pago ${rawMethod}`
+          ? [
+              `Reserva ${reservation.reservationCode}`,
+              reservation.room?.roomNumber ? `Hab. ${reservation.room.roomNumber}` : null,
+              reservation.guest ? `${reservation.guest.lastName}${reservation.guest.firstName ? ", " + reservation.guest.firstName : ""}` : null,
+              `Pago ${rawMethod}`,
+            ].filter(Boolean).join(" — ")
           : `Pago manual - ${req.body.description || "Sin descripción"}`;
         await storage.registerCashMovement(
           "reception", "reservation", req.body.reservationId || null, label,
@@ -1506,7 +1511,12 @@ export function registerReservationsRoutes(app: Express) {
         try {
           const reservation = await storage.getReservation(pay.reservation_id);
           const label = reservation
-            ? `Anulación pago ${reservation.reservationCode} — ${pay.method}`
+            ? [
+                `Anulación ${reservation.reservationCode}`,
+                reservation.room?.roomNumber ? `Hab. ${reservation.room.roomNumber}` : null,
+                reservation.guest ? `${reservation.guest.lastName}${reservation.guest.firstName ? ", " + reservation.guest.firstName : ""}` : null,
+                pay.method,
+              ].filter(Boolean).join(" — ")
             : `Anulación pago — ${pay.method}`;
           await storage.registerCashMovement(
             "reception", "payment_void", pay.id, label,
