@@ -167,10 +167,27 @@ export default function CheckInPage() {
     },
   });
 
-  const availableRooms = rooms?.filter((room) => 
-    room.status === "available" && 
-    (selectedRoomTypeId ? room.roomTypeId === selectedRoomTypeId : true)
-  );
+  const { data: maintenanceBlocks = [] } = useQuery<{ roomId: string; blockFrom: string; blockTo: string }[]>({
+    queryKey: ["/api/maintenance/blocks"],
+  });
+
+  const availableRooms = (() => {
+    const todayStr = getLocalToday();
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowStr = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    return rooms?.filter((room) => {
+      if (selectedRoomTypeId && room.roomTypeId !== selectedRoomTypeId) return false;
+      if (room.status === "available") return true;
+      if (room.status === "maintenance") {
+        const hasActiveBlock = maintenanceBlocks.some(
+          blk => blk.roomId === room.id && blk.blockFrom < tomorrowStr && blk.blockTo > todayStr
+        );
+        return !hasActiveBlock;
+      }
+      return false;
+    });
+  })();
 
   const applicableRatePlans = ratePlans?.filter((rp) => 
     rp.roomTypeId === selectedRoomTypeId

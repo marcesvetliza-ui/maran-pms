@@ -180,6 +180,11 @@ export function ReservationFormDialog({
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || defaultValues?.roomTypeId || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
+  const { data: maintenanceBlocks = [] } = useQuery<{ roomId: string; blockFrom: string; blockTo: string }[]>({
+    queryKey: ["/api/maintenance/blocks"],
+    enabled: open,
+  });
+
   // Cargos adicionales al crear — cargados desde la BD
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
     queryKey: ["/api/charge-types"],
@@ -588,14 +593,24 @@ export function ReservationFormDialog({
     });
   };
 
+  const hasMaintenanceBlockConflict = (roomId: string) => {
+    const checkIn = formData.checkInDate || today;
+    const checkOut = formData.checkOutDate || tomorrow;
+    return maintenanceBlocks.some(
+      blk => blk.roomId === roomId && blk.blockFrom < checkOut && blk.blockTo > checkIn
+    );
+  };
+
   const availableRooms = isUpgrade
     ? rooms.filter((r) => {
-        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
+        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status) ||
+          (r.status === "maintenance" && !hasMaintenanceBlockConflict(r.id));
         return isUsable || r.id === formData.roomId;
       })
     : rooms.filter((r) => {
         const sameRoom = r.id === reservation?.roomId || r.id === defaultValues?.roomId || r.id === formData.roomId;
-        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status);
+        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status) ||
+          (r.status === "maintenance" && !hasMaintenanceBlockConflict(r.id));
         return (isUsable || sameRoom) && r.roomTypeId === selectedRoomTypeId;
       });
 

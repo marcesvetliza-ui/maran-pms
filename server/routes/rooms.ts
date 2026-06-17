@@ -182,6 +182,7 @@ export function registerRoomsRoutes(app: Express) {
       }
       const rooms = await storage.getRooms();
       const allReservations = await storage.getReservations();
+      const maintenanceBlocks = await storage.getMaintenanceBlocks();
 
       let filtered = rooms.filter(r => r.status !== "blocked");
       if (roomTypeId) {
@@ -190,12 +191,21 @@ export function registerRoomsRoutes(app: Express) {
 
       const activeStatuses = ["reserved", "checked_in", "confirmed"];
       const available = filtered.filter(room => {
-        const conflict = allReservations.find(res => {
+        const resConflict = allReservations.find(res => {
           if (!activeStatuses.includes(res.status)) return false;
           if (res.roomId !== room.id) return false;
-          return res.checkInDate < checkOut && res.checkOutDate > checkIn;
+          return res.checkInDate < (checkOut as string) && res.checkOutDate > (checkIn as string);
         });
-        return !conflict;
+        if (resConflict) return false;
+
+        const blockConflict = maintenanceBlocks.find(blk =>
+          blk.roomId === room.id &&
+          blk.blockFrom < (checkOut as string) &&
+          blk.blockTo > (checkIn as string)
+        );
+        if (blockConflict) return false;
+
+        return true;
       });
 
       res.json(available);
