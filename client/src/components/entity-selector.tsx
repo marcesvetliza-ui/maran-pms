@@ -23,6 +23,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
   const [newGuest, setNewGuest] = useState({
+    tipoPersona: "fisica" as "fisica" | "juridica",
     firstName: "",
     lastName: "",
     email: "",
@@ -42,6 +43,8 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
     vehiculoColor: "",
   });
 
+  const isJuridicaGuest = newGuest.tipoPersona === "juridica";
+
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
     return () => clearTimeout(timer);
@@ -58,28 +61,31 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
   });
 
   const handleCreateGuest = () => {
-    if (!newGuest.firstName || !newGuest.lastName) return;
+    if (!newGuest.firstName) return;
+    if (!isJuridicaGuest && !newGuest.lastName) return;
     onCreateNew({
+      tipoPersona: newGuest.tipoPersona,
       firstName: newGuest.firstName,
-      lastName: newGuest.lastName,
+      lastName: isJuridicaGuest && !newGuest.lastName ? "-" : newGuest.lastName,
       email: newGuest.email || null,
       phone: newGuest.phone || null,
-      documentType: newGuest.documentType,
-      documentNumber: newGuest.documentNumber || null,
-      nationality: newGuest.nationality || null,
+      documentType: isJuridicaGuest ? "cuit" : newGuest.documentType,
+      documentNumber: isJuridicaGuest ? (newGuest.cuilCuit || null) : (newGuest.documentNumber || null),
+      nationality: isJuridicaGuest ? null : (newGuest.nationality || null),
       direccion: newGuest.direccion || null,
       localidad: newGuest.localidad || null,
       codigoPostal: newGuest.codigoPostal || null,
-      fechaNacimiento: newGuest.fechaNacimiento || null,
-      sexo: newGuest.sexo,
+      fechaNacimiento: isJuridicaGuest ? null : (newGuest.fechaNacimiento || null),
+      sexo: isJuridicaGuest ? "no_especifica" : newGuest.sexo,
       cuilCuit: newGuest.cuilCuit || null,
-      vehiculoPatente: newGuest.vehiculoPatente || null,
-      vehiculoMarca: newGuest.vehiculoMarca || null,
-      vehiculoModelo: newGuest.vehiculoModelo || null,
-      vehiculoColor: newGuest.vehiculoColor || null,
+      vehiculoPatente: isJuridicaGuest ? null : (newGuest.vehiculoPatente || null),
+      vehiculoMarca: isJuridicaGuest ? null : (newGuest.vehiculoMarca || null),
+      vehiculoModelo: isJuridicaGuest ? null : (newGuest.vehiculoModelo || null),
+      vehiculoColor: isJuridicaGuest ? null : (newGuest.vehiculoColor || null),
       companyId: null,
-    });
+    } as any);
     setNewGuest({
+      tipoPersona: "fisica",
       firstName: "",
       lastName: "",
       email: "",
@@ -208,227 +214,189 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
           </TabsContent>
 
           <TabsContent value="create" className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="firstName">Nombre *</Label>
-                <Input
-                  id="firstName"
-                  value={newGuest.firstName}
-                  onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })}
-                  placeholder="Nombre"
-                  data-testid="input-guest-firstname"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lastName">Apellido *</Label>
-                <Input
-                  id="lastName"
-                  value={newGuest.lastName}
-                  onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })}
-                  placeholder="Apellido"
-                  data-testid="input-guest-lastname"
-                />
-              </div>
+
+            {/* Toggle Persona Física / Jurídica */}
+            <div className="flex rounded-lg border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setNewGuest(g => ({ ...g, tipoPersona: "fisica" }))}
+                className={`flex-1 py-2 px-3 text-sm font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                  !isJuridicaGuest ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
+                data-testid="button-guest-tipo-fisica"
+              >
+                <User className="h-3.5 w-3.5" />
+                Persona Física
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewGuest(g => ({ ...g, tipoPersona: "juridica" }))}
+                className={`flex-1 py-2 px-3 text-sm font-medium flex items-center justify-center gap-1.5 transition-colors border-l ${
+                  isJuridicaGuest ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
+                data-testid="button-guest-tipo-juridica"
+              >
+                <Building2 className="h-3.5 w-3.5" />
+                Persona Jurídica
+              </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {/* ── JURÍDICA ── */}
+            {isJuridicaGuest && (<>
               <div className="space-y-2">
-                <Label htmlFor="documentType">Tipo Doc.</Label>
-                <Select
-                  value={newGuest.documentType || "dni"}
-                  onValueChange={(v) => setNewGuest({ ...newGuest, documentType: v as any })}
-                >
-                  <SelectTrigger data-testid="select-document-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="dni">DNI</SelectItem>
-                    <SelectItem value="passport">Pasaporte</SelectItem>
-                    <SelectItem value="cedula">Cedula</SelectItem>
-                    <SelectItem value="other">Otro</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="firstName">Razón Social *</Label>
+                <Input id="firstName" value={newGuest.firstName} onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })} placeholder="ACME S.A." data-testid="input-guest-razon-social" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="documentNumber">Numero Doc.</Label>
-                <Input
-                  id="documentNumber"
-                  value={newGuest.documentNumber}
-                  onChange={(e) => setNewGuest({ ...newGuest, documentNumber: e.target.value })}
-                  placeholder="12345678"
-                  data-testid="input-document-number"
-                />
+                <Label htmlFor="lastName">Nombre Fantasía <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                <Input id="lastName" value={newGuest.lastName} onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })} placeholder="Acme Corp" data-testid="input-guest-nombre-fantasia" />
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={newGuest.email}
-                  onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })}
-                  placeholder="correo@email.com"
-                  data-testid="input-guest-email"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Telefono</Label>
-                <Input
-                  id="phone"
-                  value={newGuest.phone}
-                  onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })}
-                  placeholder="+54 11 1234-5678"
-                  data-testid="input-guest-phone"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="nationality">Nacionalidad</Label>
-                <Input
-                  id="nationality"
-                  value={newGuest.nationality}
-                  onChange={(e) => setNewGuest({ ...newGuest, nationality: e.target.value })}
-                  placeholder="Argentina"
-                  data-testid="input-guest-nationality"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="sexo">Sexo</Label>
-                <Select
-                  value={newGuest.sexo}
-                  onValueChange={(v) => setNewGuest({ ...newGuest, sexo: v as any })}
-                >
-                  <SelectTrigger data-testid="select-guest-sexo">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="masculino">Masculino</SelectItem>
-                    <SelectItem value="femenino">Femenino</SelectItem>
-                    <SelectItem value="otro">Otro</SelectItem>
-                    <SelectItem value="no_especifica">No especifica</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="fechaNacimiento">Fecha Nacimiento</Label>
-                <Input
-                  id="fechaNacimiento"
-                  type="date"
-                  value={newGuest.fechaNacimiento}
-                  onChange={(e) => setNewGuest({ ...newGuest, fechaNacimiento: e.target.value })}
-                  data-testid="input-guest-fechanacimiento"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cuilCuit">CUIL/CUIT</Label>
-                <Input
-                  id="cuilCuit"
-                  value={newGuest.cuilCuit}
-                  onChange={(e) => setNewGuest({ ...newGuest, cuilCuit: e.target.value })}
-                  placeholder="20-12345678-9"
-                  data-testid="input-guest-cuilcuit"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="direccion">Direccion</Label>
-              <Input
-                id="direccion"
-                value={newGuest.direccion}
-                onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })}
-                placeholder="Av. Corrientes 1234"
-                data-testid="input-guest-direccion"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="localidad">Localidad</Label>
-                <Input
-                  id="localidad"
-                  value={newGuest.localidad}
-                  onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })}
-                  placeholder="CABA"
-                  data-testid="input-guest-localidad"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="codigoPostal">Codigo Postal</Label>
-                <Input
-                  id="codigoPostal"
-                  value={newGuest.codigoPostal}
-                  onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })}
-                  placeholder="1000"
-                  data-testid="input-guest-codigopostal"
-                />
-              </div>
-            </div>
-
-            <div className="border-t pt-3 mt-1">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Datos del Vehículo (opcional)</Label>
-              <div className="grid grid-cols-2 gap-4 mt-2">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="vehiculoPatente">Patente</Label>
-                  <Input
-                    id="vehiculoPatente"
-                    value={newGuest.vehiculoPatente}
-                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoPatente: e.target.value })}
-                    placeholder="ABC 123"
-                    data-testid="input-guest-vehiculo-patente"
-                  />
+                  <Label htmlFor="cuilCuit">CUIT *</Label>
+                  <Input id="cuilCuit" value={newGuest.cuilCuit} onChange={(e) => setNewGuest({ ...newGuest, cuilCuit: e.target.value })} placeholder="30-12345678-9" data-testid="input-guest-cuilcuit" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="vehiculoMarca">Marca</Label>
-                  <Input
-                    id="vehiculoMarca"
-                    value={newGuest.vehiculoMarca}
-                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoMarca: e.target.value })}
-                    placeholder="Toyota"
-                    data-testid="input-guest-vehiculo-marca"
-                  />
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={newGuest.email} onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })} placeholder="contacto@empresa.com" data-testid="input-guest-email" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4 mt-2">
+              <div className="space-y-2">
+                <Label htmlFor="phone">Teléfono</Label>
+                <Input id="phone" value={newGuest.phone} onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })} placeholder="+54 11 4000-1234" data-testid="input-guest-phone" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="direccion">Dirección</Label>
+                <Input id="direccion" value={newGuest.direccion} onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-guest-direccion" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="vehiculoModelo">Modelo</Label>
-                  <Input
-                    id="vehiculoModelo"
-                    value={newGuest.vehiculoModelo}
-                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoModelo: e.target.value })}
-                    placeholder="Corolla"
-                    data-testid="input-guest-vehiculo-modelo"
-                  />
+                  <Label htmlFor="localidad">Localidad</Label>
+                  <Input id="localidad" value={newGuest.localidad} onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })} placeholder="CABA" data-testid="input-guest-localidad" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="vehiculoColor">Color</Label>
-                  <Input
-                    id="vehiculoColor"
-                    value={newGuest.vehiculoColor}
-                    onChange={(e) => setNewGuest({ ...newGuest, vehiculoColor: e.target.value })}
-                    placeholder="Blanco"
-                    data-testid="input-guest-vehiculo-color"
-                  />
+                  <Label htmlFor="codigoPostal">Código Postal</Label>
+                  <Input id="codigoPostal" value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1000" data-testid="input-guest-codigopostal" />
                 </div>
               </div>
-            </div>
+            </>)}
+
+            {/* ── FÍSICA ── */}
+            {!isJuridicaGuest && (<>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName">Nombre *</Label>
+                  <Input id="firstName" value={newGuest.firstName} onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })} placeholder="Nombre" data-testid="input-guest-firstname" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName">Apellido *</Label>
+                  <Input id="lastName" value={newGuest.lastName} onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })} placeholder="Apellido" data-testid="input-guest-lastname" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="documentType">Tipo Doc.</Label>
+                  <Select value={newGuest.documentType || "dni"} onValueChange={(v) => setNewGuest({ ...newGuest, documentType: v as any })}>
+                    <SelectTrigger data-testid="select-document-type"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dni">DNI</SelectItem>
+                      <SelectItem value="passport">Pasaporte</SelectItem>
+                      <SelectItem value="cedula">Cédula</SelectItem>
+                      <SelectItem value="other">Otro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="documentNumber">Número Doc.</Label>
+                  <Input id="documentNumber" value={newGuest.documentNumber} onChange={(e) => setNewGuest({ ...newGuest, documentNumber: e.target.value })} placeholder="12345678" data-testid="input-document-number" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={newGuest.email} onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })} placeholder="correo@email.com" data-testid="input-guest-email" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Teléfono</Label>
+                  <Input id="phone" value={newGuest.phone} onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })} placeholder="+54 11 1234-5678" data-testid="input-guest-phone" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="nationality">Nacionalidad</Label>
+                  <Input id="nationality" value={newGuest.nationality} onChange={(e) => setNewGuest({ ...newGuest, nationality: e.target.value })} placeholder="Argentina" data-testid="input-guest-nationality" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sexo">Sexo</Label>
+                  <Select value={newGuest.sexo} onValueChange={(v) => setNewGuest({ ...newGuest, sexo: v as any })}>
+                    <SelectTrigger data-testid="select-guest-sexo"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="masculino">Masculino</SelectItem>
+                      <SelectItem value="femenino">Femenino</SelectItem>
+                      <SelectItem value="otro">Otro</SelectItem>
+                      <SelectItem value="no_especifica">No especifica</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="fechaNacimiento">Fecha Nacimiento</Label>
+                  <Input id="fechaNacimiento" type="date" value={newGuest.fechaNacimiento} onChange={(e) => setNewGuest({ ...newGuest, fechaNacimiento: e.target.value })} data-testid="input-guest-fechanacimiento" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cuilCuit">CUIL/CUIT</Label>
+                  <Input id="cuilCuit" value={newGuest.cuilCuit} onChange={(e) => setNewGuest({ ...newGuest, cuilCuit: e.target.value })} placeholder="20-12345678-9" data-testid="input-guest-cuilcuit" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="direccion">Dirección</Label>
+                <Input id="direccion" value={newGuest.direccion} onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-guest-direccion" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="localidad">Localidad</Label>
+                  <Input id="localidad" value={newGuest.localidad} onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })} placeholder="CABA" data-testid="input-guest-localidad" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="codigoPostal">Código Postal</Label>
+                  <Input id="codigoPostal" value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1000" data-testid="input-guest-codigopostal" />
+                </div>
+              </div>
+              <div className="border-t pt-3">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide">Datos del Vehículo (opcional)</Label>
+                <div className="grid grid-cols-2 gap-4 mt-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="vehiculoPatente">Patente</Label>
+                    <Input id="vehiculoPatente" value={newGuest.vehiculoPatente} onChange={(e) => setNewGuest({ ...newGuest, vehiculoPatente: e.target.value })} placeholder="ABC 123" data-testid="input-guest-vehiculo-patente" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="vehiculoMarca">Marca</Label>
+                    <Input id="vehiculoMarca" value={newGuest.vehiculoMarca} onChange={(e) => setNewGuest({ ...newGuest, vehiculoMarca: e.target.value })} placeholder="Toyota" data-testid="input-guest-vehiculo-marca" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="vehiculoModelo">Modelo</Label>
+                    <Input id="vehiculoModelo" value={newGuest.vehiculoModelo} onChange={(e) => setNewGuest({ ...newGuest, vehiculoModelo: e.target.value })} placeholder="Corolla" data-testid="input-guest-vehiculo-modelo" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="vehiculoColor">Color</Label>
+                    <Input id="vehiculoColor" value={newGuest.vehiculoColor} onChange={(e) => setNewGuest({ ...newGuest, vehiculoColor: e.target.value })} placeholder="Blanco" data-testid="input-guest-vehiculo-color" />
+                  </div>
+                </div>
+              </div>
+            </>)}
 
             <Button
               type="button"
               onClick={handleCreateGuest}
-              disabled={!newGuest.firstName || !newGuest.lastName}
+              disabled={isJuridicaGuest ? (!newGuest.firstName || !newGuest.cuilCuit) : (!newGuest.firstName || !newGuest.lastName)}
               className="w-full"
               data-testid="button-create-guest"
             >
               <Plus className="h-4 w-4 mr-2" />
-              Crear Huesped
+              {isJuridicaGuest ? "Crear Persona Jurídica" : "Crear Huésped"}
             </Button>
           </TabsContent>
         </Tabs>
