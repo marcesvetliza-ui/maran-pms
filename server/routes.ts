@@ -990,6 +990,7 @@ export async function registerRoutes(
       }
 
       const reservation = await storage.getReservation(webCheckin.reservationId);
+      const existingCompanions = await storage.getReservationCompanions(webCheckin.reservationId);
 
       res.json({
         webCheckin: {
@@ -1017,7 +1018,15 @@ export async function registerRoutes(
           checkOutDate: reservation.checkOutDate,
           roomType: reservation.room?.roomType?.name,
           nights: reservation.nights,
+          numberOfGuests: reservation.numberOfGuests,
         } : null,
+        existingCompanions: existingCompanions.map(c => ({
+          firstName: c.firstName,
+          lastName: c.lastName,
+          documentType: c.documentType,
+          documentNumber: c.documentNumber,
+          nationality: c.nationality,
+        })),
         hotel: {
           name: "Maran Suites & Towers",
           address: "Alameda de la Federación 497, Paraná, Entre Ríos",
@@ -1052,6 +1061,7 @@ export async function registerRoutes(
         documentPhotoUrl, estimatedArrivalTime,
         requestEarlyCheckIn, earlyCheckInTime,
         termsAccepted,
+        companions,
       } = req.body;
 
       if (!termsAccepted) {
@@ -1107,17 +1117,50 @@ export async function registerRoutes(
         } as any);
       }
 
+      // Guardar acompañantes en reservation_companions
+      // Primero eliminar los anteriores del web check-in (pueden cambiar en reenvíos)
+      const prevCompanions = await storage.getReservationCompanions(webCheckin.reservationId);
+      // Solo eliminar los que no tienen sourceType manual (los del web check-in se replican)
+      // Estrategia simple: reemplazar todos con los nuevos si vienen companions en el payload
+      if (Array.isArray(companions) && companions.length > 0) {
+        for (const prev of prevCompanions) {
+          await storage.deleteReservationCompanion(prev.id);
+        }
+        for (const comp of companions) {
+          if (comp.firstName?.trim() && comp.lastName?.trim()) {
+            await storage.addReservationCompanion({
+              reservationId: webCheckin.reservationId,
+              firstName: comp.firstName.trim(),
+              lastName: comp.lastName.trim(),
+              documentType: comp.documentType || "DNI",
+              documentNumber: comp.documentNumber?.trim() || null,
+              nationality: comp.nationality?.trim() || null,
+              dateOfBirth: null,
+            });
+          }
+        }
+      }
+
+      // Notificación mejorada para conserjería/recepción
+      const validCompanions = Array.isArray(companions)
+        ? companions.filter((c: any) => c.firstName?.trim() && c.lastName?.trim())
+        : [];
+      const companionSummary = validCompanions.length > 0
+        ? `\nAcompañantes registrados: ${validCompanions.map((c: any) => `${c.firstName} ${c.lastName} (${c.documentType} ${c.documentNumber})`).join("; ")}`
+        : "\nSin acompañantes registrados en el pre-ingreso.";
+      const termsLine = `\nT&C aceptados: ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })} · IP: ${req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "desconocida"}`;
+
       await storage.createNotification({
         type: "web_checkin",
-        title: `Web Check-in completado - ${confirmedFirstName} ${confirmedLastName}`,
-        message: `El huésped completó el web check-in. Llegada estimada: ${estimatedArrivalTime || "No especificada"}${requestEarlyCheckIn ? `. Solicita early check-in: ${earlyCheckInTime}` : ""}`,
+        title: `Pre-Ingreso completado — ${confirmedFirstName} ${confirmedLastName}`,
+        message: `El huésped completó el Pre-Ingreso online.\nLlegada estimada: ${estimatedArrivalTime || "No especificada"}${requestEarlyCheckIn ? `\n⚡ Solicita EARLY CHECK-IN: ${earlyCheckInTime || "sin hora"}` : ""}${companionSummary}${termsLine}`,
         targetArea: "reception",
         relatedEntityType: "reservation",
         relatedEntityId: webCheckin.reservationId,
         priority: requestEarlyCheckIn ? "high" : "normal",
       });
 
-      res.json({ success: true });
+      res.json({ success: true, companionsSaved: validCompanions.length });
     } catch (error) {
       res.status(500).json({ error: "Error processing web check-in" });
     }
