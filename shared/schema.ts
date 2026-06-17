@@ -1748,6 +1748,7 @@ export const webCheckins = pgTable("web_checkins", {
   confirmedPhone: text("confirmed_phone"),
   confirmedEmail: text("confirmed_email"),
   documentPhotoUrl: text("document_photo_url"),
+  signatureImage: text("signature_image"),
   estimatedArrivalTime: text("estimated_arrival_time"),
   requestEarlyCheckIn: boolean("request_early_check_in").default(false),
   earlyCheckInTime: text("early_check_in_time"),

@@ -973,6 +973,63 @@ export async function registerRoutes(
   });
 
   // Public endpoints (no auth required)
+  // Lookup público: busca la reserva por código + apellido y devuelve el token del web check-in
+  app.get("/api/public/reservation-lookup", async (req, res) => {
+    try {
+      const { code, lastName } = req.query as { code?: string; lastName?: string };
+      if (!code?.trim() || !lastName?.trim()) {
+        return res.status(400).json({ error: "Código de reserva y apellido son requeridos" });
+      }
+      const normalizedCode = code.trim().toUpperCase();
+      const normalizedLast = lastName.trim().toLowerCase();
+
+      const [reservation] = await db.execute(sql`
+        SELECT r.id, r.reservation_code, r.status, r.check_in_date, r.check_out_date,
+               g.last_name as guest_last_name
+        FROM reservations r
+        INNER JOIN guests g ON g.id = r.guest_id
+        WHERE UPPER(r.reservation_code) = ${normalizedCode}
+        LIMIT 1
+      `);
+
+      if (!reservation) {
+        return res.status(404).json({ error: "Reserva no encontrada. Verificá el código ingresado." });
+      }
+
+      const resRow = reservation as any;
+      if ((resRow.guest_last_name || "").toLowerCase() !== normalizedLast) {
+        return res.status(403).json({ error: "Los datos no coinciden con los registros de la reserva." });
+      }
+
+      if (resRow.status === "checked_out" || resRow.status === "cancelled") {
+        return res.status(400).json({ error: "Esta reserva no permite pre-ingreso." });
+      }
+
+      // Buscar o crear web check-in
+      let webCheckin = await storage.getWebCheckinByReservation(resRow.id);
+      if (!webCheckin) {
+        const { randomBytes } = await import("crypto");
+        const token = randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        webCheckin = await storage.createWebCheckin({
+          reservationId: resRow.id,
+          token,
+          status: "pending",
+          expiresAt,
+        });
+      }
+
+      if (webCheckin.status === "expired") {
+        return res.status(410).json({ error: "El link de pre-ingreso expiró. Contacte recepción." });
+      }
+
+      res.json({ token: webCheckin.token });
+    } catch (error) {
+      console.error("reservation-lookup error:", error);
+      res.status(500).json({ error: "Error interno" });
+    }
+  });
+
   app.get("/api/public/web-checkin/:token", async (req, res) => {
     try {
       const webCheckin = await storage.getWebCheckinByToken(req.params.token);
@@ -1058,7 +1115,7 @@ export async function registerRoutes(
         confirmedFirstName, confirmedLastName,
         confirmedDocumentType, confirmedDocumentNumber,
         confirmedNationality, confirmedPhone, confirmedEmail,
-        documentPhotoUrl, estimatedArrivalTime,
+        documentPhotoUrl, signatureImage, estimatedArrivalTime,
         requestEarlyCheckIn, earlyCheckInTime,
         termsAccepted,
         companions,
@@ -1075,6 +1132,9 @@ export async function registerRoutes(
       if (documentPhotoUrl && typeof documentPhotoUrl === "string" && documentPhotoUrl.length > 5 * 1024 * 1024) {
         return res.status(400).json({ error: "La imagen del documento es demasiado grande" });
       }
+      if (signatureImage && typeof signatureImage === "string" && signatureImage.length > 2 * 1024 * 1024) {
+        return res.status(400).json({ error: "La imagen de firma es demasiado grande" });
+      }
 
       const ipAddress = req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "";
 
@@ -1088,6 +1148,7 @@ export async function registerRoutes(
         confirmedPhone,
         confirmedEmail,
         documentPhotoUrl,
+        signatureImage: signatureImage || null,
         estimatedArrivalTime,
         requestEarlyCheckIn: requestEarlyCheckIn || false,
         earlyCheckInTime: earlyCheckInTime || null,

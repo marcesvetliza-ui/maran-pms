@@ -39,6 +39,7 @@ const PackagesPage = lazy(() => import("@/pages/packages"));
 const CompaniesPage = lazy(() => import("@/pages/companies"));
 const AgenciesPage = lazy(() => import("@/pages/agencies"));
 const WebCheckinPublicPage = lazy(() => import("@/pages/web-checkin-public"));
+const PreIngresoPage = lazy(() => import("@/pages/pre-ingreso"));
 const ChatbotDashboardPage = lazy(() => import("@/pages/chatbot-dashboard"));
 const HospitalityPage = lazy(() => import("@/pages/hospitality"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
@@ -351,6 +352,7 @@ function AuthenticatedApp() {
 
 function App() {
   const [isWebCheckin] = useRoute("/web-checkin/:token");
+  const [isPreIngreso] = useRoute("/pre-ingreso");
   const [isReservar] = useRoute("/reservar");
   const [isSurvey] = useRoute("/encuesta/:token");
 
@@ -361,6 +363,10 @@ function App() {
           {isWebCheckin ? (
             <Suspense fallback={<PageLoader />}>
               <WebCheckinPublicPage />
+            </Suspense>
+          ) : isPreIngreso ? (
+            <Suspense fallback={<PageLoader />}>
+              <PreIngresoPage />
             </Suspense>
           ) : isReservar ? (
             <Suspense fallback={<PageLoader />}>

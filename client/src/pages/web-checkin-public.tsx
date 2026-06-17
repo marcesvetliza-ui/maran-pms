@@ -21,6 +21,7 @@ import {
   Plus,
   Trash2,
   ScrollText,
+  PenLine,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,11 +31,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 
 const STEPS = [
-  { num: 1, label: "Tus datos",      icon: User },
-  { num: 2, label: "Documento",      icon: FileText },
-  { num: 3, label: "Acompañantes",   icon: Users },
-  { num: 4, label: "Llegada",        icon: Clock },
-  { num: 5, label: "Confirmación",   icon: CheckCircle2 },
+  { num: 1, label: "Tus datos",     icon: User },
+  { num: 2, label: "Documento",     icon: FileText },
+  { num: 3, label: "Acompañantes",  icon: Users },
+  { num: 4, label: "Firma",         icon: PenLine },
+  { num: 5, label: "Llegada",       icon: Clock },
+  { num: 6, label: "Confirmación",  icon: CheckCircle2 },
 ];
 
 type Companion = {
@@ -85,6 +87,125 @@ const TERMS_TEXT = `TÉRMINOS Y CONDICIONES — MARAN SUITES & TOWERS
 
 Al confirmar este Pre-Ingreso, el titular declara haber leído y aceptado en su totalidad los presentes términos y condiciones, como así también el reglamento interno del hotel.`;
 
+function SignaturePad({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [hasDrawn, setHasDrawn] = useState(!!value);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  const initCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width) return;
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = 160 * window.devicePixelRatio;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, rect.width, 160);
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(initCanvas, 50);
+    return () => clearTimeout(t);
+  }, [initCanvas]);
+
+  const getPos = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    if ("touches" in e) {
+      if (e.touches.length === 0) return null;
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+    }
+    return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top };
+  };
+
+  const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    const pos = getPos(e);
+    if (!pos) return;
+    setIsDrawing(true);
+    lastPos.current = pos;
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 1, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!isDrawing || !lastPos.current) return;
+    const pos = getPos(e);
+    if (!pos) return;
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    lastPos.current = pos;
+  };
+
+  const endDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    lastPos.current = null;
+    setHasDrawn(true);
+    const canvas = canvasRef.current;
+    if (canvas) onChange(canvas.toDataURL("image/png"));
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width / window.devicePixelRatio, 160);
+    setHasDrawn(false);
+    onChange(null);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className={`border-2 rounded-xl overflow-hidden select-none ${hasDrawn ? "border-primary" : "border-dashed border-muted-foreground/40"} bg-white`}>
+        <canvas
+          ref={canvasRef}
+          className="w-full block touch-none cursor-crosshair"
+          style={{ height: 160 }}
+          data-testid="canvas-signature"
+          onMouseDown={startDraw}
+          onMouseMove={draw}
+          onMouseUp={endDraw}
+          onMouseLeave={endDraw}
+          onTouchStart={startDraw}
+          onTouchMove={draw}
+          onTouchEnd={endDraw}
+        />
+      </div>
+      <div className="flex justify-between items-center text-xs text-muted-foreground">
+        <span className="flex items-center gap-1">
+          {hasDrawn
+            ? <><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Firma registrada</>
+            : "Trace su firma con el dedo o el mouse"}
+        </span>
+        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clear} type="button" data-testid="button-clear-signature">
+          <Trash2 className="h-3 w-3 mr-1" />Limpiar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function compressImage(file: File, maxWidth: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -134,7 +255,10 @@ export default function WebCheckinPublicPage() {
   // Step 3 — acompañantes
   const [companions, setCompanions] = useState<Companion[]>([]);
 
-  // Step 4 — llegada + T&C
+  // Step 4 — firma electrónica (Ley 25.506)
+  const [signatureImage, setSignatureImage] = useState<string | null>(null);
+
+  // Step 5 — llegada + T&C
   const [arrivalTime, setArrivalTime] = useState("");
   const [requestEarlyCheckIn, setRequestEarlyCheckIn] = useState(false);
   const [earlyCheckInTime, setEarlyCheckInTime] = useState("");
@@ -200,6 +324,7 @@ export default function WebCheckinPublicPage() {
           confirmedPhone: phone,
           confirmedEmail: email,
           documentPhotoUrl: documentPhoto,
+          signatureImage,
           estimatedArrivalTime: arrivalTime,
           requestEarlyCheckIn,
           earlyCheckInTime: requestEarlyCheckIn ? earlyCheckInTime : null,
@@ -214,7 +339,7 @@ export default function WebCheckinPublicPage() {
       return res.json();
     },
     onSuccess: () => {
-      setStep(5);
+      setStep(6);
     },
   });
 
@@ -243,16 +368,17 @@ export default function WebCheckinPublicPage() {
     if (s === 1) return firstName.trim() && lastName.trim() && documentNumber.trim();
     if (s === 2) return true;
     if (s === 3) return true;
-    if (s === 4) return termsAccepted;
+    if (s === 4) return !!signatureImage;
+    if (s === 5) return termsAccepted;
     return false;
   };
 
   const handleNext = () => {
-    if (step === 4) {
+    if (step === 5) {
       submitMutation.mutate();
       return;
     }
-    setStep(s => Math.min(s + 1, 5));
+    setStep(s => Math.min(s + 1, 6));
   };
 
   if (isLoading) {
@@ -562,8 +688,30 @@ export default function WebCheckinPublicPage() {
           </div>
         )}
 
-        {/* ── PASO 4: Llegada + T&C ── */}
+        {/* ── PASO 4: Firma Electrónica ── */}
         {step === 4 && (
+          <div className="space-y-4">
+            <Card>
+              <CardContent className="p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <PenLine className="h-5 w-5 text-primary" />
+                  <h2 className="text-lg font-bold">Firma Electrónica</h2>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  De acuerdo a la <strong>Ley 25.506</strong> de Firma Digital de la República Argentina, su firma electrónica tiene plena validez legal.
+                  Trace su firma a continuación — quedará adjunta a su reserva de forma permanente.
+                </p>
+                <SignaturePad value={signatureImage} onChange={setSignatureImage} />
+                <p className="text-xs text-muted-foreground text-center border-t pt-3">
+                  Al firmar, {firstName} {lastName} confirma que los datos provistos son correctos y verídicos.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* ── PASO 5: Llegada + T&C ── */}
+        {step === 5 && (
           <div className="space-y-4">
             <Card>
               <CardContent className="p-5 space-y-4">
@@ -634,8 +782,8 @@ export default function WebCheckinPublicPage() {
           </div>
         )}
 
-        {/* ── PASO 5: Confirmación ── */}
-        {step === 5 && (
+        {/* ── PASO 6: Confirmación ── */}
+        {step === 6 && (
           <Card>
             <CardContent className="p-5 text-center space-y-4">
               <div className="flex justify-center">
@@ -704,7 +852,7 @@ export default function WebCheckinPublicPage() {
       </div>
 
       {/* Navigation bar */}
-      {step < 5 && (
+      {step < 6 && (
         <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t p-4">
           <div className="max-w-lg mx-auto flex gap-3">
             {step > 1 && (
@@ -726,7 +874,7 @@ export default function WebCheckinPublicPage() {
             >
               {submitMutation.isPending ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Enviando...</>
-              ) : step === 4 ? (
+              ) : step === 5 ? (
                 "Confirmar Pre-Ingreso"
               ) : (
                 <>Siguiente<ChevronRight className="h-4 w-4 ml-1" /></>

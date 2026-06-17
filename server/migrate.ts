@@ -503,5 +503,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  await withTimeout("web_checkins.signature_image", T, () =>
+    db.execute(sql`ALTER TABLE web_checkins ADD COLUMN IF NOT EXISTS signature_image text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

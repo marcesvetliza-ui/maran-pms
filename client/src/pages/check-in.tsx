@@ -957,12 +957,36 @@ export default function CheckInPage() {
                             </div>
                           )}
                         </div>
-                        {wc.documentPhotoUrl && (
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                              <Image className="h-3 w-3" /> Foto del documento
-                            </p>
-                            <img src={wc.documentPhotoUrl} alt="Documento" className="max-w-xs rounded border" data-testid={`img-wc-doc-${wc.id}`} />
+                        <div className="flex flex-wrap gap-4">
+                          {wc.documentPhotoUrl && (
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                                <Image className="h-3 w-3" /> Foto del documento
+                              </p>
+                              <img src={wc.documentPhotoUrl} alt="Documento" className="max-w-xs rounded border" data-testid={`img-wc-doc-${wc.id}`} />
+                            </div>
+                          )}
+                          {(wc as any).signatureImage && (
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                                <FileText className="h-3 w-3" /> Firma electrónica (Ley 25.506)
+                              </p>
+                              <img src={(wc as any).signatureImage} alt="Firma" className="max-h-24 rounded border bg-white" data-testid={`img-wc-sig-${wc.id}`} />
+                            </div>
+                          )}
+                        </div>
+                        {wc.reservationId && (
+                          <div className="pt-2 border-t">
+                            <Button
+                              size="sm"
+                              className="w-full bg-green-600 hover:bg-green-700 text-white"
+                              data-testid={`button-wc-checkin-${wc.id}`}
+                              onClick={() => checkInMutation.mutate({ id: wc.reservationId })}
+                              disabled={checkInMutation.isPending}
+                            >
+                              <LogIn className="h-4 w-4 mr-2" />
+                              Identidad verificada — Hacer Check-in
+                            </Button>
                           </div>
                         )}
                       </CardContent>
