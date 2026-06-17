@@ -1398,6 +1398,13 @@ export default function RestaurantPage() {
         setOrderView(orderItems.length > 0 ? "comanda" : "menu");
         setSelectedCategory(null);
         setIsOrderDialogOpen(true);
+      } else {
+        // Mesa trabada como "occupied" sin pedido activo de hoy (quedó de jornada anterior).
+        // Tratarla como disponible y abrir nueva orden.
+        setCurrentOrder(null);
+        setNewCovers(table.capacity);
+        setNewWaiterName("");
+        setIsNewOrderDialogOpen(true);
       }
     }
   };

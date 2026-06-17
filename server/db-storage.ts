@@ -1884,9 +1884,15 @@ export class DatabaseStorage implements IStorage {
     if (status) {
       conditions.push(eq(restaurantOrders.status, status));
     } else if (!from && !to) {
-      // Sin filtros explícitos: excluir pedidos cerrados/cancelados para que la vista de mesas
-      // no muestre pedidos históricos de días anteriores que no se cerraron correctamente.
+      // Sin filtros explícitos: solo pedidos activos de HOY (Argentina).
+      // Esto evita que pedidos de jornadas anteriores que quedaron en "open"/"in_progress"
+      // sin cerrarse correctamente aparezcan en el plano de mesas.
       conditions.push(not(inArray(restaurantOrders.status, ["closed", "cancelled"])));
+      // Argentina = UTC-3 siempre (sin horario de verano).
+      // Medianoche Argentina = 03:00 UTC del mismo día.
+      const todayArgStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const midnightArgentinaUTC = new Date(todayArgStr + "T03:00:00.000Z");
+      conditions.push(gte(restaurantOrders.openedAt, midnightArgentinaUTC));
     }
     if (from) conditions.push(gte(restaurantOrders.openedAt, new Date(from)));
     if (to) conditions.push(lte(restaurantOrders.openedAt, new Date(to)));
