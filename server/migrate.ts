@@ -507,5 +507,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE web_checkins ADD COLUMN IF NOT EXISTS signature_image text`)
   );
 
+  await withTimeout("guests.tipo_persona", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS tipo_persona text DEFAULT 'fisica'`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

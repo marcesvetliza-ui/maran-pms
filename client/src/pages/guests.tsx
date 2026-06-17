@@ -35,6 +35,8 @@ import {
   Check,
   ChevronsUpDown,
   Loader2,
+  User,
+  Building2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -198,6 +200,7 @@ function GuestFormDialog({
   const { data: companies } = useQuery<Company[]>({ queryKey: ["/api/companies"] });
 
   const buildFormData = (g?: Guest): Partial<InsertGuest> => ({
+    tipoPersona: (g as any)?.tipoPersona || "fisica",
     firstName: g?.firstName || "",
     lastName: g?.lastName || "",
     email: g?.email || "",
@@ -243,6 +246,9 @@ function GuestFormDialog({
   const [formData, setFormData] = useState<Partial<InsertGuest>>(() => buildFormData(guest));
   const [companyOpen, setCompanyOpen] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const tipoPersona = (formData as any).tipoPersona || "fisica";
+  const isJuridica = tipoPersona === "juridica";
 
   useEffect(() => {
     if (open) {
@@ -296,16 +302,24 @@ function GuestFormDialog({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const errors: Record<string, string> = {};
-    if (!formData.firstName?.trim()) errors.firstName = "El nombre es obligatorio";
-    if (!formData.lastName?.trim()) errors.lastName = "El apellido es obligatorio";
+    if (!formData.firstName?.trim()) {
+      errors.firstName = isJuridica ? "La razón social es obligatoria" : "El nombre es obligatorio";
+    }
+    if (!isJuridica && !formData.lastName?.trim()) {
+      errors.lastName = "El apellido es obligatorio";
+    }
+    if (isJuridica && !formData.cuilCuit?.trim()) {
+      errors.cuilCuit = "El CUIT es obligatorio para personas jurídicas";
+    }
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
       return;
     }
     setFormErrors({});
-    // Normalizar CUIT: guardar siempre sin guiones (formato ARCA/AFIP)
     const payload = {
       ...formData,
+      // Para jurídica: si no hay apellido, guardamos "-"
+      lastName: isJuridica && !formData.lastName?.trim() ? "-" : formData.lastName,
       cuilCuit: formData.cuilCuit ? normalizeCuit(formData.cuilCuit) : formData.cuilCuit,
     };
     mutation.mutate(payload);
@@ -313,7 +327,7 @@ function GuestFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Huésped" : "Nuevo Huésped"}</DialogTitle>
           <DialogDescription>
@@ -322,371 +336,433 @@ function GuestFormDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
+
+            {/* ── Toggle Tipo de Persona ── */}
+            <div className="flex rounded-lg border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setFormData(f => ({ ...f, tipoPersona: "fisica" } as any))}
+                className={`flex-1 py-2 px-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                  !isJuridica
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
+                data-testid="button-tipo-fisica"
+              >
+                <User className="h-4 w-4" />
+                Persona Física
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData(f => ({ ...f, tipoPersona: "juridica" } as any))}
+                className={`flex-1 py-2 px-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors border-l ${
+                  isJuridica
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
+                data-testid="button-tipo-juridica"
+              >
+                <Building2 className="h-4 w-4" />
+                Persona Jurídica
+              </button>
+            </div>
+
+            {/* ── PERSONA JURÍDICA ── */}
+            {isJuridica && (<>
               <div className="grid gap-2">
-                <Label htmlFor="firstName">Nombre <span className="text-red-500">*</span></Label>
+                <Label htmlFor="firstName">Razón Social <span className="text-red-500">*</span></Label>
                 <Input
                   id="firstName"
-                  value={formData.firstName}
+                  value={formData.firstName || ""}
                   onChange={(e) => {
                     setFormData({ ...formData, firstName: e.target.value });
-                    if (e.target.value.trim()) setFormErrors(prev => { const n = {...prev}; delete n.firstName; return n; });
+                    if (e.target.value.trim()) setFormErrors(p => { const n = {...p}; delete n.firstName; return n; });
                   }}
-                  placeholder="Juan"
+                  placeholder="Ej: ACME S.A."
                   className={formErrors.firstName ? "border-red-500 focus-visible:ring-red-500" : ""}
-                  data-testid="input-first-name"
+                  data-testid="input-razon-social"
                 />
                 {formErrors.firstName && <p className="text-xs text-red-500">{formErrors.firstName}</p>}
               </div>
+
               <div className="grid gap-2">
-                <Label htmlFor="lastName">Apellido <span className="text-red-500">*</span></Label>
+                <Label htmlFor="lastName">Nombre Fantasía <span className="text-xs text-muted-foreground">(opcional)</span></Label>
                 <Input
                   id="lastName"
-                  value={formData.lastName}
-                  onChange={(e) => {
-                    setFormData({ ...formData, lastName: e.target.value });
-                    if (e.target.value.trim()) setFormErrors(prev => { const n = {...prev}; delete n.lastName; return n; });
-                  }}
-                  placeholder="Pérez"
-                  className={formErrors.lastName ? "border-red-500 focus-visible:ring-red-500" : ""}
-                  data-testid="input-last-name"
-                />
-                {formErrors.lastName && <p className="text-xs text-red-500">{formErrors.lastName}</p>}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={formData.email || ""}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="juan@email.com"
-                  data-testid="input-email"
+                  value={formData.lastName === "-" ? "" : (formData.lastName || "")}
+                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  placeholder="Ej: Acme Corp"
+                  data-testid="input-nombre-fantasia"
                 />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="phone">Teléfono</Label>
-                <Input
-                  id="phone"
-                  value={formData.phone || ""}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="+54 11 1234-5678"
-                  data-testid="input-phone"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="documentType">Tipo de Documento</Label>
-                <Select
-                  value={formData.documentType || "dni"}
-                  onValueChange={(value) => setFormData({ ...formData, documentType: value })}
-                >
-                  <SelectTrigger data-testid="select-document-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(DOCUMENT_TYPE_LABELS).map(([val, label]) => (
-                      <SelectItem key={val} value={val}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="documentNumber">Número de Documento</Label>
-                <Input
-                  id="documentNumber"
-                  value={formData.documentNumber || ""}
-                  onChange={(e) => setFormData({ ...formData, documentNumber: e.target.value })}
-                  placeholder="12345678"
-                  data-testid="input-document-number"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="cuilCuit">CUIT / CUIL</Label>
-                <Input
-                  id="cuilCuit"
-                  value={formData.cuilCuit || ""}
-                  onChange={(e) => setFormData({ ...formData, cuilCuit: normalizeCuit(e.target.value) })}
-                  placeholder="20123456789"
-                  maxLength={13}
-                  data-testid="input-cuil-cuit"
-                />
-                {formData.cuilCuit && normalizeCuit(formData.cuilCuit).length === 11 && (
-                  <p className="text-xs text-muted-foreground">{formatCuit(formData.cuilCuit)}</p>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="vatCondition">Condición ante IVA</Label>
-                <Select
-                  value={(formData as any).vatCondition || "consumidor_final"}
-                  onValueChange={(value) => setFormData({ ...formData, vatCondition: value } as any)}
-                >
-                  <SelectTrigger data-testid="select-vat-condition">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
-                      <SelectItem key={val} value={val}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            {/* Estado Civil */}
-            <div className="grid gap-2">
-              <Label>Estado Civil</Label>
-              <Select
-                value={(formData as any).estadoCivil || ""}
-                onValueChange={(v) => setFormData({ ...formData, estadoCivil: v } as any)}
-              >
-                <SelectTrigger data-testid="select-estado-civil">
-                  <SelectValue placeholder="Seleccionar..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="soltero">Soltero/a</SelectItem>
-                  <SelectItem value="casado">Casado/a</SelectItem>
-                  <SelectItem value="divorciado">Divorciado/a</SelectItem>
-                  <SelectItem value="viudo">Viudo/a</SelectItem>
-                  <SelectItem value="union_convivencial">Unión Convivencial</SelectItem>
-                  <SelectItem value="otro">Otro</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
 
-            {/* Nacionalidad con código AFIP */}
-            <NationalityCombobox
-              value={formData.nationality || ""}
-              afipCode={(formData as any).nationalityCode || ""}
-              onChange={(name, code) => setFormData({ ...formData, nationality: name, nationalityCode: code } as any)}
-            />
-
-            {/* Datos migratorios — solo para extranjeros (Ley 25.871) */}
-            {formData.nationality && formData.nationality !== "Argentina" && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-3">
-                <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
-                  ⚠️ Datos migratorios requeridos por Ley 25.871 (Migraciones)
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="grid gap-2">
-                    <Label htmlFor="fechaIngresoArg" className="text-xs">Fecha Ingreso a Argentina</Label>
-                    <Input
-                      id="fechaIngresoArg"
-                      type="date"
-                      value={(formData as any).fechaIngresoArgentina || ""}
-                      onChange={(e) => setFormData({ ...formData, fechaIngresoArgentina: e.target.value } as any)}
-                      data-testid="input-fecha-ingreso-argentina"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="fechaSalidaArg" className="text-xs">Fecha Salida de Argentina</Label>
-                    <Input
-                      id="fechaSalidaArg"
-                      type="date"
-                      value={(formData as any).fechaSalidaArgentina || ""}
-                      onChange={(e) => setFormData({ ...formData, fechaSalidaArgentina: e.target.value } as any)}
-                      data-testid="input-fecha-salida-argentina"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Procedencia (ciudad desde donde viaja, ≠ domicilio permanente) */}
-            <div className="grid gap-2">
-              <Label htmlFor="procedencia">
-                Procedencia <span className="text-xs text-muted-foreground">(ciudad desde donde viaja)</span>
-              </Label>
-              <Input
-                id="procedencia"
-                value={(formData as any).procedencia || ""}
-                onChange={(e) => setFormData({ ...formData, procedencia: e.target.value } as any)}
-                placeholder="Ej: Rosario (aunque viva en Córdoba)"
-                data-testid="input-procedencia"
-              />
-            </div>
-
-            {/* Domicilio permanente */}
-            <div className="pt-1 border-t">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Domicilio Permanente</Label>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="direccion">Dirección</Label>
-              <Input
-                id="direccion"
-                value={formData.direccion || ""}
-                onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
-                placeholder="Av. Siempreviva 742"
-                data-testid="input-direccion"
-              />
-            </div>
-            <ProvinciaCiudadSelect
-              provincia={formData.provincia || ""}
-              localidad={formData.localidad || ""}
-              onProvinciaChange={(v) => setFormData({ ...formData, provincia: v, localidad: "" })}
-              onLocalidadChange={(v) => setFormData({ ...formData, localidad: v })}
-              testIdProvincia="select-guest-provincia"
-              testIdLocalidad="select-guest-localidad"
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="codigoPostal">Código Postal</Label>
-                <Input
-                  id="codigoPostal"
-                  value={formData.codigoPostal || ""}
-                  onChange={(e) => setFormData({ ...formData, codigoPostal: e.target.value })}
-                  placeholder="3100"
-                  data-testid="input-codigo-postal"
-                />
-              </div>
-            </div>
-
-            {/* FCE MiPyME */}
-            <div className="pt-1 border-t">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Factura de Crédito Electrónica (FCE / MiPyME)</Label>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label className="text-sm">¿Es empresa grande?</Label>
-                <div className="flex items-center gap-3 mt-1">
-                  <input
-                    type="checkbox"
-                    id="esEmpresaGrande"
-                    checked={(formData as any).esEmpresaGrande || false}
-                    onChange={(e) => setFormData({ ...formData, esEmpresaGrande: e.target.checked } as any)}
-                    className="h-4 w-4 rounded border-input"
-                    data-testid="check-es-empresa-grande"
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="cuilCuit">CUIT <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="cuilCuit"
+                    value={formData.cuilCuit || ""}
+                    onChange={(e) => {
+                      setFormData({ ...formData, cuilCuit: normalizeCuit(e.target.value) });
+                      if (e.target.value.trim()) setFormErrors(p => { const n = {...p}; delete n.cuilCuit; return n; });
+                    }}
+                    placeholder="30-12345678-9"
+                    maxLength={13}
+                    className={formErrors.cuilCuit ? "border-red-500 focus-visible:ring-red-500" : ""}
+                    data-testid="input-cuil-cuit"
                   />
-                  <label htmlFor="esEmpresaGrande" className="text-sm text-muted-foreground">Sí, es empresa grande</label>
+                  {formData.cuilCuit && normalizeCuit(formData.cuilCuit).length === 11 && (
+                    <p className="text-xs text-muted-foreground">{formatCuit(formData.cuilCuit)}</p>
+                  )}
+                  {formErrors.cuilCuit && <p className="text-xs text-red-500">{formErrors.cuilCuit}</p>}
                 </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="vatCondition">Condición ante IVA</Label>
+                  <Select
+                    value={(formData as any).vatCondition || "responsable_inscripto"}
+                    onValueChange={(value) => setFormData({ ...formData, vatCondition: value } as any)}
+                  >
+                    <SelectTrigger data-testid="select-vat-condition">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={formData.email || ""} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="contacto@empresa.com" data-testid="input-email" />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="phone">Teléfono</Label>
+                  <Input id="phone" value={formData.phone || ""} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="+54 11 1234-5678" data-testid="input-phone" />
+                </div>
+              </div>
+
+              {/* Domicilio fiscal */}
+              <div className="pt-1 border-t">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Domicilio Fiscal</Label>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="direccion">Dirección</Label>
+                <Input id="direccion" value={formData.direccion || ""} onChange={(e) => setFormData({ ...formData, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-direccion" />
+              </div>
+              <ProvinciaCiudadSelect
+                provincia={formData.provincia || ""}
+                localidad={formData.localidad || ""}
+                onProvinciaChange={(v) => setFormData({ ...formData, provincia: v, localidad: "" })}
+                onLocalidadChange={(v) => setFormData({ ...formData, localidad: v })}
+                testIdProvincia="select-guest-provincia"
+                testIdLocalidad="select-guest-localidad"
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="codigoPostal">Código Postal</Label>
+                  <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData({ ...formData, codigoPostal: e.target.value })} placeholder="1043" data-testid="input-codigo-postal" />
+                </div>
+              </div>
+
+              {/* FCE MiPyME */}
+              <div className="pt-1 border-t">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Factura de Crédito Electrónica (FCE / MiPyME)</Label>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="esEmpresaGrande"
+                  checked={(formData as any).esEmpresaGrande || false}
+                  onChange={(e) => setFormData({ ...formData, esEmpresaGrande: e.target.checked } as any)}
+                  className="h-4 w-4 rounded border-input"
+                  data-testid="check-es-empresa-grande"
+                />
+                <label htmlFor="esEmpresaGrande" className="text-sm">Es empresa grande (requiere FCE obligatoria)</label>
               </div>
               {(formData as any).esEmpresaGrande && (
                 <div className="grid gap-2">
                   <Label htmlFor="montoBaseFce">Monto Base FCE ($)</Label>
-                  <Input
-                    id="montoBaseFce"
-                    value={(formData as any).montoBaseFce || ""}
-                    onChange={(e) => setFormData({ ...formData, montoBaseFce: e.target.value } as any)}
-                    placeholder="Ej: 400000"
-                    data-testid="input-monto-base-fce"
-                  />
+                  <Input id="montoBaseFce" value={(formData as any).montoBaseFce || ""} onChange={(e) => setFormData({ ...formData, montoBaseFce: e.target.value } as any)} placeholder="Ej: 400000" data-testid="input-monto-base-fce" />
                 </div>
               )}
-            </div>
 
-            <div className="grid gap-2">
-              <Label>Empresa asociada</Label>
-              <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={companyOpen}
-                    className="w-full justify-between font-normal"
-                    data-testid="select-company"
-                  >
-                    {formData.companyId
-                      ? (companies?.find(c => c.id === formData.companyId)?.nombreFantasia ||
-                         companies?.find(c => c.id === formData.companyId)?.razonSocial ||
-                         "Empresa")
-                      : "Sin empresa"}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Buscar empresa..." />
-                    <CommandList>
-                      <CommandEmpty>Sin resultados.</CommandEmpty>
-                      <CommandGroup>
-                        <CommandItem
-                          value="__none__"
-                          onSelect={() => {
-                            setFormData({ ...formData, companyId: null });
-                            setCompanyOpen(false);
-                          }}
-                        >
-                          <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />
-                          Sin empresa
-                        </CommandItem>
-                        {companies?.map(c => (
-                          <CommandItem
-                            key={c.id}
-                            value={`${c.razonSocial} ${c.nombreFantasia || ""}`}
-                            onSelect={() => {
-                              setFormData({ ...formData, companyId: c.id });
-                              setCompanyOpen(false);
-                            }}
-                          >
-                            <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
-                            {c.nombreFantasia || c.razonSocial}
-                            {c.nombreFantasia && (
-                              <span className="ml-1 text-xs text-muted-foreground">({c.razonSocial})</span>
-                            )}
+              {/* Empresa asociada */}
+              <div className="grid gap-2">
+                <Label>Empresa asociada en el sistema</Label>
+                <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" role="combobox" aria-expanded={companyOpen} className="w-full justify-between font-normal" data-testid="select-company">
+                      {formData.companyId ? (companies?.find(c => c.id === formData.companyId)?.nombreFantasia || companies?.find(c => c.id === formData.companyId)?.razonSocial || "Empresa") : "Sin empresa"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Buscar empresa..." />
+                      <CommandList>
+                        <CommandEmpty>Sin resultados.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem value="__none__" onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
+                            <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />Sin empresa
                           </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
+                          {companies?.map(c => (
+                            <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
+                              <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
+                              {c.nombreFantasia || c.razonSocial}
+                              {c.nombreFantasia && <span className="ml-1 text-xs text-muted-foreground">({c.razonSocial})</span>}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </>)}
 
-            <div className="pt-2 border-t">
-              <Label className="text-sm font-medium text-muted-foreground">Datos del Vehículo (opcional)</Label>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+            {/* ── PERSONA FÍSICA ── */}
+            {!isJuridica && (<>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="firstName">Nombre <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="firstName"
+                    value={formData.firstName || ""}
+                    onChange={(e) => {
+                      setFormData({ ...formData, firstName: e.target.value });
+                      if (e.target.value.trim()) setFormErrors(p => { const n = {...p}; delete n.firstName; return n; });
+                    }}
+                    placeholder="Juan"
+                    className={formErrors.firstName ? "border-red-500 focus-visible:ring-red-500" : ""}
+                    data-testid="input-first-name"
+                  />
+                  {formErrors.firstName && <p className="text-xs text-red-500">{formErrors.firstName}</p>}
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="lastName">Apellido <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="lastName"
+                    value={formData.lastName || ""}
+                    onChange={(e) => {
+                      setFormData({ ...formData, lastName: e.target.value });
+                      if (e.target.value.trim()) setFormErrors(p => { const n = {...p}; delete n.lastName; return n; });
+                    }}
+                    placeholder="Pérez"
+                    className={formErrors.lastName ? "border-red-500 focus-visible:ring-red-500" : ""}
+                    data-testid="input-last-name"
+                  />
+                  {formErrors.lastName && <p className="text-xs text-red-500">{formErrors.lastName}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={formData.email || ""} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="juan@email.com" data-testid="input-email" />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="phone">Teléfono</Label>
+                  <Input id="phone" value={formData.phone || ""} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="+54 11 1234-5678" data-testid="input-phone" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="documentType">Tipo de Documento</Label>
+                  <Select value={formData.documentType || "dni"} onValueChange={(value) => setFormData({ ...formData, documentType: value })}>
+                    <SelectTrigger data-testid="select-document-type"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(DOCUMENT_TYPE_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="documentNumber">Número de Documento</Label>
+                  <Input id="documentNumber" value={formData.documentNumber || ""} onChange={(e) => setFormData({ ...formData, documentNumber: e.target.value })} placeholder="12345678" data-testid="input-document-number" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="cuilCuit">CUIT / CUIL</Label>
+                  <Input
+                    id="cuilCuit"
+                    value={formData.cuilCuit || ""}
+                    onChange={(e) => setFormData({ ...formData, cuilCuit: normalizeCuit(e.target.value) })}
+                    placeholder="20123456789"
+                    maxLength={13}
+                    data-testid="input-cuil-cuit"
+                  />
+                  {formData.cuilCuit && normalizeCuit(formData.cuilCuit).length === 11 && (
+                    <p className="text-xs text-muted-foreground">{formatCuit(formData.cuilCuit)}</p>
+                  )}
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="vatCondition">Condición ante IVA</Label>
+                  <Select value={(formData as any).vatCondition || "consumidor_final"} onValueChange={(value) => setFormData({ ...formData, vatCondition: value } as any)}>
+                    <SelectTrigger data-testid="select-vat-condition"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Estado Civil */}
               <div className="grid gap-2">
-                <Label htmlFor="vehiculoPatente">Patente</Label>
-                <Input
-                  id="vehiculoPatente"
-                  name="vehiculoPatente"
-                  value={formData.vehiculoPatente || ""}
-                  onChange={(e) => setFormData({ ...formData, vehiculoPatente: e.target.value.toUpperCase() })}
-                  placeholder="ABC 123"
-                  data-testid="input-vehiculo-patente"
-                />
+                <Label>Estado Civil</Label>
+                <Select value={(formData as any).estadoCivil || ""} onValueChange={(v) => setFormData({ ...formData, estadoCivil: v } as any)}>
+                  <SelectTrigger data-testid="select-estado-civil"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="soltero">Soltero/a</SelectItem>
+                    <SelectItem value="casado">Casado/a</SelectItem>
+                    <SelectItem value="divorciado">Divorciado/a</SelectItem>
+                    <SelectItem value="viudo">Viudo/a</SelectItem>
+                    <SelectItem value="union_convivencial">Unión Convivencial</SelectItem>
+                    <SelectItem value="otro">Otro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Nacionalidad con código AFIP */}
+              <NationalityCombobox
+                value={formData.nationality || ""}
+                afipCode={(formData as any).nationalityCode || ""}
+                onChange={(name, code) => setFormData({ ...formData, nationality: name, nationalityCode: code } as any)}
+              />
+
+              {/* Datos migratorios — solo para extranjeros (Ley 25.871) */}
+              {formData.nationality && formData.nationality !== "Argentina" && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-3">
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                    ⚠️ Datos migratorios requeridos por Ley 25.871 (Migraciones)
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-2">
+                      <Label htmlFor="fechaIngresoArg" className="text-xs">Fecha Ingreso a Argentina</Label>
+                      <Input id="fechaIngresoArg" type="date" value={(formData as any).fechaIngresoArgentina || ""} onChange={(e) => setFormData({ ...formData, fechaIngresoArgentina: e.target.value } as any)} data-testid="input-fecha-ingreso-argentina" />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="fechaSalidaArg" className="text-xs">Fecha Salida de Argentina</Label>
+                      <Input id="fechaSalidaArg" type="date" value={(formData as any).fechaSalidaArgentina || ""} onChange={(e) => setFormData({ ...formData, fechaSalidaArgentina: e.target.value } as any)} data-testid="input-fecha-salida-argentina" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Procedencia */}
+              <div className="grid gap-2">
+                <Label htmlFor="procedencia">
+                  Procedencia <span className="text-xs text-muted-foreground">(ciudad desde donde viaja)</span>
+                </Label>
+                <Input id="procedencia" value={(formData as any).procedencia || ""} onChange={(e) => setFormData({ ...formData, procedencia: e.target.value } as any)} placeholder="Ej: Rosario (aunque viva en Córdoba)" data-testid="input-procedencia" />
+              </div>
+
+              {/* Domicilio permanente */}
+              <div className="pt-1 border-t">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Domicilio Permanente</Label>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="vehiculoMarca">Marca</Label>
-                <Input
-                  id="vehiculoMarca"
-                  name="vehiculoMarca"
-                  value={formData.vehiculoMarca || ""}
-                  onChange={(e) => setFormData({ ...formData, vehiculoMarca: e.target.value })}
-                  placeholder="Toyota"
-                  data-testid="input-vehiculo-marca"
-                />
+                <Label htmlFor="direccion">Dirección</Label>
+                <Input id="direccion" value={formData.direccion || ""} onChange={(e) => setFormData({ ...formData, direccion: e.target.value })} placeholder="Av. Siempreviva 742" data-testid="input-direccion" />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+              <ProvinciaCiudadSelect
+                provincia={formData.provincia || ""}
+                localidad={formData.localidad || ""}
+                onProvinciaChange={(v) => setFormData({ ...formData, provincia: v, localidad: "" })}
+                onLocalidadChange={(v) => setFormData({ ...formData, localidad: v })}
+                testIdProvincia="select-guest-provincia"
+                testIdLocalidad="select-guest-localidad"
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="codigoPostal">Código Postal</Label>
+                  <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData({ ...formData, codigoPostal: e.target.value })} placeholder="3100" data-testid="input-codigo-postal" />
+                </div>
+              </div>
+
+              {/* FCE MiPyME */}
+              <div className="pt-1 border-t">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Factura de Crédito Electrónica (FCE / MiPyME)</Label>
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="esEmpresaGrande" checked={(formData as any).esEmpresaGrande || false} onChange={(e) => setFormData({ ...formData, esEmpresaGrande: e.target.checked } as any)} className="h-4 w-4 rounded border-input" data-testid="check-es-empresa-grande" />
+                <label htmlFor="esEmpresaGrande" className="text-sm text-muted-foreground">Sí, es empresa grande</label>
+              </div>
+              {(formData as any).esEmpresaGrande && (
+                <div className="grid gap-2">
+                  <Label htmlFor="montoBaseFce">Monto Base FCE ($)</Label>
+                  <Input id="montoBaseFce" value={(formData as any).montoBaseFce || ""} onChange={(e) => setFormData({ ...formData, montoBaseFce: e.target.value } as any)} placeholder="Ej: 400000" data-testid="input-monto-base-fce" />
+                </div>
+              )}
+
+              {/* Empresa asociada */}
               <div className="grid gap-2">
-                <Label htmlFor="vehiculoModelo">Modelo</Label>
-                <Input
-                  id="vehiculoModelo"
-                  name="vehiculoModelo"
-                  value={formData.vehiculoModelo || ""}
-                  onChange={(e) => setFormData({ ...formData, vehiculoModelo: e.target.value })}
-                  placeholder="Corolla"
-                  data-testid="input-vehiculo-modelo"
-                />
+                <Label>Empresa asociada</Label>
+                <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" role="combobox" aria-expanded={companyOpen} className="w-full justify-between font-normal" data-testid="select-company">
+                      {formData.companyId ? (companies?.find(c => c.id === formData.companyId)?.nombreFantasia || companies?.find(c => c.id === formData.companyId)?.razonSocial || "Empresa") : "Sin empresa"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Buscar empresa..." />
+                      <CommandList>
+                        <CommandEmpty>Sin resultados.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem value="__none__" onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
+                            <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />Sin empresa
+                          </CommandItem>
+                          {companies?.map(c => (
+                            <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
+                              <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
+                              {c.nombreFantasia || c.razonSocial}
+                              {c.nombreFantasia && <span className="ml-1 text-xs text-muted-foreground">({c.razonSocial})</span>}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="vehiculoColor">Color</Label>
-                <Input
-                  id="vehiculoColor"
-                  name="vehiculoColor"
-                  value={formData.vehiculoColor || ""}
-                  onChange={(e) => setFormData({ ...formData, vehiculoColor: e.target.value })}
-                  placeholder="Blanco"
-                  data-testid="input-vehiculo-color"
-                />
+
+              {/* Vehículo */}
+              <div className="pt-2 border-t">
+                <Label className="text-sm font-medium text-muted-foreground">Datos del Vehículo (opcional)</Label>
               </div>
-            </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="vehiculoPatente">Patente</Label>
+                  <Input id="vehiculoPatente" value={formData.vehiculoPatente || ""} onChange={(e) => setFormData({ ...formData, vehiculoPatente: e.target.value.toUpperCase() })} placeholder="ABC 123" data-testid="input-vehiculo-patente" />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="vehiculoMarca">Marca</Label>
+                  <Input id="vehiculoMarca" value={formData.vehiculoMarca || ""} onChange={(e) => setFormData({ ...formData, vehiculoMarca: e.target.value })} placeholder="Toyota" data-testid="input-vehiculo-marca" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="vehiculoModelo">Modelo</Label>
+                  <Input id="vehiculoModelo" value={formData.vehiculoModelo || ""} onChange={(e) => setFormData({ ...formData, vehiculoModelo: e.target.value })} placeholder="Corolla" data-testid="input-vehiculo-modelo" />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="vehiculoColor">Color</Label>
+                  <Input id="vehiculoColor" value={formData.vehiculoColor || ""} onChange={(e) => setFormData({ ...formData, vehiculoColor: e.target.value })} placeholder="Blanco" data-testid="input-vehiculo-color" />
+                </div>
+              </div>
+            </>)}
+
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

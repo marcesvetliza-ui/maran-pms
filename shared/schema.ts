@@ -171,6 +171,8 @@ export const guests = pgTable("guests", {
   // FCE MiPyME
   esEmpresaGrande: boolean("es_empresa_grande").default(false),
   montoBaseFce: text("monto_base_fce"),
+  // Tipo de persona (física o jurídica)
+  tipoPersona: text("tipo_persona").default("fisica"),
 });
 
 export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, codigo: true, fechaAlta: true });
