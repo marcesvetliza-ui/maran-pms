@@ -67,16 +67,17 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { RoomWithType, RoomType, InsertRoom, RoomStatus, ChargeType } from "@shared/schema";
 
 function RoomStatusBadge({ status }: { status: RoomStatus }) {
-  const statusConfig: Record<RoomStatus, { label: string; className: string }> = {
+  const statusConfig: Record<string, { label: string; className: string }> = {
     available: { label: "Disponible", className: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
     occupied: { label: "Ocupada", className: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" },
     dirty: { label: "Sucia", className: "bg-orange-200 text-orange-900 dark:bg-orange-900/40 dark:text-orange-400" },
     cleaning: { label: "Limpieza", className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400" },
     maintenance: { label: "Mantenimiento", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
     oos: { label: "Fuera de Servicio", className: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" },
+    inspected: { label: "Inspeccionada", className: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400" },
   };
 
-  const config = statusConfig[status];
+  const config = statusConfig[status] ?? { label: status, className: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" };
 
   return <Badge className={config.className}>{config.label}</Badge>;
 }
