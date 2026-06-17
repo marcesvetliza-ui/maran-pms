@@ -511,5 +511,21 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS tipo_persona text DEFAULT 'fisica'`)
   );
 
+  await withTimeout("companies.es_empresa_grande", T, () =>
+    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS es_empresa_grande boolean DEFAULT false`)
+  );
+  await withTimeout("companies.monto_base_fce", T, () =>
+    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS monto_base_fce text`)
+  );
+  await withTimeout("companies.condicion_venta", T, () =>
+    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS condicion_venta_predeterminada text DEFAULT 'contado'`)
+  );
+  await withTimeout("agencies.condicion_venta", T, () =>
+    db.execute(sql`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS condicion_venta_predeterminada text DEFAULT 'contado'`)
+  );
+  await withTimeout("guests.condicion_venta", T, () =>
+    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS condicion_venta_predeterminada text DEFAULT 'contado'`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

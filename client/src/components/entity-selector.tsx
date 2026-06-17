@@ -41,6 +41,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
     vehiculoMarca: "",
     vehiculoModelo: "",
     vehiculoColor: "",
+    condicionVentaPredeterminada: "contado",
   });
 
   const isJuridicaGuest = newGuest.tipoPersona === "juridica";
@@ -82,6 +83,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       vehiculoMarca: isJuridicaGuest ? null : (newGuest.vehiculoMarca || null),
       vehiculoModelo: isJuridicaGuest ? null : (newGuest.vehiculoModelo || null),
       vehiculoColor: isJuridicaGuest ? null : (newGuest.vehiculoColor || null),
+      condicionVentaPredeterminada: newGuest.condicionVentaPredeterminada || "contado",
       companyId: null,
     } as any);
     setNewGuest({
@@ -103,6 +105,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       vehiculoMarca: "",
       vehiculoModelo: "",
       vehiculoColor: "",
+      condicionVentaPredeterminada: "contado",
     });
     setMode("search");
   };
@@ -388,6 +391,20 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
               </div>
             </>)}
 
+            <div className="space-y-2">
+              <Label>Condición de Venta</Label>
+              <Select value={newGuest.condicionVentaPredeterminada} onValueChange={(v) => setNewGuest({ ...newGuest, condicionVentaPredeterminada: v })}>
+                <SelectTrigger data-testid="select-guest-condicion-venta"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="contado">Contado</SelectItem>
+                  <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                  <SelectItem value="30_dias">30 días</SelectItem>
+                  <SelectItem value="60_dias">60 días</SelectItem>
+                  <SelectItem value="90_dias">90 días</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <Button
               type="button"
               onClick={handleCreateGuest}
@@ -438,6 +455,9 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
     creditLimit: "0",
     paymentTermDays: 30,
     notes: "",
+    condicionVentaPredeterminada: "contado",
+    esEmpresaGrande: false,
+    montoBaseFce: "",
   });
 
   useEffect(() => {
@@ -478,6 +498,9 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
       creditLimit: newCompany.creditLimit || "0",
       paymentTermDays: newCompany.paymentTermDays || 30,
       notes: newCompany.notes || null,
+      condicionVentaPredeterminada: newCompany.condicionVentaPredeterminada || "contado",
+      esEmpresaGrande: newCompany.esEmpresaGrande || false,
+      montoBaseFce: newCompany.montoBaseFce || null,
       isActive: "true",
     });
     setNewCompany({
@@ -501,6 +524,9 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
       creditLimit: "0",
       paymentTermDays: 30,
       notes: "",
+      condicionVentaPredeterminada: "contado",
+      esEmpresaGrande: false,
+      montoBaseFce: "",
     });
     setMode("search");
   };
@@ -739,6 +765,41 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
               />
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Condición de Venta</Label>
+                <Select value={newCompany.condicionVentaPredeterminada} onValueChange={(v) => setNewCompany({ ...newCompany, condicionVentaPredeterminada: v })}>
+                  <SelectTrigger data-testid="select-company-condicion-venta"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contado">Contado</SelectItem>
+                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    <SelectItem value="30_dias">30 días</SelectItem>
+                    <SelectItem value="60_dias">60 días</SelectItem>
+                    <SelectItem value="90_dias">90 días</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={newCompany.esEmpresaGrande}
+                    onChange={(e) => setNewCompany({ ...newCompany, esEmpresaGrande: e.target.checked })}
+                    data-testid="check-company-empresa-grande"
+                  />
+                  Empresa Grande (FCE MiPyME)
+                </Label>
+                {newCompany.esEmpresaGrande && (
+                  <Input
+                    value={newCompany.montoBaseFce}
+                    onChange={(e) => setNewCompany({ ...newCompany, montoBaseFce: e.target.value })}
+                    placeholder="Monto base FCE"
+                    data-testid="input-company-monto-fce"
+                  />
+                )}
+              </div>
+            </div>
+
             <Button
               type="button"
               onClick={handleCreateCompany}
@@ -772,7 +833,9 @@ export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear 
     razonSocial: "",
     nombreFantasia: "",
     cuilCuit: "",
+    condicionIva: "responsable_inscripto" as "responsable_inscripto" | "monotributo" | "exento" | "consumidor_final" | "no_responsable",
     commissionRate: "10",
+    condicionVentaPredeterminada: "contado",
     contactName: "",
     contactEmail: "",
     contactPhone: "",
@@ -799,7 +862,9 @@ export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear 
       razonSocial: newAgency.razonSocial,
       cuilCuit: newAgency.cuilCuit,
       nombreFantasia: newAgency.nombreFantasia || null,
+      condicionIva: newAgency.condicionIva,
       commissionRate: newAgency.commissionRate || "0",
+      condicionVentaPredeterminada: newAgency.condicionVentaPredeterminada || "contado",
       contactName: newAgency.contactName || null,
       contactEmail: newAgency.contactEmail || null,
       contactPhone: newAgency.contactPhone || null,
@@ -809,7 +874,9 @@ export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear 
       razonSocial: "",
       nombreFantasia: "",
       cuilCuit: "",
+      condicionIva: "responsable_inscripto",
       commissionRate: "10",
+      condicionVentaPredeterminada: "contado",
       contactName: "",
       contactEmail: "",
       contactPhone: "",
@@ -964,6 +1031,35 @@ export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear 
                   placeholder="10"
                   data-testid="input-agency-commission"
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Condición IVA</Label>
+                <Select value={newAgency.condicionIva} onValueChange={(v) => setNewAgency({ ...newAgency, condicionIva: v as any })}>
+                  <SelectTrigger data-testid="select-agency-condicion-iva"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
+                    <SelectItem value="monotributo">Monotributo</SelectItem>
+                    <SelectItem value="exento">Exento</SelectItem>
+                    <SelectItem value="consumidor_final">Consumidor Final</SelectItem>
+                    <SelectItem value="no_responsable">No Responsable</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Condición de Venta</Label>
+                <Select value={newAgency.condicionVentaPredeterminada} onValueChange={(v) => setNewAgency({ ...newAgency, condicionVentaPredeterminada: v })}>
+                  <SelectTrigger data-testid="select-agency-condicion-venta"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contado">Contado</SelectItem>
+                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    <SelectItem value="30_dias">30 días</SelectItem>
+                    <SelectItem value="60_dias">60 días</SelectItem>
+                    <SelectItem value="90_dias">90 días</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 

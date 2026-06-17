@@ -91,6 +91,9 @@ export const companies = pgTable("companies", {
   creditLimit: decimal("credit_limit", { precision: 12, scale: 2 }).default("0"),
   paymentTermDays: integer("payment_term_days").default(30),
   notes: text("notes"),
+  esEmpresaGrande: boolean("es_empresa_grande").default(false),
+  montoBaseFce: text("monto_base_fce"),
+  condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at"),
 });
@@ -121,6 +124,7 @@ export const agencies = pgTable("agencies", {
   creditLimit: decimal("credit_limit", { precision: 12, scale: 2 }).default("0"),
   paymentTermDays: integer("payment_term_days").default(30),
   notes: text("notes"),
+  condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at"),
 });
@@ -173,6 +177,7 @@ export const guests = pgTable("guests", {
   montoBaseFce: text("monto_base_fce"),
   // Tipo de persona (física o jurídica)
   tipoPersona: text("tipo_persona").default("fisica"),
+  condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
 });
 
 export const insertGuestSchema = createInsertSchema(guests).omit({ id: true, codigo: true, fechaAlta: true });

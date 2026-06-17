@@ -25,8 +25,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { GuestSelector, CompanySelector } from "@/components/entity-selector";
-import type { Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany } from "@shared/schema";
+import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
+import type { Guest, Company, Agency, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, InsertAgency } from "@shared/schema";
 
 export default function NewReservationPage() {
   const { toast } = useToast();
@@ -41,6 +41,7 @@ export default function NewReservationPage() {
 
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [selectedAgency, setSelectedAgency] = useState<Agency | null>(null);
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(prefilledRoomTypeId);
   const [selectedRoomId, setSelectedRoomId] = useState<string>(prefilledRoomId);
   const [selectedRatePlanId, setSelectedRatePlanId] = useState<string>("");
@@ -194,12 +195,26 @@ export default function NewReservationPage() {
     },
   });
 
+  const createAgencyMutation = useMutation({
+    mutationFn: async (agency: InsertAgency): Promise<Agency> => {
+      const res = await apiRequest("POST", "/api/agencies", agency);
+      return res.json();
+    },
+    onSuccess: (newAgency: Agency) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agencies"] });
+      setSelectedAgency(newAgency);
+      toast({ title: "Agencia creada", description: `${newAgency.razonSocial} ha sido registrada.` });
+    },
+    onError: () => toast({ title: "Error", description: "No se pudo crear la agencia.", variant: "destructive" }),
+  });
+
   const createReservationMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/reservations", {
         reservationCode: "",
         guestId: selectedGuest!.id,
         companyId: selectedCompany?.id || null,
+        agencyId: selectedAgency?.id || null,
         roomTypeId: selectedRoomTypeId,
         roomId: selectedRoomId,
         ratePlanId: selectedRatePlanId || null,
@@ -212,7 +227,7 @@ export default function NewReservationPage() {
         finalRatePerNight: finalRate.toFixed(2),
         totalRoomAmount: totalAmount,
         status: "confirmed",
-        source: selectedCompany ? "empresa" : "directo",
+        source: selectedAgency ? "agencia" : selectedCompany ? "empresa" : "directo",
         numberOfGuests,
         notes: notes || null,
         bedTypeId: null,
@@ -304,6 +319,13 @@ export default function NewReservationPage() {
             onSelect={setSelectedCompany}
             onCreateNew={(company) => createCompanyMutation.mutate(company)}
             onClear={() => setSelectedCompany(null)}
+          />
+
+          <AgencySelector
+            selectedAgency={selectedAgency}
+            onSelect={setSelectedAgency}
+            onCreateNew={(agency) => createAgencyMutation.mutate(agency)}
+            onClear={() => setSelectedAgency(null)}
           />
 
           <Card>

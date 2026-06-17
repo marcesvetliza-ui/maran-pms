@@ -662,6 +662,18 @@ export default function RestaurantPage() {
   const [newClientCuit, setNewClientCuit] = useState("");
   const [newClientCondicionIva, setNewClientCondicionIva] = useState<"responsable_inscripto"|"exento"|"monotributista">("exento");
 
+  // Clientes tab state
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientDialogOpen, setClientDialogOpen] = useState(false);
+  const [clientEditingId, setClientEditingId] = useState<string | null>(null);
+  const [clientForm, setClientForm] = useState({
+    tipoPersona: "fisica" as "fisica" | "juridica",
+    firstName: "", lastName: "", email: "", phone: "",
+    documentType: "dni", documentNumber: "", cuilCuit: "",
+    direccion: "", localidad: "",
+    condicionVentaPredeterminada: "contado",
+  });
+
   function validateCuit(cuit: string): boolean {
     const clean = cuit.replace(/[-\s]/g, "");
     if (!/^\d{11}$/.test(clean)) return false;
@@ -764,6 +776,43 @@ export default function RestaurantPage() {
   });
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
+  });
+
+  type RestaurantGuest = {
+    id: string; tipoPersona: string | null; firstName: string; lastName: string;
+    email: string | null; phone: string | null; documentType: string | null;
+    documentNumber: string | null; cuilCuit: string | null;
+    direccion: string | null; localidad: string | null;
+    condicionVentaPredeterminada: string | null;
+  };
+
+  const { data: restaurantGuests = [], refetch: refetchClients } = useQuery<RestaurantGuest[]>({
+    queryKey: ["/api/guests"],
+    enabled: activeTab === "clientes",
+  });
+
+  const clientCreateMutation = useMutation({
+    mutationFn: async (data: any) => { const r = await apiRequest("POST", "/api/guests", data); return r.json(); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+      setClientDialogOpen(false);
+      setClientEditingId(null);
+      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", direccion: "", localidad: "", condicionVentaPredeterminada: "contado" });
+      toast({ title: "Cliente registrado" });
+    },
+    onError: () => toast({ title: "Error al guardar", variant: "destructive" }),
+  });
+
+  const clientUpdateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { const r = await apiRequest("PATCH", `/api/guests/${id}`, data); return r.json(); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+      setClientDialogOpen(false);
+      setClientEditingId(null);
+      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", direccion: "", localidad: "", condicionVentaPredeterminada: "contado" });
+      toast({ title: "Cliente actualizado" });
+    },
+    onError: () => toast({ title: "Error al guardar", variant: "destructive" }),
   });
 
   const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -1349,7 +1398,7 @@ export default function RestaurantPage() {
     onSuccess: (company) => {
       queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       setCloseBillingName(company.razonSocial);
-      setCloseBillingCuit(company.cuilCuit);
+      setCloseBillingCuit(formatCuit(company.cuilCuit || ""));
       setCloseBillingCompanyId(company.id);
       setBillingSearch(company.razonSocial);
       setIsNewClientDialogOpen(false);
@@ -1756,6 +1805,10 @@ export default function RestaurantPage() {
           <TabsTrigger value="notas_credito" data-testid="tab-notas-credito">
             <FileX className="h-4 w-4 mr-2" />
             Notas de Crédito
+          </TabsTrigger>
+          <TabsTrigger value="clientes" data-testid="tab-clientes">
+            <Users className="h-4 w-4 mr-2" />
+            Clientes
           </TabsTrigger>
         </TabsList>
 
@@ -2725,9 +2778,274 @@ export default function RestaurantPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ==================== CLIENTES TAB ==================== */}
+        <TabsContent value="clientes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Clientes del Restaurant
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar por nombre, doc, email..."
+                      value={clientSearch}
+                      onChange={(e) => setClientSearch(e.target.value)}
+                      className="pl-8 w-64"
+                      data-testid="input-client-search"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setClientEditingId(null);
+                      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", direccion: "", localidad: "", condicionVentaPredeterminada: "contado" });
+                      setClientDialogOpen(true);
+                    }}
+                    data-testid="button-new-client"
+                  >
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Nuevo Cliente
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const q = clientSearch.toLowerCase();
+                const filtered = restaurantGuests.filter(g =>
+                  !q ||
+                  `${g.firstName} ${g.lastName}`.toLowerCase().includes(q) ||
+                  (g.email || "").toLowerCase().includes(q) ||
+                  (g.documentNumber || "").includes(q) ||
+                  (g.cuilCuit || "").includes(q) ||
+                  (g.phone || "").includes(q)
+                );
+                if (!filtered.length) return (
+                  <div className="text-center py-12 text-muted-foreground">
+                    {clientSearch ? "Sin resultados para la búsqueda." : "No hay clientes registrados. Cree el primero."}
+                  </div>
+                );
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Documento</TableHead>
+                        <TableHead>Teléfono</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Cond. Venta</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map(g => (
+                        <TableRow key={g.id} data-testid={`row-client-${g.id}`}>
+                          <TableCell className="font-medium">{g.firstName} {g.lastName}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">
+                              {g.tipoPersona === "juridica" ? "Jurídica" : "Física"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {g.documentType === "cuit" || g.tipoPersona === "juridica"
+                              ? (g.cuilCuit ? formatCuit(g.cuilCuit) : "—")
+                              : (g.documentNumber || "—")}
+                          </TableCell>
+                          <TableCell className="text-sm">{g.phone || "—"}</TableCell>
+                          <TableCell className="text-sm">{g.email || "—"}</TableCell>
+                          <TableCell>
+                            {g.condicionVentaPredeterminada
+                              ? { contado: "Contado", cuenta_corriente: "Cta Cte", "30_dias": "30 días", "60_dias": "60 días", "90_dias": "90 días" }[g.condicionVentaPredeterminada] ?? g.condicionVentaPredeterminada
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setClientEditingId(g.id);
+                                setClientForm({
+                                  tipoPersona: (g.tipoPersona as any) || "fisica",
+                                  firstName: g.firstName,
+                                  lastName: g.lastName,
+                                  email: g.email || "",
+                                  phone: g.phone || "",
+                                  documentType: g.documentType || "dni",
+                                  documentNumber: g.documentNumber || "",
+                                  cuilCuit: g.cuilCuit ? formatCuit(g.cuilCuit) : "",
+                                  direccion: g.direccion || "",
+                                  localidad: g.localidad || "",
+                                  condicionVentaPredeterminada: g.condicionVentaPredeterminada || "contado",
+                                });
+                                setClientDialogOpen(true);
+                              }}
+                              data-testid={`button-edit-client-${g.id}`}
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* ==================== DIALOGS ==================== */}
+
+      {/* Clientes Dialog */}
+      <Dialog open={clientDialogOpen} onOpenChange={(o) => { setClientDialogOpen(o); if (!o) setClientEditingId(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{clientEditingId ? "Editar Cliente" : "Nuevo Cliente"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Tipo de Persona</Label>
+              <div className="flex rounded-md overflow-hidden border">
+                <button
+                  type="button"
+                  className={`flex-1 py-1.5 text-sm transition-colors ${clientForm.tipoPersona === "fisica" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                  onClick={() => setClientForm({ ...clientForm, tipoPersona: "fisica" })}
+                  data-testid="button-client-fisica"
+                >Persona Física</button>
+                <button
+                  type="button"
+                  className={`flex-1 py-1.5 text-sm transition-colors ${clientForm.tipoPersona === "juridica" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                  onClick={() => setClientForm({ ...clientForm, tipoPersona: "juridica" })}
+                  data-testid="button-client-juridica"
+                >Persona Jurídica</button>
+              </div>
+            </div>
+
+            {clientForm.tipoPersona === "juridica" ? (
+              <div className="space-y-2">
+                <Label>Razón Social *</Label>
+                <Input value={clientForm.firstName} onChange={(e) => setClientForm({ ...clientForm, firstName: e.target.value })} placeholder="Empresa S.A." data-testid="input-client-razon-social" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Nombre *</Label>
+                  <Input value={clientForm.firstName} onChange={(e) => setClientForm({ ...clientForm, firstName: e.target.value })} placeholder="Juan" data-testid="input-client-first-name" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Apellido *</Label>
+                  <Input value={clientForm.lastName} onChange={(e) => setClientForm({ ...clientForm, lastName: e.target.value })} placeholder="Pérez" data-testid="input-client-last-name" />
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Teléfono</Label>
+                <Input value={clientForm.phone} onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })} placeholder="+54 9 11 1234-5678" data-testid="input-client-phone" />
+              </div>
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input value={clientForm.email} onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })} placeholder="email@ejemplo.com" data-testid="input-client-email" />
+              </div>
+            </div>
+
+            {clientForm.tipoPersona === "fisica" && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Tipo Doc.</Label>
+                  <Select value={clientForm.documentType} onValueChange={(v) => setClientForm({ ...clientForm, documentType: v })}>
+                    <SelectTrigger data-testid="select-client-doc-type"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dni">DNI</SelectItem>
+                      <SelectItem value="passport">Pasaporte</SelectItem>
+                      <SelectItem value="cedula">Cédula</SelectItem>
+                      <SelectItem value="other">Otro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Nro. Documento</Label>
+                  <Input value={clientForm.documentNumber} onChange={(e) => setClientForm({ ...clientForm, documentNumber: e.target.value })} placeholder="12345678" data-testid="input-client-doc-number" />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>CUIL / CUIT</Label>
+              <Input
+                value={clientForm.cuilCuit}
+                onChange={(e) => setClientForm({ ...clientForm, cuilCuit: formatCuit(e.target.value) })}
+                placeholder="20-12345678-9"
+                maxLength={13}
+                data-testid="input-client-cuit"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Dirección</Label>
+                <Input value={clientForm.direccion} onChange={(e) => setClientForm({ ...clientForm, direccion: e.target.value })} placeholder="Av. Ejemplo 123" data-testid="input-client-direccion" />
+              </div>
+              <div className="space-y-2">
+                <Label>Localidad</Label>
+                <Input value={clientForm.localidad} onChange={(e) => setClientForm({ ...clientForm, localidad: e.target.value })} placeholder="Buenos Aires" data-testid="input-client-localidad" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Condición de Venta</Label>
+              <Select value={clientForm.condicionVentaPredeterminada} onValueChange={(v) => setClientForm({ ...clientForm, condicionVentaPredeterminada: v })}>
+                <SelectTrigger data-testid="select-client-condicion-venta"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="contado">Contado</SelectItem>
+                  <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                  <SelectItem value="30_dias">30 días</SelectItem>
+                  <SelectItem value="60_dias">60 días</SelectItem>
+                  <SelectItem value="90_dias">90 días</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClientDialogOpen(false)} data-testid="button-client-cancel">Cancelar</Button>
+            <Button
+              disabled={!clientForm.firstName || (clientForm.tipoPersona === "fisica" && !clientForm.lastName) || clientCreateMutation.isPending || clientUpdateMutation.isPending}
+              onClick={() => {
+                const payload = {
+                  tipoPersona: clientForm.tipoPersona,
+                  firstName: clientForm.firstName,
+                  lastName: clientForm.tipoPersona === "juridica" ? (clientForm.lastName || "-") : clientForm.lastName,
+                  email: clientForm.email || null,
+                  phone: clientForm.phone || null,
+                  documentType: clientForm.tipoPersona === "juridica" ? "cuit" : clientForm.documentType,
+                  documentNumber: clientForm.tipoPersona === "juridica" ? (clientForm.cuilCuit.replace(/[-]/g, "") || null) : (clientForm.documentNumber || null),
+                  cuilCuit: clientForm.cuilCuit.replace(/[-]/g, "") || null,
+                  direccion: clientForm.direccion || null,
+                  localidad: clientForm.localidad || null,
+                  condicionVentaPredeterminada: clientForm.condicionVentaPredeterminada,
+                };
+                if (clientEditingId) {
+                  clientUpdateMutation.mutate({ id: clientEditingId, data: payload });
+                } else {
+                  clientCreateMutation.mutate(payload);
+                }
+              }}
+              data-testid="button-client-save"
+            >
+              {(clientCreateMutation.isPending || clientUpdateMutation.isPending) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {clientEditingId ? "Guardar Cambios" : "Crear Cliente"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* New Order Dialog (table-based) */}
       <Dialog open={isNewOrderDialogOpen} onOpenChange={(open) => { if (open) setIsNewOrderDialogOpen(true); }}>
@@ -4016,7 +4334,7 @@ export default function RestaurantPage() {
                                           className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
                                           onMouseDown={() => {
                                             setCloseBillingName(c.razonSocial);
-                                            setCloseBillingCuit(c.cuilCuit);
+                                            setCloseBillingCuit(formatCuit(c.cuilCuit || ""));
                                             setCloseBillingCompanyId(c.id);
                                             setBillingSearch(c.razonSocial);
                                             setCloseCcEntityType("company");
