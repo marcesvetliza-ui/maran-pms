@@ -131,10 +131,15 @@ export default function CheckInPage() {
   const webCheckinReservations = allReservations
     ?.filter(
       (r) =>
-        (r.status === "confirmed" || r.status === "pending") &&
+        (r.status === "confirmed" || r.status === "pending" || r.status === "web_checkin") &&
         r.checkInDate >= webCheckinDateFrom
     )
-    .sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
+    .sort((a, b) => {
+      // web_checkin primero (ya completaron el pre-ingreso)
+      if (a.status === "web_checkin" && b.status !== "web_checkin") return -1;
+      if (b.status === "web_checkin" && a.status !== "web_checkin") return 1;
+      return a.checkInDate.localeCompare(b.checkInDate);
+    });
 
   const { data: webCheckinList } = useQuery<WebCheckinListItem[]>({
     queryKey: ["/api/web-checkin/list"],

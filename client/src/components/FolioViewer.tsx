@@ -333,7 +333,7 @@ function ReservationDetailPanel({ reservationId }: { reservationId: string }) {
         </div>
         {res.status && (
           <Badge variant="outline" className="text-xs">
-            {res.status === "checked_in" ? "En Casa" : res.status === "checked_out" ? "Check-out" : res.status === "confirmed" ? "Confirmada" : res.status}
+            {res.status === "checked_in" ? "En Casa" : res.status === "checked_out" ? "Check-out" : res.status === "confirmed" ? "Confirmada" : res.status === "web_checkin" ? "Pre Check-In" : res.status}
           </Badge>
         )}
       </div>

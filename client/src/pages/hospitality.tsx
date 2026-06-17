@@ -1081,6 +1081,7 @@ function HistoryTab() {
     checked_out: "Check-out",
     checked_in: "In-house",
     confirmed: "Confirmada",
+    web_checkin: "Pre Check-In",
     pending: "Pendiente",
     cancelled: "Cancelada",
   };

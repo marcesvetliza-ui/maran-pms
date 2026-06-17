@@ -206,7 +206,7 @@ export type InsertBedType = z.infer<typeof insertBedTypeSchema>;
 export type BedType = typeof bedTypes.$inferSelect;
 
 // Reservations
-export type ReservationStatus = "tentative" | "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
+export type ReservationStatus = "tentative" | "pending" | "confirmed" | "web_checkin" | "checked_in" | "checked_out" | "cancelled";
 export type DiscountType = "none" | "percent" | "fixed";
 export type ReservationSource = "directo" | "web" | "booking" | "expedia" | "airbnb" | "despegar" | "hotelbeds" | "agoda" | "ota" | "empresa" | "telefono" | "agencia";
 
@@ -390,7 +390,7 @@ export type RoomWithType = Room & {
 };
 
 // Planning types
-export type PlanningCellStatus = "available" | "booked" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked" | "inspected" | "checked_out";
+export type PlanningCellStatus = "available" | "booked" | "web_checkin" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked" | "inspected" | "checked_out";
 
 export type PlanningData = {
   rooms: RoomWithType[];

@@ -22,12 +22,13 @@ import type { ReservationWithDetails, ReservationStatus } from "@shared/schema";
 
 function getStatusBadge(status: ReservationStatus) {
   const config: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-    tentative: { label: "Tentativa", variant: "outline" },
-    pending: { label: "Pendiente", variant: "secondary" },
-    confirmed: { label: "Confirmada", variant: "default" },
-    checked_in: { label: "Check-in", variant: "default" },
-    checked_out: { label: "Check-out", variant: "outline" },
-    cancelled: { label: "Cancelada", variant: "destructive" },
+    tentative:   { label: "Tentativa",    variant: "outline" },
+    pending:     { label: "Pendiente",    variant: "secondary" },
+    confirmed:   { label: "Confirmada",   variant: "default" },
+    web_checkin: { label: "Pre Check-In", variant: "default" },
+    checked_in:  { label: "Check-in",     variant: "default" },
+    checked_out: { label: "Check-out",    variant: "outline" },
+    cancelled:   { label: "Cancelada",    variant: "destructive" },
   };
   return config[status] || { label: status, variant: "outline" };
 }
@@ -257,13 +258,14 @@ export function ReservationDetailModal({
   })() : false;
   const canCheckIn = (
     reservation?.status === "confirmed" ||
+    reservation?.status === "web_checkin" ||
     reservation?.status === "pending" ||
     reservation?.status === "tentative"
   ) && isCheckInDateValid;
   const canCheckOut = reservation?.status === "checked_in" && isCheckOutDateValid;
   const canUndoCheckIn = reservation?.status === "checked_in" && reservation?.checkInDate === todayLocal;
   const canUndoCheckOut = reservation?.status === "checked_out" && reservation?.checkOutDate === todayLocal;
-  const canCancel = reservation?.status === "confirmed" || reservation?.status === "pending" || reservation?.status === "tentative";
+  const canCancel = reservation?.status === "confirmed" || reservation?.status === "web_checkin" || reservation?.status === "pending" || reservation?.status === "tentative";
   const totalCharges = reservation?.charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
 
   const printConfirmation = () => {

@@ -28,9 +28,10 @@ const companyFormSchema = insertCompanySchema.extend({
 type CompanyFormData = z.infer<typeof companyFormSchema>;
 
 const statusLabels: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  tentative: { label: "Tentativa", variant: "outline" },
-  pending: { label: "Pendiente", variant: "secondary" },
-  confirmed: { label: "Confirmada", variant: "default" },
+  tentative:   { label: "Tentativa",    variant: "outline" },
+  pending:     { label: "Pendiente",    variant: "secondary" },
+  confirmed:   { label: "Confirmada",   variant: "default" },
+  web_checkin: { label: "Pre Check-In", variant: "default" },
   checked_in: { label: "Check-in", variant: "default" },
   checked_out: { label: "Finalizada", variant: "outline" },
   cancelled: { label: "Cancelada", variant: "destructive" },

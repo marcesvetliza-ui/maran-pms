@@ -113,18 +113,19 @@ function parseReservationError(error: any): string {
   return "No se pudo completar la operación. Intente nuevamente.";
 }
 
-const VALID_STATUSES: ReservationStatus[] = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled"];
+const VALID_STATUSES: ReservationStatus[] = ["tentative", "pending", "confirmed", "web_checkin", "checked_in", "checked_out", "cancelled"];
 const normalizeStatus = (s: string | null | undefined): ReservationStatus =>
   VALID_STATUSES.includes(s as ReservationStatus) ? (s as ReservationStatus) : "pending";
 
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-    tentative: { label: "Tentativa", variant: "outline" },
-    pending: { label: "Pendiente", variant: "secondary" },
-    confirmed: { label: "Confirmada", variant: "default" },
-    checked_in: { label: "Check-in", variant: "default" },
-    checked_out: { label: "Check-out", variant: "outline" },
-    cancelled: { label: "Cancelada", variant: "destructive" },
+    tentative:   { label: "Tentativa",    variant: "outline" },
+    pending:     { label: "Pendiente",    variant: "secondary" },
+    confirmed:   { label: "Confirmada",   variant: "default" },
+    web_checkin: { label: "Pre Check-In", variant: "default" },
+    checked_in:  { label: "Check-in",     variant: "default" },
+    checked_out: { label: "Check-out",    variant: "outline" },
+    cancelled:   { label: "Cancelada",    variant: "destructive" },
   };
 
   const config = statusConfig[status] || { label: "Sin estado", variant: "outline" as const };
@@ -1060,6 +1061,7 @@ export function ReservationFormDialog({
                       <SelectItem value="tentative">Tentativa</SelectItem>
                       <SelectItem value="pending">Pendiente</SelectItem>
                       <SelectItem value="confirmed">Confirmada</SelectItem>
+                      <SelectItem value="web_checkin">Pre Check-In</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -1609,7 +1611,7 @@ function ReservationDetailDialog({
       const all = await res.json();
       return all
         .filter((r: ReservationWithDetails) => 
-          (r.status === "checked_in" || r.status === "confirmed") && r.id !== reservation.id
+          (r.status === "checked_in" || r.status === "confirmed" || r.status === "web_checkin") && r.id !== reservation.id
         )
         .sort((a: ReservationWithDetails, b: ReservationWithDetails) => {
           if (a.status !== b.status) {
@@ -4052,6 +4054,7 @@ export default function ReservationsPage() {
                   <SelectItem value="all">Todos los estados</SelectItem>
                   <SelectItem value="pending">Pendientes</SelectItem>
                   <SelectItem value="confirmed">Confirmadas</SelectItem>
+                  <SelectItem value="web_checkin">Pre Check-In</SelectItem>
                   <SelectItem value="checked_in">Check-in</SelectItem>
                   <SelectItem value="checked_out">Check-out</SelectItem>
                   <SelectItem value="cancelled">Canceladas</SelectItem>

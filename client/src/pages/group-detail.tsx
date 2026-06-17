@@ -1267,7 +1267,7 @@ export default function GroupDetailPage() {
         
         {/* Mass Action Buttons */}
         <div className="flex gap-2 flex-wrap">
-          {group.reservations.some(r => r.status === "confirmed" && r.checkInDate <= today) && (
+          {group.reservations.some(r => (r.status === "confirmed" || r.status === "web_checkin" || r.status === "pending") && r.checkInDate <= today) && (
             <Button
               variant="default"
               onClick={() => setShowCheckInConfirm(true)}

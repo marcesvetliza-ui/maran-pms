@@ -1110,6 +1110,13 @@ export async function registerRoutes(
         });
       }
 
+      // Actualizar status de la reserva a "web_checkin" (Pre Check-In confirmado)
+      if (reservation && reservation.status !== "checked_in" && reservation.status !== "checked_out") {
+        await storage.updateReservation(webCheckin.reservationId, {
+          status: "web_checkin",
+        } as any);
+      }
+
       if (requestEarlyCheckIn && reservation) {
         await storage.updateReservation(webCheckin.reservationId, {
           earlyCheckIn: true,

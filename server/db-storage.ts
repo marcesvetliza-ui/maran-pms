@@ -992,6 +992,8 @@ export class DatabaseStorage implements IStorage {
             }
           } else if (day === reservation.checkInDate && day === todayStr) {
             occupancy[room.id].push("checkin_today");
+          } else if (reservation.status === "web_checkin") {
+            occupancy[room.id].push("web_checkin");
           } else {
             occupancy[room.id].push("booked");
           }
@@ -3840,7 +3842,7 @@ export class DatabaseStorage implements IStorage {
       const [reservation] = await db.select().from(reservations)
         .where(eq(reservations.id, link.reservationId));
 
-      if (!reservation || reservation.status !== "confirmed") continue;
+      if (!reservation || (reservation.status !== "confirmed" && reservation.status !== "web_checkin" && reservation.status !== "pending")) continue;
 
       const todayStr = getArgentinaToday();
       if (reservation.checkInDate > todayStr) {
