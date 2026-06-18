@@ -2456,10 +2456,10 @@ export default function CashRegister() {
     setMostrarSelectorParte(true);
   }
 
-  // Non-admin/manager users only see their assigned department
+  // Non-admin/manager users see their assigned department OR their role-matching area
   const visibleConfigs = isAdminOrManager
     ? allActiveConfigs
-    : allActiveConfigs.filter((c) => c.area === user?.department);
+    : allActiveConfigs.filter((c) => c.area === user?.department || c.area === user?.role);
 
   if (isLoading) {
     return (
