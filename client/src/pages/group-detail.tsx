@@ -1087,20 +1087,20 @@ export default function GroupDetailPage() {
     window.print();
   };
 
+  const bedTypeMap: Record<string, string> = {};
+  (bedTypesList || []).forEach(bt => { bedTypeMap[bt.id] = bt.name; });
+
+  const getBedLabel = (res: any) => {
+    const btId = res.room?.bedTypeId;
+    if (btId && bedTypeMap[btId]) return bedTypeMap[btId];
+    return res.room?.roomType?.name || "-";
+  };
+
   const printRoomingList = () => {
     if (!group) return;
     const sortedReservations = [...group.reservations].sort(
       (a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || "")
     );
-
-    const bedTypeMap: Record<string, string> = {};
-    (bedTypesList || []).forEach(bt => { bedTypeMap[bt.id] = bt.name; });
-
-    const getBedLabel = (res: any) => {
-      const btId = res.room?.bedTypeId;
-      if (btId && bedTypeMap[btId]) return bedTypeMap[btId];
-      return res.room?.roomType?.name || "-";
-    };
 
     const rows = sortedReservations.map((res, idx) => {
       const companions: any[] = (res as any).companions || [];
@@ -2391,7 +2391,7 @@ export default function GroupDetailPage() {
                   <TableRow>
                     <TableHead className="w-10">#</TableHead>
                     <TableHead>Habitación</TableHead>
-                    <TableHead>Tipo</TableHead>
+                    <TableHead>Camaje</TableHead>
                     <TableHead>Huésped</TableHead>
                     <TableHead>Documento</TableHead>
                     <TableHead>Check-in</TableHead>
@@ -2407,7 +2407,7 @@ export default function GroupDetailPage() {
                       <TableRow key={res.id} data-testid={`row-rooming-${res.id}`}>
                         <TableCell className="font-medium">{idx + 1}</TableCell>
                         <TableCell className="font-bold">{res.room?.roomNumber}</TableCell>
-                        <TableCell>{res.room?.roomType?.name || "-"}</TableCell>
+                        <TableCell>{getBedLabel(res)}</TableCell>
                         <TableCell className="font-medium">{res.guest?.lastName} {res.guest?.firstName}</TableCell>
                         <TableCell className="text-sm">
                           {res.guest?.documentNumber
