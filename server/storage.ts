@@ -453,6 +453,7 @@ export interface IStorage {
   deleteMenuItem(id: string): Promise<boolean>;
 
   // Restaurant Orders
+  closeStaleOrders(): Promise<number>;
   getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]>;
   getRestaurantOrder(id: string): Promise<RestaurantOrderWithDetails | undefined>;
   getOrdersByTable(tableId: string): Promise<RestaurantOrder[]>;
@@ -3104,6 +3105,10 @@ export class MemStorage implements IStorage {
 
   async deleteMenuItem(id: string): Promise<boolean> {
     return this.menuItems.delete(id);
+  }
+
+  async closeStaleOrders(): Promise<number> {
+    return 0;
   }
 
   async getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]> {

@@ -1881,20 +1881,59 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async closeStaleOrders(): Promise<number> {
+    // Cierra todas las órdenes activas de días anteriores (Argentina) y libera las mesas.
+    // Usa SQL nativo para timezone-aware comparison — no depende del timezone del servidor Node.
+    const staleOrders = await db.select({ id: restaurantOrders.id, tableId: restaurantOrders.tableId })
+      .from(restaurantOrders)
+      .where(
+        and(
+          not(inArray(restaurantOrders.status, ["closed", "cancelled"])),
+          sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') < (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+        )
+      );
+
+    if (staleOrders.length === 0) return 0;
+
+    const staleIds = staleOrders.map(o => o.id);
+    await db.update(restaurantOrders)
+      .set({ status: "closed" as any })
+      .where(inArray(restaurantOrders.id, staleIds));
+
+    // Liberar mesas cuyo único pedido activo era el stale
+    const tableIds = [...new Set(staleOrders.filter(o => o.tableId).map(o => o.tableId!))];
+    for (const tableId of tableIds) {
+      const remaining = await db.select({ id: restaurantOrders.id })
+        .from(restaurantOrders)
+        .where(
+          and(
+            eq(restaurantOrders.tableId, tableId),
+            not(inArray(restaurantOrders.status, ["closed", "cancelled"]))
+          )
+        )
+        .limit(1);
+      if (remaining.length === 0) {
+        await db.update(restaurantTables)
+          .set({ status: "available" as any })
+          .where(eq(restaurantTables.id, tableId));
+      }
+    }
+
+    console.log(`[closeStaleOrders] Cerradas ${staleOrders.length} órdenes viejas, ${tableIds.length} mesas liberadas.`);
+    return staleOrders.length;
+  }
+
   async getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]> {
     const conditions = [];
     if (status) {
       conditions.push(eq(restaurantOrders.status, status));
     } else if (!from && !to) {
       // Sin filtros explícitos: solo pedidos activos de HOY (Argentina).
-      // Esto evita que pedidos de jornadas anteriores que quedaron en "open"/"in_progress"
-      // sin cerrarse correctamente aparezcan en el plano de mesas.
+      // Usa SQL nativo para evitar problemas de timezone entre Node y PostgreSQL.
       conditions.push(not(inArray(restaurantOrders.status, ["closed", "cancelled"])));
-      // Argentina = UTC-3 siempre (sin horario de verano).
-      // Medianoche Argentina = 03:00 UTC del mismo día.
-      const todayArgStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-      const midnightArgentinaUTC = new Date(todayArgStr + "T03:00:00.000Z");
-      conditions.push(gte(restaurantOrders.openedAt, midnightArgentinaUTC));
+      conditions.push(
+        sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+      );
     }
     if (from) conditions.push(gte(restaurantOrders.openedAt, new Date(from)));
     if (to) conditions.push(lte(restaurantOrders.openedAt, new Date(to)));

@@ -162,6 +162,10 @@ export function registerRestaurantRoutes(app: Express) {
       const status = req.query.status as string | undefined;
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
+      // Auto-close stale orders (sin filtros = plano de mesas): cierra viejas y libera mesas
+      if (!status && !from && !to) {
+        await storage.closeStaleOrders().catch(e => console.error("[closeStaleOrders]", e));
+      }
       const orders = await storage.getRestaurantOrders(status as any, from, to);
       const ordersWithSplits = await Promise.all(
         orders.map(async (order: any) => {

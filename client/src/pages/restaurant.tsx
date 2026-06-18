@@ -1440,7 +1440,15 @@ export default function RestaurantPage() {
       setNewWaiterName("");
       setIsNewOrderDialogOpen(true);
     } else if (table.status === "occupied") {
-      const tableOrder = orders.find((o) => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
+      // Defensa frontend: solo considerar órdenes de HOY en Argentina.
+      // Aunque el backend ya filtra por fecha, esta capa extra previene que
+      // órdenes viejas (de días anteriores) que escaparon el filtro abran el dialog.
+      const todayArgentina = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const tableOrder = orders.find((o) => {
+        if (o.tableId !== table.id || o.status === "closed" || o.status === "cancelled") return false;
+        const orderDate = new Date(o.openedAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        return orderDate === todayArgentina;
+      });
       if (tableOrder) {
         setCurrentOrder(tableOrder);
         const orderItems = (tableOrder as any).items || [];
@@ -1448,8 +1456,8 @@ export default function RestaurantPage() {
         setSelectedCategory(null);
         setIsOrderDialogOpen(true);
       } else {
-        // Mesa trabada como "occupied" sin pedido activo de hoy (quedó de jornada anterior).
-        // Tratarla como disponible y abrir nueva orden.
+        // Mesa trabada como "occupied" sin pedido válido de hoy (quedó de jornada anterior).
+        // El backend ya la habrá liberado en el próximo refetch; tratarla como disponible.
         setCurrentOrder(null);
         setNewCovers(table.capacity);
         setNewWaiterName("");
