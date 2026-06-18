@@ -291,7 +291,6 @@ export default function CheckOutPage() {
   const today = getLocalToday();
   const overdueReservations = reservations?.filter((res) => res.checkOutDate < today) ?? [];
   const filteredReservations = reservations?.filter((res) => {
-    if (res.checkOutDate > today) return false;
     const guestName = `${res.guest?.lastName} ${res.guest?.firstName}`.toLowerCase();
     return (
       guestName.includes(searchQuery.toLowerCase()) ||
@@ -1049,7 +1048,9 @@ export default function CheckOutPage() {
                       <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400" data-testid={`badge-today-${reservation.id}`}>Hoy</Badge>
                     ) : reservation.checkOutDate < today ? (
                       <Badge className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-400" data-testid={`badge-overdue-${reservation.id}`}>Vencido</Badge>
-                    ) : null}
+                    ) : (
+                      <Badge className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-400" data-testid={`badge-early-${reservation.id}`}>Salida {formatDateAR(reservation.checkOutDate)}</Badge>
+                    )}
                   </div>
                 </div>
               </CardHeader>

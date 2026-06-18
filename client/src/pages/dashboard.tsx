@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { getLocalToday } from "@/lib/utils";
 import {
   DoorOpen,
   Users,
@@ -214,9 +215,11 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/arrivals"],
   });
 
-  const { data: departures = [], isLoading: departuresLoading } = useQuery<ReservationWithDetails[]>({
+  const { data: departuresRaw = [], isLoading: departuresLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/dashboard/departures"],
   });
+  const todayDash = getLocalToday();
+  const departures = departuresRaw.filter((r) => r.checkOutDate <= todayDash);
 
   const { data: inHouseData = [], isLoading: inHouseLoading } = useQuery<InHouseEntry[]>({
     queryKey: ["/api/dashboard/inhouse"],
