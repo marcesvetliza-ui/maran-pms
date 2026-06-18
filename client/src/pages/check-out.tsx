@@ -291,7 +291,7 @@ export default function CheckOutPage() {
   const today = getLocalToday();
   const overdueReservations = reservations?.filter((res) => res.checkOutDate < today) ?? [];
   const filteredReservations = reservations?.filter((res) => {
-    if (res.checkOutDate !== today) return false;
+    if (res.checkOutDate > today) return false;
     const guestName = `${res.guest?.lastName} ${res.guest?.firstName}`.toLowerCase();
     return (
       guestName.includes(searchQuery.toLowerCase()) ||
@@ -984,15 +984,12 @@ export default function CheckOutPage() {
                 className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 transition-colors"
                 data-testid="button-overdue-checkouts"
               >
-                <AlertCircle className="h-4 w-4" />
-                Habitaciones no cerradas
-                <span className="ml-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-200 px-1 text-xs font-bold text-red-800 dark:bg-red-800 dark:text-red-200">
-                  {overdueReservations.length}
-                </span>
+                <ListChecks className="h-4 w-4" />
+                Cierre masivo
               </button>
             )}
             <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-400" data-testid="badge-active-count">
-              {filteredReservations?.length || 0} hoy
+              {filteredReservations?.length || 0} pendientes
             </Badge>
           </div>
         </CardContent>
@@ -1103,11 +1100,11 @@ export default function CheckOutPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <LogOut className="h-16 w-16 text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No hay check-outs para hoy</h3>
+            <h3 className="text-lg font-semibold mb-2">No hay check-outs pendientes</h3>
             <p className="text-muted-foreground">
               {searchQuery
                 ? "No se encontraron huéspedes con los criterios de búsqueda."
-                : "No hay check-outs programados para hoy."}
+                : "No hay check-outs programados para hoy ni vencidos."}
             </p>
           </CardContent>
         </Card>
