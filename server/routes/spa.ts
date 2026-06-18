@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { spaPayments, spaProfessionals, spaClients, inventoryItems } from "@shared/schema";
+import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, desc } from "drizzle-orm";
 
@@ -645,51 +645,56 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  // SPA Clients
+  // SPA Clients — unified: uses guests table so all modules share the same client base
   app.get("/api/spa/clients", async (req, res) => {
     try {
       const { search } = req.query;
-      const clients = await db.select().from(spaClients).orderBy(desc(spaClients.createdAt));
+      const allGuests = await db.select().from(guests).orderBy(desc(guests.createdAt));
       if (search) {
         const s = (search as string).toLowerCase();
-        return res.json(clients.filter((c: any) =>
-          c.firstName.toLowerCase().includes(s) ||
+        return res.json(allGuests.filter((c: any) =>
+          (c.firstName || "").toLowerCase().includes(s) ||
           (c.lastName || "").toLowerCase().includes(s) ||
           (c.phone || "").includes(s) ||
-          (c.email || "").toLowerCase().includes(s)
+          (c.email || "").toLowerCase().includes(s) ||
+          (c.documentNumber || "").includes(s)
         ));
       }
-      res.json(clients);
+      res.json(allGuests);
     } catch (error) {
-      res.status(500).json({ error: "Error fetching spa clients" });
+      res.status(500).json({ error: "Error fetching clients" });
     }
   });
 
   app.post("/api/spa/clients", async (req, res) => {
     try {
-      const [created] = await db.insert(spaClients).values(req.body).returning();
+      const [created] = await db.insert(guests).values(req.body).returning();
       res.json(created);
     } catch (error) {
-      res.status(500).json({ error: "Error creating spa client" });
+      res.status(500).json({ error: "Error creating client" });
     }
   });
 
   app.patch("/api/spa/clients/:id", async (req, res) => {
     try {
-      const [updated] = await db.update(spaClients)
-        .set(req.body).where(eq(spaClients.id, req.params.id)).returning();
+      const ALLOWED = ["firstName","lastName","email","phone","notes","documentType",
+        "documentNumber","vatCondition","cuilCuit","estadoCivil","direccion",
+        "localidad","provincia","codigoPostal","fechaNacimiento","sexo","tipoPersona"];
+      const patch: Record<string, any> = {};
+      for (const f of ALLOWED) { if (req.body[f] !== undefined) patch[f] = req.body[f]; }
+      const [updated] = await db.update(guests).set(patch).where(eq(guests.id, req.params.id)).returning();
       res.json(updated);
     } catch (error) {
-      res.status(500).json({ error: "Error updating spa client" });
+      res.status(500).json({ error: "Error updating client" });
     }
   });
 
   app.delete("/api/spa/clients/:id", async (req, res) => {
     try {
-      await db.delete(spaClients).where(eq(spaClients.id, req.params.id));
+      await db.delete(guests).where(eq(guests.id, req.params.id));
       res.json({ success: true });
     } catch (error) {
-      res.status(500).json({ error: "Error deleting spa client" });
+      res.status(500).json({ error: "Error deleting client" });
     }
   });
 

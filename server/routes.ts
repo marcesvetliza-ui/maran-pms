@@ -1909,17 +1909,20 @@ export async function registerRoutes(
   // ── GUEST UPDATE ────────────────────────────────────────────────────────────
   app.patch("/api/guests/:id", requireAuth, async (req, res) => {
     try {
-      const { firstName, lastName, email, phone, documentType, documentNumber, nationality, notes } = req.body;
-      const updated = await storage.updateGuest(req.params.id, {
-        ...(firstName !== undefined && { firstName }),
-        ...(lastName !== undefined && { lastName }),
-        ...(email !== undefined && { email }),
-        ...(phone !== undefined && { phone }),
-        ...(documentType !== undefined && { documentType }),
-        ...(documentNumber !== undefined && { documentNumber }),
-        ...(nationality !== undefined && { nationality }),
-        ...(notes !== undefined && { notes }),
-      });
+      const ALLOWED_FIELDS = [
+        "firstName","lastName","email","phone","documentType","documentNumber",
+        "nationality","nationalityCode","notes","vatCondition","cuilCuit",
+        "estadoCivil","procedencia","fechaIngresoArgentina","fechaSalidaArgentina",
+        "esEmpresaGrande","montoBaseFce","direccion","provincia","localidad",
+        "codigoPostal","fechaNacimiento","sexo","segment","companyId","agencyId",
+        "vehiculoPatente","vehiculoMarca","vehiculoModelo","vehiculoColor",
+        "tipoPersona","condicionVentaPredeterminada","isActive",
+      ];
+      const patch: Record<string, any> = {};
+      for (const field of ALLOWED_FIELDS) {
+        if (req.body[field] !== undefined) patch[field] = req.body[field];
+      }
+      const updated = await storage.updateGuest(req.params.id, patch);
       if (!updated) return res.status(404).json({ error: "Huésped no encontrado" });
       res.json(updated);
     } catch (err: any) {

@@ -2993,7 +2993,7 @@ export default function RestaurantPage() {
               <Input
                 value={clientForm.cuilCuit}
                 onChange={(e) => setClientForm({ ...clientForm, cuilCuit: formatCuit(e.target.value) })}
-                placeholder="20-12345678-9"
+                placeholder="20123456789"
                 maxLength={13}
                 data-testid="input-client-cuit"
               />
