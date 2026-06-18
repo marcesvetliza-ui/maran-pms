@@ -179,18 +179,31 @@ function formatDateTime(dateStr: string): string {
   return `${datepart} ${timepart}`;
 }
 
+const METHOD_ALIASES: Record<string, string> = {
+  efectivo: "cash",
+  tarjeta_credito: "credit_card",
+  tarjeta_debito: "debit_card",
+  transferencia: "transfer",
+  cuenta_corriente: "current_account",
+  cuenta_habitacion: "room_charge",
+};
+function normalizePaymentMethod(method: string): string {
+  return METHOD_ALIASES[method] ?? method;
+}
+
 function buildSummaryFromMovements(movements: CashMovement[]) {
   const summary: Record<string, { count: number; total: number; items: CashMovement[] }> = {};
   for (const m of movements) {
     if (m.anulado) continue;
-    if (!summary[m.paymentMethod]) {
-      summary[m.paymentMethod] = { count: 0, total: 0, items: [] };
+    const key = normalizePaymentMethod(m.paymentMethod);
+    if (!summary[key]) {
+      summary[key] = { count: 0, total: 0, items: [] };
     }
-    summary[m.paymentMethod].items.push(m);
-    if (m.movementType === "informational") continue; // solo registro, no impacta saldo
-    summary[m.paymentMethod].count += 1;
+    summary[key].items.push(m);
+    if (m.movementType === "informational") continue;
+    summary[key].count += 1;
     const amt = parseFloat(String(m.amount)) || 0;
-    summary[m.paymentMethod].total += m.movementType === "income" ? amt : -amt;
+    summary[key].total += m.movementType === "income" ? amt : -amt;
   }
   return summary;
 }
@@ -276,12 +289,16 @@ function printClosingSummary(
   const totalTx = Object.values(summary).reduce((s, v) => s + v.count, 0);
   const areaLabel = AREA_LABEL_MAP[shift.area] || shift.area;
   const diferencia = efectivoContado - efectivoSistema;
+  const shiftDateObj = new Date(shift.openedAt);
+  const shiftDateStr = shiftDateObj.toLocaleDateString("es-AR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
+  const shiftDateShort = shiftDateObj.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
 
-  // Group active movements by payment method
+  // Group active movements by payment method (normalized to avoid duplicates)
   const byMethod: Record<string, CashMovement[]> = {};
   for (const m of activos) {
-    if (!byMethod[m.paymentMethod]) byMethod[m.paymentMethod] = [];
-    byMethod[m.paymentMethod].push(m);
+    const key = normalizePaymentMethod(m.paymentMethod);
+    if (!byMethod[key]) byMethod[key] = [];
+    byMethod[key].push(m);
   }
 
   const methodBoxes = Object.entries(byMethod).map(([method, movs]) => {
@@ -372,6 +389,7 @@ function printClosingSummary(
   <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Maran Suites & Towers</div>
   <div style="font-size:20px;font-weight:bold;margin:4px 0">Cierre de Turno</div>
   <div style="font-size:14px;color:#555">${areaLabel} — ${shift.turnoTipo ? formatShiftLabel(shift) : `Turno #${shift.shiftNumber}`}</div>
+  <div style="font-size:13px;font-weight:600;color:#444;margin-top:4px">${shiftDateStr}</div>
 </div>
 
 <div style="display:flex;justify-content:space-between;margin-bottom:16px;font-size:12px;gap:16px">
@@ -412,13 +430,19 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "manager";
   const { toast } = useToast();
-  const defaultOperatorName = user?.fullName || user?.username || "";
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
   const [closeShiftDialog, setCloseShiftDialog] = useState(false);
   const [closeStep, setCloseStep] = useState<1 | 2>(1);
   const [movementDialog, setMovementDialog] = useState(false);
   const [tomarTurnoDialog, setTomarTurnoDialog] = useState(false);
-  const [openedBy, setOpenedBy] = useState(defaultOperatorName);
+  const [openedBy, setOpenedBy] = useState("");
+
+  type UserBasic = { id: string; username: string; fullName?: string | null; role: string };
+  const { data: allUsers = [] } = useQuery<UserBasic[]>({ queryKey: ["/api/admin/users"] });
+  const AREA_TO_ROLE: Record<string, string> = { reception: "reception", restaurant: "restaurant", spa: "spa", events: "events" };
+  const areaRole = AREA_TO_ROLE[area] ?? area;
+  const relevantUsers = allUsers.filter(u => u.role === areaRole || u.role === "admin" || u.role === "manager");
+  const getDisplayName = (u: UserBasic) => u.fullName || u.username;
   const [openNotes, setOpenNotes] = useState("");
   const [turnoTipoOpen, setTurnoTipoOpen] = useState("tarde");
   const [turnoTipoTomar, setTurnoTipoTomar] = useState("tarde");
@@ -553,9 +577,19 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
 
   const addMovementMutation = useMutation({
     mutationFn: async () => {
-      const label = isCobro
-        ? `Cobro CC — ${movCCEntityName}`
-        : movDesc;
+      if (!isAdmin) {
+        return apiRequest("POST", "/api/cash/movements", {
+          shiftId: currentShift!.id,
+          area,
+          sourceType: "manual",
+          sourceLabel: "Inicio de caja",
+          paymentMethod: "cash",
+          amount: parseFloat(movAmount),
+          movementType: "income",
+          description: "Inicio de caja",
+        });
+      }
+      const label = isCobro ? `Cobro CC — ${movCCEntityName}` : movDesc;
       return apiRequest("POST", "/api/cash/movements", {
         shiftId: currentShift!.id,
         area,
@@ -569,11 +603,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         proveedor: movProveedor || undefined,
         expenseCategory: movExpenseCategory || undefined,
         description: label,
-        ...(isCobro ? {
-          ccEntityType: movCCEntityType,
-          ccEntityId: movCCEntityId,
-          ccEntityName: movCCEntityName,
-        } : {}),
+        ...(isCobro ? { ccEntityType: movCCEntityType, ccEntityId: movCCEntityId, ccEntityName: movCCEntityName } : {}),
       });
     },
     onSuccess: () => {
@@ -621,7 +651,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       return apiRequest("POST", `/api/cash/shifts/${currentShift!.id}/close`, {
         closedBy,
         efectivoContado,
-        operadorSiguiente: operadorSiguiente.trim() || null,
+        operadorSiguiente: (operadorSiguiente === "_ninguno" || !operadorSiguiente.trim()) ? null : operadorSiguiente.trim(),
         notes: closeNotes || undefined,
         turnoTipo: turnoTipoClose || undefined,
       });
@@ -752,7 +782,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 data-testid={`btn-manual-movement-${area}`}
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Registrar movimiento manual
+                {isAdmin ? "Registrar movimiento manual" : "Registrar fondo inicial"}
               </Button>
             </CardHeader>
             <CardContent>
@@ -912,13 +942,16 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
             </div>
             <div>
               <label className="text-sm font-medium">Responsable *</label>
-              <Input
-                value={openedBy}
-                onChange={(e) => setOpenedBy(e.target.value)}
-                placeholder="Nombre del responsable"
-                data-testid={`input-opened-by-${area}`}
-                autoFocus
-              />
+              <Select value={openedBy} onValueChange={setOpenedBy}>
+                <SelectTrigger data-testid={`select-opened-by-${area}`}>
+                  <SelectValue placeholder="Seleccionar responsable..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {relevantUsers.map(u => (
+                    <SelectItem key={u.id} value={getDisplayName(u)}>{getDisplayName(u)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <label className="text-sm font-medium">Observaciones</label>
@@ -961,8 +994,38 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       }}>
         <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Registrar Movimiento Manual</DialogTitle>
+            <DialogTitle>{isAdmin ? "Registrar Movimiento Manual" : "Registrar Fondo Inicial de Caja"}</DialogTitle>
           </DialogHeader>
+          {!isAdmin ? (
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800">
+                <p className="text-sm text-blue-800 dark:text-blue-300 font-medium">Fondo inicial de caja</p>
+                <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                  Este registro declara el monto inicial con el que se abre la caja. Solo efectivo.
+                </p>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Monto inicial ($) *</label>
+                <Input
+                  type="number"
+                  value={movAmount}
+                  onChange={e => setMovAmount(e.target.value)}
+                  placeholder="0"
+                  data-testid={`input-mov-amount-${area}`}
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={() => addMovementMutation.mutate()}
+                  disabled={!movAmount || addMovementMutation.isPending}
+                  data-testid={`btn-confirm-movement-${area}`}
+                >
+                  {addMovementMutation.isPending ? "Registrando..." : "Registrar fondo"}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+          <>
           <div className="space-y-4">
             {/* Tipo de movimiento */}
             <div>
@@ -1211,6 +1274,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               Registrar
             </Button>
           </DialogFooter>
+          </>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1330,7 +1395,16 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
 
               <div>
                 <label className="text-sm font-medium">Cerrado por *</label>
-                <Input value={closedBy} onChange={e => setClosedBy(e.target.value)} placeholder="Nombre de quien cierra" data-testid={`input-closed-by-${area}`} />
+                <Select value={closedBy} onValueChange={setClosedBy}>
+                  <SelectTrigger data-testid={`select-closed-by-${area}`}>
+                    <SelectValue placeholder="Seleccionar quien cierra..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {relevantUsers.map(u => (
+                      <SelectItem key={u.id} value={getDisplayName(u)}>{getDisplayName(u)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <label className="text-sm font-medium">Observaciones</label>
@@ -1352,7 +1426,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               </div>
               <div>
                 <label className="text-sm font-medium">¿Quién toma el siguiente turno? <span className="text-muted-foreground font-normal">(opcional)</span></label>
-                <Input value={operadorSiguiente} onChange={e => setOperadorSiguiente(e.target.value)} placeholder="Dejar vacío si no hay relevo inmediato" data-testid={`input-next-operator-${area}`} />
+                <Select value={operadorSiguiente} onValueChange={setOperadorSiguiente}>
+                  <SelectTrigger data-testid={`select-next-operator-${area}`}>
+                    <SelectValue placeholder="Sin relevo inmediato" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_ninguno">Sin relevo inmediato</SelectItem>
+                    {relevantUsers.map(u => (
+                      <SelectItem key={u.id} value={getDisplayName(u)}>{getDisplayName(u)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}
@@ -1382,7 +1466,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
             <DialogTitle>Tomar turno — {config.areaLabel}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">Este turno fue creado automáticamente. Seleccioná el tipo e ingresá tu nombre para tomarlo.</p>
+            <p className="text-sm text-muted-foreground">Este turno fue creado automáticamente. Seleccioná el tipo y el operador que lo tomará.</p>
             <div>
               <label className="text-sm font-medium">Tipo de turno *</label>
               <div className="grid grid-cols-3 gap-2 mt-1.5">
@@ -1400,8 +1484,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium">Tu nombre *</label>
-              <Input value={openedBy} onChange={e => setOpenedBy(e.target.value)} placeholder="Nombre del responsable" data-testid={`input-tomar-turno-operador-${area}`} autoFocus />
+              <label className="text-sm font-medium">Operador *</label>
+              <Select value={openedBy} onValueChange={setOpenedBy}>
+                <SelectTrigger data-testid={`select-tomar-turno-operador-${area}`}>
+                  <SelectValue placeholder="Seleccionar operador..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {relevantUsers.map(u => (
+                    <SelectItem key={u.id} value={getDisplayName(u)}>{getDisplayName(u)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

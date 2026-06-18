@@ -1,0 +1,17 @@
+Usuario de restaurante
+Puede hacer el cierre de caja pero:
+Solicitar un nombre de quien cierra la caja no es correcto, se puede escribir cualquier cosa, no lo van ha hacer pero no es correcto. Lo correcto es seleccionar un usuario del sector. Si el que cierra es un administrador deben de aparecer los nombres de usuarios de los administradores, sino solamente los usuario del sector que está cerrando, no otros
+Resumen de cierre
+Acá hay un problema que puede ser serio, hay dos Efectivo. No he llegado a ver si hay, y si hay como funciona, la configuración de las formas de pago. Tiene que haber un abm y una asociación a cada comprobante de impuestos como de las formas de pago. No se porque acá tenes dos efectivos pero sí sé que corresponden a comprobantes distintos
+
+
+Figuran los pedidos pero no figuran el punto de venta, comprobante emitido, número y fecha
+Que despliegue por cada forma de pago el pedido en este momento no tiene mucho sentido pero…
+Solo puede emitir un reporte y si se necesita emitir de nuevo o hacer una auditoría de caja, ¿como se hace?. Tiene que haber un lanzador de consultas, que dicho de paso no existe para ningún módulo.
+El reporte tiene sus problemas pero es más debido por el funcionamiento del sistema en sí más que por el reporte, ya que no figura los datos de los comprobantes que lo conforman; dice jueves tarde pero no dice la fecha (lo tiene pero arriba a la izquierda chiquito)
+
+Luego de hacer el cierre de caja el sistema tiene que actuar de alguna manera. Hoy lo que hace es:
+El sistema puede operar si un parte de caja activo y usuario no se entera nunca y esto no puede pasar
+El sistema pide “tu nombre”. Esto, como dije con anterioridad, debe de ser un usuario del sector, no debe de mostrar los usuarios gerencial/administrador, salvo que el usuario que está tomando el turno sea uno de estos
+
+También tiene la opción disponible de Registrar movimiento manual. Como he dicho en anteriores documentos, este módulo solo puede servir para registrar un monto de inicio de caja, nada más ya que no cumple con todos los requerimientos para la emisión de un comprobante.
