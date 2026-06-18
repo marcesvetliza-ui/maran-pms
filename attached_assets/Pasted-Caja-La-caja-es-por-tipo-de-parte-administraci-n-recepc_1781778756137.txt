@@ -1,0 +1,33 @@
+Caja 
+La caja es por tipo de parte (administración, recepción, spa, justo, etc.) 
+Cada tipo de parte tiene turnos
+Cada área tiene su turno y como todos los usuarios dependen del área al momento de ingresar al sistema todo lo que emitan debe registrarse en el turno activo de esa área. El problema acá surge con los usuarios administradores/gerenciales, el sistema debe solicitar el parte de caja que va a utilizar durante su sesión, esto como primer paso luego de haber ingresado al sistema.
+Un usuario del área debe de hacer el cierre de caja correspondiente, emitir los reportes en pdf que se le solicite. No puede ver los movimientos de otras áreas 
+Acá viene como habilitar el próximo parte y hay varias formas de encarar esto
+Que el usuario que cierra ya deja el próximo parte activo sin usuario para que el sistema avise que se debe setear un usuario responsable en algún momento antes del cierre de caja
+Que el usuario que cierra no deje ningún parte de caja activo lo cual hace que el próximo usuario del área que entre lo unico que le permita hacer el sistema es activar el parte de caja de su área y luego poder hacer otra cosa
+Que el que cierra la caja no deje ningún parte de caja activo y que esta acción hace que el sistema no deje emitir nada, nada de nada, sin un parte de caja activo para esa área hasta que alguien de esa área habrá uno
+Sin parte de caja activo el área no puede hacer nada
+Todo esto se cumple pero en parte porque
+Usuario de recepción
+No saben que parte de caja está activo, no puede hacer el cierre de caja por ende no puede activar un nuevo parte, no sabe a qué parte se conectó. 
+Esto es lo que ve un usuario de recepción al ingresar al modulo de caja
+
+
+Desglosemos 
+
+
+
+
+Historial
+
+Permite seleccionar áreas por fecha y ver sus movimientos. Esto es solo aceptable para un usuario Administrador/Gerencia
+Debe de mostrar los movimientos del parte activo
+Puede filtrar por fecha 
+Resumen del día
+No informa el parte que se está visualizando 
+Informa de movimientos de otras áreas, esto es solo para administradores/gerentes
+
+Muestra mal la fecha en el reporte y no dice que parte y turno al que pertenece
+
+Se debe de permitir hacer cierre de caja pero tomando en cuenta lo anterior y lo explicado en lo que ven los usuarios del restaurante
