@@ -47,6 +47,7 @@ const DashboardExecutivePage = lazy(() => import("@/pages/dashboard-executive"))
 const CashRegisterPage = lazy(() => import("@/pages/cash-register"));
 const SourceCodePage = lazy(() => import("@/pages/source-code"));
 const AdminPage = lazy(() => import("@/pages/admin"));
+const PosConfigsPage = lazy(() => import("@/pages/pos-configs"));
 const SpaClientsPage = lazy(() => import("@/pages/spa-clients"));
 const PresupuestosPage = lazy(() => import("@/pages/presupuestos"));
 const AccountingSuppliersPage = lazy(() => import("@/pages/accounting-suppliers"));
@@ -169,6 +170,7 @@ function Router() {
         <Route path="/executive" component={DashboardExecutivePage} />
         <Route path="/cash-register" component={CashRegisterPage} />
         <Route path="/admin" component={AdminPage} />
+        <Route path="/pos-configs" component={PosConfigsPage} />
         <Route path="/source-code" component={SourceCodePage} />
         <Route path="/accounting-suppliers" component={AccountingSuppliersPage} />
         <Route path="/purchase-invoices" component={PurchaseInvoicesPage} />

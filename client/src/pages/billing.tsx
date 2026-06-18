@@ -267,6 +267,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
+  const [puntoVentaNum, setPuntoVentaNum] = useState("");
+  const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
 
   useEffect(() => {
     if (open && initialValues) {
@@ -336,6 +338,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
   function resetForm() {
     setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
+    setPuntoVentaNum("");
   }
 
   const isFA = tipo === "FA";
@@ -345,7 +348,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
     if (!razonSocial.trim()) return toast({ title: "Ingrese Razón Social / Nombre", variant: "destructive" });
     if (isFA && !cuit.trim()) return toast({ title: "CUIT es requerido para Factura A", variant: "destructive" });
     if (items.some(it => !it.descripcion.trim())) return toast({ title: "Todos los ítems deben tener descripción", variant: "destructive" });
-    mutation.mutate({ tipoComprobante: tipo, cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined }, items });
+    mutation.mutate({ tipoComprobante: tipo, cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined }, items, puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined });
   }
 
   return (
@@ -376,6 +379,23 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
             </p>
           )}
         </div>
+
+        {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").length > 0 && (
+          <div className="space-y-1">
+            <Label>Punto de Venta (ARCA)</Label>
+            <Select value={puntoVentaNum} onValueChange={setPuntoVentaNum}>
+              <SelectTrigger data-testid="select-punto-venta"><SelectValue placeholder="PV por defecto (configuración)" /></SelectTrigger>
+              <SelectContent>
+                {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").map((p: any) => (
+                  <SelectItem key={p.id} value={String(p.numero)}>
+                    PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
+          </div>
+        )}
 
         <Separator />
 

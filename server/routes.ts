@@ -40,6 +40,7 @@ import { registerFolioRoutes } from "./routes/folios";
 import { registerPublicBookingRoutes } from "./routes/publicBooking";
 import { registerEmailRoutes } from "./routes/emails";
 import { registerCountriesRoutes } from "./routes/countries";
+import { registerPosConfigsRoutes } from "./routes/pos-configs";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -3034,6 +3035,7 @@ export async function registerRoutes(
   registerPublicBookingRoutes(app);
   registerEmailRoutes(app);
   registerCountriesRoutes(app);
+  registerPosConfigsRoutes(app);
   registerGuestsRoutes(app);
   registerReservationsRoutes(app);
   registerGroupsRoutes(app);

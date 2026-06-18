@@ -47,6 +47,7 @@ import {
   ChevronDown,
   KeyRound,
   ChefHat,
+  Store,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -178,6 +179,7 @@ const menuSections = [
       { label: "Configuración",          icon: Settings, href: "/administration", roles: ["admin"] },
       { label: "Correo & Backup",        icon: Mail,     href: "/email-config",   roles: ["admin"] },
       { label: "Países (AFIP)",          icon: Globe,    href: "/admin/countries", roles: ["admin"] },
+      { label: "Puntos de Venta",        icon: Store,    href: "/pos-configs",     roles: ["admin"] },
       { label: "Seguridad de claves",    icon: KeyRound, href: "/seguridad",      roles: ["admin"] },
       { label: "Administración sistema", icon: Shield,   href: "/administration", roles: ["admin"], adminOnly: true },
       { label: "Código fuente",          icon: Code2,    href: "/source-code",    roles: ["admin"], adminOnly: true, devOnly: true },

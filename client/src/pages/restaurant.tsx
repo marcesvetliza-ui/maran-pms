@@ -555,6 +555,7 @@ export default function RestaurantPage() {
   const [reservationAreaFilter, setReservationAreaFilter] = useState<string>("all");
   const pendingCheckInReservationRef = useRef<TableReservation | null>(null);
   const [closeReceiptType, setCloseReceiptType] = useState("cierre_mesa");
+  const [closePuntoVenta, setClosePuntoVenta] = useState("");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
   const [closeDiscount, setCloseDiscount] = useState("");
   const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("percent");
@@ -774,6 +775,7 @@ export default function RestaurantPage() {
   const { data: companies = [] } = useQuery<{ id: string; name: string; razonSocial: string; nombreFantasia?: string | null; cuilCuit: string }[]>({
     queryKey: ["/api/companies"],
   });
+  const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
   });
@@ -4274,6 +4276,25 @@ export default function RestaurantPage() {
                     <div className="space-y-3 p-3 border rounded-md bg-muted/30">
                       <p className="text-sm font-medium">Datos de facturación</p>
 
+                      {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").length > 0 && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">Punto de Venta (ARCA)</label>
+                          <select
+                            className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                            value={closePuntoVenta}
+                            onChange={e => setClosePuntoVenta(e.target.value)}
+                            data-testid="select-close-punto-venta"
+                          >
+                            <option value="">PV por defecto (configuración)</option>
+                            {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").map((p: any) => (
+                              <option key={p.id} value={String(p.numero)}>
+                                PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
                       {!isFactA && (
                         <div className="flex items-center gap-2">
                           <input type="checkbox" id="fb-exento" checked={fbIsExento}
@@ -5166,6 +5187,7 @@ export default function RestaurantPage() {
                     vatCondition: isFactura ? vatCond : undefined,
                     customerRazonSocial: isFactura ? (closeBillingName || undefined) : undefined,
                     customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
+                    puntoVenta: isFactura && closePuntoVenta ? parseInt(closePuntoVenta) : undefined,
                   });
                 }
               };

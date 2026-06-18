@@ -527,5 +527,33 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS condicion_venta_predeterminada text DEFAULT 'contado'`)
   );
 
+  await withTimeout("pos_configs table", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS pos_configs (
+        id SERIAL PRIMARY KEY,
+        nombre TEXT NOT NULL,
+        numero INTEGER NOT NULL,
+        area TEXT NOT NULL DEFAULT 'general',
+        tipo TEXT NOT NULL DEFAULT 'manual',
+        descripcion TEXT,
+        activo BOOLEAN DEFAULT true
+      )
+    `)
+  );
+
+  await withTimeout("pos_configs seed", T, async () => {
+    const res = await db.execute(sql`SELECT COUNT(*) as cnt FROM pos_configs`);
+    const cnt = parseInt((res.rows[0] as any).cnt ?? "0");
+    if (cnt === 0) {
+      await db.execute(sql`
+        INSERT INTO pos_configs (nombre, numero, area, tipo, descripcion) VALUES
+        ('Recepción', 1, 'recepcion', 'electronico', 'PV electrónico — alojamiento'),
+        ('Restaurant', 2, 'restaurant', 'electronico', 'PV electrónico — gastronomía'),
+        ('SPA', 3, 'spa', 'manual', 'PV manual — spa y bienestar'),
+        ('Eventos', 4, 'eventos', 'manual', 'PV manual — salones y eventos')
+      `);
+    }
+  });
+
   logger.info("Migraciones incrementales completadas.");
 }

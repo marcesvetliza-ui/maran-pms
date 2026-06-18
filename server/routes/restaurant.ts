@@ -232,7 +232,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
       const effectiveReservationId = reservationId || roomReservationId;
       const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || paymentMethod === "cuenta_habitacion";
       const effectivePaymentMethod = isRoomCharge ? "room_charge" : (paymentMethod || "cash");
@@ -343,6 +343,7 @@ export function registerRestaurantRoutes(app: Express) {
               subtotal: finalTotal,
             }],
             operador: (req as any).user?.fullName || (req as any).user?.username,
+            puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
           invoiceId = invoice.id;
         } catch (e) {
@@ -629,7 +630,7 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.patch("/api/restaurant/orders/:id/split/:splitId", async (req, res) => {
     try {
-      const { method, receiptType, roomReservationId, amount, emitInvoice, vatCondition, customerRazonSocial, customerCuit } = req.body;
+      const { method, receiptType, roomReservationId, amount, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
 
       // Allow updating just the amount (without paying)
       if (amount !== undefined && !method) {
@@ -686,6 +687,7 @@ export function registerRestaurantRoutes(app: Express) {
               subtotal: parseFloat(split.amount),
             }],
             operador: (req as any).user?.fullName || (req as any).user?.username,
+            puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
           invoiceId = invoice.id;
         } catch (e) {
@@ -759,7 +761,7 @@ export function registerRestaurantRoutes(app: Express) {
       const {
         itemIds, method, receiptType, roomReservationId,
         emitInvoice, vatCondition, customerRazonSocial, customerCuit,
-        ccEntityType, ccEntityId, discount, discountType,
+        ccEntityType, ccEntityId, discount, discountType, puntoVenta: pvOverride,
       } = req.body;
 
       if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
@@ -860,6 +862,7 @@ export function registerRestaurantRoutes(app: Express) {
               subtotal: parseFloat(i.subtotal),
             })),
             operador: (req as any).user?.fullName || (req as any).user?.username,
+            puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
           invoiceId = invoice.id;
         } catch (e) {

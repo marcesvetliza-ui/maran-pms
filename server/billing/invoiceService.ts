@@ -29,6 +29,7 @@ export interface NewInvoiceData {
   folioId?: number;
   facturaOriginalId?: number; // para NC
   operador?: string;
+  puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
 }
 
 const TIPOS_CBT_WSFE: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8 };
@@ -141,9 +142,10 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
 
   const puntoVenta =
-    ambiente === "homologacion"
+    data.puntoVentaOverride ??
+    (ambiente === "homologacion"
       ? ((config as any).puntoVentaHomolog ?? 99)
-      : config.puntoVenta!;
+      : config.puntoVenta!);
 
   const montos = calcularMontos(data.items, data.tipoComprobante);
 

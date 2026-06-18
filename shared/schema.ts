@@ -2243,6 +2243,20 @@ export const invoiceCounters = pgTable("invoice_counters", {
   ultimoNumero: integer("ultimo_numero").default(0),
 });
 
+// ─── Puntos de Venta ──────────────────────────────────────────────────────────
+export const posConfigs = pgTable("pos_configs", {
+  id: serial("id").primaryKey(),
+  nombre: text("nombre").notNull(),
+  numero: integer("numero").notNull(),
+  area: text("area").notNull().default("general"),
+  tipo: text("tipo").notNull().default("manual"),
+  descripcion: text("descripcion"),
+  activo: boolean("activo").default(true),
+});
+export const insertPosConfigSchema = createInsertSchema(posConfigs).omit({ id: true });
+export type InsertPosConfig = z.infer<typeof insertPosConfigSchema>;
+export type PosConfig = typeof posConfigs.$inferSelect;
+
 export const reservationChangelog = pgTable("reservation_changelog", {
   id: serial("id").primaryKey(),
   reservationId: varchar("reservation_id").notNull().references(() => reservations.id),
