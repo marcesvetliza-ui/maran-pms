@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/App";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -676,6 +676,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
             <CircleDot className="h-5 w-5" />
             Estado del Turno - {config.areaLabel}
           </CardTitle>
+          {currentShift && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => setCloseShiftDialog(true)}
+              data-testid={`btn-close-shift-header-${area}`}
+            >
+              <XCircle className="h-3.5 w-3.5 mr-1.5" />
+              Cerrar turno
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           {!currentShift ? (
@@ -1797,13 +1808,16 @@ const MODULO_LABEL: Record<string, string> = {
 
 function printResumenDia(fecha: string, data: { movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }) {
   const { movimientos, totalPorMetodo, porModulo, totalGeneral } = data;
-  const html = `<!DOCTYPE html><html><head><title>Resumen del Día — ${fecha}</title>
+  const [y, m, d] = fecha.split("-");
+  const fechaFmt = `${d}/${m}/${y}`;
+  const html = `<!DOCTYPE html><html><head><title>Resumen del Día — ${fechaFmt}</title>
 <style>body{font-family:Arial,sans-serif;padding:20px;max-width:700px;margin:0 auto}
 table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left}
 th{background:#f5f5f5}.total{font-weight:bold;background:#eee}h1{font-size:18px}h2{font-size:14px;color:#555;margin-top:20px}
 .footer{text-align:center;margin-top:24px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:8px}</style>
 </head><body>
-<h1>Resumen de Ingresos del Día — ${fecha}</h1>
+<h1>Resumen de Ingresos del Día — ${fechaFmt}</h1>
+<p style="color:#666;font-size:13px;margin:0 0 12px">Consolidado de todas las áreas — Maran Suites &amp; Towers</p>
 <h2>Por Área</h2>
 <table><thead><tr><th>Área</th><th>Total</th></tr></thead><tbody>
 ${Object.entries(porModulo).map(([m, v]) => `<tr><td>${MODULO_LABEL[m] || m}</td><td>${formatCurrency(v as number)}</td></tr>`).join("")}
@@ -1838,9 +1852,16 @@ function ResumenDiaTab() {
 
   const modulos = ["reserva", "spa", "eventos", "restaurant"];
 
+  const fechaDisplay = fecha ? `${fecha.split("-")[2]}/${fecha.split("-")[1]}/${fecha.split("-")[0]}` : fecha;
+
   return (
     <div className="space-y-6 mt-4">
-      <div className="flex items-center gap-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold">Resumen del Día</h2>
+          <p className="text-sm text-muted-foreground">Consolidado de ingresos de todas las áreas</p>
+        </div>
+        <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium">Fecha:</label>
           <Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-44" data-testid="input-resumen-dia-fecha" />
@@ -1851,6 +1872,7 @@ function ResumenDiaTab() {
             Imprimir
           </Button>
         )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -2313,8 +2335,33 @@ export default function CashRegister() {
 
   const allActiveConfigs = configs?.filter((c) => c.isActive) || [];
   const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
-  const isReception = user?.role === "reception";
-  const canSeeGlobalTabs = isAdminOrManager || isReception;
+  const canSeeGlobalTabs = isAdminOrManager;
+
+  const [parteSeleccionado, setParteSeleccionado] = useState<string | null>(() =>
+    sessionStorage.getItem("caja_parte_activo")
+  );
+  const [mostrarSelectorParte, setMostrarSelectorParte] = useState(false);
+  const [currentTab, setCurrentTab] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (isAdminOrManager && !parteSeleccionado && !isLoading && allActiveConfigs.length > 0) {
+      setMostrarSelectorParte(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
+
+  function seleccionarParte(area: string) {
+    setParteSeleccionado(area);
+    sessionStorage.setItem("caja_parte_activo", area);
+    setMostrarSelectorParte(false);
+    setCurrentTab(area);
+  }
+
+  function cambiarParte() {
+    sessionStorage.removeItem("caja_parte_activo");
+    setParteSeleccionado(null);
+    setMostrarSelectorParte(true);
+  }
 
   // Non-admin/manager users only see their assigned department
   const visibleConfigs = isAdminOrManager
@@ -2330,13 +2377,78 @@ export default function CashRegister() {
     );
   }
 
-  const defaultTab = visibleConfigs.length > 0 ? visibleConfigs[0].area : (canSeeGlobalTabs ? "historial" : "");
+  const defaultTab = isAdminOrManager && parteSeleccionado
+    ? parteSeleccionado
+    : visibleConfigs.length > 0
+    ? visibleConfigs[0].area
+    : (canSeeGlobalTabs ? "historial" : "");
 
   return (
     <div className="flex flex-col gap-6 p-6">
       <h1 className="text-3xl font-bold tracking-tight" data-testid="text-cash-register-title">
         Caja
       </h1>
+
+      {/* Parte de caja activo — solo admin/gerencia */}
+      {isAdminOrManager && !mostrarSelectorParte && (
+        <div className="flex items-center gap-3 rounded-lg border px-4 py-2.5 bg-muted/40">
+          {parteSeleccionado ? (
+            <>
+              <Building2 className="h-4 w-4 text-primary shrink-0" />
+              <span className="text-sm">
+                <span className="text-muted-foreground">Operando en:</span>{" "}
+                <strong>{allActiveConfigs.find(c => c.area === parteSeleccionado)?.areaLabel || parteSeleccionado}</strong>
+              </span>
+              <Button variant="ghost" size="sm" className="ml-auto h-7 px-2 text-xs" onClick={cambiarParte} data-testid="btn-cambiar-parte">
+                Cambiar parte
+              </Button>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+              <span className="text-sm text-muted-foreground">Modo solo consulta — sin parte de caja seleccionado</span>
+              <Button variant="outline" size="sm" className="ml-auto h-7 text-xs" onClick={() => setMostrarSelectorParte(true)} data-testid="btn-seleccionar-parte">
+                Seleccionar parte
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Selector de parte — modal bloqueante para admin/gerencia */}
+      {isAdminOrManager && (
+        <Dialog open={mostrarSelectorParte} onOpenChange={() => {}}>
+          <DialogContent className="max-w-sm" onInteractOutside={e => e.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
+                ¿En qué parte de caja vas a operar?
+              </DialogTitle>
+              <DialogDescription>
+                Seleccioná el área en la que trabajarás durante esta sesión. Todos los movimientos que registres quedarán en ese parte.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2 py-2">
+              {allActiveConfigs.map(c => (
+                <button
+                  key={c.area}
+                  onClick={() => seleccionarParte(c.area)}
+                  data-testid={`btn-select-parte-${c.area}`}
+                  className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:bg-muted hover:border-primary/50 transition-colors"
+                >
+                  <DollarSign className="h-5 w-5 text-primary shrink-0" />
+                  <span className="font-medium text-sm">{c.areaLabel}</span>
+                </button>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" size="sm" onClick={() => setMostrarSelectorParte(false)} data-testid="btn-skip-parte">
+                Solo consultar (sin parte)
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {visibleConfigs.length === 0 && !canSeeGlobalTabs ? (
         <Card>
@@ -2347,7 +2459,7 @@ export default function CashRegister() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs defaultValue={defaultTab}>
+        <Tabs value={currentTab ?? defaultTab} onValueChange={setCurrentTab}>
           <TabsList data-testid="tabs-cash-areas">
             {visibleConfigs.map((c) => (
               <TabsTrigger key={c.area} value={c.area} data-testid={`tab-${c.area}`}>
