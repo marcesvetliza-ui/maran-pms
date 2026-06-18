@@ -189,6 +189,7 @@ export function registerGroupsRoutes(app: Express) {
         const activeStatuses = ["reserved", "checked_in", "confirmed"];
 
         const availableRooms = allRoomsOfType.filter(room => {
+          if (room.roomNumber === "REUB") return false;
           if (room.status === "blocked") return false;
           return !allReservations.find(res => {
             if (!activeStatuses.includes(res.status)) return false;
