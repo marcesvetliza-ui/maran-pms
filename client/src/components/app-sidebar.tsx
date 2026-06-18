@@ -157,7 +157,7 @@ const menuSections = [
     titulo: "Administración",
     items: [
       { label: "Administración", icon: Calculator, href: "/admin",         roles: MGMT_ONLY },
-      { label: "Caja",           icon: Landmark,   href: "/cash-register", roles: [...HOTEL_OPS, "restaurant", "spa"] },
+      { label: "Caja",           icon: Landmark,   href: "/cash-register", roles: [...HOTEL_OPS, "restaurant", "spa", "events"] },
     ],
   },
 
