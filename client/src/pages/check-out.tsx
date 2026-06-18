@@ -130,7 +130,7 @@ export default function CheckOutPage() {
   };
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
-    queryKey: ["/api/reservations/check-out"],
+    queryKey: ["/api/dashboard/departures"],
   });
 
   const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
