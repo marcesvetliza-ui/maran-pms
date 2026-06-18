@@ -89,6 +89,7 @@ export default function CheckOutPage() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [showOverdueDialog, setShowOverdueDialog] = useState(false);
+  const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [bulkClosing, setBulkClosing] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [wizardStep, setWizardStep] = useState(0);
@@ -246,6 +247,28 @@ export default function CheckOutPage() {
     onError: () => {
       setBulkClosing(false);
       toast({ title: "Error", description: "No se pudo completar el cierre masivo.", variant: "destructive" });
+    },
+  });
+
+  const reopenTodaysMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/reservations/reopen-todays-checkouts", {});
+      return res.json();
+    },
+    onSuccess: (data: { reopened: number; rooms: string[] }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      setShowReopenDialog(false);
+      toast({
+        title: "Check-outs revertidos",
+        description: data.reopened > 0
+          ? `${data.reopened} habitación(es) reabiertas: ${data.rooms.join(", ")}`
+          : "No había check-outs forzados de hoy para revertir.",
+      });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo reabrir los check-outs.", variant: "destructive" });
     },
   });
 
@@ -977,6 +1000,14 @@ export default function CheckOutPage() {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setShowReopenDialog(true)}
+              className="flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 transition-colors"
+              data-testid="button-reopen-checkouts"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Reabrir de hoy
+            </button>
             {overdueReservations.length > 0 && (
               <button
                 onClick={() => setShowOverdueDialog(true)}
@@ -1242,6 +1273,41 @@ export default function CheckOutPage() {
               Confirmar salida anticipada
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reabrir check-outs forzados de hoy */}
+      <Dialog open={showReopenDialog} onOpenChange={setShowReopenDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCcw className="h-5 w-5 text-blue-600" />
+              Reabrir check-outs forzados de hoy
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción revierte todos los check-outs procesados hoy cuya fecha de salida era hoy o posterior.
+              Las habitaciones volverán a estado <strong>Ocupado</strong> y las reservas a <strong>Check-in</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/10 p-3 text-sm text-blue-800 dark:text-blue-300">
+            Solo afecta check-outs con fecha de salida ≥ hoy. No revierte check-outs de días anteriores.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReopenDialog(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => reopenTodaysMutation.mutate()}
+              disabled={reopenTodaysMutation.isPending}
+              data-testid="button-confirm-reopen"
+            >
+              {reopenTodaysMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
+              ) : (
+                <><RotateCcw className="h-4 w-4 mr-2" />Reabrir check-outs</>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

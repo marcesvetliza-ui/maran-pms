@@ -777,6 +777,42 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Reopen today's forced checkouts (revert checked_out → checked_in for today/future dates)
+  app.post("/api/reservations/reopen-todays-checkouts", requireAuth, async (req, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const forced = await db.select().from(reservations).where(
+        and(eq(reservations.status, "checked_out"), gte(reservations.checkOutDate, today))
+      );
+      if (forced.length === 0) return res.json({ reopened: 0, rooms: [] });
+      const roomNumbers: string[] = [];
+      for (const r of forced) {
+        await storage.updateReservation(r.id, { status: "checked_in" });
+        if (r.roomId) {
+          await storage.updateRoom(r.roomId, { status: "occupied" });
+          // Cancel pending checkout cleaning tasks for this room
+          await db.execute(sql`
+            UPDATE housekeeping_tasks
+            SET status = 'cancelled'
+            WHERE room_id = ${r.roomId}
+              AND task_type = 'checkout_clean'
+              AND status IN ('pending', 'assigned')
+          `);
+          const room = await storage.getRoom(r.roomId);
+          if (room?.roomNumber) roomNumbers.push(room.roomNumber);
+        }
+      }
+      await audit(req, "update", "reservations",
+        `Reapertura de ${forced.length} check-out(s) forzados del día`,
+        {}
+      );
+      res.json({ reopened: forced.length, rooms: roomNumbers });
+    } catch (error) {
+      console.error("reopen-todays-checkouts error:", error);
+      res.status(500).json({ error: "Error al reabrir check-outs" });
+    }
+  });
+
   // Check-out endpoint
   app.post("/api/reservations/:id/check-out", async (req, res) => {
     try {
