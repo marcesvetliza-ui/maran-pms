@@ -1,4 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import {
   DoorOpen,
   Users,
@@ -194,6 +195,7 @@ type InHouseEntry = {
 
 export default function Dashboard() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [inHouseOpen, setInHouseOpen] = useLocalState(false);
 
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
@@ -308,27 +310,7 @@ export default function Dashboard() {
     },
   });
 
-  const checkOutMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest("POST", `/api/reservations/${id}/check-out`, {});
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      toast({ title: "Check-out realizado", description: "El huesped ha sido despedido." });
-    },
-    onError: (error: any) => {
-      const message = error?.data?.error || error?.message || "No se pudo realizar el check-out.";
-      if (message.includes("saldo pendiente") || message.includes("balance")) {
-        toast({ title: "Saldo Pendiente", description: message, variant: "destructive" });
-      } else {
-        toast({ title: "Error", description: message, variant: "destructive" });
-      }
-    },
-  });
+
 
   const today = new Date().toLocaleDateString("es-ES", {
     weekday: "long",
@@ -640,8 +622,7 @@ export default function Dashboard() {
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => checkOutMutation.mutate(reservation.id)}
-                      disabled={checkOutMutation.isPending}
+                      onClick={() => setLocation("/check-out")}
                       data-testid={`checkout-btn-${reservation.id}`}
                     >
                       <LogOut className="h-4 w-4 mr-1" />
