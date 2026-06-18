@@ -2519,6 +2519,8 @@ export const presupuestos = pgTable("presupuestos", {
   subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
   descuentoGlobal: numeric("descuento_global", { precision: 5, scale: 2 }).notNull().default("0"),
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  areaOrigen: varchar("area_origen").default("grupos"),
+  participantes: integer("participantes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2547,6 +2549,32 @@ export type InsertPresupuestoItem = z.infer<typeof insertPresupuestoItemSchema>;
 export type PresupuestoItem = typeof presupuestoItems.$inferSelect;
 
 export type PresupuestoWithItems = Presupuesto & { items: PresupuestoItem[] };
+
+// ==================== QUOTE CATALOG ITEMS ====================
+export const quoteCatalogItems = pgTable("quote_catalog_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  area: varchar("area").notNull(),
+  category: varchar("category").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  price: numeric("price", { precision: 12, scale: 2 }).notNull().default("0"),
+  priceSpecial: numeric("price_special", { precision: 12, scale: 2 }),
+  unit: varchar("unit", { length: 100 }).notNull().default("por persona"),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+export const insertQuoteCatalogItemSchema = createInsertSchema(quoteCatalogItems).omit({ id: true });
+export type InsertQuoteCatalogItem = z.infer<typeof insertQuoteCatalogItemSchema>;
+export type QuoteCatalogItem = typeof quoteCatalogItems.$inferSelect;
+
+// ==================== QUOTE CONDITIONS ====================
+export const quoteConditions = pgTable("quote_conditions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  area: varchar("area").notNull().unique(),
+  content: text("content").notNull().default(""),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+export type QuoteConditions = typeof quoteConditions.$inferSelect;
 
 // Reservation Companions
 export const reservationCompanions = pgTable("reservation_companions", {

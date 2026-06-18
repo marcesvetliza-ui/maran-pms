@@ -179,6 +179,7 @@ const menuSections = [
       { label: "Configuración",          icon: Settings, href: "/administration", roles: ["admin"] },
       { label: "Correo & Backup",        icon: Mail,     href: "/email-config",   roles: ["admin"] },
       { label: "Países (AFIP)",          icon: Globe,    href: "/admin/countries", roles: ["admin"] },
+      { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", roles: ["admin", "manager"] },
       { label: "Puntos de Venta",        icon: Store,    href: "/pos-configs",     roles: ["admin"] },
       { label: "Seguridad de claves",    icon: KeyRound, href: "/seguridad",      roles: ["admin"] },
       { label: "Administración sistema", icon: Shield,   href: "/administration", roles: ["admin"], adminOnly: true },

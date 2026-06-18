@@ -50,6 +50,7 @@ const AdminPage = lazy(() => import("@/pages/admin"));
 const PosConfigsPage = lazy(() => import("@/pages/pos-configs"));
 const SpaClientsPage = lazy(() => import("@/pages/spa-clients"));
 const PresupuestosPage = lazy(() => import("@/pages/presupuestos"));
+const ConfigPresupuestosPage = lazy(() => import("@/pages/config-presupuestos"));
 const AccountingSuppliersPage = lazy(() => import("@/pages/accounting-suppliers"));
 const PurchaseInvoicesPage = lazy(() => import("@/pages/purchase-invoices"));
 const AdminConsultasPage = lazy(() => import("@/pages/admin-consultas"));
@@ -153,6 +154,7 @@ function Router() {
         <Route path="/reviews" component={ReviewsPage} />
         <Route path="/housekeeping" component={HousekeepingPage} />
         <Route path="/presupuestos" component={PresupuestosPage} />
+        <Route path="/config/presupuestos" component={ConfigPresupuestosPage} />
         <Route path="/restaurant" component={RestaurantPage} />
         <Route path="/restaurant/recetas" component={RecetasCostosPage} />
         <Route path="/inventory" component={InventoryPage} />

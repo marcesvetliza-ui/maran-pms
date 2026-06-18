@@ -1215,6 +1215,82 @@ export async function refreshRealData() {
       console.log("Demo reservations refreshed to current dates.");
     }
 
+    // ── Presupuestos multi-área ───────────────────────────────────────────────
+    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS area_origen VARCHAR DEFAULT 'grupos'`);
+    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS participantes INTEGER`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS quote_catalog_items (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        area VARCHAR NOT NULL,
+        category VARCHAR NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        price DECIMAL(12,2) NOT NULL DEFAULT 0,
+        price_special DECIMAL(12,2),
+        unit VARCHAR(100) NOT NULL DEFAULT 'por persona',
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS quote_conditions (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        area VARCHAR NOT NULL UNIQUE,
+        content TEXT NOT NULL DEFAULT '',
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // Seed default conditions per area
+    await db.execute(sql`
+      INSERT INTO quote_conditions (id, area, content) VALUES
+      ('qcond-grupos', 'grupos',
+        E'CONDICIONES DE CONTRATACIÓN:\n\n• El presente presupuesto no implica bloqueo de habitaciones.\n\n• El camaje detallado no puede modificarse.\n\n• El pago del alojamiento y servicios adicionales contratados deberá ser realizado desde la organización y no por huésped alojado o asistente al evento.\n\n• Para garantizar la reservación, solicitamos el pago del 30% del monto final.\n\n• La tarifa no incluye servicios adicionales a excepción de aquellos detallados.\n\n• La cancelación sin penalización será de 15 días previos al comienzo de la estadía.\n\n• El rooming definitivo debe entregarse 1 semana antes del Check in solicitado. A partir de esa fecha, las habitaciones estarán sujetas a disponibilidad del hotel.'
+      ),
+      ('qcond-recepcion', 'recepcion',
+        E'CONDICIONES DE CONTRATACIÓN:\n\n• El presente presupuesto no implica bloqueo de habitaciones.\n\n• Para garantizar la reservación, solicitamos el pago del 30% del monto final.\n\n• La tarifa no incluye servicios adicionales a excepción de aquellos detallados.\n\n• La cancelación sin penalización será de 15 días previos al comienzo de la estadía.\n\n• Check in a partir de las 15:00 hs. Check out hasta las 10:00 hs.'
+      ),
+      ('qcond-eventos', 'eventos',
+        E'El presente presupuesto se actualizará hasta un mes antes del evento.\n\nCONDICIONES:\n\n• Para garantizar la reserva del salón, solicitamos el pago del 50% del total del evento.\n\n• El saldo restante deberá abonarse 7 días antes del evento.\n\n• La cancelación sin penalización será de 30 días previos al evento.\n\n• Los precios incluyen IVA salvo indicación contraria.\n\n• El catering y servicios adicionales deberán confirmarse con 15 días de anticipación.'
+      ),
+      ('qcond-spa', 'spa',
+        E'• La reserva se confirma con el pago del 30% del total.\n\n• Las cancelaciones con menos de 48 horas de anticipación no tienen devolución.\n\n• Los tratamientos tienen una duración aproximada indicada en cada servicio.\n\n• Se recomienda llegar 15 minutos antes del turno reservado.'
+      ),
+      ('qcond-restaurant', 'restaurant',
+        E'• La reserva se confirma con el pago del 30% del total.\n\n• Los menús deben confirmarse con 72 horas de anticipación.\n\n• La cancelación sin penalización es de 48 horas antes del evento.\n\n• Los precios indicados son por persona salvo que se especifique lo contrario.'
+      )
+      ON CONFLICT (area) DO NOTHING
+    `);
+
+    // Seed eventos catalog items (from corporate quote PDF)
+    await db.execute(sql`
+      INSERT INTO quote_catalog_items (id, area, category, name, description, price, price_special, unit, is_active, sort_order) VALUES
+      ('qci-ev-s1','eventos','salon','Parque Urquiza','340 m² — Auditorio hasta 500 pax. Divisible en Ala Mitre y Ala Rivadavia.',1040000,890000,'por día',true,0),
+      ('qci-ev-s2','eventos','salon','Ala Mitre','120 m² — Auditorio hasta 120 pax.',525000,451000,'por día',true,1),
+      ('qci-ev-s3','eventos','salon','Ala Rivadavia','220 m² — Auditorio hasta 280 pax.',630000,545000,'por día',true,2),
+      ('qci-ev-s4','eventos','salon','Rosedal','56 m² — Auditorio hasta 40 pax.',262000,225000,'por día',true,3),
+      ('qci-ev-s5','eventos','salon','Solárium','Terraza exterior con vista al Parque Urquiza.',525000,451000,'por día',true,4),
+      ('qci-ev-c1','eventos','coffee_break','Opción Líquida Especial','Café, variedades de té, leche, jugo de naranja.',5300,null,'por persona',true,0),
+      ('qci-ev-c2','eventos','coffee_break','Opción 1','Café, variedades de té, leche, agua mineral, jugo, petit four, medialunas dulces y saladas.',6900,null,'por persona',true,1),
+      ('qci-ev-c3','eventos','coffee_break','Opción 2','Café, té, leche, agua mineral, jugo, petit four, medialunas, criollos, variedad de budines, ensalada de frutas.',9000,null,'por persona',true,2),
+      ('qci-ev-c4','eventos','coffee_break','Opción 3','Café, variedades de té, leche, agua mineral, jugo, petit four, budines caseros, criollos entrerrianos, scons, medialunas, mini sándwiches, ensalada de frutas, shot de frutos rojos.',14000,null,'por persona',true,3),
+      ('qci-ev-c5','eventos','coffee_break','Opción Saludable','Infusión, jugo de naranja exprimido, copa de yogurt con granola y miel, ensalada de frutas, cookies de avena, frutos secos, budín integral, chia pudding.',10500,null,'por persona',true,4),
+      ('qci-ev-k1','eventos','coctel','Cóctel 1','Sándwiches en pan de miga, empanaditas variadas, mini pizzas, cazuela de pollo en crema de hongos. Incluye agua mineral, aguas saborizadas y gaseosas.',35000,null,'por persona',true,0),
+      ('qci-ev-k2','eventos','coctel','Cóctel 2','Sándwiches, empanaditas, mini pizzas, cazuela de pollo, mini picada, pincho de bondiola. Postre: mini flan, ensalada de frutas, mini brownie. Incluye agua mineral, aguas saborizadas y gaseosas.',43000,null,'por persona',true,1),
+      ('qci-ev-e1','eventos','equipamiento','Conferencia Básico','Sonido (Mitre/Rivadavia): 2 micrófonos. Proyección con pantalla, proyector HDMI y pasador inalámbrico. Operador. 4 horas.',360000,null,'servicio',true,0),
+      ('qci-ev-e2','eventos','equipamiento','Conferencia Medio','Sonido (Mitre/Rivadavia): 3 micrófonos cuello de cisne + 2 inalámbricos. Proyección HDMI, retorno de video, pasador inalámbrico. Operador. 4 horas.',432000,null,'servicio',true,1),
+      ('qci-ev-e3','eventos','equipamiento','Conferencia Grande','Sonido (Parque Urquiza): 2 micrófonos. Proyección HDMI, pasador inalámbrico. Operador. 4 horas.',432000,null,'servicio',true,2),
+      ('qci-ev-e4','eventos','equipamiento','Conferencia Grande Plus','Sonido (Parque Urquiza): 3 micrófonos cuello de cisne + 2 inalámbricos. Proyección HDMI, retorno de video. Operador. 4 horas.',511200,null,'servicio',true,3),
+      ('qci-ev-e5','eventos','equipamiento','Conferencia + Transmisión Básico','Sonido (Mitre/Rivadavia) + transmisión básica a Zoom/Meet: ATEM Mini (swicher) + 1 cámara. Operador. 4 horas.',630000,null,'servicio',true,4),
+      ('qci-ev-e6','eventos','equipamiento','Conferencia + Transmisión Medio','Sonido (Mitre/Rivadavia) + transmisión a 2 redes (YouTube, Facebook, Meet/Zoom): Mixer DataVideo 1600T con 3 cámaras robóticas. Operador. 4 horas.',747000,null,'servicio',true,5),
+      ('qci-ev-e7','eventos','equipamiento','Conferencia + Transmisión High','Sonido (Mitre/Rivadavia) + transmisión simultánea a 10 redes: Mixer DataVideo 1300T con 3 cámaras Full HD + mochila de transmisión. Operador. 4 horas.',867000,null,'servicio',true,6),
+      ('qci-ev-e8','eventos','equipamiento','Solo Sonido (Mitre/Rivadavia)','2 micrófonos cuello de cisne o inalámbricos. Operador. 4 horas.',255000,null,'servicio',true,7),
+      ('qci-ev-e9','eventos','equipamiento','Solo Sonido (Parque Urquiza)','2 micrófonos cuello de cisne o inalámbricos. Operador. 4 horas.',276000,null,'servicio',true,8)
+      ON CONFLICT (id) DO NOTHING
+    `);
+
     console.log("Real hotel data refreshed successfully!");
   } catch (error) {
     console.error("Error refreshing real data:", error);
