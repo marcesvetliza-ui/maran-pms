@@ -530,6 +530,7 @@ const SPA_LIGHT  = "#f0f7f9";
 function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842;
   const coverPath = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
+  const page2Path = path.join(process.cwd(), "server", "assets", "spa-page2.jpg");
 
   // ── PAGE 1: Cover — imagen full-bleed, sin texto superpuesto ──────────────
   if (fs.existsSync(coverPath)) {
@@ -543,36 +544,49 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
     doc.fillColor(SPA_TEAL).fontSize(12).font("Helvetica").text("MARAN SUITES & TOWERS", 0, H / 2 + 22, { width: W, align: "center" });
   }
 
-  // ── PAGE 2+: Layout limpio (sin imagen de fondo con texto impreso) ─────────
-  const M = 40;
-  const CW = W - M * 2;
+  // ── PAGE 2+: Mix — foto SPA a la derecha, contenido limpio a la izquierda ──
+  // La imagen spa-page2.jpg se usa como fondo; cubrimos el lado izquierdo con
+  // un rect crema para tapar su texto impreso. Foto queda visible en x>368.
+  const M = 30;       // margen izquierdo
+  const CW = 310;     // ancho de contenido (queda dentro del área crema)
   let y = 0;
 
   const drawContentPageBg = () => {
-    // Fondo crema suave
+    // Fondo base crema (por si la imagen no carga)
     doc.rect(0, 0, W, H).fill(SPA_CREAM);
-    // Barra superior teal
+    // Imagen SPA de fondo completa (foto queda en el lado derecho)
+    if (fs.existsSync(page2Path)) {
+      doc.image(page2Path, 0, 0, { width: W, height: H });
+    }
+    // Rectángulo crema sobre el lado izquierdo para tapar el texto impreso en la imagen
+    // El área de foto en spa-page2.jpg ocupa la parte derecha (~x>355), dejamos esa zona libre
+    doc.rect(0, 0, 368, H).fill(SPA_CREAM);
+    // Barra superior teal (ancho total, encima de todo)
     doc.rect(0, 0, W, 52).fill(SPA_TEAL);
-    // Línea decorativa inferior de la barra
+    // Línea decorativa rosa bajo la barra
     doc.rect(0, 52, W, 3).fill(SPA_ROSE);
-    // Barra inferior
+    // Barra inferior navy
     doc.rect(0, H - 28, W, 28).fill(SPA_NAVY);
     doc.fillColor("white").fontSize(7).font("Helvetica")
        .text("MARAN SUITES & TOWERS — Hotel & Spa | maran.com.ar", 0, H - 16, { width: W, align: "center" });
   };
 
   const drawContentPageHeader = () => {
-    // Hotel + N° presupuesto en la barra superior
+    // Texto hotel en la barra izquierda
     doc.fillColor("white").fontSize(8).font("Helvetica-Bold")
-       .text("SPA · MARAN SUITES & TOWERS", M, 14, { width: CW - 160 });
+       .text("SPA · MARAN SUITES & TOWERS", M, 14, { width: CW - 20 });
     doc.fillColor("#cceeff").fontSize(7).font("Helvetica")
-       .text("Hotel & Spa", M, 24, { width: CW - 160 });
-    // Badge número
-    const bW = 148, bX = W - M - bW;
-    doc.roundedRect(bX, 8, bW, 36, 4).fill(SPA_NAVY);
-    doc.fillColor("white").fontSize(5.5).font("Helvetica").text("N° PRESUPUESTO", bX, 14, { width: bW, align: "center", characterSpacing: 0.8 });
-    doc.fillColor("white").fontSize(12).font("Helvetica-Bold").text(pres.numero, bX, 21, { width: bW, align: "center" });
-    doc.fillColor("#88c8d8").fontSize(6.5).font("Helvetica").text(formatFecha(pres.fechaEmision), bX, 36, { width: bW, align: "center" });
+       .text("Hotel & Spa", M, 26, { width: CW - 20 });
+    // Badge número — en la zona del header, justo a la derecha de la foto
+    // Lo ponemos dentro de la barra teal, alineado dentro de la columna de contenido
+    const bW = CW - 10, bX = M;
+    doc.roundedRect(bX + CW - 148, 8, 146, 36, 4).fill(SPA_NAVY);
+    doc.fillColor("white").fontSize(5.5).font("Helvetica")
+       .text("N° PRESUPUESTO", bX + CW - 148, 14, { width: 146, align: "center", characterSpacing: 0.8 });
+    doc.fillColor("white").fontSize(12).font("Helvetica-Bold")
+       .text(pres.numero, bX + CW - 148, 21, { width: 146, align: "center" });
+    doc.fillColor("#88c8d8").fontSize(6.5).font("Helvetica")
+       .text(formatFecha(pres.fechaEmision), bX + CW - 148, 36, { width: 146, align: "center" });
   };
 
   const newContentPage = () => {
@@ -605,18 +619,25 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
   y += 66;
 
   // ── Tabla de servicios ─────────────────────────────────────────────────────
+  // Columnas dentro de M=30, CW=310 (right edge = 340)
+  // SERVICIO: x=38, w=155 | CANT: x=193, w=30 | P.UNIT: x=223, w=55 | TOTAL: x=278, w=62
+  const C_SVC = M + 8;    const W_SVC = 155;
+  const C_QTY = M + 163;  const W_QTY = 30;
+  const C_UNIT = M + 193; const W_UNIT = 55;
+  const C_TOT = M + 248;  const W_TOT = CW - 252;
+
   if (items.length > 0) {
     // Encabezado de tabla
     doc.rect(M, y, CW, 16).fill(SPA_TEAL);
     doc.fillColor("white").fontSize(6.5).font("Helvetica-Bold");
-    doc.text("SERVICIO", M + 8, y + 4, { width: 180 });
-    doc.text("CANT.", M + 260, y + 4, { width: 40, align: "right" });
-    doc.text("P. UNIT.", M + 305, y + 4, { width: 55, align: "right" });
-    doc.text("TOTAL", M + 365, y + 4, { width: CW - 370, align: "right" });
+    doc.text("SERVICIO", C_SVC, y + 4, { width: W_SVC });
+    doc.text("CANT.", C_QTY, y + 4, { width: W_QTY, align: "right" });
+    doc.text("P. UNIT.", C_UNIT, y + 4, { width: W_UNIT, align: "right" });
+    doc.text("TOTAL", C_TOT, y + 4, { width: W_TOT, align: "right" });
     y += 16;
 
     items.forEach((item, idx) => {
-      const detalleH = item.detalle ? Math.min(doc.heightOfString(item.detalle, { width: 180, fontSize: 6.5 }), 20) : 0;
+      const detalleH = item.detalle ? Math.min(doc.heightOfString(item.detalle, { width: W_SVC, fontSize: 6.5 }), 20) : 0;
       const rowH = Math.max(24, detalleH + 16);
       if (y + rowH > H - 60) newContentPage();
 
@@ -624,17 +645,17 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
          .strokeColor(BORDER).lineWidth(0.3).stroke();
       const cy = y + 6;
       doc.fillColor(SPA_NAVY).fontSize(7.5).font("Helvetica-Bold")
-         .text(item.descripcion, M + 8, cy, { width: 180 });
+         .text(item.descripcion, C_SVC, cy, { width: W_SVC });
       if (item.detalle) {
         doc.fillColor(MUTED).fontSize(6.5).font("Helvetica")
-           .text(item.detalle, M + 8, cy + 10, { width: 180 });
+           .text(item.detalle, C_SVC, cy + 10, { width: W_SVC });
       }
       doc.fillColor(DARK).fontSize(7.5).font("Helvetica")
-         .text(String(item.cantidad), M + 260, cy, { width: 40, align: "right" });
+         .text(String(item.cantidad), C_QTY, cy, { width: W_QTY, align: "right" });
       doc.fillColor(DARK).fontSize(7.5).font("Helvetica")
-         .text(`$ ${formatMoneyShort(item.precioUnitario)}`, M + 305, cy, { width: 55, align: "right" });
+         .text(`$ ${formatMoneyShort(item.precioUnitario)}`, C_UNIT, cy, { width: W_UNIT, align: "right" });
       doc.fillColor(SPA_NAVY).fontSize(7.5).font("Helvetica-Bold")
-         .text(`$ ${formatMoneyShort(item.subtotal)}`, M + 365, cy, { width: CW - 370, align: "right" });
+         .text(`$ ${formatMoneyShort(item.subtotal)}`, C_TOT, cy, { width: W_TOT, align: "right" });
       y += rowH;
     });
 
