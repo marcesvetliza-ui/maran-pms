@@ -519,140 +519,168 @@ function generateEventosPdf(doc: any, pres: any, catalogItems: any[], conditions
   drawBankData(doc, W, H, M, imgPath, y);
 }
 
-// ── SPA branded PDF (cover page + content pages with SPA imagery) ────────────
+// ── SPA branded PDF (cover page + clean content pages) ───────────────────────
+
+const SPA_TEAL   = "#1a7a8a";
+const SPA_NAVY   = "#1a3a6c";
+const SPA_ROSE   = "#c0185a";
+const SPA_CREAM  = "#faf8f6";
+const SPA_LIGHT  = "#f0f7f9";
 
 function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842;
   const coverPath = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
-  const page2Path = path.join(process.cwd(), "server", "assets", "spa-page2.jpg");
 
-  // ── PAGE 1: Cover — imagen pura, sin texto superpuesto ────────────────────
+  // ── PAGE 1: Cover — imagen full-bleed, sin texto superpuesto ──────────────
   if (fs.existsSync(coverPath)) {
     doc.image(coverPath, 0, 0, { width: W, height: H });
   } else {
-    doc.rect(0, 0, W, H).fill("#f4f4f4");
+    // Fallback cover
+    doc.rect(0, 0, W, H).fill(SPA_CREAM);
+    doc.rect(0, 0, W, 8).fill(SPA_TEAL);
+    doc.rect(0, H - 8, W, 8).fill(SPA_TEAL);
+    doc.fillColor(SPA_NAVY).fontSize(36).font("Helvetica-Bold").text("SPA", 0, H / 2 - 20, { width: W, align: "center" });
+    doc.fillColor(SPA_TEAL).fontSize(12).font("Helvetica").text("MARAN SUITES & TOWERS", 0, H / 2 + 22, { width: W, align: "center" });
   }
-  // No text on the cover — it's a full-bleed branded image
 
-  // ── PAGE 2+: Content on SPA background ────────────────────────────────────
-  const drawSpaBg = () => {
-    if (fs.existsSync(page2Path)) {
-      doc.image(page2Path, 0, 0, { width: W, height: H });
-    } else {
-      doc.rect(0, 0, W, H).fill("#f0f0f0");
-    }
+  // ── PAGE 2+: Layout limpio (sin imagen de fondo con texto impreso) ─────────
+  const M = 40;
+  const CW = W - M * 2;
+  let y = 0;
+
+  const drawContentPageBg = () => {
+    // Fondo crema suave
+    doc.rect(0, 0, W, H).fill(SPA_CREAM);
+    // Barra superior teal
+    doc.rect(0, 0, W, 52).fill(SPA_TEAL);
+    // Línea decorativa inferior de la barra
+    doc.rect(0, 52, W, 3).fill(SPA_ROSE);
+    // Barra inferior
+    doc.rect(0, H - 28, W, 28).fill(SPA_NAVY);
+    doc.fillColor("white").fontSize(7).font("Helvetica")
+       .text("MARAN SUITES & TOWERS — Hotel & Spa | maran.com.ar", 0, H - 16, { width: W, align: "center" });
   };
 
-  // Content area: left column (right side has photos ~x=355+)
-  const CX = 30, CW = 310;
-  let y = 28;
+  const drawContentPageHeader = () => {
+    // Hotel + N° presupuesto en la barra superior
+    doc.fillColor("white").fontSize(8).font("Helvetica-Bold")
+       .text("SPA · MARAN SUITES & TOWERS", M, 14, { width: CW - 160 });
+    doc.fillColor("#cceeff").fontSize(7).font("Helvetica")
+       .text("Hotel & Spa", M, 24, { width: CW - 160 });
+    // Badge número
+    const bW = 148, bX = W - M - bW;
+    doc.roundedRect(bX, 8, bW, 36, 4).fill(SPA_NAVY);
+    doc.fillColor("white").fontSize(5.5).font("Helvetica").text("N° PRESUPUESTO", bX, 14, { width: bW, align: "center", characterSpacing: 0.8 });
+    doc.fillColor("white").fontSize(12).font("Helvetica-Bold").text(pres.numero, bX, 21, { width: bW, align: "center" });
+    doc.fillColor("#88c8d8").fontSize(6.5).font("Helvetica").text(formatFecha(pres.fechaEmision), bX, 36, { width: bW, align: "center" });
+  };
 
-  // Helper: add new content page
   const newContentPage = () => {
     doc.addPage();
-    drawSpaBg();
-    y = 28;
+    drawContentPageBg();
+    drawContentPageHeader();
+    y = 66;
   };
 
   doc.addPage();
-  drawSpaBg();
+  drawContentPageBg();
+  drawContentPageHeader();
+  y = 66;
 
-  // ── Header block: N° presupuesto + cliente ─────────────────────────────────
-  // Badge N° presupuesto
-  const badgeX = CX, badgeW = CW, badgeH = 40;
-  doc.roundedRect(badgeX, y, badgeW, badgeH, 5).fill("#1a3a6c");
-  doc.fillColor("#ffffff").fontSize(6).font("Helvetica").text("N° PRESUPUESTO", badgeX, y + 6, { width: badgeW, align: "center", characterSpacing: 1 });
-  doc.fillColor("#ffffff").fontSize(13).font("Helvetica-Bold").text(pres.numero, badgeX, y + 15, { width: badgeW, align: "center" });
-  doc.fillColor("#88c8d8").fontSize(7.5).font("Helvetica").text(formatFecha(pres.fechaEmision), badgeX, y + 30, { width: badgeW, align: "center" });
-  y += badgeH + 8;
+  // ── Bloque cliente ─────────────────────────────────────────────────────────
+  doc.rect(M, y, CW, 56).fill(SPA_LIGHT);
+  doc.rect(M, y, 4, 56).fill(SPA_TEAL);
+  doc.fillColor(SPA_TEAL).fontSize(6.5).font("Helvetica-Bold")
+     .text("PRESUPUESTO PARA", M + 12, y + 8, { characterSpacing: 1, width: CW - 16 });
+  doc.fillColor(SPA_NAVY).fontSize(16).font("Helvetica-Bold")
+     .text(pres.para || "—", M + 12, y + 18, { width: CW - 16 });
+  let metaY = y + 38;
+  const metaParts: string[] = [];
+  if (pres.fechaEmision) metaParts.push(`Emisión: ${formatFecha(pres.fechaEmision)}`);
+  if (pres.validoHasta) metaParts.push(`Válido hasta: ${formatFecha(pres.validoHasta)}`);
+  if (pres.fechaEvento) metaParts.push(`Fecha del servicio: ${formatFecha(pres.fechaEvento)}`);
+  if (pres.empresa) metaParts.push(pres.empresa);
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica")
+     .text(metaParts.join("   ·   "), M + 12, metaY, { width: CW - 16 });
+  y += 66;
 
-  // Client / recipient info
-  doc.fillColor("#1a5f72").fontSize(6.5).font("Helvetica-Bold")
-     .text("PARA", CX, y, { characterSpacing: 1.5, width: CW });
-  y += 10;
-  doc.fillColor("#0d3a47").fontSize(14).font("Helvetica-Bold")
-     .text(pres.para || "—", CX, y, { width: CW });
-  y += 18;
-  if (pres.empresa) {
-    doc.fillColor("#2a7a90").fontSize(8.5).font("Helvetica").text(pres.empresa, CX, y, { width: CW });
-    y += 12;
-  }
-  if (pres.validoHasta) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(`Válido hasta: ${formatFecha(pres.validoHasta)}`, CX, y, { width: CW });
-    y += 11;
-  }
-  if (pres.fechaEvento) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(`Fecha del servicio: ${formatFecha(pres.fechaEvento)}`, CX, y, { width: CW });
-    y += 11;
-  }
-  // Divider
-  doc.rect(CX, y + 2, CW, 0.8).fill("#1a3a6c");
-  y += 14;
-
-  // Table header
+  // ── Tabla de servicios ─────────────────────────────────────────────────────
   if (items.length > 0) {
-    doc.rect(CX, y, CW, 14).fill("#e8eaf6");
-    doc.fillColor(NAVY).fontSize(6.5).font("Helvetica-Bold");
-    doc.text("SERVICIO", CX + 6, y + 3, { width: 140 });
-    doc.text("CANT.", CX + 188, y + 3, { width: 35, align: "right" });
-    doc.text("P. UNIT.", CX + 228, y + 3, { width: 50, align: "right" });
-    doc.text("TOTAL", CX + 278, y + 3, { width: CW - 282, align: "right" });
+    // Encabezado de tabla
+    doc.rect(M, y, CW, 16).fill(SPA_TEAL);
+    doc.fillColor("white").fontSize(6.5).font("Helvetica-Bold");
+    doc.text("SERVICIO", M + 8, y + 4, { width: 180 });
+    doc.text("CANT.", M + 260, y + 4, { width: 40, align: "right" });
+    doc.text("P. UNIT.", M + 305, y + 4, { width: 55, align: "right" });
+    doc.text("TOTAL", M + 365, y + 4, { width: CW - 370, align: "right" });
     y += 16;
 
     items.forEach((item, idx) => {
-      const detalleH = item.detalle ? Math.min(doc.heightOfString(item.detalle, { width: 140, fontSize: 6.5 }), 22) : 0;
-      const rowH = Math.max(22, detalleH + 14);
+      const detalleH = item.detalle ? Math.min(doc.heightOfString(item.detalle, { width: 180, fontSize: 6.5 }), 20) : 0;
+      const rowH = Math.max(24, detalleH + 16);
       if (y + rowH > H - 60) newContentPage();
 
-      doc.rect(CX, y, CW, rowH).fill(idx % 2 === 0 ? "#ffffff" : "#f9f5f8").strokeColor(BORDER).lineWidth(0.4).stroke();
-      const cy = y + 5;
-      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold").text(item.descripcion, CX + 6, cy, { width: 140 });
+      doc.rect(M, y, CW, rowH).fill(idx % 2 === 0 ? "#ffffff" : SPA_LIGHT)
+         .strokeColor(BORDER).lineWidth(0.3).stroke();
+      const cy = y + 6;
+      doc.fillColor(SPA_NAVY).fontSize(7.5).font("Helvetica-Bold")
+         .text(item.descripcion, M + 8, cy, { width: 180 });
       if (item.detalle) {
-        doc.fillColor(MUTED).fontSize(6.5).font("Helvetica").text(item.detalle, CX + 6, cy + 10, { width: 140 });
+        doc.fillColor(MUTED).fontSize(6.5).font("Helvetica")
+           .text(item.detalle, M + 8, cy + 10, { width: 180 });
       }
-      doc.fillColor(DARK).fontSize(7.5).font("Helvetica").text(String(item.cantidad), CX + 188, cy, { width: 35, align: "right" });
-      doc.fillColor(DARK).fontSize(7.5).font("Helvetica").text(`$ ${formatMoneyShort(item.precioUnitario)}`, CX + 228, cy, { width: 50, align: "right" });
-      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold").text(`$ ${formatMoneyShort(item.subtotal)}`, CX + 278, cy, { width: CW - 282, align: "right" });
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica")
+         .text(String(item.cantidad), M + 260, cy, { width: 40, align: "right" });
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica")
+         .text(`$ ${formatMoneyShort(item.precioUnitario)}`, M + 305, cy, { width: 55, align: "right" });
+      doc.fillColor(SPA_NAVY).fontSize(7.5).font("Helvetica-Bold")
+         .text(`$ ${formatMoneyShort(item.subtotal)}`, M + 365, cy, { width: CW - 370, align: "right" });
       y += rowH;
     });
 
-    // Total row
+    // Totales
     const total = items.reduce((acc: number, it: any) => acc + parseFloat(String(it.subtotal || 0)), 0);
     const dtoGlobal = parseFloat(String(pres.descuentoGlobal || 0));
     const totalFinal = dtoGlobal > 0 ? total * (1 - dtoGlobal / 100) : total;
     y += 4;
     if (dtoGlobal > 0) {
-      doc.rect(CX, y, CW, 16).fill("#fff0f6");
-      doc.fillColor(MUTED).fontSize(7.5).font("Helvetica").text(`Descuento ${dtoGlobal}%`, CX + 6, y + 4, { width: CW - 12 });
-      doc.fillColor("#c0185a").fontSize(7.5).font("Helvetica-Bold").text(`- $ ${formatMoneyShort(total - totalFinal)}`, CX + 6, y + 4, { width: CW - 12, align: "right" });
-      y += 18;
+      if (y + 18 > H - 60) newContentPage();
+      doc.rect(M, y, CW, 18).fill("#fff0f6");
+      doc.fillColor(MUTED).fontSize(7.5).font("Helvetica")
+         .text(`Descuento global ${dtoGlobal}%`, M + 8, y + 5, { width: CW - 16 });
+      doc.fillColor(SPA_ROSE).fontSize(7.5).font("Helvetica-Bold")
+         .text(`- $ ${formatMoneyShort(total - totalFinal)}`, M + 8, y + 5, { width: CW - 16, align: "right" });
+      y += 20;
     }
-    doc.rect(CX, y, CW, 22).fill(NAVY);
-    doc.fillColor("white").fontSize(9).font("Helvetica-Bold").text("TOTAL", CX + 6, y + 6, { width: CW - 12 });
-    doc.fillColor("white").fontSize(11).font("Helvetica-Bold").text(`$ ${formatMoney(totalFinal)}`, CX + 6, y + 5, { width: CW - 12, align: "right" });
-    y += 30;
+    if (y + 28 > H - 60) newContentPage();
+    doc.rect(M, y, CW, 28).fill(SPA_TEAL);
+    doc.fillColor("white").fontSize(9).font("Helvetica-Bold")
+       .text("TOTAL", M + 12, y + 9, { width: CW - 24 });
+    doc.fillColor("white").fontSize(13).font("Helvetica-Bold")
+       .text(`$ ${formatMoney(totalFinal)}`, M + 12, y + 8, { width: CW - 24, align: "right" });
+    y += 36;
   } else {
-    doc.fillColor(MUTED).fontSize(8).font("Helvetica").text("Sin servicios seleccionados.", CX, y, { width: CW });
-    y += 20;
+    doc.fillColor(MUTED).fontSize(8).font("Helvetica")
+       .text("Sin servicios seleccionados.", M, y + 10, { width: CW });
+    y += 28;
   }
 
-  // Conditions
+  // ── Condiciones ────────────────────────────────────────────────────────────
   if (conditions) {
     const lines = conditions.split("\n").filter(l => l.trim().length > 0);
-    let condH = 24;
-    for (const l of lines) condH += doc.heightOfString(l, { width: CW - 24, fontSize: 7 }) + 4;
-    if (y + condH > H - 60) newContentPage();
-    doc.roundedRect(CX, y, CW, 20, 4).fill(NAVY);
-    doc.rect(CX, y + 10, CW, 10).fill(NAVY);
-    doc.fillColor("white").fontSize(7).font("Helvetica-Bold")
-       .text("CONDICIONES Y OBSERVACIONES", CX + 10, y + 6, { characterSpacing: 0.8, width: CW - 20 });
-    y += 24;
-    doc.roundedRect(CX, y - 4, CW, condH - 20, 4).stroke(BORDER);
+    let condH = 28;
+    for (const l of lines) condH += doc.heightOfString(l, { width: CW - 28, fontSize: 7 }) + 5;
+    if (y + condH > H - 50) newContentPage();
+    doc.rect(M, y, CW, 20).fill(SPA_NAVY);
+    doc.fillColor("white").fontSize(6.5).font("Helvetica-Bold")
+       .text("CONDICIONES Y OBSERVACIONES", M + 10, y + 6, { characterSpacing: 0.8, width: CW - 20 });
+    y += 22;
+    doc.rect(M, y, CW, condH - 24).strokeColor(BORDER).lineWidth(0.5).stroke();
     for (const line of lines) {
-      if (y > H - 70) newContentPage();
+      if (y > H - 65) newContentPage();
       doc.fillColor(DARK).fontSize(7).font("Helvetica")
-         .text(line, CX + 10, y, { width: CW - 24 });
-      y += doc.heightOfString(line, { width: CW - 24, fontSize: 7 }) + 4;
+         .text(line, M + 10, y + 4, { width: CW - 28 });
+      y += doc.heightOfString(line, { width: CW - 28, fontSize: 7 }) + 5;
     }
   }
 }
