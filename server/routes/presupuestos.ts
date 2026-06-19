@@ -519,6 +519,155 @@ function generateEventosPdf(doc: any, pres: any, catalogItems: any[], conditions
   drawBankData(doc, W, H, M, imgPath, y);
 }
 
+// ── SPA branded PDF (cover page + content pages with SPA imagery) ────────────
+
+function generateSpaPdf(doc: any, pres: any, catalogItems: any[], conditions: string | null) {
+  const W = 595, H = 842;
+  const coverPath = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
+  const page2Path = path.join(process.cwd(), "server", "assets", "spa-page2.jpg");
+
+  // ── PAGE 1: Cover ──────────────────────────────────────────────────────────
+  if (fs.existsSync(coverPath)) {
+    doc.image(coverPath, 0, 0, { width: W, height: H });
+  } else {
+    doc.rect(0, 0, W, H).fill("#f4f4f4");
+  }
+
+  // Quote number badge — top-right of the header area (dots zone)
+  const badgeX = 390, badgeY = 18, badgeW = 170, badgeH = 58;
+  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 6)
+     .fillOpacity(0.88).fill("#1a3a6c").fillOpacity(1);
+  doc.fillColor("#ffffff").fontSize(6.5).font("Helvetica").text("N° PRESUPUESTO", badgeX, badgeY + 9, { width: badgeW, align: "center", characterSpacing: 0.8 });
+  doc.fillColor("#ffffff").fontSize(12).font("Helvetica-Bold").text(pres.numero, badgeX, badgeY + 20, { width: badgeW, align: "center" });
+  doc.fillColor("#88c8d8").fontSize(8).font("Helvetica").text(formatFecha(pres.fechaEmision), badgeX, badgeY + 36, { width: badgeW, align: "center" });
+  if (pres.validoHasta) {
+    doc.fillColor("#aad4de").fontSize(7).font("Helvetica")
+       .text(`Válido hasta: ${formatFecha(pres.validoHasta)}`, badgeX, badgeY + 48, { width: badgeW, align: "center" });
+  }
+
+  // Client info — bottom left, below "PRESUPUESTO" text on the image (~y=660)
+  const clientX = 30, clientY = 660, clientW = 280;
+  doc.fillColor("#1a5f72").fontSize(7).font("Helvetica-Bold")
+     .text("PARA", clientX, clientY, { characterSpacing: 1.5 });
+  doc.fillColor("#0d3a47").fontSize(15).font("Helvetica-Bold")
+     .text(pres.para || "—", clientX, clientY + 11, { width: clientW });
+  if (pres.empresa) {
+    doc.fillColor("#2a7a90").fontSize(9).font("Helvetica")
+       .text(pres.empresa, clientX, clientY + 30, { width: clientW });
+  }
+  if (pres.fechaEvento) {
+    doc.fillColor("#1a5f72").fontSize(7.5).font("Helvetica")
+       .text(`Fecha del servicio: ${formatFecha(pres.fechaEvento)}`, clientX, clientY + (pres.empresa ? 44 : 32), { width: clientW });
+  }
+
+  // ── PAGE 2+: Content on SPA background ────────────────────────────────────
+  const drawSpaBg = () => {
+    if (fs.existsSync(page2Path)) {
+      doc.image(page2Path, 0, 0, { width: W, height: H });
+    } else {
+      doc.rect(0, 0, W, H).fill("#f0f0f0");
+    }
+  };
+
+  // Content area: left side (images on right start ~x=355)
+  const CX = 30, CW = 310;
+  let y = 30;
+
+  // Helper: add new content page
+  const newContentPage = () => {
+    doc.addPage();
+    drawSpaBg();
+    y = 30;
+  };
+
+  doc.addPage();
+  drawSpaBg();
+
+  // Title block on content pages
+  doc.fillColor(NAVY).fontSize(16).font("Helvetica-Bold")
+     .text("SPA", CX, y, { width: CW });
+  doc.fillColor(MUTED).fontSize(8).font("Helvetica")
+     .text("Presupuesto de Servicios", CX, y + 20, { width: CW });
+  doc.fillColor(DARK).fontSize(7.5).font("Helvetica")
+     .text(`N° ${pres.numero}  ·  ${formatFecha(pres.fechaEmision)}`, CX, y + 32, { width: CW });
+  doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold")
+     .text(`Para: ${pres.para || "—"}`, CX, y + 44, { width: CW });
+  y += 62;
+
+  // Group catalog items by category
+  const grouped = new Map<string, any[]>();
+  for (const item of catalogItems) {
+    if (!item.isActive) continue;
+    if (!grouped.has(item.category)) grouped.set(item.category, []);
+    grouped.get(item.category)!.push(item);
+  }
+
+  for (const [cat, catItems] of grouped) {
+    const catLabel = CATEGORY_LABELS[cat] || cat.replace("_", " ");
+
+    // Category header
+    const neededH = 22 + catItems.reduce((acc, item) => {
+      const dh = item.description ? Math.min(doc.heightOfString(item.description, { width: CW - 12, fontSize: 7 }), 28) : 0;
+      return acc + Math.max(22, dh + 14);
+    }, 0);
+    if (y + neededH > H - 60) newContentPage();
+
+    // Section header bar
+    doc.roundedRect(CX, y, CW, 18, 3).fill(NAVY);
+    doc.fillColor("white").fontSize(7).font("Helvetica-Bold")
+       .text(catLabel.toUpperCase(), CX + 8, y + 5, { width: CW - 16, characterSpacing: 0.8 });
+    y += 20;
+
+    // Column header
+    doc.rect(CX, y, CW, 14).fill("#e8eaf6");
+    doc.fillColor(NAVY).fontSize(6.5).font("Helvetica-Bold");
+    doc.text("SERVICIO", CX + 6, y + 3, { width: 110 });
+    doc.text("PRECIO", CX + 195, y + 3, { width: 60, align: "right" });
+    doc.text("UNIDAD", CX + 258, y + 3, { width: 48, align: "right" });
+    y += 16;
+
+    catItems.forEach((item, idx) => {
+      const descH = item.description ? Math.min(doc.heightOfString(item.description, { width: 110, fontSize: 6.5 }), 26) : 0;
+      const rowH = Math.max(22, descH + 14);
+      if (y + rowH > H - 60) newContentPage();
+
+      doc.rect(CX, y, CW, rowH).fill(idx % 2 === 0 ? "#ffffff" : "#f5f5f5").strokeColor(BORDER).lineWidth(0.4).stroke();
+      const cy = y + 5;
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold").text(item.name, CX + 6, cy, { width: 130 });
+      if (item.description) {
+        doc.fillColor(MUTED).fontSize(6.5).font("Helvetica")
+           .text(item.description, CX + 6, cy + 10, { width: 130 });
+      }
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold")
+         .text(`$ ${formatMoneyShort(item.price)}`, CX + 195, cy, { width: 60, align: "right" });
+      doc.fillColor(MUTED).fontSize(6.5).font("Helvetica")
+         .text(item.unit, CX + 258, cy, { width: 48, align: "right" });
+      y += rowH;
+    });
+    y += 8;
+  }
+
+  // Conditions
+  if (conditions) {
+    const lines = conditions.split("\n").filter(l => l.trim().length > 0);
+    let condH = 24;
+    for (const l of lines) condH += doc.heightOfString(l, { width: CW - 24, fontSize: 7 }) + 4;
+    if (y + condH > H - 60) newContentPage();
+    doc.roundedRect(CX, y, CW, 20, 4).fill(NAVY);
+    doc.rect(CX, y + 10, CW, 10).fill(NAVY);
+    doc.fillColor("white").fontSize(7).font("Helvetica-Bold")
+       .text("CONDICIONES Y OBSERVACIONES", CX + 10, y + 6, { characterSpacing: 0.8, width: CW - 20 });
+    y += 24;
+    doc.roundedRect(CX, y - 4, CW, condH - 20, 4).stroke(BORDER);
+    for (const line of lines) {
+      if (y > H - 70) newContentPage();
+      doc.fillColor(DARK).fontSize(7).font("Helvetica")
+         .text(line, CX + 10, y, { width: CW - 24 });
+      y += doc.heightOfString(line, { width: CW - 24, fontSize: 7 }) + 4;
+    }
+  }
+}
+
 // ── Simple catalog PDF (spa / restaurant) ───────────────────────────────────
 
 function generateCatalogSimplePdf(doc: any, pres: any, catalogItems: any[], conditions: string | null, area: string) {
@@ -837,7 +986,9 @@ export function registerPresupuestosRoutes(app: Express) {
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
         generateEventosPdf(doc, pres, catalogItems, conditions);
-      } else if (area === "spa" || area === "restaurant") {
+      } else if (area === "spa") {
+        generateSpaPdf(doc, pres, catalogItems, conditions);
+      } else if (area === "restaurant") {
         generateCatalogSimplePdf(doc, pres, catalogItems, conditions, area);
       } else {
         generateGeneralPdf(doc, pres, items, conditions);
