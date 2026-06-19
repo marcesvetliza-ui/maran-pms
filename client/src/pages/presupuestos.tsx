@@ -55,7 +55,7 @@ const AREA_CONFIG: Record<AreaOrigen, { label: string; icon: typeof Building2; c
   grupos:     { label: "Grupos",           icon: Users,          color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",    useItems: true  },
   recepcion:  { label: "Recepción",        icon: Building2,      color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300", useItems: true  },
   eventos:    { label: "Eventos",          icon: Calendar,       color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300", useItems: false },
-  spa:        { label: "SPA",              icon: Flower2,        color: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",     useItems: false },
+  spa:        { label: "SPA",              icon: Flower2,        color: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",     useItems: true  },
   restaurant: { label: "Restaurant Justo", icon: UtensilsCrossed, color: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300", useItems: false },
 };
 
@@ -196,8 +196,33 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
   );
 
   const { data: roomTypes = [] } = useQuery<RoomType[]>({ queryKey: ["/api/room-types"] });
-
   const useItems = AREA_CONFIG[area]?.useItems ?? true;
+  const useCatalogPicker = useItems && area === "spa";
+  const { data: spaCatalog = [] } = useQuery<any[]>({
+    queryKey: ["/api/quote-catalog", area],
+    queryFn: () => fetch(`/api/quote-catalog?area=${area}`, { credentials: "include" }).then(r => r.json()),
+    enabled: useCatalogPicker,
+  });
+  const spaCatalogGrouped = spaCatalog.filter(i => i.isActive).reduce((acc: Record<string, any[]>, item: any) => {
+    if (!acc[item.category]) acc[item.category] = [];
+    acc[item.category].push(item);
+    return acc;
+  }, {});
+  const CATALOG_CAT_LABELS: Record<string, string> = {
+    tratamiento: "Tratamientos", masaje: "Masajes", paquete: "Paquetes", otro: "Otros Servicios",
+  };
+  const handleAddFromCatalog = (item: any) => {
+    const newItem: ItemRow = {
+      sector: "spa",
+      descripcion: item.name,
+      detalle: item.description || "",
+      cantidad: "1",
+      precioUnitario: String(item.price),
+      descuento: "0",
+      subtotal: String(item.price),
+    };
+    setItems(prev => [...prev.filter(it => it.descripcion.trim() !== ""), newItem]);
+  };
 
   // Load default conditions from API when area changes (new presupuesto only)
   useEffect(() => {
@@ -352,13 +377,52 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
             </div>
           </div>
 
-          {/* ── Items (solo para grupos y recepcion) ──────── */}
+          {/* ── Catalog picker for SPA ─────────────────────── */}
+          {useCatalogPicker && Object.keys(spaCatalogGrouped).length > 0 && (
+            <div className="rounded-lg border bg-pink-50/40 dark:bg-pink-950/20 p-3 space-y-2">
+              <Label className="text-sm font-semibold text-pink-800 dark:text-pink-300">
+                <Flower2 className="inline h-3.5 w-3.5 mr-1" />
+                Catálogo SPA — hacé clic para agregar servicios
+              </Label>
+              {Object.entries(spaCatalogGrouped).map(([cat, catItems]) => (
+                <div key={cat}>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                    {CATALOG_CAT_LABELS[cat] || cat}
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
+                    {(catItems as any[]).map((item: any) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleAddFromCatalog(item)}
+                        className="text-left text-xs rounded border border-pink-200 dark:border-pink-800 bg-white dark:bg-pink-950/40 p-2 hover:bg-pink-100 dark:hover:bg-pink-900/40 transition-colors flex justify-between items-start gap-2"
+                        data-testid={`button-catalog-item-${item.id}`}
+                      >
+                        <div className="min-w-0">
+                          <span className="font-semibold block truncate">{item.name}</span>
+                          {item.description && (
+                            <span className="text-muted-foreground block truncate">{item.description}</span>
+                          )}
+                          <span className="text-muted-foreground">{item.unit}</span>
+                        </div>
+                        <span className="whitespace-nowrap text-pink-700 dark:text-pink-300 font-bold shrink-0">
+                          + $ {parseFloat(item.price).toLocaleString("es-AR", { minimumFractionDigits: 0 })}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Items ──────────────────────────────────────── */}
           {useItems ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Ítems del presupuesto</Label>
+                <Label className="text-base font-semibold">Servicios seleccionados</Label>
                 <Button size="sm" variant="outline" onClick={handleAddItem} data-testid="button-add-item">
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Agregar ítem
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Agregar ítem manual
                 </Button>
               </div>
               <div className="border rounded-lg overflow-hidden">

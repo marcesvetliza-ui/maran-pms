@@ -521,7 +521,7 @@ function generateEventosPdf(doc: any, pres: any, catalogItems: any[], conditions
 
 // ── SPA branded PDF (cover page + content pages with SPA imagery) ────────────
 
-function generateSpaPdf(doc: any, pres: any, catalogItems: any[], conditions: string | null) {
+function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842;
   const coverPath = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
   const page2Path = path.join(process.cwd(), "server", "assets", "spa-page2.jpg");
@@ -594,57 +594,51 @@ function generateSpaPdf(doc: any, pres: any, catalogItems: any[], conditions: st
      .text(`Para: ${pres.para || "—"}`, CX, y + 44, { width: CW });
   y += 62;
 
-  // Group catalog items by category
-  const grouped = new Map<string, any[]>();
-  for (const item of catalogItems) {
-    if (!item.isActive) continue;
-    if (!grouped.has(item.category)) grouped.set(item.category, []);
-    grouped.get(item.category)!.push(item);
-  }
-
-  for (const [cat, catItems] of grouped) {
-    const catLabel = CATEGORY_LABELS[cat] || cat.replace("_", " ");
-
-    // Category header
-    const neededH = 22 + catItems.reduce((acc, item) => {
-      const dh = item.description ? Math.min(doc.heightOfString(item.description, { width: CW - 12, fontSize: 7 }), 28) : 0;
-      return acc + Math.max(22, dh + 14);
-    }, 0);
-    if (y + neededH > H - 60) newContentPage();
-
-    // Section header bar
-    doc.roundedRect(CX, y, CW, 18, 3).fill(NAVY);
-    doc.fillColor("white").fontSize(7).font("Helvetica-Bold")
-       .text(catLabel.toUpperCase(), CX + 8, y + 5, { width: CW - 16, characterSpacing: 0.8 });
-    y += 20;
-
-    // Column header
+  // Table header
+  if (items.length > 0) {
     doc.rect(CX, y, CW, 14).fill("#e8eaf6");
     doc.fillColor(NAVY).fontSize(6.5).font("Helvetica-Bold");
-    doc.text("SERVICIO", CX + 6, y + 3, { width: 110 });
-    doc.text("PRECIO", CX + 195, y + 3, { width: 60, align: "right" });
-    doc.text("UNIDAD", CX + 258, y + 3, { width: 48, align: "right" });
+    doc.text("SERVICIO", CX + 6, y + 3, { width: 140 });
+    doc.text("CANT.", CX + 188, y + 3, { width: 35, align: "right" });
+    doc.text("P. UNIT.", CX + 228, y + 3, { width: 50, align: "right" });
+    doc.text("TOTAL", CX + 278, y + 3, { width: CW - 282, align: "right" });
     y += 16;
 
-    catItems.forEach((item, idx) => {
-      const descH = item.description ? Math.min(doc.heightOfString(item.description, { width: 110, fontSize: 6.5 }), 26) : 0;
-      const rowH = Math.max(22, descH + 14);
+    items.forEach((item, idx) => {
+      const detalleH = item.detalle ? Math.min(doc.heightOfString(item.detalle, { width: 140, fontSize: 6.5 }), 22) : 0;
+      const rowH = Math.max(22, detalleH + 14);
       if (y + rowH > H - 60) newContentPage();
 
-      doc.rect(CX, y, CW, rowH).fill(idx % 2 === 0 ? "#ffffff" : "#f5f5f5").strokeColor(BORDER).lineWidth(0.4).stroke();
+      doc.rect(CX, y, CW, rowH).fill(idx % 2 === 0 ? "#ffffff" : "#f9f5f8").strokeColor(BORDER).lineWidth(0.4).stroke();
       const cy = y + 5;
-      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold").text(item.name, CX + 6, cy, { width: 130 });
-      if (item.description) {
-        doc.fillColor(MUTED).fontSize(6.5).font("Helvetica")
-           .text(item.description, CX + 6, cy + 10, { width: 130 });
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold").text(item.descripcion, CX + 6, cy, { width: 140 });
+      if (item.detalle) {
+        doc.fillColor(MUTED).fontSize(6.5).font("Helvetica").text(item.detalle, CX + 6, cy + 10, { width: 140 });
       }
-      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold")
-         .text(`$ ${formatMoneyShort(item.price)}`, CX + 195, cy, { width: 60, align: "right" });
-      doc.fillColor(MUTED).fontSize(6.5).font("Helvetica")
-         .text(item.unit, CX + 258, cy, { width: 48, align: "right" });
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica").text(String(item.cantidad), CX + 188, cy, { width: 35, align: "right" });
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica").text(`$ ${formatMoneyShort(item.precioUnitario)}`, CX + 228, cy, { width: 50, align: "right" });
+      doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold").text(`$ ${formatMoneyShort(item.subtotal)}`, CX + 278, cy, { width: CW - 282, align: "right" });
       y += rowH;
     });
-    y += 8;
+
+    // Total row
+    const total = items.reduce((acc: number, it: any) => acc + parseFloat(String(it.subtotal || 0)), 0);
+    const dtoGlobal = parseFloat(String(pres.descuentoGlobal || 0));
+    const totalFinal = dtoGlobal > 0 ? total * (1 - dtoGlobal / 100) : total;
+    y += 4;
+    if (dtoGlobal > 0) {
+      doc.rect(CX, y, CW, 16).fill("#fff0f6");
+      doc.fillColor(MUTED).fontSize(7.5).font("Helvetica").text(`Descuento ${dtoGlobal}%`, CX + 6, y + 4, { width: CW - 12 });
+      doc.fillColor("#c0185a").fontSize(7.5).font("Helvetica-Bold").text(`- $ ${formatMoneyShort(total - totalFinal)}`, CX + 6, y + 4, { width: CW - 12, align: "right" });
+      y += 18;
+    }
+    doc.rect(CX, y, CW, 22).fill(NAVY);
+    doc.fillColor("white").fontSize(9).font("Helvetica-Bold").text("TOTAL", CX + 6, y + 6, { width: CW - 12 });
+    doc.fillColor("white").fontSize(11).font("Helvetica-Bold").text(`$ ${formatMoney(totalFinal)}`, CX + 6, y + 5, { width: CW - 12, align: "right" });
+    y += 30;
+  } else {
+    doc.fillColor(MUTED).fontSize(8).font("Helvetica").text("Sin servicios seleccionados.", CX, y, { width: CW });
+    y += 20;
   }
 
   // Conditions
@@ -987,7 +981,7 @@ export function registerPresupuestosRoutes(app: Express) {
       } else if (area === "eventos") {
         generateEventosPdf(doc, pres, catalogItems, conditions);
       } else if (area === "spa") {
-        generateSpaPdf(doc, pres, catalogItems, conditions);
+        generateSpaPdf(doc, pres, items, conditions);
       } else if (area === "restaurant") {
         generateCatalogSimplePdf(doc, pres, catalogItems, conditions, area);
       } else {
