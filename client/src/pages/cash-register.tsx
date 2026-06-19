@@ -904,17 +904,6 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               <SummaryTable movements={movements} />
             </CardContent>
           </Card>
-
-          <div className="flex justify-end">
-            <Button
-              variant="destructive"
-              onClick={() => setCloseShiftDialog(true)}
-              data-testid={`btn-close-shift-${area}`}
-            >
-              <XCircle className="h-4 w-4 mr-2" />
-              Cerrar Turno
-            </Button>
-          </div>
         </>
       )}
 
