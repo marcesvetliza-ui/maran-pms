@@ -526,39 +526,13 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
   const coverPath = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
   const page2Path = path.join(process.cwd(), "server", "assets", "spa-page2.jpg");
 
-  // ── PAGE 1: Cover ──────────────────────────────────────────────────────────
+  // ── PAGE 1: Cover — imagen pura, sin texto superpuesto ────────────────────
   if (fs.existsSync(coverPath)) {
     doc.image(coverPath, 0, 0, { width: W, height: H });
   } else {
     doc.rect(0, 0, W, H).fill("#f4f4f4");
   }
-
-  // Quote number badge — top-right of the header area (dots zone)
-  const badgeX = 390, badgeY = 18, badgeW = 170, badgeH = 58;
-  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 6)
-     .fillOpacity(0.88).fill("#1a3a6c").fillOpacity(1);
-  doc.fillColor("#ffffff").fontSize(6.5).font("Helvetica").text("N° PRESUPUESTO", badgeX, badgeY + 9, { width: badgeW, align: "center", characterSpacing: 0.8 });
-  doc.fillColor("#ffffff").fontSize(12).font("Helvetica-Bold").text(pres.numero, badgeX, badgeY + 20, { width: badgeW, align: "center" });
-  doc.fillColor("#88c8d8").fontSize(8).font("Helvetica").text(formatFecha(pres.fechaEmision), badgeX, badgeY + 36, { width: badgeW, align: "center" });
-  if (pres.validoHasta) {
-    doc.fillColor("#aad4de").fontSize(7).font("Helvetica")
-       .text(`Válido hasta: ${formatFecha(pres.validoHasta)}`, badgeX, badgeY + 48, { width: badgeW, align: "center" });
-  }
-
-  // Client info — bottom left, below "PRESUPUESTO" text on the image (~y=660)
-  const clientX = 30, clientY = 660, clientW = 280;
-  doc.fillColor("#1a5f72").fontSize(7).font("Helvetica-Bold")
-     .text("PARA", clientX, clientY, { characterSpacing: 1.5 });
-  doc.fillColor("#0d3a47").fontSize(15).font("Helvetica-Bold")
-     .text(pres.para || "—", clientX, clientY + 11, { width: clientW });
-  if (pres.empresa) {
-    doc.fillColor("#2a7a90").fontSize(9).font("Helvetica")
-       .text(pres.empresa, clientX, clientY + 30, { width: clientW });
-  }
-  if (pres.fechaEvento) {
-    doc.fillColor("#1a5f72").fontSize(7.5).font("Helvetica")
-       .text(`Fecha del servicio: ${formatFecha(pres.fechaEvento)}`, clientX, clientY + (pres.empresa ? 44 : 32), { width: clientW });
-  }
+  // No text on the cover — it's a full-bleed branded image
 
   // ── PAGE 2+: Content on SPA background ────────────────────────────────────
   const drawSpaBg = () => {
@@ -569,30 +543,51 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
     }
   };
 
-  // Content area: left side (images on right start ~x=355)
+  // Content area: left column (right side has photos ~x=355+)
   const CX = 30, CW = 310;
-  let y = 30;
+  let y = 28;
 
   // Helper: add new content page
   const newContentPage = () => {
     doc.addPage();
     drawSpaBg();
-    y = 30;
+    y = 28;
   };
 
   doc.addPage();
   drawSpaBg();
 
-  // Title block on content pages
-  doc.fillColor(NAVY).fontSize(16).font("Helvetica-Bold")
-     .text("SPA", CX, y, { width: CW });
-  doc.fillColor(MUTED).fontSize(8).font("Helvetica")
-     .text("Presupuesto de Servicios", CX, y + 20, { width: CW });
-  doc.fillColor(DARK).fontSize(7.5).font("Helvetica")
-     .text(`N° ${pres.numero}  ·  ${formatFecha(pres.fechaEmision)}`, CX, y + 32, { width: CW });
-  doc.fillColor(DARK).fontSize(7.5).font("Helvetica-Bold")
-     .text(`Para: ${pres.para || "—"}`, CX, y + 44, { width: CW });
-  y += 62;
+  // ── Header block: N° presupuesto + cliente ─────────────────────────────────
+  // Badge N° presupuesto
+  const badgeX = CX, badgeW = CW, badgeH = 40;
+  doc.roundedRect(badgeX, y, badgeW, badgeH, 5).fill("#1a3a6c");
+  doc.fillColor("#ffffff").fontSize(6).font("Helvetica").text("N° PRESUPUESTO", badgeX, y + 6, { width: badgeW, align: "center", characterSpacing: 1 });
+  doc.fillColor("#ffffff").fontSize(13).font("Helvetica-Bold").text(pres.numero, badgeX, y + 15, { width: badgeW, align: "center" });
+  doc.fillColor("#88c8d8").fontSize(7.5).font("Helvetica").text(formatFecha(pres.fechaEmision), badgeX, y + 30, { width: badgeW, align: "center" });
+  y += badgeH + 8;
+
+  // Client / recipient info
+  doc.fillColor("#1a5f72").fontSize(6.5).font("Helvetica-Bold")
+     .text("PARA", CX, y, { characterSpacing: 1.5, width: CW });
+  y += 10;
+  doc.fillColor("#0d3a47").fontSize(14).font("Helvetica-Bold")
+     .text(pres.para || "—", CX, y, { width: CW });
+  y += 18;
+  if (pres.empresa) {
+    doc.fillColor("#2a7a90").fontSize(8.5).font("Helvetica").text(pres.empresa, CX, y, { width: CW });
+    y += 12;
+  }
+  if (pres.validoHasta) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(`Válido hasta: ${formatFecha(pres.validoHasta)}`, CX, y, { width: CW });
+    y += 11;
+  }
+  if (pres.fechaEvento) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(`Fecha del servicio: ${formatFecha(pres.fechaEvento)}`, CX, y, { width: CW });
+    y += 11;
+  }
+  // Divider
+  doc.rect(CX, y + 2, CW, 0.8).fill("#1a3a6c");
+  y += 14;
 
   // Table header
   if (items.length > 0) {
