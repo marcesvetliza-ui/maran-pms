@@ -255,7 +255,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride, reservationAdvanceCredit } = req.body;
       const effectiveReservationId = reservationId || roomReservationId;
       const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || paymentMethod === "cuenta_habitacion";
       const effectivePaymentMethod = isRoomCharge ? "room_charge" : (paymentMethod || "cash");
@@ -269,6 +269,12 @@ export function registerRestaurantRoutes(app: Express) {
           discountAmount = discount;
         }
         finalTotal = Math.max(0, finalTotal - discountAmount);
+      }
+
+      // Apply reservation advance credit (pre-paid deposits)
+      const advanceCredit = parseFloat(String(reservationAdvanceCredit || 0)) || 0;
+      if (advanceCredit > 0) {
+        finalTotal = Math.max(0, finalTotal - advanceCredit);
       }
 
       const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
@@ -344,12 +350,26 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
+      // Mark reservation advances as applied to this order
+      if (advanceCredit > 0 && order.tableId) {
+        try {
+          const today = new Date().toISOString().split("T")[0];
+          const tableAdvances = await storage.getReservationAdvancesByTable(order.tableId, today);
+          for (const adv of tableAdvances.filter(a => !a.appliedToOrderId)) {
+            await (storage as any).applyReservationAdvancesToOrder(adv.reservationId, req.params.id);
+          }
+        } catch (e) {
+          console.error("[Advances] Error aplicando adelantos al cierre:", e);
+        }
+      }
+
       // Emitir factura AFIP si se solicitó
       let invoiceId: number | undefined;
       if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+          const advCreditLabel = advanceCredit > 0 ? ` (Seña aplicada: $${advanceCredit.toFixed(2)})` : "";
           const invoice = await emitirFactura({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
@@ -358,7 +378,7 @@ export function registerRestaurantRoutes(app: Express) {
               condicionIva: condicion,
             },
             items: [{
-              descripcion: `Consumiciones Restaurante — Pedido ${order.orderNumber}`,
+              descripcion: `Consumiciones Restaurante — Pedido ${order.orderNumber}${advCreditLabel}`,
               cantidad: 1,
               precioUnitario: parseFloat((finalTotal / 1.21).toFixed(4)),
               alicuotaIva: "21" as const,
@@ -1198,13 +1218,45 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.post("/api/restaurant/table-reservations/:id/advances", requireAuth, async (req, res) => {
     try {
-      const { amount, paymentMethod, notes } = req.body;
+      const { amount, paymentMethod, notes, receiptType, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
       // Generate voucher number ADV-YYYY-NNNN
       const year = new Date().getFullYear();
-      const existing = await storage.getReservationAdvances(req.params.id);
       const allAdvances = await storage.getReservationAdvances(req.params.id);
       const seq = String(allAdvances.length + 1).padStart(4, "0");
       const voucherNumber = `ADV-${year}-${seq}`;
+
+      // Emit AFIP invoice if receipt type is factura
+      let invoiceId: number | null = null;
+      if (receiptType && ["factura_a", "factura_b", "factura_c"].includes(receiptType)) {
+        try {
+          const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
+          const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+          const amountNum = parseFloat(String(amount));
+          const neto = parseFloat((amountNum / 1.21).toFixed(4));
+          const invoice = await emitirFactura({
+            tipoComprobante: tipo as "FA" | "FB" | "FC",
+            cliente: {
+              razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
+              cuit: customerCuit || undefined,
+              condicionIva: condicion,
+            },
+            items: [{
+              descripcion: `Seña / Anticipo Reserva Restaurante — ${voucherNumber}`,
+              cantidad: 1,
+              precioUnitario: neto,
+              alicuotaIva: "21" as const,
+              subtotalNeto: neto,
+              subtotal: amountNum,
+            }],
+            operador: (req as any).user?.fullName || (req as any).user?.username,
+            puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
+          });
+          invoiceId = invoice.id;
+        } catch (e) {
+          console.error("[Billing] Error emitiendo factura adelanto reserva:", e);
+        }
+      }
+
       const advance = await storage.createReservationAdvance({
         reservationId: req.params.id,
         amount: String(amount),
@@ -1212,8 +1264,9 @@ export function registerRestaurantRoutes(app: Express) {
         voucherNumber,
         notes: notes || null,
         appliedToOrderId: null,
+        invoiceId,
       });
-      res.status(201).json(advance);
+      res.status(201).json({ ...advance, invoiceId });
     } catch (error) {
       res.status(500).json({ error: "Error creating advance" });
     }

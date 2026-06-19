@@ -66,6 +66,7 @@ import {
   UserPlus,
   CheckCircle,
   BedDouble,
+  FileText,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -190,6 +191,7 @@ type RestaurantReservationAdvance = {
   notes: string | null;
   createdAt: string;
   appliedToOrderId: string | null;
+  invoiceId: number | null;
 };
 
 type TimeSlot = {
@@ -331,12 +333,14 @@ type AdvanceDialogProps = {
   setAdvanceNotes: (v: string) => void;
   createAdvanceMutation: any;
   deleteAdvanceMutation: any;
+  posConfigsData?: any[];
 };
 
 function AdvanceDialog({
   reservationId, open, onOpenChange, reservations,
   advanceAmount, setAdvanceAmount, advancePaymentMethod, setAdvancePaymentMethod,
   advanceNotes, setAdvanceNotes, createAdvanceMutation, deleteAdvanceMutation,
+  posConfigsData = [],
 }: AdvanceDialogProps) {
   const reservation = reservations.find(r => r.id === reservationId);
   const { data: advances = [], isLoading } = useQuery<RestaurantReservationAdvance[]>({
@@ -350,6 +354,12 @@ function AdvanceDialog({
     enabled: !!reservationId && open,
   });
 
+  const [advReceiptType, setAdvReceiptType] = useState("voucher");
+  const [advFbIsExento, setAdvFbIsExento] = useState(false);
+  const [advCustomerName, setAdvCustomerName] = useState("");
+  const [advCustomerCuit, setAdvCustomerCuit] = useState("");
+  const [advPuntoVenta, setAdvPuntoVenta] = useState("");
+
   const totalAdvances = advances.reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
 
   const payMethodLabel: Record<string, string> = {
@@ -357,9 +367,12 @@ function AdvanceDialog({
     tarjeta_debito: "Débito", tarjeta_credito: "Crédito", mercadopago: "MercadoPago",
   };
 
+  const isFactura = ["factura_a", "factura_b", "factura_c"].includes(advReceiptType);
+  const needsClient = advReceiptType === "factura_a" || (advReceiptType === "factura_b" && advFbIsExento);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5" />
@@ -387,9 +400,22 @@ function AdvanceDialog({
                       {payMethodLabel[adv.paymentMethod] || adv.paymentMethod}
                       {adv.voucherNumber && <span className="ml-2 font-mono">{adv.voucherNumber}</span>}
                       {adv.notes && <span className="ml-2">— {adv.notes}</span>}
+                      {adv.invoiceId && <span className="ml-2 text-green-600 font-medium">· Fact. #{adv.invoiceId}</span>}
+                      {adv.appliedToOrderId && <span className="ml-2 text-blue-600">· Aplicado</span>}
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
+                    {adv.invoiceId && (
+                      <Button
+                        variant="ghost" size="sm"
+                        className="h-7 w-7 p-0 text-green-600"
+                        title="Ver factura AFIP"
+                        data-testid={`button-view-invoice-advance-${adv.id}`}
+                        onClick={() => window.open(`/api/billing/invoices/${adv.invoiceId}/pdf`, "_blank")}
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost" size="sm"
                       className="h-7 w-7 p-0 text-muted-foreground"
@@ -416,7 +442,7 @@ function AdvanceDialog({
                           @media print{button{display:none}}
                         </style></head><body>
                         <h1>Maran Suites &amp; Towers</h1>
-                        <p class="sub">Restaurante — Voucher Anticipo (No Fiscal)</p>
+                        <p class="sub">Restaurante — Voucher Anticipo${adv.invoiceId ? " (Fiscal)" : " (No Fiscal)"}</p>
                         <hr class="sep">
                         <div class="row"><span class="label">Reserva a nombre de:</span></div>
                         <div class="row"><span class="val">${reservation.guestName}</span></div>
@@ -428,7 +454,8 @@ function AdvanceDialog({
                         ${adv.notes ? `<div class="row"><span class="label">Ref.:</span><span class="val">${adv.notes}</span></div>` : ""}
                         <div class="total">$ ${amt}</div>
                         ${adv.voucherNumber ? `<div class="voucher">Voucher: ${adv.voucherNumber}</div>` : ""}
-                        <p class="nota">Este comprobante no tiene valor fiscal.<br>Acreditable al momento del consumo.</p>
+                        ${adv.invoiceId ? `<div class="voucher">Factura AFIP #${adv.invoiceId}</div>` : ""}
+                        <p class="nota">${adv.invoiceId ? "Comprobante fiscal emitido." : "Este comprobante no tiene valor fiscal."}<br>Acreditable al momento del consumo.</p>
                         <br><button onclick="window.print()">Imprimir</button>
                         </body></html>`);
                         w.document.close();
@@ -440,7 +467,8 @@ function AdvanceDialog({
                       variant="ghost" size="sm"
                       className="text-destructive hover:text-destructive h-7 w-7 p-0"
                       onClick={() => deleteAdvanceMutation.mutate(adv.id)}
-                      disabled={deleteAdvanceMutation.isPending}
+                      disabled={deleteAdvanceMutation.isPending || !!adv.appliedToOrderId}
+                      title={adv.appliedToOrderId ? "Adelanto ya aplicado a una orden" : "Eliminar"}
                       data-testid={`button-delete-advance-${adv.id}`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -448,8 +476,9 @@ function AdvanceDialog({
                   </div>
                 </div>
               ))}
-              <div className="text-right text-sm font-semibold pr-1 text-muted-foreground">
-                Total señado: ${totalAdvances.toLocaleString("es-AR")}
+              <div className="flex items-center justify-between text-sm font-semibold pr-1">
+                <span className="text-muted-foreground">Total señado:</span>
+                <span className="text-green-700 dark:text-green-400">${totalAdvances.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
           ) : (
@@ -485,6 +514,82 @@ function AdvanceDialog({
               </div>
             </div>
             <div className="grid gap-1.5">
+              <Label className="text-xs">Comprobante</Label>
+              <Select value={advReceiptType} onValueChange={(v) => {
+                setAdvReceiptType(v);
+                if (v !== "factura_a" && !(v === "factura_b" && advFbIsExento)) {
+                  setAdvCustomerName(""); setAdvCustomerCuit("");
+                }
+                if (v === "factura_b") setAdvFbIsExento(false);
+              }}>
+                <SelectTrigger data-testid="select-advance-receipt-type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="voucher">Voucher (no fiscal)</SelectItem>
+                  <SelectItem value="factura_b">Factura B</SelectItem>
+                  <SelectItem value="factura_a">Factura A</SelectItem>
+                  <SelectItem value="factura_c">Factura C</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {isFactura && posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").length > 0 && (
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Punto de Venta (ARCA)</Label>
+                <select
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  value={advPuntoVenta}
+                  onChange={e => setAdvPuntoVenta(e.target.value)}
+                  data-testid="select-advance-pv"
+                >
+                  <option value="">PV por defecto</option>
+                  {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").map((p: any) => (
+                    <option key={p.id} value={String(p.numero)}>
+                      PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {advReceiptType === "factura_b" && (
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id="adv-fb-exento" checked={advFbIsExento}
+                  onChange={e => {
+                    setAdvFbIsExento(e.target.checked);
+                    if (!e.target.checked) { setAdvCustomerName(""); setAdvCustomerCuit(""); }
+                  }}
+                  className="h-4 w-4 cursor-pointer"
+                />
+                <label htmlFor="adv-fb-exento" className="text-xs cursor-pointer select-none">
+                  Empresa exenta / identificada
+                </label>
+              </div>
+            )}
+
+            {needsClient && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Razón Social *</Label>
+                  <Input
+                    value={advCustomerName}
+                    onChange={(e) => setAdvCustomerName(e.target.value)}
+                    placeholder="CONSUMIDOR FINAL"
+                    data-testid="input-advance-customer-name"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">CUIT</Label>
+                  <Input
+                    value={advCustomerCuit}
+                    onChange={(e) => setAdvCustomerCuit(e.target.value)}
+                    placeholder="20-00000000-0"
+                    data-testid="input-advance-customer-cuit"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-1.5">
               <Label className="text-xs">Observación</Label>
               <Input
                 value={advanceNotes}
@@ -498,12 +603,22 @@ function AdvanceDialog({
               disabled={!advanceAmount || parseFloat(advanceAmount) <= 0 || createAdvanceMutation.isPending || !reservationId}
               onClick={() => {
                 if (!reservationId || !advanceAmount) return;
-                createAdvanceMutation.mutate({ reservationId, amount: advanceAmount, paymentMethod: advancePaymentMethod, notes: advanceNotes });
+                createAdvanceMutation.mutate({
+                  reservationId,
+                  amount: advanceAmount,
+                  paymentMethod: advancePaymentMethod,
+                  notes: advanceNotes,
+                  receiptType: isFactura ? advReceiptType : undefined,
+                  vatCondition: advReceiptType === "factura_a" ? "responsable_inscripto" : advFbIsExento ? "exento" : "consumidor_final",
+                  customerRazonSocial: advCustomerName || undefined,
+                  customerCuit: advCustomerCuit || undefined,
+                  puntoVenta: advPuntoVenta || undefined,
+                });
               }}
               data-testid="button-submit-advance"
             >
               {createAdvanceMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-              Registrar Anticipo
+              {isFactura ? "Registrar y Facturar" : "Registrar Anticipo"}
             </Button>
           </div>
         </div>
@@ -781,6 +896,22 @@ export default function RestaurantPage() {
     queryKey: ["/api/agencies"],
   });
 
+  const todayISO = new Date().toISOString().split("T")[0];
+  const closeOrderTableId = currentOrder?.tableId ?? null;
+  const { data: closeDialogTableAdvances = [] } = useQuery<RestaurantReservationAdvance[]>({
+    queryKey: ["/api/restaurant/tables", closeOrderTableId, "advances", todayISO],
+    queryFn: async () => {
+      if (!closeOrderTableId) return [];
+      const res = await fetch(`/api/restaurant/tables/${closeOrderTableId}/advances?date=${todayISO}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: isCloseDialogOpen && !!closeOrderTableId,
+  });
+  const totalAdvanceCredit = closeDialogTableAdvances
+    .filter(a => !a.appliedToOrderId)
+    .reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
+
   type RestaurantGuest = {
     id: string; tipoPersona: string | null; firstName: string; lastName: string;
     email: string | null; phone: string | null; documentType: string | null;
@@ -879,15 +1010,22 @@ export default function RestaurantPage() {
   });
 
   const createAdvanceMutation = useMutation({
-    mutationFn: async ({ reservationId, amount, paymentMethod, notes }: { reservationId: string; amount: string; paymentMethod: string; notes: string }) => {
-      const res = await apiRequest("POST", `/api/restaurant/table-reservations/${reservationId}/advances`, { amount, paymentMethod, notes });
+    mutationFn: async ({ reservationId, amount, paymentMethod, notes, receiptType, vatCondition, customerRazonSocial, customerCuit, puntoVenta }: { reservationId: string; amount: string; paymentMethod: string; notes: string; receiptType?: string; vatCondition?: string; customerRazonSocial?: string; customerCuit?: string; puntoVenta?: string }) => {
+      const res = await apiRequest("POST", `/api/restaurant/table-reservations/${reservationId}/advances`, { amount, paymentMethod, notes, receiptType, vatCondition, customerRazonSocial, customerCuit, puntoVenta });
       return res.json();
     },
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/advances", vars.reservationId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
       setAdvanceAmount("");
       setAdvanceNotes("");
-      toast({ title: "Adelanto registrado", description: `Voucher generado` });
+      const isFactura = vars.receiptType && ["factura_a", "factura_b", "factura_c"].includes(vars.receiptType);
+      if (isFactura && (_data as any)?.invoiceId) {
+        window.open(`/api/billing/invoices/${(_data as any).invoiceId}/pdf`, "_blank");
+        toast({ title: "Adelanto registrado — Factura emitida", description: `Voucher ${(_data as any).voucherNumber} generado con factura AFIP.` });
+      } else {
+        toast({ title: "Adelanto registrado", description: `Voucher ${(_data as any)?.voucherNumber || ""} generado` });
+      }
     },
   });
 
@@ -1195,6 +1333,7 @@ export default function RestaurantPage() {
       discount?: number; discountType?: string; roomReservationId?: string;
       billingName?: string; billingCuit?: string; ccEntityType?: string; ccEntityId?: string;
       emitInvoice?: boolean; vatCondition?: string; customerRazonSocial?: string; customerCuit?: string;
+      puntoVenta?: number; reservationAdvanceCredit?: number;
     }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
@@ -1211,6 +1350,8 @@ export default function RestaurantPage() {
         vatCondition: data.vatCondition,
         customerRazonSocial: data.customerRazonSocial,
         customerCuit: data.customerCuit,
+        puntoVenta: data.puntoVenta,
+        reservationAdvanceCredit: data.reservationAdvanceCredit,
       });
       return res.json();
     },
@@ -1230,6 +1371,8 @@ export default function RestaurantPage() {
       setCloseCcEntityId("");
       setBillingSearch("");
       setFbIsExento(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       if (data?.invoiceId) {
         window.open(`/api/billing/invoices/${data.invoiceId}/pdf`, "_blank");
         toast({ title: "Pedido cerrado — Factura emitida", description: "Se abrió el PDF en una nueva pestaña." });
@@ -4131,7 +4274,8 @@ export default function RestaurantPage() {
                 const total = parseFloat(getUpdatedOrder()?.total || "0");
                 const disc = parseFloat(closeDiscount || "0");
                 const discAmount = closeDiscountType === "percent" ? total * disc / 100 : disc;
-                const finalTotal = Math.max(0, total - discAmount);
+                const afterDiscount = Math.max(0, total - discAmount);
+                const finalTotal = Math.max(0, afterDiscount - totalAdvanceCredit);
                 return (
                   <>
                     {disc > 0 && (
@@ -4140,10 +4284,22 @@ export default function RestaurantPage() {
                         <span>-${discAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
+                    {totalAdvanceCredit > 0 && (
+                      <div className="flex justify-between text-sm text-blue-600 dark:text-blue-400 font-medium py-1 border border-blue-200 dark:border-blue-800 rounded px-2 bg-blue-50 dark:bg-blue-950/20">
+                        <span className="flex items-center gap-1.5">
+                          <CreditCard className="h-3.5 w-3.5" />
+                          Seña / Anticipo reserva:
+                        </span>
+                        <span>-${totalAdvanceCredit.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-xl font-bold pt-2">
-                      <span>Total:</span>
+                      <span>A cobrar:</span>
                       <span>${finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                     </div>
+                    {totalAdvanceCredit > 0 && (
+                      <p className="text-xs text-muted-foreground text-right">Total consumido: ${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
+                    )}
                   </>
                 );
               })()}
@@ -5189,6 +5345,7 @@ export default function RestaurantPage() {
                     customerRazonSocial: isFactura ? (closeBillingName || undefined) : undefined,
                     customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
                     puntoVenta: isFactura && closePuntoVenta ? parseInt(closePuntoVenta) : undefined,
+                    reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
                   });
                 }
               };
@@ -5632,6 +5789,7 @@ export default function RestaurantPage() {
         setAdvanceNotes={setAdvanceNotes}
         createAdvanceMutation={createAdvanceMutation}
         deleteAdvanceMutation={deleteAdvanceMutation}
+        posConfigsData={posConfigsData}
       />
 
       {/* Assign Table Dialog */}
@@ -5643,16 +5801,16 @@ export default function RestaurantPage() {
               {assignTableReservation && `Reserva: ${assignTableReservation.guestName} — ${assignTableReservation.partySize} personas`}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 pt-2">
+          <div className="space-y-2 pt-2 max-h-64 overflow-y-auto">
             {tables.filter(t => t.isActive === "true").sort((a,b) => a.tableNumber.localeCompare(b.tableNumber, undefined, {numeric: true})).map((t) => {
               const hasOrder = orders.some(o => o.tableId === t.id && ["open","in_progress","served"].includes(o.status));
+              const isAlreadyAssigned = assignTableReservation?.tableId === t.id;
               return (
                 <button
                   key={t.id}
-                  className={`w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between ${hasOrder ? "opacity-40 cursor-not-allowed bg-muted" : "hover:bg-accent cursor-pointer"}`}
-                  disabled={hasOrder}
+                  className={`w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between ${isAlreadyAssigned ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 cursor-default" : hasOrder ? "border-amber-300 bg-amber-50 dark:bg-amber-950/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 cursor-pointer" : "hover:bg-accent cursor-pointer"}`}
                   onClick={() => {
-                    if (!assignTableReservation) return;
+                    if (!assignTableReservation || isAlreadyAssigned) return;
                     updateReservationMutation.mutate({ id: assignTableReservation.id, data: { tableId: t.id } });
                     setIsAssignTableDialogOpen(false);
                     setAssignTableReservation(null);
@@ -5660,7 +5818,10 @@ export default function RestaurantPage() {
                   data-testid={`button-assign-table-option-${t.id}`}
                 >
                   <span className="font-medium">Mesa {t.tableNumber}</span>
-                  <span className="text-sm text-muted-foreground">{t.capacity} pers.{hasOrder ? " — Ocupada" : ""}</span>
+                  <span className={`text-xs ${hasOrder ? "text-amber-600 dark:text-amber-400" : isAlreadyAssigned ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"}`}>
+                    {t.capacity} pers.
+                    {isAlreadyAssigned ? " — Ya asignada" : hasOrder ? " — Ocupada (asignable)" : " — Libre"}
+                  </span>
                 </button>
               );
             })}

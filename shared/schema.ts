@@ -960,6 +960,7 @@ export const restaurantReservationAdvances = pgTable("restaurant_reservation_adv
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   appliedToOrderId: varchar("applied_to_order_id"),
+  invoiceId: integer("invoice_id"),
 });
 
 export const insertRestaurantReservationAdvanceSchema = createInsertSchema(restaurantReservationAdvances).omit({ id: true, createdAt: true });

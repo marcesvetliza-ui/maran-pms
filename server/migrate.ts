@@ -334,6 +334,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await withTimeout("restaurant_reservation_advances.invoice_id", T, () =>
+    db.execute(sql`ALTER TABLE restaurant_reservation_advances ADD COLUMN IF NOT EXISTS invoice_id integer`)
+  );
+
   await withTimeout("order_items.paid", T, () =>
     db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS paid boolean NOT NULL DEFAULT false`)
   );
