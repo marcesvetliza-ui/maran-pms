@@ -1020,7 +1020,15 @@ export function registerPresupuestosRoutes(app: Express) {
       res.setHeader("Content-Disposition", `inline; filename="${pres.numero}.pdf"`);
       doc.pipe(res);
 
-      if (area === "grupos" || area === "recepcion") {
+      if (area === "recepcion") {
+        // Portada full-bleed antes del contenido
+        const recepCover = path.join(process.cwd(), "server", "assets", "recep-cover.jpg");
+        if (fs.existsSync(recepCover)) {
+          doc.image(recepCover, 0, 0, { width: 595, height: 842 });
+          doc.addPage();
+        }
+        generateHockeyPdf(doc, pres, items, conditions);
+      } else if (area === "grupos") {
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
         generateEventosPdf(doc, pres, catalogItems, conditions);
