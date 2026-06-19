@@ -23,6 +23,8 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
+import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
+import { VAT_CONDITION_LABELS } from "@/pages/guests";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Plus,
@@ -786,7 +788,8 @@ export default function RestaurantPage() {
     tipoPersona: "fisica" as "fisica" | "juridica",
     firstName: "", lastName: "", email: "", phone: "",
     documentType: "dni", documentNumber: "", cuilCuit: "",
-    direccion: "", localidad: "",
+    vatCondition: "consumidor_final",
+    direccion: "", provincia: "", localidad: "",
     condicionVentaPredeterminada: "contado",
   });
 
@@ -931,7 +934,7 @@ export default function RestaurantPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
       setClientDialogOpen(false);
       setClientEditingId(null);
-      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", direccion: "", localidad: "", condicionVentaPredeterminada: "contado" });
+      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", vatCondition: "consumidor_final", direccion: "", provincia: "", localidad: "", condicionVentaPredeterminada: "contado" });
       toast({ title: "Cliente registrado" });
     },
     onError: () => toast({ title: "Error al guardar", variant: "destructive" }),
@@ -943,7 +946,7 @@ export default function RestaurantPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
       setClientDialogOpen(false);
       setClientEditingId(null);
-      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", direccion: "", localidad: "", condicionVentaPredeterminada: "contado" });
+      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", vatCondition: "consumidor_final", direccion: "", provincia: "", localidad: "", condicionVentaPredeterminada: "contado" });
       toast({ title: "Cliente actualizado" });
     },
     onError: () => toast({ title: "Error al guardar", variant: "destructive" }),
@@ -2957,7 +2960,7 @@ export default function RestaurantPage() {
                     size="sm"
                     onClick={() => {
                       setClientEditingId(null);
-                      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", direccion: "", localidad: "", condicionVentaPredeterminada: "contado" });
+                      setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", vatCondition: "consumidor_final", direccion: "", provincia: "", localidad: "", condicionVentaPredeterminada: "contado" });
                       setClientDialogOpen(true);
                     }}
                     data-testid="button-new-client"
@@ -3027,13 +3030,15 @@ export default function RestaurantPage() {
                                 setClientForm({
                                   tipoPersona: (g.tipoPersona as any) || "fisica",
                                   firstName: g.firstName,
-                                  lastName: g.lastName,
+                                  lastName: g.lastName === "-" ? "" : (g.lastName || ""),
                                   email: g.email || "",
                                   phone: g.phone || "",
                                   documentType: g.documentType || "dni",
                                   documentNumber: g.documentNumber || "",
                                   cuilCuit: g.cuilCuit ? formatCuit(g.cuilCuit) : "",
+                                  vatCondition: (g as any).vatCondition || ((g.tipoPersona as any) === "juridica" ? "responsable_inscripto" : "consumidor_final"),
                                   direccion: g.direccion || "",
+                                  provincia: (g as any).provincia || "",
                                   localidad: g.localidad || "",
                                   condicionVentaPredeterminada: g.condicionVentaPredeterminada || "contado",
                                 });
@@ -3059,47 +3064,47 @@ export default function RestaurantPage() {
 
       {/* Clientes Dialog */}
       <Dialog open={clientDialogOpen} onOpenChange={(o) => { setClientDialogOpen(o); if (!o) setClientEditingId(null); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{clientEditingId ? "Editar Cliente" : "Nuevo Cliente"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Tipo de Persona</Label>
-              <div className="flex rounded-md overflow-hidden border">
-                <button
-                  type="button"
-                  className={`flex-1 py-1.5 text-sm transition-colors ${clientForm.tipoPersona === "fisica" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
-                  onClick={() => setClientForm({ ...clientForm, tipoPersona: "fisica" })}
-                  data-testid="button-client-fisica"
-                >Persona Física</button>
-                <button
-                  type="button"
-                  className={`flex-1 py-1.5 text-sm transition-colors ${clientForm.tipoPersona === "juridica" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
-                  onClick={() => setClientForm({ ...clientForm, tipoPersona: "juridica" })}
-                  data-testid="button-client-juridica"
-                >Persona Jurídica</button>
-              </div>
+            {/* Tipo de Persona */}
+            <div className="flex rounded-md overflow-hidden border">
+              <button type="button"
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${clientForm.tipoPersona === "fisica" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                onClick={() => setClientForm({ ...clientForm, tipoPersona: "fisica", vatCondition: "consumidor_final" })}
+                data-testid="button-client-fisica">Persona Física</button>
+              <button type="button"
+                className={`flex-1 py-2 text-sm font-medium transition-colors border-l ${clientForm.tipoPersona === "juridica" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                onClick={() => setClientForm({ ...clientForm, tipoPersona: "juridica", vatCondition: "responsable_inscripto" })}
+                data-testid="button-client-juridica">Persona Jurídica</button>
             </div>
 
-            {clientForm.tipoPersona === "juridica" ? (
+            {/* Nombre / Razón Social */}
+            {clientForm.tipoPersona === "juridica" ? (<>
               <div className="space-y-2">
-                <Label>Razón Social *</Label>
+                <Label>Razón Social <span className="text-red-500">*</span></Label>
                 <Input value={clientForm.firstName} onChange={(e) => setClientForm({ ...clientForm, firstName: e.target.value })} placeholder="Empresa S.A." data-testid="input-client-razon-social" />
               </div>
-            ) : (
+              <div className="space-y-2">
+                <Label>Nombre Comercial <span className="text-xs text-muted-foreground">(cómo se conoce al negocio)</span></Label>
+                <Input value={clientForm.lastName} onChange={(e) => setClientForm({ ...clientForm, lastName: e.target.value })} placeholder="Acme Corp" data-testid="input-client-nombre-comercial" />
+              </div>
+            </>) : (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Nombre *</Label>
+                  <Label>Nombre <span className="text-red-500">*</span></Label>
                   <Input value={clientForm.firstName} onChange={(e) => setClientForm({ ...clientForm, firstName: e.target.value })} placeholder="Juan" data-testid="input-client-first-name" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Apellido *</Label>
+                  <Label>Apellido <span className="text-red-500">*</span></Label>
                   <Input value={clientForm.lastName} onChange={(e) => setClientForm({ ...clientForm, lastName: e.target.value })} placeholder="Pérez" data-testid="input-client-last-name" />
                 </div>
               </div>
             )}
 
+            {/* Teléfono + Email */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Teléfono</Label>
@@ -3111,6 +3116,7 @@ export default function RestaurantPage() {
               </div>
             </div>
 
+            {/* Documento — solo Física */}
             {clientForm.tipoPersona === "fisica" && (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -3132,28 +3138,52 @@ export default function RestaurantPage() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label>CUIL / CUIT</Label>
-              <Input
-                value={clientForm.cuilCuit}
-                onChange={(e) => setClientForm({ ...clientForm, cuilCuit: formatCuit(e.target.value) })}
-                placeholder="20123456789"
-                maxLength={13}
-                data-testid="input-client-cuit"
-              />
-            </div>
-
+            {/* CUIT/CUIL + Condición IVA */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Dirección</Label>
-                <Input value={clientForm.direccion} onChange={(e) => setClientForm({ ...clientForm, direccion: e.target.value })} placeholder="Av. Ejemplo 123" data-testid="input-client-direccion" />
+                <Label>{clientForm.tipoPersona === "juridica" ? "CUIT *" : "CUIL / CUIT"}</Label>
+                <Input
+                  value={clientForm.cuilCuit}
+                  onChange={(e) => setClientForm({ ...clientForm, cuilCuit: formatCuit(e.target.value) })}
+                  placeholder={clientForm.tipoPersona === "juridica" ? "30-12345678-9" : "20-12345678-9"}
+                  maxLength={13}
+                  data-testid="input-client-cuit"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Localidad</Label>
-                <Input value={clientForm.localidad} onChange={(e) => setClientForm({ ...clientForm, localidad: e.target.value })} placeholder="Buenos Aires" data-testid="input-client-localidad" />
+                <Label>Condición ante IVA <span className="text-red-500">*</span></Label>
+                <Select value={clientForm.vatCondition} onValueChange={(v) => setClientForm({ ...clientForm, vatCondition: v })}>
+                  <SelectTrigger data-testid="select-client-vat"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
+                      <SelectItem key={val} value={val}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
+            {/* Domicilio fiscal */}
+            <div className="pt-1 border-t">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Domicilio</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Dirección</Label>
+              <Input value={clientForm.direccion} onChange={(e) => setClientForm({ ...clientForm, direccion: e.target.value })} placeholder="Av. Ejemplo 123" data-testid="input-client-direccion" />
+            </div>
+            <ProvinciaCiudadSelect
+              provincia={clientForm.provincia}
+              localidad={clientForm.localidad}
+              onProvinciaChange={(v) => setClientForm({ ...clientForm, provincia: v, localidad: "" })}
+              onLocalidadChange={(v) => setClientForm({ ...clientForm, localidad: v })}
+              testIdProvincia="select-client-provincia"
+              testIdLocalidad="select-client-localidad"
+            />
+
+            {/* Condición de Venta */}
+            <div className="pt-1 border-t">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Comercial</p>
+            </div>
             <div className="space-y-2">
               <Label>Condición de Venta</Label>
               <Select value={clientForm.condicionVentaPredeterminada} onValueChange={(v) => setClientForm({ ...clientForm, condicionVentaPredeterminada: v })}>
@@ -3182,7 +3212,9 @@ export default function RestaurantPage() {
                   documentType: clientForm.tipoPersona === "juridica" ? "cuit" : clientForm.documentType,
                   documentNumber: clientForm.tipoPersona === "juridica" ? (clientForm.cuilCuit.replace(/[-]/g, "") || null) : (clientForm.documentNumber || null),
                   cuilCuit: clientForm.cuilCuit.replace(/[-]/g, "") || null,
+                  vatCondition: clientForm.vatCondition || null,
                   direccion: clientForm.direccion || null,
+                  provincia: clientForm.provincia || null,
                   localidad: clientForm.localidad || null,
                   condicionVentaPredeterminada: clientForm.condicionVentaPredeterminada,
                 };

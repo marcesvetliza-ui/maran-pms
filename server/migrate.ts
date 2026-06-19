@@ -649,5 +649,18 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `);
   });
 
+  // ── SPA clients — nuevos campos demograficos ──────────────────────────────
+  await withTimeout("spa_clients new columns", T, async () => {
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS tipo_persona text DEFAULT 'fisica'`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS document_type text`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS document_number text`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS cuil_cuit text`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS vat_condition text`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS direccion text`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS provincia text`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS localidad text`);
+    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS codigo_postal text`);
+  });
+
   logger.info("Migraciones incrementales completadas.");
 }

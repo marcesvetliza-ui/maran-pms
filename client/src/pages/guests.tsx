@@ -386,13 +386,13 @@ function GuestFormDialog({
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="lastName">Nombre Fantasía <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                <Label htmlFor="lastName">Nombre Comercial <span className="text-xs text-muted-foreground">(cómo se conoce al negocio)</span></Label>
                 <Input
                   id="lastName"
                   value={formData.lastName === "-" ? "" : (formData.lastName || "")}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                   placeholder="Ej: Acme Corp"
-                  data-testid="input-nombre-fantasia"
+                  data-testid="input-nombre-comercial"
                 />
               </div>
 

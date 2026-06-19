@@ -1376,11 +1376,20 @@ export type SpaProfessional = typeof spaProfessionals.$inferSelect;
 // SPA Clients
 export const spaClients = pgTable("spa_clients", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tipoPersona: text("tipo_persona").default("fisica"),
   firstName: text("first_name").notNull(),
   lastName: text("last_name"),
   phone: text("phone"),
   email: text("email"),
   notes: text("notes"),
+  documentType: text("document_type"),
+  documentNumber: text("document_number"),
+  cuilCuit: text("cuil_cuit"),
+  vatCondition: text("vat_condition"),
+  direccion: text("direccion"),
+  provincia: text("provincia"),
+  localidad: text("localidad"),
+  codigoPostal: text("codigo_postal"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
