@@ -579,13 +579,13 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
     doc.addPage();
     drawContentPageBg();
     drawContentPageHeader();
-    y = 66;
+    y = 100;
   };
 
   doc.addPage();
   drawContentPageBg();
   drawContentPageHeader();
-  y = 66;
+  y = 100;
 
   // ── Bloque cliente ─────────────────────────────────────────────────────────
   doc.rect(M, y, CW, 56).fill(SPA_LIGHT);
