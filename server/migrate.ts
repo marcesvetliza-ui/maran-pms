@@ -638,8 +638,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // ── Unificación clientes SPA → guests ────────────────────────────────────
   await withTimeout("spa_clients → guests migration", T, async () => {
     await db.execute(sql`
-      INSERT INTO guests (id, first_name, last_name, phone, email, notes, created_at)
-      SELECT sc.id, sc.first_name, sc.last_name, sc.phone, sc.email, sc.notes, sc.created_at
+      INSERT INTO guests (id, first_name, last_name, phone, email)
+      SELECT sc.id, sc.first_name, COALESCE(sc.last_name, '-'), sc.phone, sc.email
       FROM spa_clients sc
       WHERE NOT EXISTS (SELECT 1 FROM guests g WHERE g.id = sc.id)
     `);

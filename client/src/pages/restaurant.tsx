@@ -758,6 +758,7 @@ export default function RestaurantPage() {
 
   const { data: orders = [], isLoading: ordersLoading } = useQuery<RestaurantOrder[]>({
     queryKey: ["/api/restaurant/orders"],
+    refetchInterval: 30000,
   });
 
   const { data: inHouseRooms = [] } = useQuery<{ roomId: string; roomNumber: string; guestName: string; reservationId: string }[]>({

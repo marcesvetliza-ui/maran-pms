@@ -2,6 +2,9 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
+import { db } from "../db";
+import { restaurantOrders } from "@shared/schema";
+import { eq, and, not, inArray } from "drizzle-orm";
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -200,6 +203,26 @@ export function registerRestaurantRoutes(app: Express) {
       }
       if (!tableId && (!orderLabel || !orderLabel.trim())) {
         return res.status(400).json({ error: "Etiqueta de orden es requerida para areas sin mesas" });
+      }
+      // Auto-cerrar órdenes activas previas de la misma mesa (mismo día) para evitar
+      // que consumos de una sesión anterior aparezcan al abrir la mesa de nuevo.
+      if (tableId) {
+        const staleForTable = await db
+          .select({ id: restaurantOrders.id })
+          .from(restaurantOrders)
+          .where(
+            and(
+              eq(restaurantOrders.tableId, tableId),
+              not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[]))
+            )
+          );
+        if (staleForTable.length > 0) {
+          const staleIds = staleForTable.map(o => o.id);
+          await db
+            .update(restaurantOrders)
+            .set({ status: "closed" as any })
+            .where(inArray(restaurantOrders.id, staleIds));
+        }
       }
       const orderNumber = storage.generateOrderNumber();
       const order = await storage.createRestaurantOrder({
