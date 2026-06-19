@@ -263,6 +263,7 @@ export default function WebCheckinPublicPage() {
   const [requestEarlyCheckIn, setRequestEarlyCheckIn] = useState(false);
   const [earlyCheckInTime, setEarlyCheckInTime] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [requestFacturaA, setRequestFacturaA] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["/api/public/web-checkin", token],
@@ -329,6 +330,7 @@ export default function WebCheckinPublicPage() {
           requestEarlyCheckIn,
           earlyCheckInTime: requestEarlyCheckIn ? earlyCheckInTime : null,
           termsAccepted,
+          requestFacturaA,
           companions: companions.filter(c => c.firstName.trim() && c.lastName.trim()),
         }),
       });
@@ -522,6 +524,23 @@ export default function WebCheckinPublicPage() {
                 <div className="space-y-1.5">
                   <Label htmlFor="email">Email</Label>
                   <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} data-testid="input-wc-email" />
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <Checkbox
+                  id="requestFacturaA"
+                  checked={requestFacturaA}
+                  onCheckedChange={(v) => setRequestFacturaA(!!v)}
+                  className="mt-0.5"
+                  data-testid="checkbox-factura-a"
+                />
+                <div className="space-y-0.5">
+                  <Label htmlFor="requestFacturaA" className="text-sm font-medium cursor-pointer">
+                    Solicitar Factura A (IVA discriminado)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Marcá esta opción si necesitás una factura con IVA discriminado (Responsable Inscripto o Monotributista). Recepción te consultará los datos fiscales al hacer el check-in.
+                  </p>
                 </div>
               </div>
             </CardContent>

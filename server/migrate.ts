@@ -662,5 +662,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS codigo_postal text`);
   });
 
+  // ── Web check-in — solicitud Factura A ────────────────────────────────────
+  await withTimeout("web_checkins request_factura_a column", T, async () => {
+    await db.execute(sql`ALTER TABLE web_checkins ADD COLUMN IF NOT EXISTS request_factura_a boolean DEFAULT false`);
+  });
+
   logger.info("Migraciones incrementales completadas.");
 }

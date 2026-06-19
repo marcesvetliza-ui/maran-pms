@@ -1118,7 +1118,7 @@ export async function registerRoutes(
         confirmedNationality, confirmedPhone, confirmedEmail,
         documentPhotoUrl, signatureImage, estimatedArrivalTime,
         requestEarlyCheckIn, earlyCheckInTime,
-        termsAccepted,
+        termsAccepted, requestFacturaA,
         companions,
       } = req.body;
 
@@ -1155,6 +1155,7 @@ export async function registerRoutes(
         earlyCheckInTime: earlyCheckInTime || null,
         termsAccepted: true,
         termsAcceptedAt: new Date(),
+        requestFacturaA: requestFacturaA || false,
         ipAddress,
         completedAt: new Date(),
       } as any);

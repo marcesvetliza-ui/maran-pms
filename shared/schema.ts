@@ -1771,6 +1771,7 @@ export const webCheckins = pgTable("web_checkins", {
   earlyCheckInTime: text("early_check_in_time"),
   termsAccepted: boolean("terms_accepted").default(false),
   termsAcceptedAt: timestamp("terms_accepted_at"),
+  requestFacturaA: boolean("request_factura_a").default(false),
   ipAddress: text("ip_address"),
   completedAt: timestamp("completed_at"),
   expiresAt: timestamp("expires_at"),

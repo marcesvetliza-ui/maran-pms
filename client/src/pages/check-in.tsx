@@ -956,6 +956,14 @@ export default function CheckInPage() {
                               </Badge>
                             </div>
                           )}
+                          {(wc as any).requestFacturaA && (
+                            <div className="col-span-2">
+                              <Badge className="bg-red-100 text-red-700 border border-red-300 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800 gap-1.5">
+                                <AlertTriangle className="h-3 w-3" />
+                                Solicita Factura A — consultar datos fiscales al check-in
+                              </Badge>
+                            </div>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-4">
                           {wc.documentPhotoUrl && (

@@ -18,6 +18,7 @@ import { toArgentinaDateStr } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, RatePlan, Package, BedType, Company, Agency } from "@shared/schema";
+import { GuestFormDialog } from "@/pages/guests";
 
 export type QuickReservationData = {
   roomId: string;
@@ -50,8 +51,7 @@ export function QuickReservationDialog({
   const [manualRate, setManualRate] = useState("");
   const [notes, setNotes] = useState("");
   const [guestSearch, setGuestSearch] = useState("");
-  const [showNewGuest, setShowNewGuest] = useState(false);
-  const [newGuest, setNewGuest] = useState({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "", vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "" });
+  const [showGuestCreateDialog, setShowGuestCreateDialog] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [agencyId, setAgencyId] = useState<string | null>(null);
@@ -104,16 +104,6 @@ export function QuickReservationDialog({
       ).slice(0, 10)
     : guests.slice(0, 10);
 
-  const createGuestMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/guests", data);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
-    },
-  });
-
   const mutation = useMutation({
     mutationFn: async (data: any) => {
       const res = await apiRequest("POST", "/api/reservations", data);
@@ -141,8 +131,7 @@ export function QuickReservationDialog({
   const resetForm = () => {
     setGuestId(""); setCheckOutDate(""); setNumberOfGuests(1); setBedConfig(""); setBedTypeId(null);
     setRatePlanId(""); setSource("directo"); setManualRate(""); setNotes(""); setGuestSearch("");
-    setShowNewGuest(false);
-    setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "", vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "" });
+    setShowGuestCreateDialog(false);
     setCompanyId(null); setSelectedCompany(null); setAgencyId(null); setSelectedAgency(null); setPackageId("");
     setPendingCharges([]); setShowChargeForm(false); setChargePresetLabel(""); setChargeDesc(""); setChargeAmount(""); setChargeQty(1);
   };
@@ -156,26 +145,7 @@ export function QuickReservationDialog({
       toast({ title: "Fechas inválidas", description: "La fecha de check-out debe ser posterior al check-in.", variant: "destructive" });
       return;
     }
-    let finalGuestId = guestId;
-    if (!finalGuestId && showNewGuest) {
-      if (!newGuest.firstName.trim()) {
-        toast({ title: "Datos incompletos", description: "Ingrese al menos el nombre del huésped.", variant: "destructive" });
-        return;
-      }
-      try {
-        const created = await createGuestMutation.mutateAsync({
-          firstName: newGuest.firstName.trim(), lastName: newGuest.lastName.trim() || "",
-          documentType: newGuest.documentNumber ? "dni" : null, documentNumber: newGuest.documentNumber || null,
-          phone: newGuest.phone || null, email: newGuest.email || null, nationality: "Argentina", segment: "LEISURE",
-          vehiculoPatente: newGuest.vehiculoPatente || null, vehiculoMarca: newGuest.vehiculoMarca || null,
-          vehiculoModelo: newGuest.vehiculoModelo || null, vehiculoColor: newGuest.vehiculoColor || null,
-        });
-        finalGuestId = created.id;
-      } catch {
-        toast({ title: "Error", description: "No se pudo crear el huésped.", variant: "destructive" });
-        return;
-      }
-    }
+    const finalGuestId = guestId;
     if (!finalGuestId) {
       toast({ title: "Datos incompletos", description: "Seleccione o cree un huésped.", variant: "destructive" });
       return;
@@ -238,7 +208,6 @@ export function QuickReservationDialog({
         <div className="grid gap-3 py-2">
           <div className="grid gap-2">
             <Label>Huésped *</Label>
-            {!showNewGuest ? (
               <>
                 <Input placeholder="Buscar huésped por nombre o DNI..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} data-testid="input-guest-search" />
                 {(guestSearch.length > 0 || guests.length > 0) && (
@@ -253,33 +222,21 @@ export function QuickReservationDialog({
                     {filteredGuests.length === 0 && <div className="px-3 py-2 text-sm text-muted-foreground">No se encontraron huéspedes</div>}
                   </div>
                 )}
-                <Button variant="outline" size="sm" className="w-fit" onClick={() => { setShowNewGuest(true); setGuestId(""); }} data-testid="button-new-guest">
+                <Button variant="outline" size="sm" className="w-fit" onClick={() => { setShowGuestCreateDialog(true); setGuestId(""); }} data-testid="button-new-guest">
                   <Plus className="h-3 w-3 mr-1" /> Nuevo huésped
                 </Button>
               </>
-            ) : (
-              <div className="border rounded-md p-3 space-y-2 bg-muted/30">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium">Nuevo huésped</span>
-                  <Button variant="ghost" size="sm" onClick={() => { setShowNewGuest(false); setNewGuest({ firstName: "", lastName: "", documentNumber: "", phone: "", email: "", vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "" }); }} data-testid="button-cancel-new-guest">Cancelar</Button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input placeholder="Nombre *" value={newGuest.firstName} onChange={(e) => setNewGuest({...newGuest, firstName: e.target.value})} data-testid="input-new-guest-firstname" />
-                  <Input placeholder="Apellido" value={newGuest.lastName} onChange={(e) => setNewGuest({...newGuest, lastName: e.target.value})} data-testid="input-new-guest-lastname" />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <Input placeholder="DNI" value={newGuest.documentNumber} onChange={(e) => setNewGuest({...newGuest, documentNumber: e.target.value})} data-testid="input-new-guest-dni" />
-                  <Input placeholder="Teléfono" value={newGuest.phone} onChange={(e) => setNewGuest({...newGuest, phone: e.target.value})} data-testid="input-new-guest-phone" />
-                  <Input placeholder="Email" value={newGuest.email} onChange={(e) => setNewGuest({...newGuest, email: e.target.value})} data-testid="input-new-guest-email" />
-                </div>
-                <div className="grid grid-cols-4 gap-2">
-                  <Input placeholder="Patente" value={newGuest.vehiculoPatente} onChange={(e) => setNewGuest({...newGuest, vehiculoPatente: e.target.value})} data-testid="input-new-guest-vehiculo-patente" />
-                  <Input placeholder="Marca" value={newGuest.vehiculoMarca} onChange={(e) => setNewGuest({...newGuest, vehiculoMarca: e.target.value})} data-testid="input-new-guest-vehiculo-marca" />
-                  <Input placeholder="Modelo" value={newGuest.vehiculoModelo} onChange={(e) => setNewGuest({...newGuest, vehiculoModelo: e.target.value})} data-testid="input-new-guest-vehiculo-modelo" />
-                  <Input placeholder="Color" value={newGuest.vehiculoColor} onChange={(e) => setNewGuest({...newGuest, vehiculoColor: e.target.value})} data-testid="input-new-guest-vehiculo-color" />
-                </div>
-              </div>
-            )}
+            <GuestFormDialog
+              open={showGuestCreateDialog}
+              onOpenChange={setShowGuestCreateDialog}
+              onSuccess={(guestId, fullName) => {
+                if (guestId) {
+                  setGuestId(guestId);
+                  setGuestSearch(fullName || "Huésped creado");
+                }
+                setShowGuestCreateDialog(false);
+              }}
+            />
           </div>
 
           <CompanySelector selectedCompany={selectedCompany}

@@ -183,7 +183,7 @@ function NationalityCombobox({
   );
 }
 
-function GuestFormDialog({
+export function GuestFormDialog({
   guest,
   open,
   onOpenChange,
@@ -192,7 +192,7 @@ function GuestFormDialog({
   guest?: Guest;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
+  onSuccess: (guestId?: string, fullName?: string) => void;
 }) {
   const { toast } = useToast();
   const isEditing = !!guest;
@@ -263,18 +263,22 @@ function GuestFormDialog({
         Object.entries(data).filter(([_, v]) => v !== "" && v !== undefined)
       );
       if (isEditing) {
-        return apiRequest("PATCH", `/api/guests/${guest.id}`, payload);
+        await apiRequest("PATCH", `/api/guests/${guest.id}`, payload);
+        return null;
       }
-      return apiRequest("POST", "/api/guests", payload);
+      const res = await apiRequest("POST", "/api/guests", payload);
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       toast({
         title: isEditing ? "Huésped actualizado" : "Huésped registrado",
         description: `${formData.lastName} ${formData.firstName} ha sido ${isEditing ? "actualizado" : "registrado"} exitosamente.`,
       });
-      onSuccess();
+      const createdId = result?.id as string | undefined;
+      const fullName = result ? `${result.lastName} ${result.firstName}` : undefined;
+      onSuccess(createdId, fullName);
       onOpenChange(false);
     },
     onError: async (error: any) => {
