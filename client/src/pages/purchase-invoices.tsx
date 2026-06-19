@@ -634,7 +634,7 @@ function InvoiceDialog({
                 )}
                 <div>
                   <Label>Punto de Venta</Label>
-                  <Input type="number" value={form.puntoVenta} onChange={(e) => f("puntoVenta", e.target.value)} placeholder="0001" data-testid="input-punto-venta" />
+                  <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
                 </div>
                 <div>
                   <Label>Número</Label>

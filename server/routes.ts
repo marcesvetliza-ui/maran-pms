@@ -2457,7 +2457,7 @@ export async function registerRoutes(
 
       // Formatear numero comprobante ext
       const numeroComprobanteExt = body.puntoVenta && body.numeroComprobante
-        ? `${String(body.puntoVenta).padStart(4, "0")}-${String(body.numeroComprobante).padStart(8, "0")}`
+        ? `${String(body.puntoVenta).padStart(5, "0")}-${String(body.numeroComprobante).padStart(8, "0")}`
         : body.numeroComprobante;
 
       // Insertar comprobante
