@@ -438,7 +438,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [openedBy, setOpenedBy] = useState("");
 
   type UserBasic = { id: string; username: string; fullName?: string | null; role: string };
-  const { data: allUsers = [] } = useQuery<UserBasic[]>({ queryKey: ["/api/admin/users"] });
+  const { data: allUsers = [] } = useQuery<UserBasic[]>({ queryKey: ["/api/staff/users"] });
   const AREA_TO_ROLE: Record<string, string> = { reception: "reception", restaurant: "restaurant", spa: "spa", events: "events" };
   const areaRole = AREA_TO_ROLE[area] ?? area;
   const relevantUsers = allUsers.filter(u => u.role === areaRole || u.role === "admin" || u.role === "manager");
