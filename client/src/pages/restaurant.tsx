@@ -918,13 +918,13 @@ export default function RestaurantPage() {
     id: string; tipoPersona: string | null; firstName: string; lastName: string;
     email: string | null; phone: string | null; documentType: string | null;
     documentNumber: string | null; cuilCuit: string | null;
+    vatCondition: string | null;
     direccion: string | null; localidad: string | null;
     condicionVentaPredeterminada: string | null;
   };
 
   const { data: restaurantGuests = [], refetch: refetchClients } = useQuery<RestaurantGuest[]>({
     queryKey: ["/api/guests"],
-    enabled: activeTab === "clientes",
   });
 
   const clientCreateMutation = useMutation({
@@ -1000,6 +1000,7 @@ export default function RestaurantPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       setEditingReservation(null);
       toast({ title: "Reserva actualizada" });
     },
@@ -1079,6 +1080,17 @@ export default function RestaurantPage() {
             : `Comanda abierta correctamente.`,
         });
         return;
+      }
+      // Auto check-in: if the new order's table has a "confirmed" reservation for today, auto-set to check_in
+      if (order.tableId) {
+        const _todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const _confirmedRes = reservations.find(r =>
+          r.tableId === order.tableId && r.status === "confirmed" && r.reservationDate === _todayStr
+        );
+        if (_confirmedRes) {
+          apiRequest("PATCH", `/api/restaurant/table-reservations/${_confirmedRes.id}`, { status: "check_in" })
+            .then(() => queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] }));
+        }
       }
       setCurrentOrder(order);
       setIsNewOrderDialogOpen(false);
@@ -1364,6 +1376,18 @@ export default function RestaurantPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+      // Auto-complete: if the closed order's table has a check_in reservation today, move it to historical
+      if (currentOrder?.tableId) {
+        const _closedTableId = currentOrder.tableId;
+        const _todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const _checkedInRes = reservations.find(r =>
+          r.tableId === _closedTableId && r.status === "check_in" && r.reservationDate === _todayStr
+        );
+        if (_checkedInRes) {
+          apiRequest("PATCH", `/api/restaurant/table-reservations/${_checkedInRes.id}`, { status: "historical" })
+            .then(() => queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] }));
+        }
+      }
       setCurrentOrder(null);
       setIsCloseDialogOpen(false);
       setCloseDiscount("");
@@ -4456,15 +4480,36 @@ export default function RestaurantPage() {
                   const showClientForm = isFactA || fbIsExento;
                   const clientSelected = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
                   const cuitValid = !closeBillingCuit || !!closeBillingCompanyId || validateCuit(closeBillingCuit);
-                  const billingResults = billingSearch.length >= 2
-                    ? companies
-                        .filter(c => {
-                          const q = billingSearch.toLowerCase();
-                          return c.razonSocial.toLowerCase().includes(q)
-                            || (c.nombreFantasia?.toLowerCase() || "").includes(q)
-                            || c.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
-                        })
-                        .slice(0, 8)
+                  const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest" }[] = billingSearch.length >= 2
+                    ? [
+                        ...companies
+                          .filter(c => {
+                            const q = billingSearch.toLowerCase();
+                            return c.razonSocial.toLowerCase().includes(q)
+                              || (c.nombreFantasia?.toLowerCase() || "").includes(q)
+                              || c.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
+                          })
+                          .slice(0, 6)
+                          .map(c => ({ id: c.id, label: c.razonSocial, sublabel: c.nombreFantasia || undefined, cuit: formatCuit(c.cuilCuit), type: "company" as const })),
+                        ...restaurantGuests
+                          .filter(g => {
+                            if (!g.cuilCuit) return false;
+                            if (g.vatCondition === "consumidor_final" || !g.vatCondition) return false;
+                            const q = billingSearch.toLowerCase();
+                            const fullName = `${g.firstName} ${g.lastName}`.toLowerCase();
+                            return fullName.includes(q)
+                              || g.lastName.toLowerCase().includes(q)
+                              || g.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
+                          })
+                          .slice(0, 4)
+                          .map(g => ({
+                            id: g.id,
+                            label: `${g.firstName} ${g.lastName}`.toUpperCase(),
+                            sublabel: g.vatCondition === "monotributista" ? "Monotributista" : g.vatCondition === "responsable_inscripto" ? "Resp. Inscripto" : g.vatCondition || undefined,
+                            cuit: formatCuit(g.cuilCuit || ""),
+                            type: "guest" as const,
+                          })),
+                      ]
                     : [];
 
                   return (
@@ -4531,31 +4576,43 @@ export default function RestaurantPage() {
                               <div className="flex gap-2">
                                 <div className="relative flex-1">
                                   <Input
-                                    placeholder="Buscar empresa por nombre o CUIT..."
+                                    placeholder="Buscar empresa o persona por nombre o CUIT..."
                                     value={billingSearch}
                                     onChange={e => { setBillingSearch(e.target.value); setCloseBillingCompanyId(""); }}
                                     onFocus={() => setBillingSearchOpen(true)}
-                                    onBlur={() => setTimeout(() => setBillingSearchOpen(false), 150)}
+                                    onBlur={() => setTimeout(() => setBillingSearchOpen(false), 350)}
                                     data-testid="input-billing-search"
                                     autoComplete="off"
                                   />
                                   {billingSearchOpen && billingResults.length > 0 && (
-                                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                      {billingResults.map(c => (
-                                        <button key={c.id} type="button"
-                                          className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
+                                    <div
+                                      className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg max-h-52 overflow-y-auto"
+                                      onMouseDown={e => e.preventDefault()}
+                                    >
+                                      {billingResults.map(item => (
+                                        <button key={item.id} type="button"
+                                          className="w-full text-left px-3 py-2 hover:bg-accent text-sm flex items-start gap-2"
                                           onMouseDown={() => {
-                                            setCloseBillingName(c.razonSocial);
-                                            setCloseBillingCuit(formatCuit(c.cuilCuit || ""));
-                                            setCloseBillingCompanyId(c.id);
-                                            setBillingSearch(c.razonSocial);
-                                            setCloseCcEntityType("company");
-                                            setCloseCcEntityId(c.id);
+                                            setCloseBillingName(item.label);
+                                            setCloseBillingCuit(item.cuit);
+                                            if (item.type === "company") {
+                                              setCloseBillingCompanyId(item.id);
+                                              setCloseCcEntityType("company");
+                                              setCloseCcEntityId(item.id);
+                                            } else {
+                                              setCloseBillingCompanyId("");
+                                              setCloseCcEntityType("company");
+                                              setCloseCcEntityId("");
+                                            }
+                                            setBillingSearch(item.label);
+                                            setBillingSearchOpen(false);
                                           }}
                                         >
-                                          <span className="font-medium">{c.razonSocial}</span>
-                                          {c.nombreFantasia && <span className="text-muted-foreground"> ({c.nombreFantasia})</span>}
-                                          <span className="text-xs text-muted-foreground ml-2">{formatCuit(c.cuilCuit)}</span>
+                                          <span className="flex-1 min-w-0">
+                                            <span className="font-medium block truncate">{item.label}</span>
+                                            {item.sublabel && <span className="text-xs text-muted-foreground">{item.sublabel}</span>}
+                                          </span>
+                                          <span className="text-xs text-muted-foreground shrink-0 mt-0.5">{item.cuit}</span>
                                         </button>
                                       ))}
                                     </div>
