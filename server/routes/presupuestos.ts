@@ -1034,7 +1034,13 @@ export function registerPresupuestosRoutes(app: Express) {
       } else if (area === "spa") {
         generateSpaPdf(doc, pres, items, conditions);
       } else if (area === "restaurant") {
-        generateCatalogSimplePdf(doc, pres, catalogItems, conditions, area);
+        // Portada Justo full-bleed, luego contenido con ítems
+        const restaurantCover = path.join(process.cwd(), "server", "assets", "restaurant-cover.jpg");
+        if (fs.existsSync(restaurantCover)) {
+          doc.image(restaurantCover, 0, 0, { width: 595, height: 842 });
+          doc.addPage();
+        }
+        generateHockeyPdf(doc, pres, items, conditions);
       } else {
         generateGeneralPdf(doc, pres, items, conditions);
       }
