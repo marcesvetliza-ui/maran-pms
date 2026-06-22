@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -363,6 +364,15 @@ function AdvanceDialog({
   const [advCustomerName, setAdvCustomerName] = useState("");
   const [advCustomerCuit, setAdvCustomerCuit] = useState("");
 
+  useEffect(() => {
+    if (open) {
+      setAdvReceiptType("voucher");
+      setAdvFbIsExento(false);
+      setAdvCustomerName("");
+      setAdvCustomerCuit("");
+    }
+  }, [open, reservationId]);
+
   const totalAdvances = advances.reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
 
   const payMethodLabel: Record<string, string> = {
@@ -468,10 +478,9 @@ function AdvanceDialog({
                     </Button>
                     <Button
                       variant="ghost" size="sm"
-                      className="text-destructive hover:text-destructive h-7 w-7 p-0"
-                      onClick={() => deleteAdvanceMutation.mutate(adv.id)}
-                      disabled={deleteAdvanceMutation.isPending || !!adv.appliedToOrderId}
-                      title={adv.appliedToOrderId ? "Adelanto ya aplicado a una orden" : "Eliminar"}
+                      className="h-7 w-7 p-0 text-muted-foreground/40 cursor-not-allowed"
+                      disabled
+                      title="Los comprobantes no se eliminan. Para anular, emitir una Nota de Crédito."
                       data-testid={`button-delete-advance-${adv.id}`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -721,6 +730,7 @@ export default function RestaurantPage() {
   const [advanceNotes, setAdvanceNotes] = useState("");
   const [isAssignTableDialogOpen, setIsAssignTableDialogOpen] = useState(false);
   const [assignTableReservation, setAssignTableReservation] = useState<TableReservation | null>(null);
+  const [confirmCancelReservationId, setConfirmCancelReservationId] = useState<string | null>(null);
   const [closeBillingName, setCloseBillingName] = useState("");
   const [closeBillingCuit, setCloseBillingCuit] = useState("");
   const [closeBillingCompanyId, setCloseBillingCompanyId] = useState("");
@@ -2204,11 +2214,14 @@ export default function RestaurantPage() {
                                   if (!tableOrder) return null;
                                   const tableSplits = (tableOrder as any)?.splits || [];
                                   const paidSplits = tableSplits.filter((s: any) => s.isPaid === "true").length;
+                                  const checkedInRes = todayTableReservations.find(r => r.status === "check_in");
                                   return (
                                     <>
-                                      {tableOrder.waiterName && (
+                                      {checkedInRes ? (
+                                        <span className="text-[9px] truncate max-w-full opacity-90 font-medium">{checkedInRes.guestName.split(" ")[0]}</span>
+                                      ) : tableOrder.waiterName ? (
                                         <span className="text-[9px] truncate max-w-full opacity-80">{tableOrder.waiterName}</span>
-                                      )}
+                                      ) : null}
                                       <TableElapsedBadge openedAt={tableOrder.openedAt} />
                                       {tableSplits.length > 0 && (
                                         <span className={`text-[8px] font-bold px-1 py-0.5 rounded leading-none ${paidSplits < tableSplits.length ? "bg-amber-400/90 text-amber-900" : "bg-green-500/90 text-white"}`}>
@@ -2377,7 +2390,9 @@ export default function RestaurantPage() {
                           setCloseDiscountType("percent");
                           setCloseRoomId("");
                           setRoomSearchFilter("");
-                          setCloseBillingName("");
+                          const _todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          const _tableRes = reservations.find(r => r.tableId === order.tableId && r.status === "check_in" && r.reservationDate === _todayISO);
+                          setCloseBillingName(_tableRes ? _tableRes.guestName : "");
                           setCloseBillingCuit("");
                           setCloseBillingCompanyId("");
                           setCloseCcEntityType("company");
@@ -2516,7 +2531,9 @@ export default function RestaurantPage() {
                     .sort((a, b) => a.reservationTime.localeCompare(b.reservationTime))
                     .map(r => {
                       const t = tables.find(x => x.id === r.tableId);
-                      return `${r.reservationTime}  ${r.guestName}  (${r.partySize}p)  Mesa: ${t?.tableNumber || "—"}  Tel: ${r.guestPhone || "—"}  ${reservationStatusLabels[r.status]}`;
+                      const advAmt = parseFloat(r.advanceAmount || "0");
+                      const advStr = advAmt > 0 ? `  Seña: $${advAmt.toLocaleString("es-AR")}` : "";
+                      return `${r.reservationTime}  ${r.guestName}  (${r.partySize}p)  Mesa: ${t?.tableNumber || "—"}  Tel: ${r.guestPhone || "—"}  ${reservationStatusLabels[r.status]}${advStr}`;
                     }).join("\n");
                   const w = window.open("", "_blank", "width=600,height=700");
                   if (w) {
@@ -2824,19 +2841,13 @@ export default function RestaurantPage() {
                                     </Button>
                                   )}
                                   <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive"
-                                    onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "cancelled" } })}
+                                    onClick={() => setConfirmCancelReservationId(reservation.id)}
                                     data-testid={`button-cancel-${reservation.id}`}
-                                    title="Cancelar">
+                                    title="Cancelar reserva">
                                     <X className="h-3 w-3" />
                                   </Button>
                                 </>
                               )}
-                              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground"
-                                onClick={() => deleteReservationMutation.mutate(reservation.id)}
-                                data-testid={`button-delete-${reservation.id}`}
-                                title="Eliminar">
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -4143,7 +4154,9 @@ export default function RestaurantPage() {
                   setCloseDiscountType("percent");
                   setCloseRoomId("");
                   setRoomSearchFilter("");
-                  setCloseBillingName("");
+                  const _todayISOc = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                  const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && r.status === "check_in" && r.reservationDate === _todayISOc) : null;
+                  setCloseBillingName(_tableResc ? _tableResc.guestName : "");
                   setCloseBillingCuit("");
                   setCloseBillingCompanyId("");
                   setCloseCcEntityType("company");
@@ -5809,7 +5822,7 @@ export default function RestaurantPage() {
       <AdvanceDialog
         reservationId={advanceDialogReservationId}
         open={isAdvanceDialogOpen}
-        onOpenChange={(v) => { setIsAdvanceDialogOpen(v); if (!v) setAdvanceDialogReservationId(null); }}
+        onOpenChange={(v) => { setIsAdvanceDialogOpen(v); if (!v) { setAdvanceDialogReservationId(null); setAdvanceAmount(""); setAdvanceNotes(""); setAdvancePaymentMethod("efectivo"); } }}
         reservations={reservations}
         advanceAmount={advanceAmount}
         setAdvanceAmount={setAdvanceAmount}
@@ -5821,6 +5834,32 @@ export default function RestaurantPage() {
         deleteAdvanceMutation={deleteAdvanceMutation}
         posConfigsData={posConfigsData}
       />
+
+      {/* Confirm Cancel Reservation AlertDialog */}
+      <AlertDialog open={!!confirmCancelReservationId} onOpenChange={(open) => { if (!open) setConfirmCancelReservationId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Cancelar reserva?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción cambiará el estado de la reserva a <strong>Cancelada</strong>. No se puede deshacer desde la lista.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmCancelReservationId(null)}>Volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => {
+                if (confirmCancelReservationId) {
+                  updateReservationMutation.mutate({ id: confirmCancelReservationId, data: { status: "cancelled" } });
+                  setConfirmCancelReservationId(null);
+                }
+              }}
+            >
+              Sí, cancelar reserva
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Assign Table Dialog */}
       <Dialog open={isAssignTableDialogOpen} onOpenChange={setIsAssignTableDialogOpen}>

@@ -1,0 +1,32 @@
+Hecha la reserva podemos hacer señas
+
+que seria lo que aparece en las observaciones, ¿nro de comprobante?
+
+En este caso hice clic en Cerrar y luego entrar de nuevo a la seña, que puede ser de otra reserva, me trajo el mismo comprobante, importe, etc, de la última seña hecha
+
+Luego de haber hecho la seña no informa esto, debería informar
+
+
+
+En los reportes Imprimir Lista y Hoja del día no muestra los adelantos hechos
+
+Si quiero hacer una seña con una factura A al buscar la razón social no encuentra nada
+
+puedo colocar cualquier nombre en razon social, poner cualquier cosa en cuit y me deja hacer una factura a
+
+El botón Trash borra el adelanto pero no debe de hacer eso, los comprobantes no se elimina nunca, se anulan con otro comprobante, una nota de crédito si es electrónica o comprobante similar, del mismo tipo, para la misma persona, misma forma de pago y artìculos 
+
+No entiendo lo de imprimir voucher, la impresora, que uso puede tener, pero funciona.
+
+Puede asignar una mesa a la reserva, las mesas que me mostraba eran correctas y en el paño de mesas aparece la mesa reservada y el nombre, todo perfecto pero, puede que valga, que pasa si tengo reasignarse a otra mesa por lo que sea, quizás debería haber una reasignación a otra mesa desde este módulo.
+
+Lo que está mal son los botones de :
+cancelar que no pide confirmación de la acción
+eliminar que no debe de existir, se cancela
+tomada una acción no se puede volver a un estado anterior
+
+Se le dio el check in. Hasta que abrí la mesa y cargue productos me mostraba el nombre de la persona que hizo la reserva, luego de emitir la reserva desaparece el nombre, quizás no debería desaparecer
+
+Cargue productos y al momento de facturar se puede hacer una observación, la factura se emite a nombre de consumidor final cuando tenemos todos los datos del cliente, lo lógico sería  hacerla a nombre del cliente.
+
+Luego de eso la mesa sigue apareciendo con el color de ocupada y volvió a aparecer el nombre, aun cambiando el estado de la reserva a histórica. Para cambiar de estado tuve que salir del módulo y entrar de nuevo. Cabe destacar que estoy trabajando con dos navegadores para simular dos pc
