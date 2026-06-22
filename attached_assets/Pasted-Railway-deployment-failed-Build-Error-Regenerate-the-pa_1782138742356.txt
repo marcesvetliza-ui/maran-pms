@@ -1,0 +1,45 @@
+Railway deployment failed — Build Error
+
+Regenerate the package-lock.json outside of Replit using the public npm registry to fix internal URLs that cause npm to hang during installation. The build fails because npm ci crashes with an out-of-memory error after hanging for 4+ minutes. A Railpack version upgrade from 0.29.0 to 0.30.0 invalidated cached node_modules layers, and the package-lock.json contains Replit-internal registry URLs (package-firewall.replit.local) that are unreachable from Railway, compounding the issue.
+
+Repository: https://github.com/marcesvetliza-ui/maran-pms
+Branch: main · Commit: a6c1ccc — Configure custom build commands for improved deployment
+
+Create nixpacks.toml to specify custom npm install and build commands, optimizing the deployment process.
+
+Replit-Commit-Author: Agent
+Replit-Commit-Session-Id: 93d18edc-9518-4e3b-9e80-ebd2f1bcd8f2
+Replit-Commit-Checkpoint-Type: full_checkpoint
+Replit-Commit-Event-Id: a2f23a86-92cc-40e1-936e-71d18d6ed7ec
+Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/46b92747-2b2c-4beb-b04f-14f3426587e4/93d18edc-9518-4e3b-9e80-ebd2f1bcd8f2/EmOuD1G
+Replit-Helium-Checkpoint-Created: true
+Deployment ID: 364da494-a787-47c1-ae04-b66ce71690cd
+Service ID: 767a7c93-80da-4dcd-ad1e-178919e6aa6e
+Environment ID: fda7f455-8e45-40ab-94d8-8b9a8104ce43
+
+---
+
+## Problem
+The build fails during `npm ci` with `npm error Exit handler never called!` after hanging for ~4 minutes, indicating an npm OOM crash. The service uses Railpack (auto-detected Node.js, npm package manager). The build stage fails with exit code 1:
+
+```
+npm error Exit handler never called!
+npm error This is an error with npm itself.
+Build Failed: build daemon returned an error < failed to solve: process "npm ci" did not complete successfully: exit code: 1 >
+```
+
+The Railpack version upgraded from 0.29.0 (last successful build, commit 545952a5) to 0.30.0 (current failing builds), invalidating cached node_modules layers. No railway.json or railway.toml config file is present — all settings are auto-detected. The package-lock.json is 416KB.
+
+## Diagnosis
+Two compounding issues cause the failure:
+1. The package-lock.json contains resolved URLs pointing to Replit's internal package proxy (`package-firewall.replit.local`) for recently added packages (`bcryptjs`, `@types/bcryptjs`). These URLs are unreachable from Railway's build environment, causing npm to hang on network timeouts before eventually crashing.
+2. The large dependency tree (416KB lockfile), combined with the Railpack cache invalidation (0.29.0 → 0.30.0), requires a full cold install that exceeds available build memory.
+
+The previous successful build used cached layers so npm ci was effectively a no-op and completed in ~1.5 minutes. Without cache, the combination of unreachable registry URLs and the large dependency tree causes npm to OOM after ~4 minutes.
+
+The `nixpacks.toml` file added in this commit (phases.install, phases.build, start cmd) is irrelevant — Railway uses Railpack, not Nixpacks, so this file is silently ignored.
+
+## Fix
+1. **File: `package-lock.json`** — Must be regenerated outside of Replit by running `npm install --registry https://registry.npmjs.org/` on a local machine (not in Replit). This replaces all `package-firewall.replit.local` resolved URLs with public `registry.npmjs.org` URLs. Commit the updated lockfile. This step cannot be automated by a code agent as it requires running npm commands to regenerate the lockfile.
+
+2. **File: `nixpacks.toml`** — Delete this file entirely from the repo root. It has no effect on Railway (which uses Railpack, not Nixpacks) and its presence is misleading.
