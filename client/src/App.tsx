@@ -11,7 +11,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
-import { LogOut, User } from "lucide-react";
+import { LogOut, User, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -86,12 +86,59 @@ interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   logout: () => void;
+  selectedPosId: string | null;
+  selectedPosNumero: number | null;
+  selectedPosNombre: string | null;
+  setSelectedPos: (id: string, numero: number, nombre: string) => void;
+  changePosMode: () => void;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, logout: () => {} });
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  logout: () => {},
+  selectedPosId: null,
+  selectedPosNumero: null,
+  selectedPosNombre: null,
+  setSelectedPos: () => {},
+  changePosMode: () => {},
+});
 
 export function useAuth() {
   return useContext(AuthContext);
+}
+
+function PosSelector({ configs, onSelect }: { configs: any[]; onSelect: (id: string, numero: number, nombre: string) => void }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="max-w-sm w-full">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 mb-4">
+            <Monitor className="w-7 h-7 text-primary" />
+          </div>
+          <h1 className="text-xl font-bold">Maran Suites & Towers</h1>
+          <p className="text-base font-medium mt-3">Seleccioná tu punto de venta</p>
+          <p className="text-sm text-muted-foreground mt-1">Se usará durante toda la sesión para facturación y caja</p>
+        </div>
+        <div className="space-y-3">
+          {configs.map((p: any) => (
+            <button
+              key={p.id}
+              data-testid={`button-select-pos-${p.numero}`}
+              onClick={() => onSelect(p.id, p.numero, p.nombre)}
+              className="w-full text-left p-4 border-2 rounded-xl hover:border-primary hover:bg-accent transition-all group"
+            >
+              <div className="font-semibold text-base group-hover:text-primary transition-colors">
+                PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+              </div>
+              {p.descripcion && (
+                <div className="text-sm text-muted-foreground mt-0.5">{p.descripcion}</div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PageLoader() {
@@ -229,7 +276,7 @@ function useRadixScrollLockCleanup() {
 }
 
 function AppLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, selectedPosNumero, selectedPosNombre, changePosMode } = useAuth();
   useRadixScrollLockCleanup();
   const [location] = useLocation();
 
@@ -258,6 +305,17 @@ function AppLayout() {
           <header className="flex items-center justify-between gap-4 px-4 py-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shrink-0">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex items-center gap-3">
+              {selectedPosNumero && (
+                <button
+                  onClick={changePosMode}
+                  title="Cambiar punto de venta"
+                  data-testid="button-change-pos"
+                  className="flex items-center gap-1.5 text-xs bg-primary/10 text-primary px-2.5 py-1 rounded-full hover:bg-primary/20 transition-colors cursor-pointer"
+                >
+                  <Monitor className="w-3 h-3" />
+                  <span>PV {String(selectedPosNumero).padStart(4, "0")}{selectedPosNombre ? ` — ${selectedPosNombre}` : ""}</span>
+                </button>
+              )}
               {user && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="text-current-user">
                   <User className="w-4 h-4" />
@@ -299,6 +357,16 @@ function AuthenticatedApp() {
   const [checking, setChecking] = useState(true);
   const [, navigate] = useLocation();
 
+  const [selectedPosId, setSelectedPosId] = useState<string | null>(() => localStorage.getItem("maranPosId"));
+  const [selectedPosNumero, setSelectedPosNumero] = useState<number | null>(() => {
+    const n = localStorage.getItem("maranPosNumero");
+    return n ? parseInt(n) : null;
+  });
+  const [selectedPosNombre, setSelectedPosNombre] = useState<string | null>(() => localStorage.getItem("maranPosNombre"));
+  const [showPosSelector, setShowPosSelector] = useState(false);
+  const [posConfigs, setPosConfigs] = useState<any[]>([]);
+  const [posChecking, setPosChecking] = useState(false);
+
   const checkAuth = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
@@ -319,6 +387,61 @@ function AuthenticatedApp() {
     checkAuth();
   }, [checkAuth]);
 
+  const fetchAndSelectPos = useCallback(async () => {
+    if (localStorage.getItem("maranPosId")) return;
+    setPosChecking(true);
+    try {
+      const res = await fetch("/api/pos-configs", { credentials: "include" });
+      if (!res.ok) return;
+      const data: any[] = await res.json();
+      const electronic = data.filter((p: any) => p.activo && p.tipo === "electronico");
+      if (electronic.length === 0) return;
+      if (electronic.length === 1) {
+        const p = electronic[0];
+        applyPos(p.id, p.numero, p.nombre);
+      } else {
+        setPosConfigs(electronic);
+        setShowPosSelector(true);
+      }
+    } catch {
+    } finally {
+      setPosChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) fetchAndSelectPos();
+  }, [user, fetchAndSelectPos]);
+
+  const applyPos = (id: string, numero: number, nombre: string) => {
+    setSelectedPosId(id);
+    setSelectedPosNumero(numero);
+    setSelectedPosNombre(nombre);
+    localStorage.setItem("maranPosId", id);
+    localStorage.setItem("maranPosNumero", String(numero));
+    localStorage.setItem("maranPosNombre", nombre);
+    setShowPosSelector(false);
+  };
+
+  const setSelectedPos = (id: string, numero: number, nombre: string) => {
+    applyPos(id, numero, nombre);
+  };
+
+  const changePosMode = () => {
+    if (posConfigs.length > 0) {
+      setShowPosSelector(true);
+    } else {
+      fetch("/api/pos-configs", { credentials: "include" })
+        .then(r => r.json())
+        .then((data: any[]) => {
+          const electronic = data.filter((p: any) => p.activo && p.tipo === "electronico");
+          setPosConfigs(electronic);
+          setShowPosSelector(true);
+        })
+        .catch(() => {});
+    }
+  };
+
   const handleLogin = (userData: AuthUser) => {
     setUser(userData);
     navigate(getRoleHomePage(userData.role));
@@ -328,11 +451,19 @@ function AuthenticatedApp() {
     try {
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch {}
+    localStorage.removeItem("maranPosId");
+    localStorage.removeItem("maranPosNumero");
+    localStorage.removeItem("maranPosNombre");
+    setSelectedPosId(null);
+    setSelectedPosNumero(null);
+    setSelectedPosNombre(null);
+    setShowPosSelector(false);
+    setPosConfigs([]);
     setUser(null);
     queryClient.clear();
   };
 
-  if (checking) {
+  if (checking || posChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
@@ -347,8 +478,12 @@ function AuthenticatedApp() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
+  if (showPosSelector && posConfigs.length > 0) {
+    return <PosSelector configs={posConfigs} onSelect={setSelectedPos} />;
+  }
+
   return (
-    <AuthContext.Provider value={{ user, logout: handleLogout }}>
+    <AuthContext.Provider value={{ user, logout: handleLogout, selectedPosId, selectedPosNumero, selectedPosNombre, setSelectedPos, changePosMode }}>
       <AppLayout />
     </AuthContext.Provider>
   );

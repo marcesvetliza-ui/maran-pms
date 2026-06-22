@@ -69,6 +69,7 @@ import {
   CheckCircle,
   BedDouble,
   FileText,
+  Monitor,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -344,6 +345,7 @@ function AdvanceDialog({
   advanceNotes, setAdvanceNotes, createAdvanceMutation, deleteAdvanceMutation,
   posConfigsData = [],
 }: AdvanceDialogProps) {
+  const { selectedPosNumero, selectedPosNombre } = useAuth();
   const reservation = reservations.find(r => r.id === reservationId);
   const { data: advances = [], isLoading } = useQuery<RestaurantReservationAdvance[]>({
     queryKey: ["/api/restaurant/advances", reservationId],
@@ -360,7 +362,6 @@ function AdvanceDialog({
   const [advFbIsExento, setAdvFbIsExento] = useState(false);
   const [advCustomerName, setAdvCustomerName] = useState("");
   const [advCustomerCuit, setAdvCustomerCuit] = useState("");
-  const [advPuntoVenta, setAdvPuntoVenta] = useState("");
 
   const totalAdvances = advances.reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
 
@@ -534,22 +535,10 @@ function AdvanceDialog({
               </Select>
             </div>
 
-            {isFactura && posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").length > 0 && (
-              <div className="grid gap-1.5">
-                <Label className="text-xs">Punto de Venta (ARCA)</Label>
-                <select
-                  className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-                  value={advPuntoVenta}
-                  onChange={e => setAdvPuntoVenta(e.target.value)}
-                  data-testid="select-advance-pv"
-                >
-                  <option value="">PV por defecto</option>
-                  {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").map((p: any) => (
-                    <option key={p.id} value={String(p.numero)}>
-                      PV {String(p.numero).padStart(4, "0")} — {p.nombre}
-                    </option>
-                  ))}
-                </select>
+            {isFactura && selectedPosNumero && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-3 py-2">
+                <Monitor className="h-3.5 w-3.5 shrink-0" />
+                <span>PV {String(selectedPosNumero).padStart(4, "0")}{selectedPosNombre ? ` — ${selectedPosNombre}` : ""}</span>
               </div>
             )}
 
@@ -614,7 +603,7 @@ function AdvanceDialog({
                   vatCondition: advReceiptType === "factura_a" ? "responsable_inscripto" : advFbIsExento ? "exento" : "consumidor_final",
                   customerRazonSocial: advCustomerName || undefined,
                   customerCuit: advCustomerCuit || undefined,
-                  puntoVenta: advPuntoVenta || undefined,
+                  puntoVenta: selectedPosNumero || undefined,
                 });
               }}
               data-testid="button-submit-advance"
@@ -634,7 +623,7 @@ function AdvanceDialog({
 }
 
 export default function RestaurantPage() {
-  const { user } = useAuth();
+  const { user, selectedPosNumero, selectedPosNombre } = useAuth();
   const canEditLayout = ["admin", "manager", "responsable_area"].includes(user?.role || "");
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("floor");
@@ -672,7 +661,6 @@ export default function RestaurantPage() {
   const [reservationAreaFilter, setReservationAreaFilter] = useState<string>("all");
   const pendingCheckInReservationRef = useRef<TableReservation | null>(null);
   const [closeReceiptType, setCloseReceiptType] = useState("cierre_mesa");
-  const [closePuntoVenta, setClosePuntoVenta] = useState("");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
   const [closeDiscount, setCloseDiscount] = useState("");
   const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("percent");
@@ -4465,22 +4453,10 @@ export default function RestaurantPage() {
                     <div className="space-y-3 p-3 border rounded-md bg-muted/30">
                       <p className="text-sm font-medium">Datos de facturación</p>
 
-                      {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").length > 0 && (
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">Punto de Venta (ARCA)</label>
-                          <select
-                            className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-                            value={closePuntoVenta}
-                            onChange={e => setClosePuntoVenta(e.target.value)}
-                            data-testid="select-close-punto-venta"
-                          >
-                            <option value="">PV por defecto (configuración)</option>
-                            {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").map((p: any) => (
-                              <option key={p.id} value={String(p.numero)}>
-                                PV {String(p.numero).padStart(4, "0")} — {p.nombre}
-                              </option>
-                            ))}
-                          </select>
+                      {selectedPosNumero && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-3 py-2">
+                          <Monitor className="h-3.5 w-3.5 shrink-0" />
+                          <span>PV {String(selectedPosNumero).padStart(4, "0")}{selectedPosNombre ? ` — ${selectedPosNombre}` : ""}</span>
                         </div>
                       )}
 
@@ -5376,7 +5352,7 @@ export default function RestaurantPage() {
                     vatCondition: isFactura ? vatCond : undefined,
                     customerRazonSocial: isFactura ? (closeBillingName || undefined) : undefined,
                     customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
-                    puntoVenta: isFactura && closePuntoVenta ? parseInt(closePuntoVenta) : undefined,
+                    puntoVenta: isFactura && selectedPosNumero ? selectedPosNumero : undefined,
                     reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
                   });
                 }
