@@ -5500,15 +5500,15 @@ export default function RestaurantPage() {
 
       {/* Reservation Dialog */}
       <Dialog open={isReservationDialogOpen} onOpenChange={setIsReservationDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Nueva Reserva</DialogTitle>
           </DialogHeader>
           <Form {...reservationForm}>
-            <form onSubmit={reservationForm.handleSubmit((data) => {
+            <form id="reservation-form" onSubmit={reservationForm.handleSubmit((data) => {
               const payload = { ...data, tableId: data.tableId || null, status: "confirmed" };
               createReservationMutation.mutate(payload as any);
-            })} className="space-y-4">
+            })} className="space-y-3 overflow-y-auto flex-1 pr-1">
               <GuestSearchCombobox
                 label="Buscar cliente registrado (opcional)"
                 selectedGuestId={reservationForm.watch("clientId") ?? null}
@@ -5649,15 +5649,16 @@ export default function RestaurantPage() {
                   )} />
                 </div>
               </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsReservationDialogOpen(false)}>Cancelar</Button>
-                <Button type="submit" disabled={createReservationMutation.isPending} data-testid="button-save-reservation">
-                  {createReservationMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Guardar Reserva
-                </Button>
-              </DialogFooter>
+              <div className="pb-1" />
             </form>
           </Form>
+          <DialogFooter className="shrink-0 pt-2 border-t">
+            <Button type="button" variant="outline" onClick={() => setIsReservationDialogOpen(false)}>Cancelar</Button>
+            <Button type="submit" form="reservation-form" disabled={createReservationMutation.isPending} data-testid="button-save-reservation">
+              {createReservationMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Guardar Reserva
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
