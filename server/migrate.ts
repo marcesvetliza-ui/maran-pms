@@ -667,5 +667,52 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     await db.execute(sql`ALTER TABLE web_checkins ADD COLUMN IF NOT EXISTS request_factura_a boolean DEFAULT false`);
   });
 
+  // ── Paquetes Turísticos ───────────────────────────────────────────────────
+  await withTimeout("packages (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS packages (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        code text NOT NULL UNIQUE,
+        name text NOT NULL,
+        description text,
+        room_type_id varchar,
+        nights integer NOT NULL DEFAULT 1,
+        base_price decimal(12,2) NOT NULL DEFAULT 0,
+        discount_percent decimal(5,2),
+        valid_from date,
+        valid_until date,
+        status text NOT NULL DEFAULT 'active',
+        included_services text[],
+        terms text,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)
+  );
+
+  await withTimeout("package_items (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS package_items (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        package_id varchar NOT NULL,
+        item_type text NOT NULL,
+        description text NOT NULL,
+        quantity integer NOT NULL DEFAULT 1,
+        unit_value decimal(10,2)
+      )
+    `)
+  );
+
+  await withTimeout("package_room_prices (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS package_room_prices (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        package_id varchar NOT NULL,
+        room_type_id varchar NOT NULL,
+        price decimal(12,2) NOT NULL DEFAULT 0,
+        extra_amount decimal(12,2) DEFAULT 0
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

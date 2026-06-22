@@ -2469,14 +2469,14 @@ export default function GroupDetailPage() {
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 <p>
-                  Se realizará el check-in de <strong>{group.reservations.filter(r => r.status === "confirmed").length}</strong> habitación(es) confirmadas.
+                  Se realizará el check-in de <strong>{group.reservations.filter(r => ["confirmed", "web_checkin", "pending"].includes(r.status)).length}</strong> habitación(es) elegibles.
                   Las habitaciones pasarán a estado "ocupado".
                 </p>
                 <div className="rounded-md bg-muted p-3 text-sm space-y-1">
                   <p className="font-medium text-foreground">Resumen del grupo:</p>
-                  <p>Confirmadas: {group.reservations.filter(r => r.status === "confirmed").length}</p>
+                  <p>Elegibles para check-in: {group.reservations.filter(r => ["confirmed", "web_checkin", "pending"].includes(r.status)).length}</p>
                   <p>Ya en casa: {group.reservations.filter(r => r.status === "checked_in").length}</p>
-                  <p>Otras: {group.reservations.filter(r => !["confirmed", "checked_in"].includes(r.status)).length}</p>
+                  <p>Otras: {group.reservations.filter(r => !["confirmed", "web_checkin", "pending", "checked_in"].includes(r.status)).length}</p>
                 </div>
               </div>
             </AlertDialogDescription>
