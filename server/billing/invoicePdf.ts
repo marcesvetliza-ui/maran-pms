@@ -81,7 +81,7 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
     doc.rect(x0, y, W, 48).strokeColor("#ccc").stroke();
     doc.font("Helvetica-Bold").fontSize(8).text("Datos del Cliente:", x0 + 6, y + 5);
     doc.font("Helvetica").fontSize(8)
-      .text(`Razón Social / Nombre: ${factura.clienteRazonSocial}`, x0 + 6, y + 16)
+      .text(`Razón Social / Nombre: ${factura.clienteRazonSocial ?? "—"}`, x0 + 6, y + 16)
       .text(`Domicilio: ${factura.clienteDomicilio ?? "—"}`, x0 + 6, y + 27);
 
     const midRight = x0 + W / 2;
@@ -91,7 +91,7 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
     } else if (factura.clienteDni) {
       doc.text(`DNI: ${factura.clienteDni}`, midRight, y + 16);
     }
-    doc.text(`Condición IVA: ${factura.clienteCondicionIva}`, midRight, y + 27);
+    doc.text(`Condición IVA: ${factura.clienteCondicionIva ?? "—"}`, midRight, y + 27);
 
     y += 56;
 

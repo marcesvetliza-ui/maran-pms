@@ -363,13 +363,54 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
+      // Obtener ítems del pedido (necesario tanto para la factura como para el stock)
+      const orderItemsList = await storage.getOrderItems(req.params.id);
+
       // Emitir factura AFIP si se solicitó
       let invoiceId: number | undefined;
       if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
-          const advCreditLabel = advanceCredit > 0 ? ` (Seña aplicada: $${advanceCredit.toFixed(2)})` : "";
+
+          // Construir ítems de factura agrupados por categoría de menú
+          const originalTotal = parseFloat(order.total || "0");
+          const scaleFactor = originalTotal > 0 ? finalTotal / originalTotal : 1;
+
+          interface CatGroup { name: string; grossSubtotal: number }
+          const categoryGroups = new Map<string, CatGroup>();
+
+          for (const item of orderItemsList) {
+            const menuItem = await storage.getMenuItem(item.menuItemId);
+            const catName = menuItem?.category?.name || "Consumiciones";
+            const grossAmt = parseFloat(item.subtotal || "0") * scaleFactor;
+            const existing = categoryGroups.get(catName);
+            if (existing) {
+              existing.grossSubtotal += grossAmt;
+            } else {
+              categoryGroups.set(catName, { name: catName, grossSubtotal: grossAmt });
+            }
+          }
+
+          // Convertir grupos a líneas de factura (neto + IVA 21%)
+          const invoiceItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21"; subtotalNeto: number; subtotal: number }[] =
+            Array.from(categoryGroups.values())
+              .filter(g => g.grossSubtotal > 0.01)
+              .map(g => {
+                const gross = parseFloat(g.grossSubtotal.toFixed(2));
+                const net = parseFloat((gross / 1.21).toFixed(4));
+                return { descripcion: g.name, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross };
+              });
+
+          // Fallback: línea única si no hay ítems válidos
+          if (invoiceItems.length === 0) {
+            const advLbl = advanceCredit > 0 ? ` (Seña: $${advanceCredit.toFixed(2)})` : "";
+            const discLbl = discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : "";
+            const gross = parseFloat(finalTotal.toFixed(2));
+            const net = parseFloat((gross / 1.21).toFixed(4));
+            invoiceItems.push({ descripcion: `Consumiciones Restaurante — Pedido ${order.orderNumber}${discLbl}${advLbl}`, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross });
+          }
+
           const invoice = await emitirFactura({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
@@ -377,14 +418,7 @@ export function registerRestaurantRoutes(app: Express) {
               cuit: customerCuit || undefined,
               condicionIva: condicion,
             },
-            items: [{
-              descripcion: `Consumiciones Restaurante — Pedido ${order.orderNumber}${advCreditLabel}`,
-              cantidad: 1,
-              precioUnitario: parseFloat((finalTotal / 1.21).toFixed(4)),
-              alicuotaIva: "21" as const,
-              subtotalNeto: parseFloat((finalTotal / 1.21).toFixed(4)),
-              subtotal: finalTotal,
-            }],
+            items: invoiceItems,
             operador: (req as any).user?.fullName || (req as any).user?.username,
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
@@ -395,7 +429,6 @@ export function registerRestaurantRoutes(app: Express) {
       }
 
       try {
-        const orderItemsList = await storage.getOrderItems(req.params.id);
         const stockResult = await storage.deductStockFromOrder(
           req.params.id,
           orderItemsList.map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity }))
