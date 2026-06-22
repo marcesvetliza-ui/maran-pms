@@ -4437,7 +4437,7 @@ export default function RestaurantPage() {
                   const isFactA = closeReceiptType === "factura_a";
                   const showClientForm = isFactA || fbIsExento;
                   const clientSelected = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
-                  const cuitValid = !closeBillingCuit || validateCuit(closeBillingCuit);
+                  const cuitValid = !closeBillingCuit || !!closeBillingCompanyId || validateCuit(closeBillingCuit);
                   const billingResults = billingSearch.length >= 2
                     ? companies
                         .filter(c => {
@@ -4537,7 +4537,7 @@ export default function RestaurantPage() {
                                         >
                                           <span className="font-medium">{c.razonSocial}</span>
                                           {c.nombreFantasia && <span className="text-muted-foreground"> ({c.nombreFantasia})</span>}
-                                          <span className="text-xs text-muted-foreground ml-2">{c.cuilCuit}</span>
+                                          <span className="text-xs text-muted-foreground ml-2">{formatCuit(c.cuilCuit)}</span>
                                         </button>
                                       ))}
                                     </div>
