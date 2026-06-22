@@ -23,6 +23,7 @@ type GuestSearchComboboxProps = {
   selectedGuestName?: string | null;
   onGuestSelect: (guest: GuestResult) => void;
   onClear?: () => void;
+  onCreateNew?: (prefillName?: string) => void;
   placeholder?: string;
   "data-testid"?: string;
 };
@@ -33,6 +34,7 @@ export function GuestSearchCombobox({
   selectedGuestName,
   onGuestSelect,
   onClear,
+  onCreateNew,
   placeholder = "Buscar por nombre, teléfono o email...",
   "data-testid": testId = "guest-search-combobox",
 }: GuestSearchComboboxProps) {
@@ -124,13 +126,17 @@ export function GuestSearchCombobox({
   };
 
   const handleCreateNew = () => {
-    // Pre-fill from search query if it looks like a name
+    setShowDropdown(false);
+    if (onCreateNew) {
+      onCreateNew(query.trim() || undefined);
+      return;
+    }
+    // Fallback: simple internal dialog
     const parts = query.trim().split(" ");
     setNewFirstName(parts[0] || "");
     setNewLastName(parts.slice(1).join(" ") || "");
     setNewPhone("");
     setNewEmail("");
-    setShowDropdown(false);
     setShowNewDialog(true);
   };
 
@@ -205,7 +211,11 @@ export function GuestSearchCombobox({
           <button
             type="button"
             className="mt-1 text-xs text-primary hover:underline flex items-center gap-1"
-            onClick={() => { setShowNewDialog(true); setNewFirstName(""); setNewLastName(""); setNewPhone(""); setNewEmail(""); }}
+            onClick={() => {
+              if (onCreateNew) { onCreateNew(); return; }
+              setNewFirstName(""); setNewLastName(""); setNewPhone(""); setNewEmail("");
+              setShowNewDialog(true);
+            }}
             data-testid={`${testId}-new-btn`}
           >
             <UserPlus className="h-3 w-3" />

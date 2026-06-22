@@ -771,6 +771,7 @@ export default function RestaurantPage() {
   // Clientes tab state
   const [clientSearch, setClientSearch] = useState("");
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
+  const [clientCreatedForReservation, setClientCreatedForReservation] = useState<((g: { id: string; firstName: string; lastName: string; phone?: string | null; email?: string | null }) => void) | null>(null);
   const [clientEditingId, setClientEditingId] = useState<string | null>(null);
   const [clientForm, setClientForm] = useState({
     tipoPersona: "fisica" as "fisica" | "juridica",
@@ -918,12 +919,16 @@ export default function RestaurantPage() {
 
   const clientCreateMutation = useMutation({
     mutationFn: async (data: any) => { const r = await apiRequest("POST", "/api/guests", data); return r.json(); },
-    onSuccess: () => {
+    onSuccess: (guest: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
       setClientDialogOpen(false);
       setClientEditingId(null);
       setClientForm({ tipoPersona: "fisica", firstName: "", lastName: "", email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "", vatCondition: "consumidor_final", direccion: "", provincia: "", localidad: "", condicionVentaPredeterminada: "contado" });
       toast({ title: "Cliente registrado" });
+      if (clientCreatedForReservation) {
+        clientCreatedForReservation(guest);
+        setClientCreatedForReservation(null);
+      }
     },
     onError: () => toast({ title: "Error al guardar", variant: "destructive" }),
   });
@@ -3051,12 +3056,12 @@ export default function RestaurantPage() {
       {/* ==================== DIALOGS ==================== */}
 
       {/* Clientes Dialog */}
-      <Dialog open={clientDialogOpen} onOpenChange={(o) => { setClientDialogOpen(o); if (!o) setClientEditingId(null); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+      <Dialog open={clientDialogOpen} onOpenChange={(o) => { setClientDialogOpen(o); if (!o) { setClientEditingId(null); setClientCreatedForReservation(null); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{clientEditingId ? "Editar Cliente" : "Nuevo Cliente"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 overflow-y-auto flex-1 pr-1">
             {/* Tipo de Persona */}
             <div className="flex rounded-md overflow-hidden border">
               <button type="button"
@@ -5521,6 +5526,22 @@ export default function RestaurantPage() {
                 }}
                 onClear={() => {
                   reservationForm.setValue("clientId", null);
+                }}
+                onCreateNew={(prefill) => {
+                  const parts = (prefill || "").trim().split(" ");
+                  setClientEditingId(null);
+                  setClientForm({
+                    tipoPersona: "fisica", firstName: parts[0] || "", lastName: parts.slice(1).join(" ") || "",
+                    email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "",
+                    vatCondition: "consumidor_final", direccion: "", provincia: "", localidad: "", condicionVentaPredeterminada: "contado",
+                  });
+                  setClientCreatedForReservation(() => (g: { id: string; firstName: string; lastName: string; phone?: string | null; email?: string | null }) => {
+                    reservationForm.setValue("clientId", g.id);
+                    reservationForm.setValue("guestName", [g.firstName, g.lastName].filter(Boolean).join(" "));
+                    reservationForm.setValue("guestPhone", g.phone || "");
+                    reservationForm.setValue("guestEmail", g.email || "");
+                  });
+                  setClientDialogOpen(true);
                 }}
                 placeholder="Nombre, teléfono o email..."
                 data-testid="reservation-guest-search"

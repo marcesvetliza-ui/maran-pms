@@ -345,7 +345,8 @@ export class DatabaseStorage implements IStorage {
           ilike(guests.lastName, `%${query}%`),
           ilike(guests.email, `%${query}%`),
           ilike(guests.documentNumber, `%${query}%`),
-          ilike(guests.phone, `%${query}%`)
+          ilike(guests.phone, `%${query}%`),
+          ilike(guests.cuilCuit, `%${query}%`)
         )
       )
     ).limit(20);
