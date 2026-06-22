@@ -373,34 +373,30 @@ export function registerRestaurantRoutes(app: Express) {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
 
-          // Construir ítems de factura agrupados por categoría de menú
+          // Construir ítems de factura: una línea por ítem del pedido
           const originalTotal = parseFloat(order.total || "0");
           const scaleFactor = originalTotal > 0 ? finalTotal / originalTotal : 1;
 
-          interface CatGroup { name: string; grossSubtotal: number }
-          const categoryGroups = new Map<string, CatGroup>();
+          const invoiceItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21"; subtotalNeto: number; subtotal: number }[] = [];
 
           for (const item of orderItemsList) {
             const menuItem = await storage.getMenuItem(item.menuItemId);
-            const catName = menuItem?.category?.name || "Consumiciones";
-            const grossAmt = parseFloat(item.subtotal || "0") * scaleFactor;
-            const existing = categoryGroups.get(catName);
-            if (existing) {
-              existing.grossSubtotal += grossAmt;
-            } else {
-              categoryGroups.set(catName, { name: catName, grossSubtotal: grossAmt });
-            }
-          }
+            // Nombre: customName en notes (entre corchetes) > nombre del ítem de menú > fallback
+            let itemName = menuItem?.name || "Ítem";
+            const notesMatch = (item.notes || "").match(/^\[(.+?)\]/);
+            if (notesMatch) itemName = notesMatch[1];
 
-          // Convertir grupos a líneas de factura (neto + IVA 21%)
-          const invoiceItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21"; subtotalNeto: number; subtotal: number }[] =
-            Array.from(categoryGroups.values())
-              .filter(g => g.grossSubtotal > 0.01)
-              .map(g => {
-                const gross = parseFloat(g.grossSubtotal.toFixed(2));
-                const net = parseFloat((gross / 1.21).toFixed(4));
-                return { descripcion: g.name, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross };
-              });
+            const grossItem = parseFloat(item.subtotal || "0") * scaleFactor;
+            if (grossItem <= 0.001) continue;
+
+            const qty = item.quantity || 1;
+            const grossUnit = parseFloat((grossItem / qty).toFixed(2));
+            const netUnit = parseFloat((grossUnit / 1.21).toFixed(4));
+            const grossTotal = parseFloat((grossUnit * qty).toFixed(2));
+            const netTotal = parseFloat((netUnit * qty).toFixed(4));
+
+            invoiceItems.push({ descripcion: itemName, cantidad: qty, precioUnitario: netUnit, alicuotaIva: "21" as const, subtotalNeto: netTotal, subtotal: grossTotal });
+          }
 
           // Fallback: línea única si no hay ítems válidos
           if (invoiceItems.length === 0) {
