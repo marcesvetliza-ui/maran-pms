@@ -326,7 +326,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
 
 // ── Catalog PDF (eventos) ─────────────────────────────────────────────────────
 
-function generateEventosPdf(doc: any, pres: any, catalogItems: any[], conditions: string | null) {
+function generateEventosPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842, M = 40;
   const imgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
   const headerH = 148;
@@ -387,121 +387,106 @@ function generateEventosPdf(doc: any, pres: any, catalogItems: any[], conditions
   doc.fillColor(MUTED).fontSize(7.5).font("Helvetica-Oblique")
     .text("El presente presupuesto se actualizará hasta un mes antes del evento.", M, y, { width: contentW, align: "center" });
 
-  // ── PAGE 2+: Catalog sections ────────────────────────────────────────────
-  const grouped = new Map<string, any[]>();
-  for (const item of catalogItems) {
-    if (!item.isActive) continue;
-    if (!grouped.has(item.category)) grouped.set(item.category, []);
-    grouped.get(item.category)!.push(item);
-  }
-
-  const categoryOrder = ["salon", "coffee_break", "coctel", "equipamiento", "menu", "otro"];
-  const orderedCategories = [
-    ...categoryOrder.filter(c => grouped.has(c)),
-    ...[...grouped.keys()].filter(c => !categoryOrder.includes(c)),
-  ];
-
+  // ── PAGE 2: Selected items table ─────────────────────────────────────────
   doc.addPage();
   drawPageBg(doc, imgPath, W, H);
   y = headerH + 16;
 
-  for (const cat of orderedCategories) {
-    const catItems = grouped.get(cat)!;
-    const catLabel = CATEGORY_LABELS[cat] || cat.replace("_", " ");
+  // Info header box
+  const infoH2 = 48;
+  doc.roundedRect(M, y, contentW, infoH2, 6).fillAndStroke(LIGHT_BG, BORDER);
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 8, { characterSpacing: 1 });
+  doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
+  const c2e = M + 280, c3e = M + 390;
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EVENTO", c2e, y + 8, { characterSpacing: 0.5 });
+  doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text(pres.fechaEvento ? formatFecha(pres.fechaEvento) : "A confirmar", c2e, y + 20);
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PRESUPUESTO N°", c3e, y + 8, { characterSpacing: 0.5 });
+  doc.fillColor(DARK).fontSize(9).font("Helvetica").text(pres.numero, c3e, y + 20);
+  if (pres.participantes) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARTICIPANTES", c2e, y + 32, { characterSpacing: 0.5 });
+    doc.fillColor(DARK).fontSize(9).font("Helvetica").text(`${pres.participantes} personas`, c2e, y + 44);
+  }
+  y += infoH2 + 14;
 
-    // Estimate space needed
-    let neededH = 30;
-    for (const item of catItems) {
-      neededH += 24 + (item.description ? doc.heightOfString(item.description || "", { width: contentW - 250, fontSize: 7.5 }) : 0) + 4;
-    }
-    if (y + neededH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 16; }
-
-    y = sectionHeader(doc, catLabel, M, y, contentW);
-    y += 2;
-
-    if (cat === "salon") {
-      // Salon table: name | m2/cap | tarifa diaria | tarifa especial
-      const cols = { nombre: M, cap: M + 185, tarifa: M + 300, especial: M + 420 };
-      const Ws = { nombre: 180, cap: 110, tarifa: 115, especial: 95 };
-      doc.roundedRect(M, y, contentW, 18, 3).fill("#e8eaf6");
-      doc.fillColor(NAVY).fontSize(7).font("Helvetica-Bold");
-      const th = y + 5;
-      doc.text("SALÓN", cols.nombre + 6, th, { width: Ws.nombre });
-      doc.text("ARMADO / CAPACIDAD", cols.cap, th, { width: Ws.cap });
-      doc.text("TARIFA DIARIA", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
-      doc.text("TARIFA ESPECIAL", cols.especial, th, { width: Ws.especial, align: "right" });
-      y += 20;
-
-      catItems.forEach((item, idx) => {
-        const descH = item.description ? doc.heightOfString(item.description, { width: Ws.cap, fontSize: 7.5 }) : 0;
-        const rowH = Math.max(24, descH + 14);
-        if (y + rowH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 16; }
-        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#f9f9f9").stroke(BORDER);
-        const cy = y + 5;
-        doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(item.name, cols.nombre + 6, cy, { width: Ws.nombre });
-        if (item.description) doc.font("Helvetica").fillColor(MUTED).fontSize(7.5).text(item.description, cols.cap, cy, { width: Ws.cap });
-        doc.fillColor(DARK).fontSize(8).font("Helvetica").text(`$ ${formatMoneyShort(item.price)} + IVA`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
-        if (item.priceSpecial) {
-          doc.fillColor("#1a6c3a").font("Helvetica-Bold").text(`$ ${formatMoneyShort(item.priceSpecial)} + IVA`, cols.especial, cy, { width: Ws.especial, align: "right" });
-        } else {
-          doc.fillColor(MUTED).font("Helvetica").text("—", cols.especial, cy, { width: Ws.especial, align: "right" });
-        }
-        y += rowH;
-      });
-    } else if (cat === "equipamiento") {
-      // Equipment table: category | description | price
-      const cols = { nombre: M, desc: M + 155, precio: M + 450 };
-      const Ws = { nombre: 150, desc: 290, precio: 65 };
-      doc.roundedRect(M, y, contentW, 18, 3).fill("#e8eaf6");
-      doc.fillColor(NAVY).fontSize(7).font("Helvetica-Bold");
-      const th = y + 5;
-      doc.text("COMBO", cols.nombre + 6, th, { width: Ws.nombre });
-      doc.text("DESCRIPCIÓN DEL SERVICIO", cols.desc, th, { width: Ws.desc });
-      doc.text("PRECIO", cols.precio, th, { width: Ws.precio, align: "right" });
-      y += 20;
-
-      catItems.forEach((item, idx) => {
-        const descH = item.description ? doc.heightOfString(item.description, { width: Ws.desc, fontSize: 7.5 }) : 0;
-        const rowH = Math.max(24, descH + 14);
-        if (y + rowH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 16; }
-        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#f9f9f9").stroke(BORDER);
-        const cy = y + 5;
-        doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(item.name, cols.nombre + 6, cy, { width: Ws.nombre });
-        if (item.description) doc.fillColor(MUTED).fontSize(7.5).font("Helvetica").text(item.description, cols.desc, cy, { width: Ws.desc });
-        doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(`$ ${formatMoneyShort(item.price)} + IVA`, cols.precio, cy, { width: Ws.precio, align: "right" });
+  // Items table
+  if (items.length > 0) {
+    const hasDiscount = items.some((i: any) => parseFloat(i.descuento ?? "0") > 0);
+    if (hasDiscount) {
+      const cols = { tipo: M, tarifa: M + 200, dto: M + 310, tarifa_dto: M + 380, sub: M + 450 };
+      const Ws = { tipo: 195, tarifa: 105, dto: 65, tarifa_dto: 65, sub: 65 };
+      doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
+      doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
+      const th = y + 6;
+      doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
+      doc.text("PRECIO UNITARIO", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
+      doc.text("DESC.", cols.dto, th, { width: Ws.dto, align: "right" });
+      doc.text("P. ESPECIAL", cols.tarifa_dto, th, { width: Ws.tarifa_dto, align: "right" });
+      doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
+      y += 22;
+      items.forEach((it: any, idx: number) => {
+        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo, fontSize: 8 });
+        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
+        const rowH = Math.max(24, descH + detH + 14);
+        if (y + rowH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
+        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
+        const cy = y + 6;
+        const dto = parseFloat(it.descuento ?? "0");
+        const tarifaConDto = parseFloat(it.precioUnitario) * (1 - dto / 100);
+        doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
+        if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
+        doc.fillColor(DARK).fontSize(8).font("Helvetica").text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
+        doc.text(dto > 0 ? `${dto}%` : "—", cols.dto, cy, { width: Ws.dto, align: "right" });
+        if (dto > 0) doc.fillColor("#1a6c3a").font("Helvetica-Bold");
+        doc.text(`$ ${formatMoney(tarifaConDto.toFixed(2))}`, cols.tarifa_dto, cy, { width: Ws.tarifa_dto, align: "right" });
+        doc.fillColor(DARK).font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
         y += rowH;
       });
     } else {
-      // Coffee breaks / cocteles / menu: option grid
-      const itemsPerRow = Math.min(catItems.length, 5);
-      const colW = Math.floor(contentW / itemsPerRow) - 3;
-      let rowStart = 0;
-      while (rowStart < catItems.length) {
-        const rowItems = catItems.slice(rowStart, rowStart + itemsPerRow);
-        let maxH = 0;
-        for (const item of rowItems) {
-          const descH = item.description ? doc.heightOfString(item.description, { width: colW - 12, fontSize: 7 }) : 0;
-          maxH = Math.max(maxH, descH + 50);
-        }
-        if (y + maxH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 16; }
-        rowItems.forEach((item, i) => {
-          const cx = M + i * (colW + 3);
-          doc.roundedRect(cx, y, colW, maxH, 4).fill(LIGHT_BG).stroke(BORDER);
-          doc.fillColor(NAVY).fontSize(8).font("Helvetica-Bold").text(item.name, cx + 6, y + 8, { width: colW - 12 });
-          if (item.description) {
-            const nameH = doc.heightOfString(item.name, { width: colW - 12, fontSize: 8 });
-            doc.fillColor(DARK).fontSize(7).font("Helvetica").text(item.description, cx + 6, y + 10 + nameH, { width: colW - 12 });
-          }
-          const priceY = y + maxH - 18;
-          doc.roundedRect(cx + 4, priceY, colW - 8, 14, 3).fill(NAVY);
-          doc.fillColor("white").fontSize(8).font("Helvetica-Bold")
-            .text(`$ ${formatMoneyShort(item.price)} + IVA / ${item.unit}`, cx + 6, priceY + 2, { width: colW - 12, align: "center" });
-        });
-        y += maxH + 6;
-        rowStart += itemsPerRow;
-      }
+      const cols = { tipo: M, noches: M + 220, tarifa: M + 290, sub: M + 420 };
+      const Ws = { tipo: 215, noches: 65, tarifa: 125, sub: 95 };
+      doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
+      doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
+      const th = y + 6;
+      doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
+      doc.text("CANTIDAD", cols.noches, th, { width: Ws.noches, align: "right" });
+      doc.text("PRECIO UNITARIO — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
+      doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
+      y += 22;
+      items.forEach((it: any, idx: number) => {
+        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo, fontSize: 8 });
+        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
+        const rowH = Math.max(24, descH + detH + 14);
+        if (y + rowH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
+        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
+        const cy = y + 6;
+        doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
+        if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
+        doc.fillColor(DARK).fontSize(8).font("Helvetica").text(formatNum(it.cantidad), cols.noches, cy, { width: Ws.noches, align: "right" });
+        doc.text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
+        doc.font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
+        y += rowH;
+      });
     }
-    y += 12;
+    y += 8;
+
+    // Totals
+    const subtotalSum = items.reduce((sum: number, it: any) => sum + parseFloat(it.subtotal || "0"), 0);
+    const descGlobal = parseFloat(pres.descuentoGlobal || "0");
+    const descMonto = subtotalSum * descGlobal / 100;
+    const total = subtotalSum - descMonto;
+    const totW = 210, totX = M + contentW - totW;
+    doc.fillColor(MUTED).fontSize(8).font("Helvetica").text("Subtotal", totX + 6, y + 4, { width: totW / 2 });
+    doc.text(`$ ${formatMoney(subtotalSum)}`, totX, y + 4, { width: totW - 6, align: "right" });
+    y += 18;
+    if (descGlobal > 0) {
+      doc.fillColor(MUTED).text(`Descuento global (${descGlobal}%)`, totX + 6, y + 4, { width: totW / 2 });
+      doc.text(`- $ ${formatMoney(descMonto)}`, totX, y + 4, { width: totW - 6, align: "right" });
+      y += 18;
+    }
+    doc.roundedRect(totX, y, totW, 24, 4).fill(NAVY);
+    doc.fillColor("white").fontSize(12).font("Helvetica-Bold").text("TOTAL GENERAL", totX + 6, y + 6, { width: totW / 2 });
+    doc.text(`$ ${formatMoney(total)}`, totX, y + 6, { width: totW - 6, align: "right" });
+    y += 34;
   }
 
   y = drawConditions(doc, conditions, W, H, M, imgPath, y);
@@ -1019,7 +1004,7 @@ export function registerPresupuestosRoutes(app: Express) {
         }
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
-        generateEventosPdf(doc, pres, catalogItems, conditions);
+        generateEventosPdf(doc, pres, items, conditions);
       } else if (area === "spa") {
         generateSpaPdf(doc, pres, items, conditions);
       } else if (area === "restaurant") {

@@ -54,7 +54,7 @@ const SECTOR_LABELS: Record<Sector, string> = {
 const AREA_CONFIG: Record<AreaOrigen, { label: string; icon: typeof Building2; color: string; useItems: boolean }> = {
   grupos:     { label: "Grupos",           icon: Users,          color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",    useItems: true  },
   recepcion:  { label: "Recepción",        icon: Building2,      color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300", useItems: true  },
-  eventos:    { label: "Eventos",          icon: Calendar,       color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300", useItems: false },
+  eventos:    { label: "Eventos",          icon: Calendar,       color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300", useItems: true  },
   spa:        { label: "SPA",              icon: Flower2,        color: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",     useItems: true  },
   restaurant: { label: "Restaurant Justo", icon: UtensilsCrossed, color: "bg-lime-100 text-lime-800 dark:bg-lime-900/40 dark:text-lime-300", useItems: true },
 };
@@ -198,11 +198,31 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
   const { data: roomTypes = [] } = useQuery<RoomType[]>({ queryKey: ["/api/room-types"] });
   const useItems = AREA_CONFIG[area]?.useItems ?? true;
   const useCatalogPicker = useItems && (area === "spa" || area === "restaurant");
+  const useEventosAutoLoad = area === "eventos" && !isEdit;
   const { data: areaCatalog = [] } = useQuery<any[]>({
     queryKey: ["/api/quote-catalog", area],
     queryFn: () => fetch(`/api/quote-catalog?area=${area}`, { credentials: "include" }).then(r => r.json()),
-    enabled: useCatalogPicker,
+    enabled: useCatalogPicker || useEventosAutoLoad,
   });
+
+  // Auto-load all active eventos catalog items when creating a new eventos presupuesto
+  const [eventosItemsLoaded, setEventosItemsLoaded] = useState(false);
+  useEffect(() => {
+    if (!useEventosAutoLoad || eventosItemsLoaded) return;
+    if (areaCatalog.length === 0) return;
+    const active = areaCatalog.filter((i: any) => i.isActive);
+    if (active.length === 0) return;
+    setItems(active.map((item: any) => ({
+      sector: "evento" as Sector,
+      descripcion: item.name,
+      detalle: item.description || "",
+      cantidad: "1",
+      precioUnitario: String(item.price),
+      descuento: "0",
+      subtotal: calcSubtotal("1", String(item.price), "0"),
+    })));
+    setEventosItemsLoaded(true);
+  }, [useEventosAutoLoad, eventosItemsLoaded, areaCatalog]);
   const areaCatalogGrouped = areaCatalog.filter(i => i.isActive).reduce((acc: Record<string, any[]>, item: any) => {
     if (!acc[item.category]) acc[item.category] = [];
     acc[item.category].push(item);
@@ -428,6 +448,12 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
                   <Plus className="h-3.5 w-3.5 mr-1" /> Agregar ítem manual
                 </Button>
               </div>
+              {area === "eventos" && !isEdit && eventosItemsLoaded && (
+                <div className="flex items-center gap-2 rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/20 px-3 py-2 text-xs text-purple-700 dark:text-purple-300">
+                  <Calendar className="h-3.5 w-3.5 shrink-0" />
+                  Ítems cargados desde el catálogo de eventos. Modificá precios, cantidades o eliminá los que no apliquen para este presupuesto.
+                </div>
+              )}
               <div className="border rounded-lg overflow-hidden">
                 <Table>
                   <TableHeader>
