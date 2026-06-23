@@ -5784,7 +5784,26 @@ export default function RestaurantPage() {
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={reservationForm.control} name="tableId" render={({ field }) => {
                   const watchedAreaId = reservationForm.watch("areaId");
-                  const availableTables = tables.filter(t =>
+                  const watchedDate = reservationForm.watch("reservationDate");
+                  const watchedTime = reservationForm.watch("reservationTime");
+                  // Tables blocked by an existing reservation on same date+time
+                  const reservedTableIds = new Set(
+                    reservations
+                      .filter(r =>
+                        r.tableId &&
+                        r.reservationDate === watchedDate &&
+                        r.reservationTime === watchedTime &&
+                        r.status !== "cancelled" && r.status !== "completed"
+                      )
+                      .map(r => r.tableId!)
+                  );
+                  // Tables blocked by an active order (only relevant for today)
+                  const orderTableIds = new Set(
+                    watchedDate === todayStr
+                      ? activeOrders.filter(o => o.tableId).map(o => o.tableId!)
+                      : []
+                  );
+                  const activeTables = tables.filter(t =>
                     t.isActive === "true" && (!watchedAreaId || t.areaId === watchedAreaId)
                   );
                   return (
@@ -5804,9 +5823,14 @@ export default function RestaurantPage() {
                         <FormControl><SelectTrigger data-testid="select-table"><SelectValue /></SelectTrigger></FormControl>
                         <SelectContent>
                           <SelectItem value="__none__">Sin asignar</SelectItem>
-                          {availableTables.map((t) => (
-                            <SelectItem key={t.id} value={t.id}>Mesa {t.tableNumber} ({t.capacity}p){t.hasWindow === "true" ? " 🪟" : ""}</SelectItem>
-                          ))}
+                          {activeTables.map((t) => {
+                            const isOccupied = reservedTableIds.has(t.id) || orderTableIds.has(t.id);
+                            return (
+                              <SelectItem key={t.id} value={t.id} disabled={isOccupied}>
+                                Mesa {t.tableNumber} ({t.capacity}p){t.hasWindow === "true" ? " 🪟" : ""}{isOccupied ? " — Ocupada" : ""}
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                       <FormMessage />
