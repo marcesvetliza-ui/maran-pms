@@ -2049,11 +2049,27 @@ export class DatabaseStorage implements IStorage {
     await db.update(orderItems).set({ orderId: targetOrderId }).where(inArray(orderItems.id, itemIds));
   }
 
+  private async _enrichReservationsWithAdvances(res: any[]): Promise<any[]> {
+    if (res.length === 0) return res;
+    const ids = res.map(r => r.id);
+    const advances = await db.select().from(restaurantReservationAdvances)
+      .where(inArray(restaurantReservationAdvances.reservationId, ids));
+    const totals = new Map<string, number>();
+    for (const a of advances) {
+      totals.set(a.reservationId, (totals.get(a.reservationId) || 0) + parseFloat(String(a.amount || "0")));
+    }
+    return res.map(r => ({
+      ...r,
+      advanceAmount: totals.has(r.id) ? String(totals.get(r.id)) : (r.advanceAmount ?? "0"),
+    }));
+  }
+
   async getTableReservations(): Promise<TableReservationWithTable[]> {
     const res = await db.select().from(tableReservations);
     const tables = await db.select().from(restaurantTables);
     const tablesMap = new Map(tables.map(t => [t.id, t]));
-    return res.map(r => ({ ...r, table: r.tableId ? (tablesMap.get(r.tableId) ?? null) : null }));
+    const enriched = await this._enrichReservationsWithAdvances(res);
+    return enriched.map(r => ({ ...r, table: r.tableId ? (tablesMap.get(r.tableId) ?? null) : null }));
   }
 
   async getTableReservation(id: string): Promise<TableReservationWithTable | undefined> {
@@ -2064,14 +2080,16 @@ export class DatabaseStorage implements IStorage {
       const [t] = await db.select().from(restaurantTables).where(eq(restaurantTables.id, res.tableId));
       table = t ?? null;
     }
-    return { ...res, table };
+    const [enriched] = await this._enrichReservationsWithAdvances([res]);
+    return { ...enriched, table };
   }
 
   async getTableReservationsByDate(date: string): Promise<TableReservationWithTable[]> {
     const res = await db.select().from(tableReservations).where(eq(tableReservations.reservationDate, date));
     const tables = await db.select().from(restaurantTables);
     const tablesMap = new Map(tables.map(t => [t.id, t]));
-    return res.map(r => ({ ...r, table: r.tableId ? (tablesMap.get(r.tableId) ?? null) : null }));
+    const enriched = await this._enrichReservationsWithAdvances(res);
+    return enriched.map(r => ({ ...r, table: r.tableId ? (tablesMap.get(r.tableId) ?? null) : null }));
   }
 
   async getTableReservationsByTable(tableId: string): Promise<TableReservation[]> {
@@ -2113,11 +2131,32 @@ export class DatabaseStorage implements IStorage {
 
   async createReservationAdvance(data: InsertRestaurantReservationAdvance): Promise<RestaurantReservationAdvance> {
     const [created] = await db.insert(restaurantReservationAdvances).values(data as any).returning();
+    // Recalculate total advance amount on the reservation
+    if (data.reservationId) {
+      const all = await db.select().from(restaurantReservationAdvances)
+        .where(eq(restaurantReservationAdvances.reservationId, data.reservationId));
+      const total = all.reduce((sum, a) => sum + parseFloat(String(a.amount || "0")), 0);
+      await db.update(tableReservations)
+        .set({ advanceAmount: String(total) })
+        .where(eq(tableReservations.id, data.reservationId));
+    }
     return created;
   }
 
   async deleteReservationAdvance(id: string): Promise<boolean> {
+    // Fetch the advance first to know which reservation to recalculate
+    const [advance] = await db.select().from(restaurantReservationAdvances)
+      .where(eq(restaurantReservationAdvances.id, id));
     const result = await db.delete(restaurantReservationAdvances).where(eq(restaurantReservationAdvances.id, id));
+    // Recalculate total advance amount on the reservation
+    if (advance?.reservationId) {
+      const all = await db.select().from(restaurantReservationAdvances)
+        .where(eq(restaurantReservationAdvances.reservationId, advance.reservationId));
+      const total = all.reduce((sum, a) => sum + parseFloat(String(a.amount || "0")), 0);
+      await db.update(tableReservations)
+        .set({ advanceAmount: String(total) })
+        .where(eq(tableReservations.id, advance.reservationId));
+    }
     return (result.rowCount ?? 0) > 0;
   }
 
