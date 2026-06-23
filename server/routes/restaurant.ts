@@ -351,10 +351,13 @@ export function registerRestaurantRoutes(app: Express) {
       }
 
       // Mark reservation advances as applied to this order
+      // Use the order's openedAt date (not today) to correctly find advances for multi-day orders.
       if (advanceCredit > 0 && order.tableId) {
         try {
-          const today = new Date().toISOString().split("T")[0];
-          const tableAdvances = await storage.getReservationAdvancesByTable(order.tableId, today);
+          const orderDate = order.openedAt
+            ? new Date(order.openedAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+            : new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+          const tableAdvances = await storage.getReservationAdvancesByTable(order.tableId, orderDate);
           for (const adv of tableAdvances.filter(a => !a.appliedToOrderId)) {
             await (storage as any).applyReservationAdvancesToOrder(adv.reservationId, req.params.id);
           }

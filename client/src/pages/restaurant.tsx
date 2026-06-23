@@ -914,11 +914,16 @@ export default function RestaurantPage() {
 
   const todayISO = new Date().toISOString().split("T")[0];
   const closeOrderTableId = currentOrder?.tableId ?? null;
+  // Use the date the order was opened (not today) to find the correct reservation advances.
+  // Orders opened yesterday should look for yesterday's reservation advances, not today's.
+  const closeOrderDate = currentOrder?.openedAt
+    ? new Date(currentOrder.openedAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+    : todayISO;
   const { data: closeDialogTableAdvances = [] } = useQuery<RestaurantReservationAdvance[]>({
-    queryKey: ["/api/restaurant/tables", closeOrderTableId, "advances", todayISO],
+    queryKey: ["/api/restaurant/tables", closeOrderTableId, "advances", closeOrderDate],
     queryFn: async () => {
       if (!closeOrderTableId) return [];
-      const res = await fetch(`/api/restaurant/tables/${closeOrderTableId}/advances?date=${todayISO}`);
+      const res = await fetch(`/api/restaurant/tables/${closeOrderTableId}/advances?date=${closeOrderDate}`);
       if (!res.ok) return [];
       return res.json();
     },
