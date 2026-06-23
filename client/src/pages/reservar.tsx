@@ -684,25 +684,26 @@ export default function ReservarPage() {
 function PublicLayout({ hotelInfo, children }: {
   hotelInfo?: HotelInfo; children: React.ReactNode;
 }) {
+  const [logoError, setLogoError] = useState(false);
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-['Montserrat']">
       {/* Header */}
       <div className="sticky top-0 z-50 bg-white dark:bg-gray-900 border-b shadow-sm" style={{ borderColor: CREAM }}>
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          {/* Logo: always use the SVG from Maran's WordPress */}
-          <img
-            src="/wp-content/uploads/2022/12/Logo-Maran-Color.svg"
-            alt={hotelInfo?.name || "Maran Suites & Towers"}
-            style={{ height: 30, width: "auto" }}
-            onError={e => {
-              (e.target as HTMLImageElement).style.display = "none";
-              const fallback = document.createElement("span");
-              fallback.className = "font-bold text-lg font-['Playfair_Display']";
-              fallback.style.color = BRAND;
-              fallback.textContent = hotelInfo?.name || "Maran Suites & Towers";
-              (e.target as HTMLImageElement).parentElement?.appendChild(fallback);
-            }}
-          />
+          {/* Logo */}
+          {logoError ? (
+            <span className="font-bold text-lg font-['Playfair_Display']" style={{ color: BRAND }}>
+              {hotelInfo?.name || "Maran Suites & Towers"}
+            </span>
+          ) : (
+            <img
+              src="/wp-content/uploads/2022/12/Logo-Maran-Color.svg"
+              alt={hotelInfo?.name || "Maran Suites & Towers"}
+              style={{ height: 30, width: "auto" }}
+              onError={() => setLogoError(true)}
+            />
+          )}
           <div className="text-xs text-gray-500 font-['Montserrat']">{hotelInfo?.tagline}</div>
         </div>
       </div>
