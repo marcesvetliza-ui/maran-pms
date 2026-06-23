@@ -2860,7 +2860,15 @@ export default function RestaurantPage() {
                               {isActive && (
                                 <>
                                   <Button size="icon" variant="ghost" className="h-7 w-7"
-                                    onClick={() => { setEditingReservation(reservation); setIsEditReservationOpen(true); }}
+                                    onClick={() => {
+                                      const res = { ...(reservation as any) };
+                                      if (!res.areaId && res.tableId) {
+                                        const tbl = tables.find(t => t.id === res.tableId);
+                                        if (tbl?.areaId) res.areaId = tbl.areaId;
+                                      }
+                                      setEditingReservation(res);
+                                      setIsEditReservationOpen(true);
+                                    }}
                                     data-testid={`button-edit-${reservation.id}`}>
                                     <Pencil className="h-3 w-3" />
                                   </Button>
@@ -5712,7 +5720,20 @@ export default function RestaurantPage() {
                 <FormField control={reservationForm.control} name="areaId" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Salón <span className="text-muted-foreground text-xs">(opcional)</span></FormLabel>
-                    <Select onValueChange={(v) => field.onChange(v === "__none__" ? null : v)} value={field.value || "__none__"}>
+                    <Select
+                      onValueChange={(v) => {
+                        const areaId = v === "__none__" ? null : v;
+                        field.onChange(areaId);
+                        const currentTableId = reservationForm.getValues("tableId");
+                        if (currentTableId && areaId) {
+                          const currentTable = tables.find(t => t.id === currentTableId);
+                          if (currentTable && currentTable.areaId !== areaId) {
+                            reservationForm.setValue("tableId", null);
+                          }
+                        }
+                      }}
+                      value={field.value || "__none__"}
+                    >
                       <FormControl><SelectTrigger data-testid="select-reservation-area"><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="__none__">Sin especificar</SelectItem>
@@ -5761,21 +5782,37 @@ export default function RestaurantPage() {
                 }} />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <FormField control={reservationForm.control} name="tableId" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Mesa <span className="text-muted-foreground text-xs">(opcional)</span></FormLabel>
-                    <Select onValueChange={(v) => field.onChange(v === "__none__" ? null : v)} value={field.value || "__none__"}>
-                      <FormControl><SelectTrigger data-testid="select-table"><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="__none__">Sin asignar</SelectItem>
-                        {tables.filter(t => t.isActive === "true").map((t) => (
-                          <SelectItem key={t.id} value={t.id}>Mesa {t.tableNumber} ({t.capacity}p){t.hasWindow === "true" ? " 🪟" : ""}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <FormField control={reservationForm.control} name="tableId" render={({ field }) => {
+                  const watchedAreaId = reservationForm.watch("areaId");
+                  const availableTables = tables.filter(t =>
+                    t.isActive === "true" && (!watchedAreaId || t.areaId === watchedAreaId)
+                  );
+                  return (
+                    <FormItem>
+                      <FormLabel>Mesa <span className="text-muted-foreground text-xs">(opcional)</span></FormLabel>
+                      <Select
+                        onValueChange={(v) => {
+                          const tableId = v === "__none__" ? null : v;
+                          field.onChange(tableId);
+                          if (tableId) {
+                            const tbl = tables.find(t => t.id === tableId);
+                            if (tbl?.areaId) reservationForm.setValue("areaId", tbl.areaId);
+                          }
+                        }}
+                        value={field.value || "__none__"}
+                      >
+                        <FormControl><SelectTrigger data-testid="select-table"><SelectValue /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="__none__">Sin asignar</SelectItem>
+                          {availableTables.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>Mesa {t.tableNumber} ({t.capacity}p){t.hasWindow === "true" ? " 🪟" : ""}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }} />
                 <FormField control={reservationForm.control} name="partySize" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Personas *</FormLabel>
@@ -5865,33 +5902,23 @@ export default function RestaurantPage() {
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Mesa <span className="text-muted-foreground text-xs">(opcional)</span></Label>
-                  <Select
-                    value={editingReservation.tableId || "__none__"}
-                    onValueChange={(v) => setEditingReservation({...editingReservation, tableId: v === "__none__" ? null : v})}
-                  >
-                    <SelectTrigger data-testid="select-edit-table"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Sin asignar</SelectItem>
-                      {tables.filter(t => t.isActive === "true").map((t) => (
-                        <SelectItem key={t.id} value={t.id}>Mesa {t.tableNumber} ({t.capacity}p)</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Personas</Label>
-                  <Input type="number" min={1} value={editingReservation.partySize} onChange={(e) => setEditingReservation({...editingReservation, partySize: parseInt(e.target.value) || 1})} data-testid="input-edit-party-size" />
-                </div>
-              </div>
               {areas.filter(a => a.isActive === "true").length > 1 && (
                 <div className="grid gap-2">
                   <Label>Salón <span className="text-muted-foreground text-xs">(opcional)</span></Label>
                   <Select
                     value={(editingReservation as any).areaId || "__none__"}
-                    onValueChange={(v) => setEditingReservation({...editingReservation, areaId: v === "__none__" ? null : v} as any)}
+                    onValueChange={(v) => {
+                      const areaId = v === "__none__" ? null : v;
+                      const currentTableId = editingReservation.tableId;
+                      if (currentTableId && areaId) {
+                        const currentTable = tables.find(t => t.id === currentTableId);
+                        if (currentTable && currentTable.areaId !== areaId) {
+                          setEditingReservation({...editingReservation, areaId, tableId: null} as any);
+                          return;
+                        }
+                      }
+                      setEditingReservation({...editingReservation, areaId} as any);
+                    }}
                   >
                     <SelectTrigger data-testid="select-edit-area"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -5903,6 +5930,39 @@ export default function RestaurantPage() {
                   </Select>
                 </div>
               )}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Mesa <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                  <Select
+                    value={editingReservation.tableId || "__none__"}
+                    onValueChange={(v) => {
+                      const tableId = v === "__none__" ? null : v;
+                      if (tableId) {
+                        const tbl = tables.find(t => t.id === tableId);
+                        setEditingReservation({...editingReservation, tableId, areaId: tbl?.areaId || (editingReservation as any).areaId || null} as any);
+                      } else {
+                        setEditingReservation({...editingReservation, tableId: null} as any);
+                      }
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-edit-table"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Sin asignar</SelectItem>
+                      {tables.filter(t => {
+                        if (t.isActive !== "true") return false;
+                        const editAreaId = (editingReservation as any).areaId;
+                        return !editAreaId || t.areaId === editAreaId;
+                      }).map((t) => (
+                        <SelectItem key={t.id} value={t.id}>Mesa {t.tableNumber} ({t.capacity}p)</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Personas</Label>
+                  <Input type="number" min={1} value={editingReservation.partySize} onChange={(e) => setEditingReservation({...editingReservation, partySize: parseInt(e.target.value) || 1})} data-testid="input-edit-party-size" />
+                </div>
+              </div>
               <div className="grid gap-2">
                 <Label>Notas</Label>
                 <Textarea rows={2} value={editingReservation.notes || ""} onChange={(e) => setEditingReservation({...editingReservation, notes: e.target.value})} data-testid="input-edit-notes" />
