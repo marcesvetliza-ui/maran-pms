@@ -71,6 +71,7 @@ import {
   BedDouble,
   FileText,
   Monitor,
+  RotateCcw,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -2811,27 +2812,27 @@ export default function RestaurantPage() {
                           </TableCell>
                           <TableCell>
                             {advanceAmt > 0 ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-xs text-green-700 dark:text-green-400"
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-300 dark:border-green-700 hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors cursor-pointer"
                                 onClick={() => { setAdvanceDialogReservationId(reservation.id); setIsAdvanceDialogOpen(true); }}
                                 data-testid={`button-view-advance-${reservation.id}`}
+                                title="Ver detalle de seña"
                               >
-                                <CreditCard className="h-3 w-3 mr-1" />
+                                <CreditCard className="h-3 w-3" />
                                 ${advanceAmt.toLocaleString("es-AR")}
-                              </Button>
+                              </button>
                             ) : isActive ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-xs text-muted-foreground"
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs text-muted-foreground border border-dashed border-muted-foreground/40 hover:border-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                                 onClick={() => { setAdvanceDialogReservationId(reservation.id); setIsAdvanceDialogOpen(true); }}
                                 data-testid={`button-add-advance-${reservation.id}`}
+                                title="Registrar seña"
                               >
-                                <Plus className="h-3 w-3 mr-1" />
+                                <Plus className="h-3 w-3" />
                                 Seña
-                              </Button>
+                              </button>
                             ) : <span className="text-xs text-muted-foreground">—</span>}
                           </TableCell>
                           <TableCell className="text-right">
@@ -2887,6 +2888,14 @@ export default function RestaurantPage() {
                                     <X className="h-3 w-3" />
                                   </Button>
                                 </>
+                              )}
+                              {(reservation.status === "no_show" || reservation.status === "cancelled") && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950"
+                                  onClick={() => updateReservationMutation.mutate({ id: reservation.id, data: { status: "pending" } })}
+                                  data-testid={`button-reopen-${reservation.id}`}
+                                  title="Reabrir como pendiente">
+                                  <RotateCcw className="h-3 w-3 mr-1" />Reabrir
+                                </Button>
                               )}
                             </div>
                           </TableCell>
@@ -5891,6 +5900,38 @@ export default function RestaurantPage() {
           </DialogHeader>
           {editingReservation && (
             <div className="space-y-4">
+              {/* Seña info block */}
+              {(() => {
+                const advAmt = parseFloat((editingReservation as any).advanceAmount || "0");
+                return advAmt > 0 ? (
+                  <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4 text-green-600 dark:text-green-400" />
+                      <div>
+                        <span className="text-sm font-semibold text-green-800 dark:text-green-300">Seña registrada</span>
+                        <span className="ml-2 text-sm font-bold text-green-700 dark:text-green-400">${advAmt.toLocaleString("es-AR")}</span>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-100 dark:border-green-700 dark:text-green-400"
+                      onClick={() => { setIsEditReservationOpen(false); setAdvanceDialogReservationId(editingReservation.id); setIsAdvanceDialogOpen(true); }}
+                      data-testid="button-edit-view-advance">
+                      Ver detalle
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between p-3 bg-muted/40 border border-dashed rounded-lg">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <CreditCard className="h-4 w-4" />
+                      <span className="text-sm">Sin seña registrada</span>
+                    </div>
+                    <Button size="sm" variant="outline" className="h-7 text-xs"
+                      onClick={() => { setIsEditReservationOpen(false); setAdvanceDialogReservationId(editingReservation.id); setIsAdvanceDialogOpen(true); }}
+                      data-testid="button-edit-add-advance">
+                      <Plus className="h-3 w-3 mr-1" />Agregar seña
+                    </Button>
+                  </div>
+                );
+              })()}
               <div className="grid gap-2">
                 <Label>Nombre *</Label>
                 <Input value={editingReservation.guestName} onChange={(e) => setEditingReservation({...editingReservation, guestName: e.target.value})} data-testid="input-edit-guest-name" />
