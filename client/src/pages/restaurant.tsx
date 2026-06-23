@@ -894,6 +894,10 @@ export default function RestaurantPage() {
     queryKey: ["/api/companies"],
   });
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
+  const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string }[]>({
+    queryKey: ["/api/admin/users"],
+  });
+  const restaurantUsers = allUsers.filter(u => u.role === "restaurant" || u.role === "admin" || u.role === "manager");
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
   });
@@ -3271,13 +3275,18 @@ export default function RestaurantPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="waiter-name">Mozo *</Label>
-              <Input
-                id="waiter-name"
-                value={newWaiterName}
-                onChange={(e) => setNewWaiterName(e.target.value)}
-                placeholder="Nombre del mozo"
-                data-testid="input-waiter-name"
-              />
+              <Select value={newWaiterName} onValueChange={setNewWaiterName}>
+                <SelectTrigger id="waiter-name" data-testid="select-waiter-name">
+                  <SelectValue placeholder="Seleccionar mozo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {restaurantUsers.map(u => (
+                    <SelectItem key={u.id} value={u.fullName}>
+                      {u.fullName} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="covers">Cantidad de comensales</Label>
@@ -3334,13 +3343,18 @@ export default function RestaurantPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="direct-waiter">Mozo *</Label>
-              <Input
-                id="direct-waiter"
-                value={newWaiterName}
-                onChange={(e) => setNewWaiterName(e.target.value)}
-                placeholder="Nombre del mozo"
-                data-testid="input-direct-waiter"
-              />
+              <Select value={newWaiterName} onValueChange={setNewWaiterName}>
+                <SelectTrigger id="direct-waiter" data-testid="select-direct-waiter">
+                  <SelectValue placeholder="Seleccionar mozo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {restaurantUsers.map(u => (
+                    <SelectItem key={u.id} value={u.fullName}>
+                      {u.fullName} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="direct-covers">Comensales (opcional)</Label>
@@ -3610,13 +3624,18 @@ export default function RestaurantPage() {
                   {transferTargetOrderId === "new" && (
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Mozo del nuevo ticket *</label>
-                      <Input
-                        className="h-8 text-sm"
-                        placeholder="Nombre del mozo"
-                        value={transferNewWaiter}
-                        onChange={e => setTransferNewWaiter(e.target.value)}
-                        data-testid="input-transfer-new-waiter"
-                      />
+                      <Select value={transferNewWaiter} onValueChange={setTransferNewWaiter}>
+                        <SelectTrigger className="h-8 text-sm" data-testid="select-transfer-new-waiter">
+                          <SelectValue placeholder="Seleccionar mozo..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {restaurantUsers.map(u => (
+                            <SelectItem key={u.id} value={u.fullName}>
+                              {u.fullName} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                   <Button
