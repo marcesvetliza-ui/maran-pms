@@ -111,7 +111,7 @@ function drawConditions(doc: any, condiciones: string | null, W: number, H: numb
   let bodyH = 10;
   for (const line of lines) bodyH += doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
   const boxH = 24 + bodyH + 8;
-  if (y + boxH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
+  if (y + boxH > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
   doc.roundedRect(margin, y, contentW, boxH, 6).stroke(BORDER);
   doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
   doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
@@ -119,7 +119,7 @@ function drawConditions(doc: any, condiciones: string | null, W: number, H: numb
     .text("CONDICIONES Y OBSERVACIONES", margin + 14, y + 7, { characterSpacing: 1, width: contentW - 28 });
   let cy = y + 30;
   for (const line of lines) {
-    if (cy > H - 110) { doc.addPage(); drawPageBg(doc, imgPath, W, H); cy = 158; }
+    if (cy > H - 140) { doc.addPage(); drawPageBg(doc, imgPath, W, H); cy = 158; }
     doc.fillColor(DARK).fontSize(8).font("Helvetica")
       .text(line, margin + 14, cy, { width: contentW - 28 });
     cy += doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
@@ -130,7 +130,7 @@ function drawConditions(doc: any, condiciones: string | null, W: number, H: numb
 function drawBankData(doc: any, W: number, H: number, margin: number, imgPath: string, y: number): number {
   const contentW = W - margin * 2;
   const boxH = 16 + BANK_DATA.length * 13 + 8;
-  if (y + boxH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
+  if (y + boxH > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
   y = sectionHeader(doc, "Datos Bancarios", margin, y, contentW);
   doc.fillColor(DARK).fontSize(8).font("Helvetica");
   for (const line of BANK_DATA) {
@@ -411,9 +411,12 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
   // Items table
   if (items.length > 0) {
     const hasDiscount = items.some((i: any) => parseFloat(i.descuento ?? "0") > 0);
+    // Footer safety margin: footer image starts ~120px from bottom
+    const FOOT = 125;
     if (hasDiscount) {
-      const cols = { tipo: M, tarifa: M + 200, dto: M + 310, tarifa_dto: M + 380, sub: M + 450 };
-      const Ws = { tipo: 195, tarifa: 105, dto: 65, tarifa_dto: 65, sub: 65 };
+      // 5-col layout: desc | precio unit | dto | precio esp | subtotal
+      const cols = { tipo: M, tarifa: M + 195, dto: M + 305, tarifa_dto: M + 370, sub: M + 440 };
+      const Ws  = { tipo: 190, tarifa: 105,    dto: 60,      tarifa_dto: 65,       sub: 70 };
       doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
       doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
       const th = y + 6;
@@ -427,7 +430,7 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
         const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo, fontSize: 8 });
         const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
-        if (y + rowH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
+        if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
         doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
         const cy = y + 6;
         const dto = parseFloat(it.descuento ?? "0");
@@ -442,13 +445,14 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
         y += rowH;
       });
     } else {
-      const cols = { tipo: M, noches: M + 220, tarifa: M + 290, sub: M + 420 };
-      const Ws = { tipo: 215, noches: 65, tarifa: 125, sub: 95 };
+      // 4-col layout: desc | cantidad | precio unit | subtotal
+      const cols = { tipo: M, noches: M + 215, tarifa: M + 280, sub: M + 405 };
+      const Ws  = { tipo: 210, noches: 60,      tarifa: 120,     sub: 105 };
       doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
       doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
       const th = y + 6;
       doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
-      doc.text("CANTIDAD", cols.noches, th, { width: Ws.noches, align: "right" });
+      doc.text("CANT.", cols.noches, th, { width: Ws.noches, align: "right" });
       doc.text("PRECIO UNITARIO — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
       doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
       y += 22;
@@ -456,7 +460,7 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
         const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo, fontSize: 8 });
         const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
-        if (y + rowH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
+        if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
         doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
         const cy = y + 6;
         doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
@@ -469,23 +473,25 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
     }
     y += 8;
 
-    // Totals
+    // Totals — check page break before drawing
     const subtotalSum = items.reduce((sum: number, it: any) => sum + parseFloat(it.subtotal || "0"), 0);
     const descGlobal = parseFloat(pres.descuentoGlobal || "0");
     const descMonto = subtotalSum * descGlobal / 100;
     const total = subtotalSum - descMonto;
-    const totW = 210, totX = M + contentW - totW;
+    const totalsH = 18 + (descGlobal > 0 ? 18 : 0) + 34;
+    if (y + totalsH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
+    const totW = 220, totX = M + contentW - totW;
     doc.fillColor(MUTED).fontSize(8).font("Helvetica").text("Subtotal", totX + 6, y + 4, { width: totW / 2 });
-    doc.text(`$ ${formatMoney(subtotalSum)}`, totX, y + 4, { width: totW - 6, align: "right" });
+    doc.fillColor(DARK).text(`$ ${formatMoney(subtotalSum)}`, totX, y + 4, { width: totW - 6, align: "right" });
     y += 18;
     if (descGlobal > 0) {
       doc.fillColor(MUTED).text(`Descuento global (${descGlobal}%)`, totX + 6, y + 4, { width: totW / 2 });
-      doc.text(`- $ ${formatMoney(descMonto)}`, totX, y + 4, { width: totW - 6, align: "right" });
+      doc.fillColor(DARK).text(`- $ ${formatMoney(descMonto)}`, totX, y + 4, { width: totW - 6, align: "right" });
       y += 18;
     }
     doc.roundedRect(totX, y, totW, 24, 4).fill(NAVY);
-    doc.fillColor("white").fontSize(12).font("Helvetica-Bold").text("TOTAL GENERAL", totX + 6, y + 6, { width: totW / 2 });
-    doc.text(`$ ${formatMoney(total)}`, totX, y + 6, { width: totW - 6, align: "right" });
+    doc.fillColor("white").fontSize(10).font("Helvetica-Bold").text("TOTAL GENERAL", totX + 8, y + 7, { width: totW / 2 });
+    doc.text(`$ ${formatMoney(total)}`, totX, y + 7, { width: totW - 8, align: "right" });
     y += 34;
   }
 
