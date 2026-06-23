@@ -2473,7 +2473,6 @@ export default function RestaurantPage() {
                         className="flex-1"
                         onClick={() => {
                           setCurrentOrder(order);
-                          setCloseReceiptType("cierre_mesa");
                           setClosePaymentMethod("efectivo");
                           setCloseDiscount("");
                           setCloseDiscountType("percent");
@@ -2481,8 +2480,11 @@ export default function RestaurantPage() {
                           setRoomSearchFilter("");
                           const _todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
                           const _tableRes = reservations.find(r => r.tableId === order.tableId && (r.status === "check_in" || r.status === "confirmed") && r.reservationDate === _todayISO);
-                          setCloseBillingName(_tableRes ? _tableRes.guestName : "");
-                          setCloseBillingCuit("");
+                          const _resClient = (_tableRes as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableRes as any).clientId) : null;
+                          const _needsFactura = _resClient && _resClient.vatCondition && !["consumidor_final", ""].includes(_resClient.vatCondition || "");
+                          setCloseReceiptType(_needsFactura ? "factura_a" : "cierre_mesa");
+                          setCloseBillingName(_needsFactura ? `${_resClient!.firstName} ${_resClient!.lastName}`.toUpperCase() : (_tableRes ? _tableRes.guestName : ""));
+                          setCloseBillingCuit(_needsFactura ? (_resClient!.cuilCuit || "") : "");
                           setCloseBillingCompanyId("");
                           setCloseCcEntityType("company");
                           setCloseCcEntityId("");
@@ -4268,7 +4270,6 @@ export default function RestaurantPage() {
                   const existingSplits = (updOrder as any)?.splits || [];
                   const hasActiveSplits = existingSplits.length > 0 && existingSplits.some((s: any) => s.isPaid !== "true");
                   setIsOrderDialogOpen(false);
-                  setCloseReceiptType("cierre_mesa");
                   setClosePaymentMethod("efectivo");
                   setCloseDiscount("");
                   setCloseDiscountType("percent");
@@ -4276,8 +4277,11 @@ export default function RestaurantPage() {
                   setRoomSearchFilter("");
                   const _todayISOc = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
                   const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && (r.status === "check_in" || r.status === "confirmed") && r.reservationDate === _todayISOc) : null;
-                  setCloseBillingName(_tableResc ? _tableResc.guestName : "");
-                  setCloseBillingCuit("");
+                  const _resClientc = (_tableResc as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableResc as any).clientId) : null;
+                  const _needsFacturac = _resClientc && _resClientc.vatCondition && !["consumidor_final", ""].includes(_resClientc.vatCondition || "");
+                  setCloseReceiptType(_needsFacturac ? "factura_a" : "cierre_mesa");
+                  setCloseBillingName(_needsFacturac ? `${_resClientc!.firstName} ${_resClientc!.lastName}`.toUpperCase() : (_tableResc ? _tableResc.guestName : ""));
+                  setCloseBillingCuit(_needsFacturac ? (_resClientc!.cuilCuit || "") : "");
                   setCloseBillingCompanyId("");
                   setCloseCcEntityType("company");
                   setCloseCcEntityId("");
@@ -4520,7 +4524,7 @@ export default function RestaurantPage() {
                             const hasRealClient = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
                             if (v === "factura_b") {
                               if (!hasRealClient) setCloseBillingName("CONSUMIDOR FINAL");
-                              setCloseBillingCuit(""); setCloseBillingCompanyId("");
+                              setCloseBillingCompanyId("");
                               setBillingSearch(""); setFbIsExento(false);
                             } else if (v !== "factura_a") {
                               if (!hasRealClient) { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setBillingSearch(""); }
@@ -4573,7 +4577,7 @@ export default function RestaurantPage() {
 
                 {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && (() => {
                   const isFactA = closeReceiptType === "factura_a";
-                  const showClientForm = true;
+                  const showClientForm = isFactA || fbIsExento;
                   const clientSelected = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
                   const cuitValid = !closeBillingCuit || !!closeBillingCompanyId || validateCuit(closeBillingCuit);
                   const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest" }[] = billingSearch.length >= 2
