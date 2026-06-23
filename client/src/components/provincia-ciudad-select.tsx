@@ -53,7 +53,7 @@ export function ProvinciaCiudadSelect({
     <div className="grid grid-cols-2 gap-3">
       <div className="grid gap-2">
         <Label>Provincia</Label>
-        <Select value={provincia || ""} onValueChange={handleProvinciaChange}>
+        <Select modal={false} value={provincia || ""} onValueChange={handleProvinciaChange}>
           <SelectTrigger data-testid={testIdProvincia}>
             <SelectValue placeholder="Seleccionar..." />
           </SelectTrigger>
@@ -69,7 +69,7 @@ export function ProvinciaCiudadSelect({
         <Label>Ciudad / Localidad</Label>
         {provincia ? (
           <>
-            <Select value={selectValue} onValueChange={handleCiudadSelectChange}>
+            <Select modal={false} value={selectValue} onValueChange={handleCiudadSelectChange}>
               <SelectTrigger data-testid={testIdLocalidad}>
                 <SelectValue placeholder="Seleccionar..." />
               </SelectTrigger>

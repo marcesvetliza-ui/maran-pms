@@ -700,6 +700,8 @@ export default function RestaurantPage() {
   const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
   const [transferTargetOrderId, setTransferTargetOrderId] = useState<string>("");
   const [transferNewWaiter, setTransferNewWaiter] = useState("");
+  const [reservationClientSearch, setReservationClientSearch] = useState("");
+  const [showReservationClientDropdown, setShowReservationClientDropdown] = useState(false);
   const [editingCovers, setEditingCovers] = useState(false);
   const [coversInput, setCoversInput] = useState(1);
   const [showCancelOrderDialog, setShowCancelOrderDialog] = useState(false);
@@ -5605,38 +5607,80 @@ export default function RestaurantPage() {
               const payload = { ...data, tableId: data.tableId || null, status: "confirmed" };
               createReservationMutation.mutate(payload as any);
             })} className="space-y-3 overflow-y-auto flex-1 pr-1">
-              <GuestSearchCombobox
-                label="Buscar cliente registrado (opcional)"
-                selectedGuestId={reservationForm.watch("clientId") ?? null}
-                selectedGuestName={reservationForm.watch("clientId") ? reservationForm.watch("guestName") : null}
-                onGuestSelect={(g) => {
-                  reservationForm.setValue("clientId", g.id);
-                  reservationForm.setValue("guestName", [g.firstName, g.lastName].filter(Boolean).join(" "));
-                  reservationForm.setValue("guestPhone", g.phone || "");
-                  reservationForm.setValue("guestEmail", g.email || "");
-                }}
-                onClear={() => {
-                  reservationForm.setValue("clientId", null);
-                }}
-                onCreateNew={(prefill) => {
-                  const parts = (prefill || "").trim().split(" ");
-                  setClientEditingId(null);
-                  setClientForm({
-                    tipoPersona: "fisica", firstName: parts[0] || "", lastName: parts.slice(1).join(" ") || "",
-                    email: "", phone: "", documentType: "dni", documentNumber: "", cuilCuit: "",
-                    vatCondition: "consumidor_final", direccion: "", provincia: "", localidad: "", condicionVentaPredeterminada: "contado",
-                  });
-                  setClientCreatedForReservation(() => (g: { id: string; firstName: string; lastName: string; phone?: string | null; email?: string | null }) => {
-                    reservationForm.setValue("clientId", g.id);
-                    reservationForm.setValue("guestName", [g.firstName, g.lastName].filter(Boolean).join(" "));
-                    reservationForm.setValue("guestPhone", g.phone || "");
-                    reservationForm.setValue("guestEmail", g.email || "");
-                  });
-                  setClientDialogOpen(true);
-                }}
-                placeholder="Nombre, teléfono o email..."
-                data-testid="reservation-guest-search"
-              />
+              {/* Buscador combinado: clientes del restaurant + empresas */}
+              {(() => {
+                const selectedClientId = reservationForm.watch("clientId");
+                const selectedName = reservationForm.watch("guestName");
+                const q = reservationClientSearch.toLowerCase();
+                const guestResults = q.length >= 2 ? restaurantGuests.filter(g =>
+                  `${g.firstName} ${g.lastName}`.toLowerCase().includes(q) ||
+                  (g.phone || "").includes(q) ||
+                  (g.email || "").toLowerCase().includes(q) ||
+                  (g.documentNumber || "").includes(q)
+                ).slice(0, 6).map(g => ({
+                  id: g.id, label: `${g.firstName} ${g.lastName || ""}`.trim(),
+                  sublabel: [g.phone, g.email].filter(Boolean).join(" · "), type: "guest" as const,
+                  phone: g.phone, email: g.email,
+                })) : [];
+                const companyResults = q.length >= 2 ? companies.filter(c =>
+                  (c.razonSocial || "").toLowerCase().includes(q) ||
+                  (c.nombreFantasia || "").toLowerCase().includes(q) ||
+                  (c.cuilCuit || "").includes(q)
+                ).slice(0, 4).map(c => ({
+                  id: `company-${c.id}`, label: c.razonSocial,
+                  sublabel: [c.nombreFantasia, c.cuilCuit].filter(Boolean).join(" · "), type: "company" as const,
+                  phone: null, email: null,
+                })) : [];
+                const allResults = [...guestResults, ...companyResults];
+                return (
+                  <div className="space-y-1.5 relative" data-testid="reservation-guest-search">
+                    <Label className="text-sm font-medium">Buscar cliente o empresa (opcional)</Label>
+                    {selectedClientId && selectedName ? (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted/40">
+                        <Check className="h-4 w-4 text-green-600 shrink-0" />
+                        <span className="text-sm flex-1 font-medium">{selectedName}</span>
+                        <button type="button" onClick={() => { reservationForm.setValue("clientId", null); setReservationClientSearch(""); }} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                        <Input
+                          value={reservationClientSearch}
+                          onChange={(e) => { setReservationClientSearch(e.target.value); setShowReservationClientDropdown(true); }}
+                          onFocus={() => reservationClientSearch.length >= 2 && setShowReservationClientDropdown(true)}
+                          onBlur={() => setTimeout(() => setShowReservationClientDropdown(false), 200)}
+                          placeholder="Nombre, empresa, teléfono o CUIT..."
+                          className="pl-8"
+                          data-testid="reservation-guest-search-input"
+                        />
+                      </div>
+                    )}
+                    {showReservationClientDropdown && !selectedClientId && allResults.length > 0 && (
+                      <div className="absolute z-50 left-0 right-0 mt-1 bg-background border rounded-md shadow-lg max-h-56 overflow-y-auto">
+                        {guestResults.length > 0 && <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40">Clientes</div>}
+                        {guestResults.map(r => (
+                          <button key={r.id} type="button" className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex flex-col gap-0.5 border-b last:border-0"
+                            onMouseDown={(e) => { e.preventDefault(); reservationForm.setValue("clientId", r.id); reservationForm.setValue("guestName", r.label); reservationForm.setValue("guestPhone", r.phone || ""); reservationForm.setValue("guestEmail", r.email || ""); setReservationClientSearch(""); setShowReservationClientDropdown(false); }}>
+                            <span className="font-medium">{r.label}</span>
+                            {r.sublabel && <span className="text-xs text-muted-foreground">{r.sublabel}</span>}
+                          </button>
+                        ))}
+                        {companyResults.length > 0 && <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40 border-t">Empresas</div>}
+                        {companyResults.map(r => (
+                          <button key={r.id} type="button" className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex flex-col gap-0.5 border-b last:border-0"
+                            onMouseDown={(e) => { e.preventDefault(); reservationForm.setValue("clientId", r.id); reservationForm.setValue("guestName", r.label); reservationForm.setValue("guestPhone", ""); reservationForm.setValue("guestEmail", ""); setReservationClientSearch(""); setShowReservationClientDropdown(false); }}>
+                            <span className="font-medium flex items-center gap-1.5">🏢 {r.label}</span>
+                            {r.sublabel && <span className="text-xs text-muted-foreground">{r.sublabel}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {showReservationClientDropdown && !selectedClientId && q.length >= 2 && allResults.length === 0 && (
+                      <div className="absolute z-50 left-0 right-0 mt-1 bg-background border rounded-md shadow-sm px-3 py-2 text-sm text-muted-foreground">Sin resultados para &quot;{reservationClientSearch}&quot;</div>
+                    )}
+                  </div>
+                );
+              })()}
               <FormField control={reservationForm.control} name="guestName" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Nombre *</FormLabel>
