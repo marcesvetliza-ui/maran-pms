@@ -4500,7 +4500,7 @@ export default function RestaurantPage() {
 
                 {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && (() => {
                   const isFactA = closeReceiptType === "factura_a";
-                  const showClientForm = isFactA || fbIsExento;
+                  const showClientForm = true;
                   const clientSelected = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
                   const cuitValid = !closeBillingCuit || !!closeBillingCompanyId || validateCuit(closeBillingCuit);
                   const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest" }[] = billingSearch.length >= 2
@@ -4509,6 +4509,7 @@ export default function RestaurantPage() {
                           .filter(c => {
                             const q = billingSearch.toLowerCase();
                             return c.razonSocial.toLowerCase().includes(q)
+                              || (c.name || "").toLowerCase().includes(q)
                               || (c.nombreFantasia?.toLowerCase() || "").includes(q)
                               || c.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
                           })
@@ -4537,7 +4538,10 @@ export default function RestaurantPage() {
 
                   return (
                     <div className="space-y-3 p-3 border rounded-md bg-muted/30">
-                      <p className="text-sm font-medium">Datos de facturación</p>
+                      <p className="text-sm font-medium">
+                        Datos de facturación
+                        {!isFactA && <span className="ml-1 text-xs font-normal text-muted-foreground">(cliente opcional para Factura B)</span>}
+                      </p>
 
                       {selectedPosNumero && (
                         <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-3 py-2">
@@ -4601,7 +4605,7 @@ export default function RestaurantPage() {
                                   <Input
                                     placeholder="Buscar empresa o persona por nombre o CUIT..."
                                     value={billingSearch}
-                                    onChange={e => { setBillingSearch(e.target.value); setCloseBillingCompanyId(""); }}
+                                    onChange={e => { setBillingSearch(e.target.value); setCloseBillingCompanyId(""); setBillingSearchOpen(true); }}
                                     onFocus={() => setBillingSearchOpen(true)}
                                     onBlur={() => setTimeout(() => setBillingSearchOpen(false), 350)}
                                     data-testid="input-billing-search"
