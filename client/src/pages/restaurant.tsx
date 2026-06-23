@@ -1873,6 +1873,7 @@ export default function RestaurantPage() {
     <h3>Restaurante</h3>
     <hr>
     <p style="font-size:12px;margin:4px 0"><b>Mesa/Pedido:</b> ${esc(order.orderLabel || String(order.orderNumber))}</p>
+    ${order.waiterName ? `<p style="font-size:12px;margin:4px 0"><b>Mozo:</b> ${esc(order.waiterName)}</p>` : ""}
     <p style="font-size:12px;margin:4px 0"><b>Fecha:</b> ${esc(format(new Date(), "dd/MM/yyyy HH:mm"))}</p>
     <hr>
     <table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th style="text-align:right">Total</th></tr></thead>
@@ -1920,6 +1921,7 @@ export default function RestaurantPage() {
     <div class="anulado">⚠&nbsp;ANULACIÓN</div>
     <hr>
     <p class="meta"><b>Mesa/Pedido:</b> ${esc(order?.orderLabel || String(order?.orderNumber || ""))}</p>
+    ${order?.waiterName ? `<p class="meta"><b>Mozo:</b> ${esc(order.waiterName)}</p>` : ""}
     <p class="meta"><b>Hora:</b> ${new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</p>
     <hr>
     <table>
