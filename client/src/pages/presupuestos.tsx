@@ -316,8 +316,8 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ClipboardList className="h-5 w-5 text-primary" />
+          <DialogTitle className="flex items-center gap-2 font-['Playfair_Display']" style={{ color: "#822638" }}>
+            <ClipboardList className="h-5 w-5" style={{ color: "#822638" }} />
             {isEdit ? `Editar ${presupuesto!.numero}` : "Nuevo Presupuesto"}
           </DialogTitle>
           <DialogDescription>
@@ -443,13 +443,17 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
           {useItems ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Servicios seleccionados</Label>
-                <Button size="sm" variant="outline" onClick={handleAddItem} data-testid="button-add-item">
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Agregar ítem manual
-                </Button>
+                <Label className="text-base font-semibold font-['Playfair_Display']" style={{ color: "#822638" }}>Servicios seleccionados</Label>
+                <button
+                  onClick={handleAddItem}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors bg-transparent text-[#822638] border-[#822638] hover:bg-[#822638] hover:text-white font-['Montserrat']"
+                  data-testid="button-add-item"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Agregar ítem manual
+                </button>
               </div>
               {area === "eventos" && !isEdit && eventosItemsLoaded && (
-                <div className="flex items-center gap-2 rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/20 px-3 py-2 text-xs text-purple-700 dark:text-purple-300">
+                <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-['Montserrat']" style={{ borderColor: "#82263830", background: "#FEF4EB", color: "#822638" }}>
                   <Calendar className="h-3.5 w-3.5 shrink-0" />
                   Ítems cargados desde el catálogo de eventos. Modificá precios, cantidades o eliminá los que no apliquen para este presupuesto.
                 </div>
@@ -500,8 +504,8 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
                     </div>
                   )}
                   <div className="flex items-center justify-between pt-2 border-t">
-                    <span className="font-bold text-base">TOTAL</span>
-                    <span className="font-bold text-base text-primary">$ {fmt(totalFinal)}</span>
+                    <span className="font-bold text-base font-['Playfair_Display']" style={{ color: "#822638" }}>TOTAL</span>
+                    <span className="font-bold text-base font-['Playfair_Display']" style={{ color: "#822638" }}>$ {fmt(totalFinal)}</span>
                   </div>
                 </div>
               </div>
@@ -531,9 +535,14 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
 
         <DialogFooter className="gap-2 flex-wrap">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={() => saveMutation.mutate(buildPayload())} disabled={!valid || saveMutation.isPending} data-testid="button-save-presupuesto">
+          <button
+            onClick={() => saveMutation.mutate(buildPayload())}
+            disabled={!valid || saveMutation.isPending}
+            className="px-4 py-2 rounded-md text-sm font-semibold border transition-colors bg-[#822638] text-white border-[#822638] hover:bg-transparent hover:text-[#822638] disabled:opacity-50 disabled:cursor-not-allowed font-['Montserrat']"
+            data-testid="button-save-presupuesto"
+          >
             {saveMutation.isPending ? "Guardando..." : isEdit ? "Guardar cambios" : "Crear presupuesto"}
-          </Button>
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -590,24 +599,28 @@ export default function PresupuestosPage() {
   }, {} as Record<AreaOrigen, number>);
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 space-y-5 font-['Montserrat']">
       {/* ── Title ─────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
-          <ClipboardList className="h-6 w-6 text-muted-foreground" />
-          <h1 className="text-2xl font-bold" data-testid="text-page-title">Presupuestos</h1>
+          <ClipboardList className="h-6 w-6" style={{ color: "#822638" }} />
+          <h1 className="text-2xl font-bold font-['Playfair_Display']" style={{ color: "#822638" }} data-testid="text-page-title">Presupuestos</h1>
           <Badge variant="secondary">{lista.length} total</Badge>
         </div>
-        <Button onClick={handleNew} data-testid="button-nuevo-presupuesto">
-          <Plus className="h-4 w-4 mr-1" /> Nuevo presupuesto
-        </Button>
+        <button
+          onClick={handleNew}
+          className="flex items-center gap-1 px-4 py-2 rounded-md text-sm font-semibold border transition-colors bg-[#822638] text-white border-[#822638] hover:bg-transparent hover:text-[#822638]"
+          data-testid="button-nuevo-presupuesto"
+        >
+          <Plus className="h-4 w-4" /> Nuevo presupuesto
+        </button>
       </div>
 
       {/* ── Area filter tabs ───────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={() => setAreaFilter("todos")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${areaFilter === "todos" ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted border-border"}`}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${areaFilter === "todos" ? "text-white border-[#822638] bg-[#822638]" : "bg-background hover:bg-muted border-border"}`}
           data-testid="tab-area-todos"
         >
           Todos <span className="ml-1 text-xs opacity-70">({lista.length})</span>
@@ -620,7 +633,7 @@ export default function PresupuestosPage() {
             <button
               key={a}
               onClick={() => setAreaFilter(a)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border flex items-center gap-1.5 ${areaFilter === a ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted border-border"}`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border flex items-center gap-1.5 ${areaFilter === a ? "text-white border-[#822638] bg-[#822638]" : "bg-background hover:bg-muted border-border"}`}
               data-testid={`tab-area-${a}`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -641,7 +654,7 @@ export default function PresupuestosPage() {
               <button
                 key={e}
                 onClick={() => setEstadoFilter(prev => prev === e ? "todos" : e)}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${estadoFilter === e ? "ring-2 ring-primary " : "opacity-60 hover:opacity-100 "} ${ec.cls}`}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${estadoFilter === e ? "ring-2 ring-[#822638] " : "opacity-60 hover:opacity-100 "} ${ec.cls}`}
                 data-testid={`filter-estado-${e}`}
               >
                 {ec.label}
@@ -691,7 +704,7 @@ export default function PresupuestosPage() {
                 const AreaIcon2 = areaCfg?.icon ?? Building2;
                 return (
                   <TableRow key={p.id} className="hover:bg-muted/30" data-testid={`row-presupuesto-${p.id}`}>
-                    <TableCell className="font-mono text-sm font-semibold text-primary">{p.numero}</TableCell>
+                    <TableCell className="font-mono text-sm font-semibold" style={{ color: "#822638" }}>{p.numero}</TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${areaCfg?.color}`}>
                         <AreaIcon2 className="h-3 w-3" />
