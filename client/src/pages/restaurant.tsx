@@ -2672,7 +2672,7 @@ export default function RestaurantPage() {
               Todas
             </Button>
             <Select value={reservationStatusFilter} onValueChange={setReservationStatusFilter}>
-              <SelectTrigger className="w-36" data-testid="select-status-filter">
+              <SelectTrigger className="w-44" data-testid="select-status-filter">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
@@ -2687,7 +2687,7 @@ export default function RestaurantPage() {
             </Select>
             {areas.filter(a => a.isActive === "true").length > 1 && (
               <Select value={reservationAreaFilter} onValueChange={setReservationAreaFilter}>
-                <SelectTrigger className="w-36" data-testid="select-area-filter">
+                <SelectTrigger className="w-44" data-testid="select-area-filter">
                   <SelectValue placeholder="Salón" />
                 </SelectTrigger>
                 <SelectContent>
