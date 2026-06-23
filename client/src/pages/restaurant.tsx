@@ -1084,13 +1084,10 @@ export default function RestaurantPage() {
       if (pendingReservation) {
         pendingCheckInReservationRef.current = null;
         const advAmt = parseFloat(pendingReservation.advanceAmount || "0");
-        if (advAmt > 0) {
-          applyAdvancesMutation.mutate({ reservationId: pendingReservation.id, orderId: order.id });
-        }
         toast({
           title: `Check-in — ${pendingReservation.guestName}`,
           description: advAmt > 0
-            ? `Comanda abierta. Seña aplicada: $${advAmt.toLocaleString("es-AR")}`
+            ? `Comanda abierta. Seña de $${advAmt.toLocaleString("es-AR")} se descontará al cerrar.`
             : `Comanda abierta correctamente.`,
         });
         return;
@@ -1671,9 +1668,6 @@ export default function RestaurantPage() {
           });
         } else if (table.status === "occupied") {
           const tableOrder = orders.find(o => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
-          if (advAmt > 0 && tableOrder) {
-            applyAdvancesMutation.mutate({ reservationId: reservation.id, orderId: tableOrder.id });
-          }
           if (tableOrder) {
             setCurrentOrder(tableOrder);
             setOrderView(((tableOrder as any).items || []).length > 0 ? "comanda" : "menu");
