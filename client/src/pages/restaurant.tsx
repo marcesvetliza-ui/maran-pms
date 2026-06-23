@@ -498,7 +498,13 @@ function AdvanceDialog({
             <p className="text-sm text-muted-foreground text-center py-2">Sin anticipos registrados</p>
           )}
 
-          {/* Formulario nuevo adelanto */}
+          {/* Formulario nuevo adelanto — bloqueado si reserva ya está en check_in */}
+          {reservation?.status === "check_in" ? (
+            <div className="flex items-center gap-2 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-300">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>La reserva ya está en Check-in. No se pueden registrar señas adicionales.</span>
+            </div>
+          ) : (
           <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Registrar nuevo anticipo</p>
             <div className="grid grid-cols-2 gap-3">
@@ -622,6 +628,7 @@ function AdvanceDialog({
               {isFactura ? "Registrar y Facturar" : "Registrar Anticipo"}
             </Button>
           </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -2059,6 +2066,54 @@ export default function RestaurantPage() {
             </div>
           </div>
 
+          {/* Reservas sin mesa asignada — hoy */}
+          {(() => {
+            const todayFloor = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            const tablelessToday = reservations.filter(
+              r => !r.tableId && r.reservationDate === todayFloor && ["pending","confirmed","check_in"].includes(r.status)
+            ).sort((a,b) => a.reservationTime.localeCompare(b.reservationTime));
+            if (tablelessToday.length === 0) return null;
+            return (
+              <div className="mb-2 rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/20 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <CalendarDays className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                  <span className="text-sm font-semibold text-violet-800 dark:text-violet-300">Reservas sin mesa asignada — hoy</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {tablelessToday.map(r => {
+                    const advAmt = parseFloat(r.advanceAmount || "0");
+                    return (
+                      <div key={r.id} className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-violet-950/40 border border-violet-200 dark:border-violet-700 rounded-md shadow-sm">
+                        <div className="text-sm">
+                          <span className="font-medium">{r.guestName.split(" ")[0]}</span>
+                          <span className="text-muted-foreground ml-1">{r.reservationTime.slice(0,5)}</span>
+                          <span className="text-muted-foreground ml-1">({r.partySize}p)</span>
+                          {advAmt > 0 && (
+                            <span className="ml-2 text-xs font-semibold text-green-700 dark:text-green-400">
+                              <CreditCard className="inline h-3 w-3 mr-0.5" />${advAmt.toLocaleString("es-AR")}
+                            </span>
+                          )}
+                        </div>
+                        <Button size="sm" variant="outline" className="h-6 px-2 text-xs"
+                          onClick={() => { setAssignTableReservation(r); setIsAssignTableDialogOpen(true); }}
+                          data-testid={`button-floor-assign-${r.id}`}>
+                          <MapPin className="h-3 w-3 mr-1" />Asignar
+                        </Button>
+                        {r.status !== "check_in" && (
+                          <Button size="sm" className="h-6 px-2 text-xs bg-green-600 hover:bg-green-700"
+                            onClick={() => handleCheckIn(r)}
+                            data-testid={`button-floor-checkin-${r.id}`}>
+                            <CheckCircle2 className="h-3 w-3 mr-1" />Check-in
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           {areas.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
@@ -2247,7 +2302,8 @@ export default function RestaurantPage() {
                                   if (!tableOrder) return null;
                                   const tableSplits = (tableOrder as any)?.splits || [];
                                   const paidSplits = tableSplits.filter((s: any) => s.isPaid === "true").length;
-                                  const checkedInRes = todayTableReservations.find(r => r.status === "check_in");
+                                  const checkedInRes = todayTableReservations.find(r => r.status === "check_in")
+                                    || todayTableReservations.find(r => r.status === "confirmed");
                                   return (
                                     <>
                                       {checkedInRes ? (
@@ -2424,7 +2480,7 @@ export default function RestaurantPage() {
                           setCloseRoomId("");
                           setRoomSearchFilter("");
                           const _todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-                          const _tableRes = reservations.find(r => r.tableId === order.tableId && r.status === "check_in" && r.reservationDate === _todayISO);
+                          const _tableRes = reservations.find(r => r.tableId === order.tableId && (r.status === "check_in" || r.status === "confirmed") && r.reservationDate === _todayISO);
                           setCloseBillingName(_tableRes ? _tableRes.guestName : "");
                           setCloseBillingCuit("");
                           setCloseBillingCompanyId("");
@@ -2822,7 +2878,7 @@ export default function RestaurantPage() {
                                 <CreditCard className="h-3 w-3" />
                                 ${advanceAmt.toLocaleString("es-AR")}
                               </button>
-                            ) : isActive ? (
+                            ) : (isActive && reservation.status !== "check_in") ? (
                               <button
                                 type="button"
                                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs text-muted-foreground border border-dashed border-muted-foreground/40 hover:border-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -4219,7 +4275,7 @@ export default function RestaurantPage() {
                   setCloseRoomId("");
                   setRoomSearchFilter("");
                   const _todayISOc = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-                  const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && r.status === "check_in" && r.reservationDate === _todayISOc) : null;
+                  const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && (r.status === "check_in" || r.status === "confirmed") && r.reservationDate === _todayISOc) : null;
                   setCloseBillingName(_tableResc ? _tableResc.guestName : "");
                   setCloseBillingCuit("");
                   setCloseBillingCompanyId("");
@@ -4461,13 +4517,13 @@ export default function RestaurantPage() {
                         ) : (
                           <Select value={effRec} onValueChange={(v) => {
                             setCloseReceiptType(v);
+                            const hasRealClient = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
                             if (v === "factura_b") {
-                              setCloseBillingName("CONSUMIDOR FINAL");
+                              if (!hasRealClient) setCloseBillingName("CONSUMIDOR FINAL");
                               setCloseBillingCuit(""); setCloseBillingCompanyId("");
                               setBillingSearch(""); setFbIsExento(false);
                             } else if (v !== "factura_a") {
-                              setCloseBillingName(""); setCloseBillingCuit("");
-                              setCloseBillingCompanyId(""); setBillingSearch("");
+                              if (!hasRealClient) { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setBillingSearch(""); }
                             }
                           }}>
                             <SelectTrigger data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
