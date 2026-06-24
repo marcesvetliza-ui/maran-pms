@@ -694,7 +694,7 @@ function PublicLayout({ hotelInfo, children }: {
           <img
             src="/wp-content/uploads/2022/12/Logo-Maran-Color.svg"
             alt={hotelInfo?.name || "Maran Suites & Towers"}
-            style={{ height: 30, width: "auto" }}
+            style={{ height: 48, width: "auto" }}
             onError={(e) => { (e.currentTarget as HTMLImageElement).src = "/logo-maran.png"; }}
           />
           <div className="text-xs text-gray-500 font-['Montserrat']">{hotelInfo?.tagline}</div>
