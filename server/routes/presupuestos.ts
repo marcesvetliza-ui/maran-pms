@@ -89,6 +89,9 @@ const BORDER = "#e0e0e0";
 function drawPageBg(doc: any, imgPath: string, W: number, H: number) {
   if (fs.existsSync(imgPath)) {
     doc.image(imgPath, 0, 0, { width: W, height: H });
+    // White overlay over the content area so text is always readable
+    // Preserves the branded header (top 148px) and footer (bottom ~85px)
+    doc.rect(0, 148, W, H - 148 - 85).fill("white");
   } else {
     doc.rect(0, 0, W, 148).fill(NAVY);
     doc.rect(0, 148, W, 4).fill(ORANGE);
