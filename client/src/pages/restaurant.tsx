@@ -761,6 +761,7 @@ export default function RestaurantPage() {
   const [closeBillingName, setCloseBillingName] = useState("");
   const [closeBillingCuit, setCloseBillingCuit] = useState("");
   const [closeBillingCompanyId, setCloseBillingCompanyId] = useState("");
+  const [closeBillingGuestId, setCloseBillingGuestId] = useState("");
   const [closeCcEntityType, setCloseCcEntityType] = useState<"company" | "agency">("company");
   const [closeCcEntityId, setCloseCcEntityId] = useState("");
   const [invoiceForNC, setInvoiceForNC] = useState<any | null>(null);
@@ -1601,26 +1602,37 @@ export default function RestaurantPage() {
 
   const createQuickClientMutation = useMutation({
     mutationFn: async (data: { razonSocial: string; cuilCuit: string; condicionIva: string }) => {
-      const res = await apiRequest("POST", "/api/companies", {
-        razonSocial: data.razonSocial,
-        cuilCuit: data.cuilCuit,
-        condicionIva: data.condicionIva,
-        isActive: "true",
-        pais: "Argentina",
+      // Split razonSocial into firstName + lastName for guest record
+      const parts = data.razonSocial.trim().split(/\s+/);
+      const firstName = parts[0] || data.razonSocial;
+      const lastName = parts.slice(1).join(" ") || "-";
+      const res = await apiRequest("POST", "/api/guests", {
+        firstName,
+        lastName,
+        cuilCuit: data.cuilCuit.replace(/-/g, ""),
+        vatCondition: data.condicionIva,
+        documentType: "cuit",
+        documentNumber: data.cuilCuit.replace(/-/g, ""),
+        nationality: "Argentina",
+        nationalityCode: "200",
+        condicionVentaPredeterminada: "contado",
       });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || "Error"); }
       return res.json();
     },
-    onSuccess: (company) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
-      setCloseBillingName(company.razonSocial);
-      setCloseBillingCuit(formatCuit(company.cuilCuit || ""));
-      setCloseBillingCompanyId(company.id);
-      setBillingSearch(company.razonSocial);
+    onSuccess: (guest) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+      const fullName = `${guest.firstName} ${guest.lastName || ""}`.toUpperCase().trim();
+      setCloseBillingName(fullName);
+      setCloseBillingCuit(formatCuit(guest.cuilCuit || ""));
+      setCloseBillingGuestId(guest.id);
+      setCloseBillingCompanyId("");
+      setBillingSearch(fullName);
       setIsNewClientDialogOpen(false);
       setNewClientRazonSocial(""); setNewClientCuit(""); setNewClientCondicionIva("exento");
-      toast({ title: "Cliente creado y seleccionado" });
+      toast({ title: "Cliente creado y seleccionado", description: `${fullName} registrado como huésped` });
     },
-    onError: () => toast({ title: "Error al crear cliente", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al crear cliente", description: e.message, variant: "destructive" }),
   });
 
   const emitirNCMutation = useMutation({
@@ -4337,11 +4349,13 @@ export default function RestaurantPage() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div>
-              <Label className="text-xs">Razón Social *</Label>
+              <Label className="text-xs">
+                {newClientVatContext === "factura_a" ? "Nombre y Apellido *" : "Nombre, Apellido o Razón Social *"}
+              </Label>
               <Input
                 value={newClientRazonSocial}
                 onChange={e => setNewClientRazonSocial(e.target.value)}
-                placeholder="Empresa S.A."
+                placeholder={newClientVatContext === "factura_a" ? "Juan Pérez" : "Juan Pérez o Empresa S.A."}
                 data-testid="input-new-client-razon-social"
               />
             </div>
@@ -4557,6 +4571,7 @@ export default function RestaurantPage() {
                             // Always reset billing state when switching receipt type to avoid stale data
                             setFbIsExento(false);
                             setCloseBillingCompanyId("");
+                            setCloseBillingGuestId("");
                             setCloseBillingCuit("");
                             setBillingSearch("");
                             setCloseBillingName(v === "factura_b" ? "CONSUMIDOR FINAL" : "");
@@ -4610,8 +4625,8 @@ export default function RestaurantPage() {
                   const isFactA = closeReceiptType === "factura_a";
                   const showClientForm = isFactA || fbIsExento;
                   // clientSelected only when explicitly chosen from dropdown (not just typing in manual field)
-                  const clientSelected = !!closeBillingCompanyId;
-                  const cuitValid = !closeBillingCuit || !!closeBillingCompanyId || validateCuit(closeBillingCuit);
+                  const clientSelected = !!closeBillingCompanyId || !!closeBillingGuestId;
+                  const cuitValid = !closeBillingCuit || clientSelected || validateCuit(closeBillingCuit);
                   const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest" }[] = billingSearch.length >= 2
                     ? [
                         ...companies
@@ -4684,7 +4699,7 @@ export default function RestaurantPage() {
                             className="h-4 w-4 cursor-pointer"
                           />
                           <label htmlFor="fb-exento" className="text-sm cursor-pointer select-none">
-                            Empresa exenta / identificada (no es Consumidor Final)
+                            Persona o empresa identificada — exenta (no es Consumidor Final)
                           </label>
                         </div>
                       )}
@@ -4700,7 +4715,10 @@ export default function RestaurantPage() {
                         <>
                           {clientSelected ? (
                             <div className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-md">
-                              <Building2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                              {closeBillingGuestId
+                                ? <User className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                                : <Building2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                              }
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium truncate">{closeBillingName}</p>
                                 {closeBillingCuit && (
@@ -4710,7 +4728,7 @@ export default function RestaurantPage() {
                                 )}
                               </div>
                               <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0"
-                                onClick={() => { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setBillingSearch(""); }}
+                                onClick={() => { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setBillingSearch(""); }}
                               >
                                 <X className="h-3.5 w-3.5" />
                               </Button>
@@ -4741,9 +4759,11 @@ export default function RestaurantPage() {
                                             setCloseBillingCuit(item.cuit);
                                             if (item.type === "company") {
                                               setCloseBillingCompanyId(item.id);
+                                              setCloseBillingGuestId("");
                                               setCloseCcEntityType("company");
                                               setCloseCcEntityId(item.id);
                                             } else {
+                                              setCloseBillingGuestId(item.id);
                                               setCloseBillingCompanyId("");
                                               setCloseCcEntityType("company");
                                               setCloseCcEntityId("");
