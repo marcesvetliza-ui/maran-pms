@@ -804,6 +804,7 @@ export default function RestaurantPage() {
   const [newClientRazonSocial, setNewClientRazonSocial] = useState("");
   const [newClientCuit, setNewClientCuit] = useState("");
   const [newClientCondicionIva, setNewClientCondicionIva] = useState<"responsable_inscripto"|"exento"|"monotributista">("exento");
+  const [newClientVatContext, setNewClientVatContext] = useState<"factura_a"|"factura_b">("factura_b");
 
   // Clientes tab state
   const [clientSearch, setClientSearch] = useState("");
@@ -4367,11 +4368,21 @@ export default function RestaurantPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
-                  <SelectItem value="exento">Exento</SelectItem>
-                  <SelectItem value="monotributista">Monotributista</SelectItem>
+                  {newClientVatContext === "factura_b" ? (
+                    <SelectItem value="exento">Exento</SelectItem>
+                  ) : (
+                    <>
+                      <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
+                      <SelectItem value="monotributista">Monotributista</SelectItem>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {newClientVatContext === "factura_b"
+                  ? "Para Factura B solo se pueden identificar clientes exentos."
+                  : "Para Factura A se requiere Resp. Inscripto o Monotributista."}
+              </p>
             </div>
           </div>
           <DialogFooter>
@@ -4543,14 +4554,12 @@ export default function RestaurantPage() {
                         ) : (
                           <Select value={effRec} onValueChange={(v) => {
                             setCloseReceiptType(v);
-                            const hasRealClient = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
-                            if (v === "factura_b") {
-                              if (!hasRealClient) setCloseBillingName("CONSUMIDOR FINAL");
-                              setCloseBillingCompanyId("");
-                              setBillingSearch(""); setFbIsExento(false);
-                            } else if (v !== "factura_a") {
-                              if (!hasRealClient) { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setBillingSearch(""); }
-                            }
+                            // Always reset billing state when switching receipt type to avoid stale data
+                            setFbIsExento(false);
+                            setCloseBillingCompanyId("");
+                            setCloseBillingCuit("");
+                            setBillingSearch("");
+                            setCloseBillingName(v === "factura_b" ? "CONSUMIDOR FINAL" : "");
                           }}>
                             <SelectTrigger data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -4600,7 +4609,8 @@ export default function RestaurantPage() {
                 {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && (() => {
                   const isFactA = closeReceiptType === "factura_a";
                   const showClientForm = isFactA || fbIsExento;
-                  const clientSelected = !!closeBillingName && closeBillingName !== "CONSUMIDOR FINAL";
+                  // clientSelected only when explicitly chosen from dropdown (not just typing in manual field)
+                  const clientSelected = !!closeBillingCompanyId;
                   const cuitValid = !closeBillingCuit || !!closeBillingCompanyId || validateCuit(closeBillingCuit);
                   const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest" }[] = billingSearch.length >= 2
                     ? [
@@ -4617,18 +4627,26 @@ export default function RestaurantPage() {
                         ...restaurantGuests
                           .filter(g => {
                             if (!g.cuilCuit) return false;
-                            if (g.vatCondition === "consumidor_final" || !g.vatCondition) return false;
+                            // For Factura B (exento): only show exento guests
+                            // For Factura A: only show responsable_inscripto / monotributo
+                            if (isFactA) {
+                              if (!["responsable_inscripto", "monotributo", "monotributista"].includes(g.vatCondition || "")) return false;
+                            } else {
+                              // fbIsExento → exento context
+                              if (!["exento"].includes(g.vatCondition || "")) return false;
+                            }
                             const q = billingSearch.toLowerCase();
-                            const fullName = `${g.firstName} ${g.lastName}`.toLowerCase();
+                            const fullName = `${g.firstName} ${g.lastName || ""}`.toLowerCase();
                             return fullName.includes(q)
-                              || g.lastName.toLowerCase().includes(q)
+                              || (g.lastName || "").toLowerCase().includes(q)
+                              || (g.firstName || "").toLowerCase().includes(q)
                               || g.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
                           })
                           .slice(0, 4)
                           .map(g => ({
                             id: g.id,
-                            label: `${g.firstName} ${g.lastName}`.toUpperCase(),
-                            sublabel: g.vatCondition === "monotributista" ? "Monotributista" : g.vatCondition === "responsable_inscripto" ? "Resp. Inscripto" : g.vatCondition || undefined,
+                            label: `${g.firstName} ${g.lastName || ""}`.toUpperCase().trim(),
+                            sublabel: g.vatCondition === "monotributista" || g.vatCondition === "monotributo" ? "Monotributista" : g.vatCondition === "responsable_inscripto" ? "Resp. Inscripto" : g.vatCondition === "exento" ? "Exento" : g.vatCondition || undefined,
                             cuit: formatCuit(g.cuilCuit || ""),
                             type: "guest" as const,
                           })),
@@ -4751,7 +4769,13 @@ export default function RestaurantPage() {
                                 </div>
                                 <Button type="button" variant="outline" size="sm"
                                   className="shrink-0 gap-1"
-                                  onClick={() => setIsNewClientDialogOpen(true)}
+                                  onClick={() => {
+                                    setNewClientVatContext(isFactA ? "factura_a" : "factura_b");
+                                    setNewClientCondicionIva(isFactA ? "responsable_inscripto" : "exento");
+                                    setNewClientRazonSocial("");
+                                    setNewClientCuit("");
+                                    setIsNewClientDialogOpen(true);
+                                  }}
                                   data-testid="button-new-billing-client"
                                 >
                                   <UserPlus className="h-3.5 w-3.5" />
