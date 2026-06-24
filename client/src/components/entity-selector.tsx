@@ -7,8 +7,59 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, User, Building2, Plus, X, Check, Plane } from "lucide-react";
-import type { Guest, Company, InsertGuest, InsertCompany, Agency, InsertAgency } from "@shared/schema";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
+import { Search, User, Building2, Plus, X, Check, Plane, ChevronsUpDown } from "lucide-react";
+import type { Guest, Company, InsertGuest, InsertCompany, Agency, InsertAgency, Country } from "@shared/schema";
+
+const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  dni: "DNI", cuit: "CUIT", cuil: "CUIL", passport: "Pasaporte",
+  cedula: "Cédula (CI)", lc: "Libreta Cívica", le: "Libreta de Enrolamiento", other: "Otro",
+};
+const VAT_CONDITION_LABELS: Record<string, string> = {
+  consumidor_final: "Consumidor Final", responsable_inscripto: "Responsable Inscripto",
+  monotributista: "Monotributista", exento: "Exento",
+  no_responsable: "No Responsable", no_categorizado: "No Categorizado (Extranjero)",
+};
+
+function NationalityCombobox({ value, afipCode, onChange }: {
+  value: string; afipCode?: string; onChange: (name: string, code: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const { data: countriesList = [] } = useQuery<Country[]>({ queryKey: ["/api/countries"] });
+  const filtered = countriesList.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 40);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal" data-testid="select-nationality">
+          <span className={value ? "" : "text-muted-foreground"}>{value || "Seleccionar país..."}</span>
+          <div className="flex items-center gap-2">
+            {afipCode && <span className="text-xs text-muted-foreground font-mono">AFIP:{afipCode}</span>}
+            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          </div>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Buscar país..." value={search} onValueChange={setSearch} />
+          <CommandList>
+            <CommandEmpty>Sin resultados.</CommandEmpty>
+            <CommandGroup>
+              {filtered.map(c => (
+                <CommandItem key={c.id} value={c.name} onSelect={() => { onChange(c.name, String(c.afipCode)); setOpen(false); setSearch(""); }}>
+                  <Check className={`mr-2 h-4 w-4 ${value === c.name ? "opacity-100" : "opacity-0"}`} />
+                  <span className="flex-1">{c.name}</span>
+                  <span className="text-xs text-muted-foreground font-mono ml-2">{c.afipCode}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 interface GuestSelectorProps {
   onSelect: (guest: Guest) => void;
@@ -28,10 +79,17 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
     lastName: "",
     email: "",
     phone: "",
-    documentType: "dni" as "dni" | "passport" | "cedula" | "other" | null,
+    documentType: "dni" as string,
     documentNumber: "",
     nationality: "Argentina",
+    nationalityCode: "200",
+    vatCondition: "consumidor_final",
+    estadoCivil: "",
+    procedencia: "",
+    fechaIngresoArgentina: "",
+    fechaSalidaArgentina: "",
     direccion: "",
+    provincia: "",
     localidad: "",
     codigoPostal: "",
     fechaNacimiento: "",
@@ -73,6 +131,12 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       documentType: isJuridicaGuest ? "cuit" : newGuest.documentType,
       documentNumber: isJuridicaGuest ? (newGuest.cuilCuit || null) : (newGuest.documentNumber || null),
       nationality: isJuridicaGuest ? null : (newGuest.nationality || null),
+      nationalityCode: isJuridicaGuest ? null : (newGuest.nationalityCode || null),
+      vatCondition: newGuest.vatCondition || null,
+      estadoCivil: isJuridicaGuest ? null : (newGuest.estadoCivil || null),
+      procedencia: isJuridicaGuest ? null : (newGuest.procedencia || null),
+      fechaIngresoArgentina: isJuridicaGuest ? null : (newGuest.fechaIngresoArgentina || null),
+      fechaSalidaArgentina: isJuridicaGuest ? null : (newGuest.fechaSalidaArgentina || null),
       direccion: newGuest.direccion || null,
       localidad: newGuest.localidad || null,
       codigoPostal: newGuest.codigoPostal || null,
@@ -88,23 +152,14 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
     } as any);
     setNewGuest({
       tipoPersona: "fisica",
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      documentType: "dni",
-      documentNumber: "",
-      nationality: "Argentina",
-      direccion: "",
-      localidad: "",
-      codigoPostal: "",
-      fechaNacimiento: "",
-      sexo: "no_especifica",
-      cuilCuit: "",
-      vehiculoPatente: "",
-      vehiculoMarca: "",
-      vehiculoModelo: "",
-      vehiculoColor: "",
+      firstName: "", lastName: "", email: "", phone: "",
+      documentType: "dni", documentNumber: "",
+      nationality: "Argentina", nationalityCode: "200",
+      vatCondition: "consumidor_final", estadoCivil: "",
+      procedencia: "", fechaIngresoArgentina: "", fechaSalidaArgentina: "",
+      direccion: "", provincia: "", localidad: "", codigoPostal: "",
+      fechaNacimiento: "", sexo: "no_especifica", cuilCuit: "",
+      vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "",
       condicionVentaPredeterminada: "contado",
     });
     setMode("search");
@@ -298,24 +353,6 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="documentType">Tipo Doc.</Label>
-                  <Select value={newGuest.documentType || "dni"} onValueChange={(v) => setNewGuest({ ...newGuest, documentType: v as any })}>
-                    <SelectTrigger data-testid="select-document-type"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="dni">DNI</SelectItem>
-                      <SelectItem value="passport">Pasaporte</SelectItem>
-                      <SelectItem value="cedula">Cédula</SelectItem>
-                      <SelectItem value="other">Otro</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="documentNumber">Número Doc.</Label>
-                  <Input id="documentNumber" value={newGuest.documentNumber} onChange={(e) => setNewGuest({ ...newGuest, documentNumber: e.target.value })} placeholder="12345678" data-testid="input-document-number" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input id="email" type="email" value={newGuest.email} onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })} placeholder="correo@email.com" data-testid="input-guest-email" />
                 </div>
@@ -326,8 +363,85 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="nationality">Nacionalidad</Label>
-                  <Input id="nationality" value={newGuest.nationality} onChange={(e) => setNewGuest({ ...newGuest, nationality: e.target.value })} placeholder="Argentina" data-testid="input-guest-nationality" />
+                  <Label htmlFor="documentType">Tipo de Documento</Label>
+                  <Select value={newGuest.documentType || "dni"} onValueChange={(v) => setNewGuest({ ...newGuest, documentType: v })}>
+                    <SelectTrigger data-testid="select-document-type"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(DOCUMENT_TYPE_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="documentNumber">Número de Documento</Label>
+                  <Input id="documentNumber" value={newGuest.documentNumber} onChange={(e) => setNewGuest({ ...newGuest, documentNumber: e.target.value })} placeholder="12345678" data-testid="input-document-number" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="cuilCuit">CUIT / CUIL</Label>
+                  <Input id="cuilCuit" value={newGuest.cuilCuit} onChange={(e) => setNewGuest({ ...newGuest, cuilCuit: e.target.value })} placeholder="20123456789" maxLength={13} data-testid="input-guest-cuilcuit" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="vatCondition">Condición ante IVA</Label>
+                  <Select value={newGuest.vatCondition || "consumidor_final"} onValueChange={(v) => setNewGuest({ ...newGuest, vatCondition: v })}>
+                    <SelectTrigger data-testid="select-vat-condition"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Estado Civil</Label>
+                <Select value={newGuest.estadoCivil || ""} onValueChange={(v) => setNewGuest({ ...newGuest, estadoCivil: v })}>
+                  <SelectTrigger data-testid="select-estado-civil"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="soltero">Soltero/a</SelectItem>
+                    <SelectItem value="casado">Casado/a</SelectItem>
+                    <SelectItem value="divorciado">Divorciado/a</SelectItem>
+                    <SelectItem value="viudo">Viudo/a</SelectItem>
+                    <SelectItem value="union_convivencial">Unión Convivencial</SelectItem>
+                    <SelectItem value="otro">Otro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Nacionalidad / País <span className="text-xs text-muted-foreground">(Nomenclador AFIP)</span></Label>
+                <NationalityCombobox
+                  value={newGuest.nationality}
+                  afipCode={newGuest.nationalityCode}
+                  onChange={(name, code) => setNewGuest({ ...newGuest, nationality: name, nationalityCode: code })}
+                />
+              </div>
+              {newGuest.nationality && newGuest.nationality !== "Argentina" && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-3">
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                    ⚠️ Datos migratorios requeridos por Ley 25.871 (Migraciones)
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Fecha Ingreso a Argentina</Label>
+                      <Input type="date" value={newGuest.fechaIngresoArgentina} onChange={(e) => setNewGuest({ ...newGuest, fechaIngresoArgentina: e.target.value })} data-testid="input-fecha-ingreso-argentina" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Fecha Salida de Argentina</Label>
+                      <Input type="date" value={newGuest.fechaSalidaArgentina} onChange={(e) => setNewGuest({ ...newGuest, fechaSalidaArgentina: e.target.value })} data-testid="input-fecha-salida-argentina" />
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="procedencia">Procedencia <span className="text-xs text-muted-foreground">(ciudad desde donde viaja)</span></Label>
+                <Input id="procedencia" value={newGuest.procedencia} onChange={(e) => setNewGuest({ ...newGuest, procedencia: e.target.value })} placeholder="Ej: Rosario (aunque viva en Córdoba)" data-testid="input-procedencia" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="fechaNacimiento">Fecha Nacimiento</Label>
+                  <Input id="fechaNacimiento" type="date" value={newGuest.fechaNacimiento} onChange={(e) => setNewGuest({ ...newGuest, fechaNacimiento: e.target.value })} data-testid="input-guest-fechanacimiento" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="sexo">Sexo</Label>
@@ -342,50 +456,42 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="fechaNacimiento">Fecha Nacimiento</Label>
-                  <Input id="fechaNacimiento" type="date" value={newGuest.fechaNacimiento} onChange={(e) => setNewGuest({ ...newGuest, fechaNacimiento: e.target.value })} data-testid="input-guest-fechanacimiento" />
+              <div className="border-t pt-3">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide">Domicilio Permanente</Label>
+                <div className="space-y-2 mt-2">
+                  <Input value={newGuest.direccion} onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-guest-direccion" />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="cuilCuit">CUIL/CUIT</Label>
-                  <Input id="cuilCuit" value={newGuest.cuilCuit} onChange={(e) => setNewGuest({ ...newGuest, cuilCuit: e.target.value })} placeholder="20-12345678-9" data-testid="input-guest-cuilcuit" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="direccion">Dirección</Label>
-                <Input id="direccion" value={newGuest.direccion} onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-guest-direccion" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="localidad">Localidad</Label>
-                  <Input id="localidad" value={newGuest.localidad} onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })} placeholder="CABA" data-testid="input-guest-localidad" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="codigoPostal">Código Postal</Label>
-                  <Input id="codigoPostal" value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1000" data-testid="input-guest-codigopostal" />
+                <div className="grid grid-cols-2 gap-4 mt-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Localidad</Label>
+                    <Input value={newGuest.localidad} onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })} placeholder="CABA" data-testid="input-guest-localidad" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Código Postal</Label>
+                    <Input value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1000" data-testid="input-guest-codigopostal" />
+                  </div>
                 </div>
               </div>
               <div className="border-t pt-3">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide">Datos del Vehículo (opcional)</Label>
                 <div className="grid grid-cols-2 gap-4 mt-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="vehiculoPatente">Patente</Label>
-                    <Input id="vehiculoPatente" value={newGuest.vehiculoPatente} onChange={(e) => setNewGuest({ ...newGuest, vehiculoPatente: e.target.value })} placeholder="ABC 123" data-testid="input-guest-vehiculo-patente" />
+                  <div className="space-y-1">
+                    <Label className="text-xs">Patente</Label>
+                    <Input value={newGuest.vehiculoPatente} onChange={(e) => setNewGuest({ ...newGuest, vehiculoPatente: e.target.value })} placeholder="ABC 123" data-testid="input-guest-vehiculo-patente" />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="vehiculoMarca">Marca</Label>
-                    <Input id="vehiculoMarca" value={newGuest.vehiculoMarca} onChange={(e) => setNewGuest({ ...newGuest, vehiculoMarca: e.target.value })} placeholder="Toyota" data-testid="input-guest-vehiculo-marca" />
+                  <div className="space-y-1">
+                    <Label className="text-xs">Marca</Label>
+                    <Input value={newGuest.vehiculoMarca} onChange={(e) => setNewGuest({ ...newGuest, vehiculoMarca: e.target.value })} placeholder="Toyota" data-testid="input-guest-vehiculo-marca" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="vehiculoModelo">Modelo</Label>
-                    <Input id="vehiculoModelo" value={newGuest.vehiculoModelo} onChange={(e) => setNewGuest({ ...newGuest, vehiculoModelo: e.target.value })} placeholder="Corolla" data-testid="input-guest-vehiculo-modelo" />
+                  <div className="space-y-1">
+                    <Label className="text-xs">Modelo</Label>
+                    <Input value={newGuest.vehiculoModelo} onChange={(e) => setNewGuest({ ...newGuest, vehiculoModelo: e.target.value })} placeholder="Corolla" data-testid="input-guest-vehiculo-modelo" />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="vehiculoColor">Color</Label>
-                    <Input id="vehiculoColor" value={newGuest.vehiculoColor} onChange={(e) => setNewGuest({ ...newGuest, vehiculoColor: e.target.value })} placeholder="Blanco" data-testid="input-guest-vehiculo-color" />
+                  <div className="space-y-1">
+                    <Label className="text-xs">Color</Label>
+                    <Input value={newGuest.vehiculoColor} onChange={(e) => setNewGuest({ ...newGuest, vehiculoColor: e.target.value })} placeholder="Blanco" data-testid="input-guest-vehiculo-color" />
                   </div>
                 </div>
               </div>
