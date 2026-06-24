@@ -206,13 +206,22 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
   });
 
   // Auto-load all active eventos catalog items when creating a new eventos presupuesto
+  // Items are sorted by category order (as configured) then by sortOrder within each category
+  const EVENTOS_CATEGORY_ORDER = ["salon", "coffee_break", "coctel", "equipamiento", "menu", "otro"];
   const [eventosItemsLoaded, setEventosItemsLoaded] = useState(false);
   useEffect(() => {
     if (!useEventosAutoLoad || eventosItemsLoaded) return;
     if (areaCatalog.length === 0) return;
     const active = areaCatalog.filter((i: any) => i.isActive);
     if (active.length === 0) return;
-    setItems(active.map((item: any) => ({
+    const sorted = [...active].sort((a: any, b: any) => {
+      const catA = EVENTOS_CATEGORY_ORDER.indexOf(a.category);
+      const catB = EVENTOS_CATEGORY_ORDER.indexOf(b.category);
+      const catDiff = (catA === -1 ? 999 : catA) - (catB === -1 ? 999 : catB);
+      if (catDiff !== 0) return catDiff;
+      return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
+    });
+    setItems(sorted.map((item: any) => ({
       sector: "evento" as Sector,
       descripcion: item.name,
       detalle: item.description || "",
