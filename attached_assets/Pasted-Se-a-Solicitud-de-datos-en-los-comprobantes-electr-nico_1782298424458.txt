@@ -1,0 +1,36 @@
+Seña
+
+Solicitud de datos en los comprobantes electrónicos
+Para cualquier tipo de comprobante se debe poder seleccionar el cliente al que se le va a hacer la factura
+para las facturas B no lo pide por lo que supongo que solo lo emite a consumidor final
+para las facturas A lo pide pero no localiza nada al realizar la búsqueda, sea por razón social o cuit
+
+1 — Factura B ahora permite identificar el cliente (opcional)
+Antes el buscador de cliente solo aparecía si activabas el checkbox "Empresa exenta". Ahora el buscador aparece siempre para Factura A y B. El encabezado aclara "(cliente opcional para Factura B)" — el comprobante se sigue emitiendo como Consumidor Final en AFIP, pero queda registrado internamente quién fue.
+2 — Búsqueda Factura A no encontraba nada (dos causas)
+El onChange del input no activaba el dropdown — solucionado agregando setBillingSearchOpen(true) al escribir.
+La búsqueda de empresa no incluía el campo name (solo razonSocial). Según cómo esté cargada la empresa en el sistema, el nombre puede estar en uno u otro campo — ahora busca en ambos.
+3 — Búsqueda ahora cubre: razón social, nombre comercial, campo name, y CUIT (con o sin guiones).
+
+Sigue igual y hay mas peros
+
+En Comprobante se puede seleccionar 4 opciones cuando deberían ser 2
+ 
+En el caso de que la reserva esté registrada a nombre de un cliente existente
+
+se debe tener en cuenta esto
+
+* Voucher (no fiscal) debería emitirse al cliente registrado en la reserva por auditoría
+* Factura B debería aparecer sólo si el cliente de la reserva tiene una inscripción exenta o consumidor final.
+* Factura A debería aparecer sólo si el cliente de la reserva tiene una inscripción responsable inscripto o , monotributo
+
+En el caso de que la reserva no esté registrada a nombre de un cliente 
+
+
+Al momento de registrar una seña al no estar registrado como cliente 
+
+* Factura B puede ser emitida a consumidor final 
+* Voucher (no fiscal) deberá ser emitido a cliente consumidor final porque a alguien debe de ser emitido pero agregando en las observaciones, o en algún lugar, todos los datos pertinentes a la reserva (nombre, mesa, sector, dia, hora, etc) para auditoria
+* Factura A no porque no es un cliente registrado
+
+* En todos los casos Factura C no debe de aparecer

@@ -339,13 +339,14 @@ type AdvanceDialogProps = {
   createAdvanceMutation: any;
   deleteAdvanceMutation: any;
   posConfigsData?: any[];
+  restaurantGuests?: any[];
 };
 
 function AdvanceDialog({
   reservationId, open, onOpenChange, reservations,
   advanceAmount, setAdvanceAmount, advancePaymentMethod, setAdvancePaymentMethod,
   advanceNotes, setAdvanceNotes, createAdvanceMutation, deleteAdvanceMutation,
-  posConfigsData = [],
+  posConfigsData = [], restaurantGuests = [],
 }: AdvanceDialogProps) {
   const { selectedPosNumero, selectedPosNombre } = useAuth();
   const reservation = reservations.find(r => r.id === reservationId);
@@ -361,16 +362,43 @@ function AdvanceDialog({
   });
 
   const [advReceiptType, setAdvReceiptType] = useState("voucher");
-  const [advFbIsExento, setAdvFbIsExento] = useState(false);
   const [advCustomerName, setAdvCustomerName] = useState("");
   const [advCustomerCuit, setAdvCustomerCuit] = useState("");
+
+  // Resolve the registered client linked to this reservation
+  const linkedClient = reservation?.clientId
+    ? restaurantGuests.find((g: any) => g.id === reservation.clientId) as any ?? null
+    : null;
+  const hasClient = !!linkedClient;
+  const clientVat: string = (linkedClient?.vatCondition as string) || "consumidor_final";
+
+  // Compute which receipt types are valid for this reservation
+  const availableReceiptTypes: { value: string; label: string }[] = [
+    { value: "voucher", label: "Voucher (no fiscal)" },
+    ...(hasClient
+      ? [
+          ...( ["consumidor_final", "exento", ""].includes(clientVat)
+            ? [{ value: "factura_b", label: "Factura B" }]
+            : []),
+          ...( ["responsable_inscripto", "monotributo"].includes(clientVat)
+            ? [{ value: "factura_a", label: "Factura A" }]
+            : []),
+        ]
+      : [{ value: "factura_b", label: "Factura B" }]
+    ),
+  ];
 
   useEffect(() => {
     if (open) {
       setAdvReceiptType("voucher");
-      setAdvFbIsExento(false);
-      setAdvCustomerName("");
-      setAdvCustomerCuit("");
+      setAdvCustomerName(
+        hasClient
+          ? linkedClient?.tipoPersona === "juridica"
+            ? (linkedClient?.firstName || "")
+            : `${linkedClient?.firstName || ""} ${linkedClient?.lastName || ""}`.trim()
+          : ""
+      );
+      setAdvCustomerCuit(hasClient ? (linkedClient?.cuilCuit || "") : "");
     }
   }, [open, reservationId]);
 
@@ -381,8 +409,8 @@ function AdvanceDialog({
     tarjeta_debito: "Débito", tarjeta_credito: "Crédito", mercadopago: "MercadoPago",
   };
 
-  const isFactura = ["factura_a", "factura_b", "factura_c"].includes(advReceiptType);
-  const needsClient = advReceiptType === "factura_a" || (advReceiptType === "factura_b" && advFbIsExento);
+  const isFactura = ["factura_a", "factura_b"].includes(advReceiptType);
+  const needsClient = isFactura && hasClient;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -536,19 +564,23 @@ function AdvanceDialog({
               <Label className="text-xs">Comprobante</Label>
               <Select value={advReceiptType} onValueChange={(v) => {
                 setAdvReceiptType(v);
-                if (v !== "factura_a" && !(v === "factura_b" && advFbIsExento)) {
+                if (!["factura_a", "factura_b"].includes(v)) {
                   setAdvCustomerName(""); setAdvCustomerCuit("");
                 }
-                if (v === "factura_b") setAdvFbIsExento(false);
               }}>
                 <SelectTrigger data-testid="select-advance-receipt-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="voucher">Voucher (no fiscal)</SelectItem>
-                  <SelectItem value="factura_b">Factura B</SelectItem>
-                  <SelectItem value="factura_a">Factura A</SelectItem>
-                  <SelectItem value="factura_c">Factura C</SelectItem>
+                  {availableReceiptTypes.map(rt => (
+                    <SelectItem key={rt.value} value={rt.value}>{rt.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              {hasClient && (
+                <p className="text-xs text-muted-foreground">
+                  Cliente: <span className="font-medium">{linkedClient?.firstName} {linkedClient?.lastName || ""}</span>
+                  {" — "}{clientVat === "responsable_inscripto" ? "Resp. Inscripto" : clientVat === "monotributo" ? "Monotributista" : clientVat === "exento" ? "Exento" : "Consumidor Final"}
+                </p>
+              )}
             </div>
 
             {isFactura && selectedPosNumero && (
@@ -558,25 +590,10 @@ function AdvanceDialog({
               </div>
             )}
 
-            {advReceiptType === "factura_b" && (
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="adv-fb-exento" checked={advFbIsExento}
-                  onChange={e => {
-                    setAdvFbIsExento(e.target.checked);
-                    if (!e.target.checked) { setAdvCustomerName(""); setAdvCustomerCuit(""); }
-                  }}
-                  className="h-4 w-4 cursor-pointer"
-                />
-                <label htmlFor="adv-fb-exento" className="text-xs cursor-pointer select-none">
-                  Empresa exenta / identificada
-                </label>
-              </div>
-            )}
-
             {needsClient && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
-                  <Label className="text-xs">Razón Social *</Label>
+                  <Label className="text-xs">Razón Social</Label>
                   <Input
                     value={advCustomerName}
                     onChange={(e) => setAdvCustomerName(e.target.value)}
@@ -616,7 +633,7 @@ function AdvanceDialog({
                   paymentMethod: advancePaymentMethod,
                   notes: advanceNotes,
                   receiptType: isFactura ? advReceiptType : undefined,
-                  vatCondition: advReceiptType === "factura_a" ? "responsable_inscripto" : advFbIsExento ? "exento" : "consumidor_final",
+                  vatCondition: advReceiptType === "factura_a" ? "responsable_inscripto" : (clientVat === "exento" ? "exento" : "consumidor_final"),
                   customerRazonSocial: advCustomerName || undefined,
                   customerCuit: advCustomerCuit || undefined,
                   puntoVenta: selectedPosNumero || undefined,
@@ -6148,6 +6165,7 @@ export default function RestaurantPage() {
         createAdvanceMutation={createAdvanceMutation}
         deleteAdvanceMutation={deleteAdvanceMutation}
         posConfigsData={posConfigsData}
+        restaurantGuests={restaurantGuests}
       />
 
       {/* Confirm Cancel Reservation AlertDialog */}
