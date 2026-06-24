@@ -108,23 +108,22 @@ function drawConditions(doc: any, condiciones: string | null, W: number, H: numb
   const contentW = W - margin * 2;
   const lines = condiciones.split("\n").filter(l => l.trim().length > 0);
   let y = startY;
-  let bodyH = 10;
-  for (const line of lines) bodyH += doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
-  const boxH = 24 + bodyH + 8;
-  if (y + boxH > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
-  doc.roundedRect(margin, y, contentW, boxH, 6).stroke(BORDER);
+  // Only require minimal space (header + 1 line) before starting — don't wait for full block to fit
+  if (y + 80 > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
+  // Draw section header bar
   doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
   doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
   doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold")
     .text("CONDICIONES Y OBSERVACIONES", margin + 14, y + 7, { characterSpacing: 1, width: contentW - 28 });
   let cy = y + 30;
   for (const line of lines) {
-    if (cy > H - 140) { doc.addPage(); drawPageBg(doc, imgPath, W, H); cy = 158; }
+    const lineH = doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
+    if (cy + lineH > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); cy = 158; }
     doc.fillColor(DARK).fontSize(8).font("Helvetica")
       .text(line, margin + 14, cy, { width: contentW - 28 });
-    cy += doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
+    cy += lineH;
   }
-  return y + boxH + 10;
+  return cy + 10;
 }
 
 function drawBankData(doc: any, W: number, H: number, margin: number, imgPath: string, y: number): number {
