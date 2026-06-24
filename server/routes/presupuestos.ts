@@ -427,8 +427,10 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
       doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
       y += 22;
       items.forEach((it: any, idx: number) => {
-        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo, fontSize: 8 });
-        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
+        doc.fontSize(8).font("Helvetica-Bold");
+        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo });
+        doc.fontSize(7).font("Helvetica");
+        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
         if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
         doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
@@ -457,8 +459,10 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
       doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
       y += 22;
       items.forEach((it: any, idx: number) => {
-        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo, fontSize: 8 });
-        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
+        doc.fontSize(8).font("Helvetica-Bold");
+        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo });
+        doc.fontSize(7).font("Helvetica");
+        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
         if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
         doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
