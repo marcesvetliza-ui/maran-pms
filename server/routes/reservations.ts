@@ -139,6 +139,11 @@ export function registerReservationsRoutes(app: Express) {
         createdAt: req.body.createdAt ? new Date(req.body.createdAt) : new Date(),
       };
 
+      // Date integrity check — checkout must be strictly after checkin
+      if (data.checkInDate && data.checkOutDate && data.checkOutDate <= data.checkInDate) {
+        return res.status(400).json({ error: "La fecha de egreso debe ser posterior a la de ingreso." });
+      }
+
       if (data.roomId && data.checkInDate && data.checkOutDate) {
         const hasConflict = await storage.checkOverbooking(
           data.roomId,
@@ -240,6 +245,12 @@ export function registerReservationsRoutes(app: Express) {
       const finalRoomId = req.body.roomId || existing.roomId;
       const finalCheckIn = req.body.checkInDate || existing.checkInDate;
       const finalCheckOut = req.body.checkOutDate || existing.checkOutDate;
+
+      // Date integrity check — checkout must be strictly after checkin
+      if (finalCheckIn && finalCheckOut && finalCheckOut <= finalCheckIn) {
+        return res.status(400).json({ error: "La fecha de egreso debe ser posterior a la de ingreso." });
+      }
+
       const roomChanged = req.body.roomId && req.body.roomId !== existing.roomId;
       const datesChanged = (req.body.checkInDate && req.body.checkInDate !== existing.checkInDate) ||
                            (req.body.checkOutDate && req.body.checkOutDate !== existing.checkOutDate);

@@ -401,10 +401,11 @@ export function ReservationFormDialog({
   });
 
   const calculateNights = (checkIn: string, checkOut: string) => {
+    if (!checkIn || !checkOut) return 0;
     const start = new Date(checkIn);
     const end = new Date(checkOut);
     const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return Math.max(1, diff);
+    return diff; // can be 0 or negative — used for validation
   };
 
   const calculateTotals = (baseRate: string, discountType: DiscountType, discountValue: string, nights: number) => {
@@ -464,18 +465,22 @@ export function ReservationFormDialog({
   };
 
   const handleDateChange = (field: "checkInDate" | "checkOutDate", value: string) => {
-    const newData = { ...formData, [field]: value };
-    const nights = calculateNights(
-      field === "checkInDate" ? value : formData.checkInDate || today,
-      field === "checkOutDate" ? value : formData.checkOutDate || tomorrow
-    );
+    let newCheckIn = field === "checkInDate" ? value : formData.checkInDate || today;
+    let newCheckOut = field === "checkOutDate" ? value : formData.checkOutDate || tomorrow;
+    // Auto-advance checkout if checkin moves past it
+    if (field === "checkInDate" && newCheckOut && value >= newCheckOut) {
+      const next = new Date(value + "T12:00:00");
+      next.setDate(next.getDate() + 1);
+      newCheckOut = next.toISOString().split("T")[0];
+    }
+    const nights = calculateNights(newCheckIn, newCheckOut);
     const totals = calculateTotals(
-      formData.baseRatePerNight || "0", 
-      formData.discountType as DiscountType, 
-      formData.discountValue || "0", 
-      nights
+      formData.baseRatePerNight || "0",
+      formData.discountType as DiscountType,
+      formData.discountValue || "0",
+      Math.max(0, nights)
     );
-    setFormData({ ...newData, nights, ...totals });
+    setFormData({ ...formData, [field === "checkInDate" ? "checkInDate" : "checkOutDate"]: value, checkInDate: newCheckIn, checkOutDate: newCheckOut, nights, ...totals });
   };
 
   const handleDiscountChange = (discountType?: DiscountType, discountValue?: string) => {
@@ -577,6 +582,13 @@ export function ReservationFormDialog({
     const finalRoomId = formData.roomId || reservation?.roomId || "";
     if (!finalRoomId) {
       toast({ title: "Habitación requerida", description: "Seleccioná un tipo y habitación antes de guardar.", variant: "destructive" });
+      return;
+    }
+    // Date validation: checkout must be strictly after checkin
+    const ci = formData.checkInDate || "";
+    const co = formData.checkOutDate || "";
+    if (!ci || !co || co <= ci) {
+      toast({ title: "Fechas inválidas", description: "La fecha de Check-out debe ser posterior al Check-in.", variant: "destructive" });
       return;
     }
     mutation.mutate({
@@ -983,30 +995,41 @@ export function ReservationFormDialog({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="checkIn">Fecha Check-in</Label>
-                <Input
-                  id="checkIn"
-                  type="date"
-                  value={formData.checkInDate}
-                  onChange={(e) => handleDateChange("checkInDate", e.target.value)}
-                  required
-                  data-testid="input-check-in"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="checkOut">Fecha Check-out</Label>
-                <Input
-                  id="checkOut"
-                  type="date"
-                  value={formData.checkOutDate}
-                  onChange={(e) => handleDateChange("checkOutDate", e.target.value)}
-                  required
-                  data-testid="input-check-out"
-                />
-              </div>
-            </div>
+            {(() => {
+              const datesInvalid = !!formData.checkInDate && !!formData.checkOutDate && formData.checkOutDate <= formData.checkInDate;
+              return (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="checkIn">Fecha Check-in</Label>
+                    <Input
+                      id="checkIn"
+                      type="date"
+                      value={formData.checkInDate}
+                      onChange={(e) => handleDateChange("checkInDate", e.target.value)}
+                      required
+                      className={datesInvalid ? "border-destructive" : ""}
+                      data-testid="input-check-in"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="checkOut">Fecha Check-out</Label>
+                    <Input
+                      id="checkOut"
+                      type="date"
+                      value={formData.checkOutDate}
+                      min={formData.checkInDate ? (() => { const d = new Date(formData.checkInDate + "T12:00:00"); d.setDate(d.getDate()+1); return d.toISOString().split("T")[0]; })() : undefined}
+                      onChange={(e) => handleDateChange("checkOutDate", e.target.value)}
+                      required
+                      className={datesInvalid ? "border-destructive" : ""}
+                      data-testid="input-check-out"
+                    />
+                    {datesInvalid && (
+                      <p className="text-xs text-destructive">⚠ El egreso debe ser posterior al ingreso</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2">
