@@ -672,22 +672,29 @@ export default function CheckOutPage() {
                       </div>
                       <div>
                         <Label>Método de pago</Label>
-                        <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
-                          <SelectTrigger data-testid="select-payment-method">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(paymentMethodLabels).map(([value, label]) => (
-                              <SelectItem key={value} value={value}>{label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {paymentReceiptType === "cierre_habitacion" ? (
+                          <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-input bg-muted text-sm text-muted-foreground" data-testid="select-payment-method-fixed">
+                            <span className="font-medium text-foreground">Efectivo</span>
+                            <span className="text-xs">(requerido para cierre de habitación)</span>
+                          </div>
+                        ) : (
+                          <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
+                            <SelectTrigger data-testid="select-payment-method">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(paymentMethodLabels).filter(([v]) => v !== "efectivo").map(([value, label]) => (
+                                <SelectItem key={value} value={value}>{label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label>Tipo de comprobante</Label>
-                        <Select value={paymentReceiptType} onValueChange={setPaymentReceiptType}>
+                        <Select value={paymentReceiptType} onValueChange={(v) => { setPaymentReceiptType(v); if (v === "cierre_habitacion") setPaymentMethod("efectivo"); else if (paymentMethod === "efectivo") setPaymentMethod("tarjeta_debito"); }}>
                           <SelectTrigger data-testid="select-receipt-type">
                             <SelectValue />
                           </SelectTrigger>
