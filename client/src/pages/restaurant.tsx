@@ -2275,11 +2275,11 @@ export default function RestaurantPage() {
                             const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
                             const todayTableReservations = reservations.filter(
                               (r) => r.tableId === table.id && r.reservationDate === todayISO &&
-                                ["pending", "confirmed", "check_in"].includes(r.status)
+                                ["pending", "confirmed", "check_in", "seated"].includes(r.status)
                             ).sort((a, b) => a.reservationTime.localeCompare(b.reservationTime));
                             const hasReservationToday = todayTableReservations.length > 0;
                             const nextReservation = todayTableReservations[0];
-                            const isCheckedIn = todayTableReservations.some(r => r.status === "check_in");
+                            const isCheckedIn = todayTableReservations.some(r => r.status === "check_in" || r.status === "seated");
                             const effectiveStatus = table.status === "available" && hasReservationToday
                               ? (isCheckedIn ? "occupied" : "reserved")
                               : table.status;
@@ -2323,7 +2323,8 @@ export default function RestaurantPage() {
                                   if (!tableOrder) return null;
                                   const tableSplits = (tableOrder as any)?.splits || [];
                                   const paidSplits = tableSplits.filter((s: any) => s.isPaid === "true").length;
-                                  const checkedInRes = todayTableReservations.find(r => r.status === "check_in")
+                                  const checkedInRes = todayTableReservations.find(r => r.status === "seated")
+                                    || todayTableReservations.find(r => r.status === "check_in")
                                     || todayTableReservations.find(r => r.status === "confirmed");
                                   return (
                                     <>
@@ -2500,7 +2501,7 @@ export default function RestaurantPage() {
                           setCloseRoomId("");
                           setRoomSearchFilter("");
                           const _todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-                          const _tableRes = reservations.find(r => r.tableId === order.tableId && (r.status === "check_in" || r.status === "confirmed") && r.reservationDate === _todayISO);
+                          const _tableRes = reservations.find(r => r.tableId === order.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISO);
                           const _resClient = (_tableRes as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableRes as any).clientId) : null;
                           const _needsFactura = _resClient && _resClient.vatCondition && !["consumidor_final", ""].includes(_resClient.vatCondition || "");
                           setCloseReceiptType(_needsFactura ? "factura_a" : "cierre_mesa");
@@ -4297,7 +4298,7 @@ export default function RestaurantPage() {
                   setCloseRoomId("");
                   setRoomSearchFilter("");
                   const _todayISOc = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-                  const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && (r.status === "check_in" || r.status === "confirmed") && r.reservationDate === _todayISOc) : null;
+                  const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISOc) : null;
                   const _resClientc = (_tableResc as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableResc as any).clientId) : null;
                   const _needsFacturac = _resClientc && _resClientc.vatCondition && !["consumidor_final", ""].includes(_resClientc.vatCondition || "");
                   setCloseReceiptType(_needsFacturac ? "factura_a" : "cierre_mesa");
