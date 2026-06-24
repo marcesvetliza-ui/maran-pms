@@ -427,14 +427,16 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
       doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
       y += 22;
       items.forEach((it: any, idx: number) => {
+        const rowBg = idx % 2 === 0 ? "#fff" : "#fafafa";
         doc.fontSize(8).font("Helvetica-Bold");
         const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo });
         doc.fontSize(7).font("Helvetica");
         const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
         if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
-        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
-        const cy = y + 6;
+        const rowY = y;
+        doc.rect(M, rowY, contentW, rowH).fill(rowBg).stroke(BORDER);
+        const cy = rowY + 6;
         const dto = parseFloat(it.descuento ?? "0");
         const tarifaConDto = parseFloat(it.precioUnitario) * (1 - dto / 100);
         doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
@@ -444,7 +446,15 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
         if (dto > 0) doc.fillColor("#1a6c3a").font("Helvetica-Bold");
         doc.text(`$ ${formatMoney(tarifaConDto.toFixed(2))}`, cols.tarifa_dto, cy, { width: Ws.tarifa_dto, align: "right" });
         doc.fillColor(DARK).font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
-        y += rowH;
+        // Correct row height using actual doc.y position (same-page overestimate fix)
+        if (doc.y > rowY && doc.y < rowY + rowH - 8) {
+          const actualEnd = doc.y + 8;
+          doc.rect(M - 1, actualEnd, contentW + 2, rowY + rowH - actualEnd + 2).fill(rowBg);
+          doc.rect(M, rowY, contentW, actualEnd - rowY).stroke(BORDER);
+          y = actualEnd;
+        } else {
+          y = rowY + rowH;
+        }
       });
     } else {
       // 4-col layout: desc | cantidad | precio unit | subtotal
@@ -459,20 +469,30 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
       doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
       y += 22;
       items.forEach((it: any, idx: number) => {
+        const rowBg = idx % 2 === 0 ? "#fff" : "#fafafa";
         doc.fontSize(8).font("Helvetica-Bold");
         const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo });
         doc.fontSize(7).font("Helvetica");
         const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
         if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
-        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
-        const cy = y + 6;
+        const rowY = y;
+        doc.rect(M, rowY, contentW, rowH).fill(rowBg).stroke(BORDER);
+        const cy = rowY + 6;
         doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
         if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
         doc.fillColor(DARK).fontSize(8).font("Helvetica").text(formatNum(it.cantidad), cols.noches, cy, { width: Ws.noches, align: "right" });
         doc.text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
         doc.font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
-        y += rowH;
+        // Correct row height using actual doc.y position (same-page overestimate fix)
+        if (doc.y > rowY && doc.y < rowY + rowH - 8) {
+          const actualEnd = doc.y + 8;
+          doc.rect(M - 1, actualEnd, contentW + 2, rowY + rowH - actualEnd + 2).fill(rowBg);
+          doc.rect(M, rowY, contentW, actualEnd - rowY).stroke(BORDER);
+          y = actualEnd;
+        } else {
+          y = rowY + rowH;
+        }
       });
     }
     y += 8;
