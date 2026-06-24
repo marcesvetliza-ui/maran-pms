@@ -23,7 +23,7 @@ export function registerHousekeepingRoutes(app: Express) {
     try {
       const allUsers = await storage.getSystemUsers();
       const staff = allUsers
-        .filter(u => ["housekeeping", "gobernanta", "responsable_area"].includes(u.role) && u.isActive === "true")
+        .filter(u => ["housekeeping"].includes(u.role) && u.isActive === "true")
         .map(u => ({ id: u.id, fullName: u.fullName, role: u.role, username: u.username }));
       res.json(staff);
     } catch (error) {

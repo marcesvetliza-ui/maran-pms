@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from "../auth";
 import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 
-const FINANCE_ROLES = ["admin", "manager", "administracion", "responsable_area"] as [string, ...string[]];
+const FINANCE_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
 
 const TOTAL_ROOMS = 66;
 

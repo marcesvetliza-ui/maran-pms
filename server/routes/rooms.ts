@@ -3,8 +3,8 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
 
-const ROOMS_WRITE_ROLES = ["admin", "manager", "responsable_area"] as [string, ...string[]];
-const RATES_WRITE_ROLES = ["admin", "manager", "responsable_area"] as [string, ...string[]];
+const ROOMS_WRITE_ROLES = ["admin", "manager", "jefe_recepcion", "resp_administracion"] as [string, ...string[]];
+const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
 
 export function registerRoomsRoutes(app: Express) {
   // Room Types

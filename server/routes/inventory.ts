@@ -4,7 +4,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth";
 
-const INVENTORY_WRITE_ROLES = ["admin", "manager", "restaurant", "resp_deposito", "responsable_area"] as [string, ...string[]];
+const INVENTORY_WRITE_ROLES = ["admin", "manager", "restaurant", "resp_deposito", "resp_administracion"] as [string, ...string[]];
 
 export function registerInventoryRoutes(app: Express) {
   // Item Categories

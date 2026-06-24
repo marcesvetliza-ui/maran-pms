@@ -72,12 +72,32 @@ import { Badge } from "@/components/ui/badge";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { SystemNotification } from "@shared/schema";
 
-// roles: qué roles pueden ver el ítem. Sin la propiedad = todos.
-// admin y manager siempre ven todo.
-const ALL_ROLES = ["admin", "manager", "reception", "housekeeping", "maintenance", "restaurant", "spa", "events", "gobernanta", "responsable_area"];
-const HOTEL_OPS  = ["admin", "manager", "reception"];
-const MGMT_ONLY  = ["admin", "manager"];
-const HK_SUPERVISORS = ["admin", "manager", "gobernanta", "responsable_area"];
+// ─── Permisos por rol (según matriz aprobada) ────────────────────────────────
+// Roles disponibles: admin, manager, spa, maintenance, housekeeping, restaurant,
+//   events, reception, resp_deposito, resp_administracion, jefe_recepcion, comercial
+
+const DASHBOARD_ROLES   = ["admin","manager","spa","housekeeping","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
+const PLANNING_ROLES    = ["admin","manager","housekeeping","restaurant","events","reception","resp_administracion","jefe_recepcion","comercial"];
+const CORE_RECEPCION    = ["admin","reception","jefe_recepcion","comercial"];
+const CHECKINOUT_ROLES  = ["admin","manager","housekeeping","events","reception","jefe_recepcion","comercial"];
+const HABITACIONES_ROLES= ["admin","manager","housekeeping","reception","jefe_recepcion","comercial"];
+const TARIFAS_ROLES     = ["admin","manager","reception","resp_administracion","jefe_recepcion","comercial"];
+const HUESPEDES_ROLES   = ["admin","housekeeping","events","reception","jefe_recepcion","comercial"];
+const PAQUETES_ROLES    = ["admin","spa","reception","jefe_recepcion","comercial"];
+const PRESUPUESTOS_ROLES= ["admin","manager","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
+const RESTAURANT_ROLES  = ["admin","manager","restaurant","events","reception","resp_deposito","jefe_recepcion","comercial"];
+const RECETAS_ROLES     = ["admin","manager","events","resp_deposito"];
+const SPA_ROLES         = ["admin","manager","spa","reception","jefe_recepcion","comercial"];
+const SPA_CLIENTS_ROLES = ["admin","manager","spa"];
+const EVENTOS_ROLES     = ["admin","manager","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
+const HK_MODULE_ROLES   = ["admin","manager","housekeeping","reception","jefe_recepcion","comercial"];
+const MANT_MODULE_ROLES = ["admin","manager","housekeeping","reception","jefe_recepcion","comercial"];
+const INVENTARIO_ROLES  = ["admin","manager","spa","resp_deposito","resp_administracion"];
+const HOSPITALIDAD_ROLES= ["admin","manager","spa","housekeeping","restaurant","events","reception","jefe_recepcion","comercial"];
+const RESENAS_ROLES     = ["admin","manager","reception","jefe_recepcion","comercial"];
+const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","jefe_recepcion"];
+const CAJA_ROLES        = ["admin","manager","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
+const GERENCIA_ROLES    = ["admin","manager","resp_administracion","jefe_recepcion","comercial"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MÓDULOS DEL SISTEMA — cada sección corresponde a un módulo vendible.
@@ -85,90 +105,83 @@ const HK_SUPERVISORS = ["admin", "manager", "gobernanta", "responsable_area"];
 // ─────────────────────────────────────────────────────────────────────────────
 const menuSections = [
   // ── MÓDULO 1: PMS Core ────────────────────────────────────────────────────
-  // Núcleo no negociable. Reservas, front desk, habitaciones, huéspedes, tarifas.
   {
     titulo: "PMS — Recepción",
     items: [
-      { label: "Dashboard",      icon: LayoutDashboard, href: "/",               roles: ALL_ROLES },
-      { label: "Planning",       icon: CalendarDays,    href: "/planning",       roles: [...HOTEL_OPS, "events"] },
-      { label: "Reservas",       icon: BookOpen,        href: "/reservations",   roles: HOTEL_OPS },
-      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation",roles: HOTEL_OPS },
-      { label: "Check in",       icon: LogIn,           href: "/check-in",       roles: HOTEL_OPS },
-      { label: "Check out",      icon: LogOut,          href: "/check-out",      roles: HOTEL_OPS },
-      { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",          roles: [...HOTEL_OPS, "housekeeping", "maintenance", "gobernanta", "responsable_area"] },
-      { label: "Tarifas",        icon: Tag,             href: "/rate-plans",     roles: MGMT_ONLY },
-      { label: "Huéspedes",      icon: User,            href: "/guests",         roles: HOTEL_OPS },
+      { label: "Dashboard",      icon: LayoutDashboard, href: "/",                roles: DASHBOARD_ROLES },
+      { label: "Planning",       icon: CalendarDays,    href: "/planning",        roles: PLANNING_ROLES },
+      { label: "Reservas",       icon: BookOpen,        href: "/reservations",    roles: CORE_RECEPCION },
+      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation", roles: CORE_RECEPCION },
+      { label: "Check in",       icon: LogIn,           href: "/check-in",        roles: CHECKINOUT_ROLES },
+      { label: "Check out",      icon: LogOut,          href: "/check-out",       roles: CHECKINOUT_ROLES },
+      { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",           roles: HABITACIONES_ROLES },
+      { label: "Tarifas",        icon: Tag,             href: "/rate-plans",      roles: TARIFAS_ROLES },
+      { label: "Huéspedes",      icon: User,            href: "/guests",          roles: HUESPEDES_ROLES },
     ],
   },
 
   // ── MÓDULO 2: Comercial ───────────────────────────────────────────────────
-  // Distribución, ventas y relaciones comerciales.
   {
     titulo: "Comercial",
     items: [
-      { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", roles: MGMT_ONLY },
-      { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         roles: MGMT_ONLY },
-      { label: "Grupos",            icon: Users,             href: "/groups",               roles: [...HOTEL_OPS, "events"] },
-      { label: "Empresas",          icon: Building2,         href: "/companies",            roles: HOTEL_OPS },
-      { label: "Agencias",          icon: Briefcase,         href: "/agencies",             roles: MGMT_ONLY },
-      { label: "Paquetes",          icon: Package,           href: "/packages",             roles: HOTEL_OPS },
-      { label: "Presupuestos",      icon: ClipboardList,     href: "/presupuestos",         roles: HOTEL_OPS },
+      { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", roles: CORE_RECEPCION },
+      { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         roles: CORE_RECEPCION },
+      { label: "Grupos",            icon: Users,             href: "/groups",               roles: CORE_RECEPCION },
+      { label: "Empresas",          icon: Building2,         href: "/companies",            roles: CORE_RECEPCION },
+      { label: "Agencias",          icon: Briefcase,         href: "/agencies",             roles: CORE_RECEPCION },
+      { label: "Paquetes",          icon: Package,           href: "/packages",             roles: PAQUETES_ROLES },
+      { label: "Presupuestos",      icon: ClipboardList,     href: "/presupuestos",         roles: PRESUPUESTOS_ROLES },
     ],
   },
 
   // ── MÓDULO 3: Servicios ───────────────────────────────────────────────────
-  // Puntos de venta y servicios al huésped: Restaurant, SPA y Eventos.
   {
     titulo: "Servicios",
     items: [
-      { label: "Restaurant",         icon: UtensilsCrossed, href: "/restaurant",        roles: [...HOTEL_OPS, "restaurant"] },
-      { label: "Recetas y Costos",  icon: ChefHat,         href: "/restaurant/recetas", roles: MGMT_ONLY },
-      { label: "Spa",               icon: Sparkles,        href: "/spa",               roles: [...HOTEL_OPS, "spa"] },
-      { label: "Clientes Spa",      icon: Heart,           href: "/spa-clients",        roles: [...HOTEL_OPS, "spa"] },
-      { label: "Eventos",           icon: CalendarCheck,   href: "/events",             roles: [...HOTEL_OPS, "events"] },
+      { label: "Restaurant",       icon: UtensilsCrossed, href: "/restaurant",         roles: RESTAURANT_ROLES },
+      { label: "Recetas y Costos", icon: ChefHat,         href: "/restaurant/recetas", roles: RECETAS_ROLES },
+      { label: "Spa",              icon: Sparkles,        href: "/spa",                roles: SPA_ROLES },
+      { label: "Clientes Spa",     icon: Heart,           href: "/spa-clients",        roles: SPA_CLIENTS_ROLES },
+      { label: "Eventos",          icon: CalendarCheck,   href: "/events",             roles: EVENTOS_ROLES },
     ],
   },
 
   // ── MÓDULO 4: Operaciones ─────────────────────────────────────────────────
-  // Back-of-house: limpieza, mantenimiento y stock.
   {
     titulo: "Operaciones",
     items: [
-      { label: "Housekeeping",  icon: Brush,        href: "/housekeeping", roles: [...HOTEL_OPS, "housekeeping", "gobernanta", "responsable_area"] },
-      { label: "Mantenimiento", icon: Wrench,        href: "/maintenance",  roles: [...HOTEL_OPS, "maintenance"] },
-      { label: "Inventario",    icon: Package,       href: "/inventory",    roles: [...MGMT_ONLY, "maintenance"] },
+      { label: "Housekeeping",  icon: Brush,   href: "/housekeeping", roles: HK_MODULE_ROLES },
+      { label: "Mantenimiento", icon: Wrench,  href: "/maintenance",  roles: MANT_MODULE_ROLES },
+      { label: "Inventario",    icon: Package, href: "/inventory",    roles: INVENTARIO_ROLES },
     ],
   },
 
   // ── MÓDULO 5: Experiencia al Huésped ─────────────────────────────────────
-  // Comunicación, fidelización y reputación.
   {
     titulo: "Experiencia al Huésped",
     items: [
-      { label: "Hospitalidad",           icon: HandHeart,     href: "/hospitality",  roles: [...HOTEL_OPS, "housekeeping"] },
-      { label: "MARA Chatbot",           icon: Bot,           href: "/chatbot",       roles: HOTEL_OPS },
-      { label: "Reseñas",                icon: Star,          href: "/reviews",       roles: MGMT_ONLY },
+      { label: "Hospitalidad", icon: HandHeart, href: "/hospitality", roles: HOSPITALIDAD_ROLES },
+      { label: "MARA Chatbot", icon: Bot,       href: "/chatbot",     roles: CORE_RECEPCION },
+      { label: "Reseñas",      icon: Star,      href: "/reviews",     roles: RESENAS_ROLES },
     ],
   },
 
   // ── MÓDULO 6: Administración ──────────────────────────────────────────────
-  // Back-office financiero: facturación, contabilidad, caja.
   {
     titulo: "Administración",
     items: [
-      { label: "Administración", icon: Calculator, href: "/admin",         roles: MGMT_ONLY },
-      { label: "Caja",           icon: Landmark,   href: "/cash-register", roles: [...HOTEL_OPS, "restaurant", "spa", "events"] },
+      { label: "Administración", icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
+      { label: "Caja",           icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
     ],
   },
 
   // ── MÓDULO 7: Gerencia & Revenue ─────────────────────────────────────────
-  // KPIs ejecutivos, reportes y análisis de revenue.
   {
     titulo: "Gerencia & Revenue",
     items: [
-      { label: "Operaciones", icon: Activity,   href: "/operaciones", roles: [...HOTEL_OPS, "events"] },
-      { label: "Ejecutivo",   icon: TrendingUp, href: "/executive",   roles: MGMT_ONLY },
-      { label: "Reportes",    icon: BarChart2,  href: "/reports",     roles: MGMT_ONLY },
+      { label: "Operaciones", icon: Activity,   href: "/operaciones", roles: GERENCIA_ROLES },
+      { label: "Ejecutivo",   icon: TrendingUp, href: "/executive",   roles: GERENCIA_ROLES },
+      { label: "Reportes",    icon: BarChart2,  href: "/reports",     roles: GERENCIA_ROLES },
     ],
   },
 
@@ -176,14 +189,14 @@ const menuSections = [
   {
     titulo: "Configuración",
     items: [
-      { label: "Configuración",          icon: Settings, href: "/administration", roles: ["admin"] },
-      { label: "Correo & Backup",        icon: Mail,     href: "/email-config",   roles: ["admin"] },
-      { label: "Países (AFIP)",          icon: Globe,    href: "/admin/countries", roles: ["admin"] },
-      { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", roles: ["admin", "manager"] },
-      { label: "Puntos de Venta",        icon: Store,    href: "/pos-configs",     roles: ["admin"] },
-      { label: "Seguridad de claves",    icon: KeyRound, href: "/seguridad",      roles: ["admin"] },
-      { label: "Administración sistema", icon: Shield,   href: "/administration", roles: ["admin"], adminOnly: true },
-      { label: "Código fuente",          icon: Code2,    href: "/source-code",    roles: ["admin"], adminOnly: true, devOnly: true },
+      { label: "Configuración",          icon: Settings,      href: "/administration",      roles: ["admin"] },
+      { label: "Correo & Backup",        icon: Mail,          href: "/email-config",        roles: ["admin"] },
+      { label: "Países (AFIP)",          icon: Globe,         href: "/admin/countries",     roles: ["admin"] },
+      { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", roles: ["admin"] },
+      { label: "Puntos de Venta",        icon: Store,         href: "/pos-configs",         roles: ["admin","resp_administracion"] },
+      { label: "Seguridad de claves",    icon: KeyRound,      href: "/seguridad",           roles: ["admin"] },
+      { label: "Administración sistema", icon: Shield,        href: "/administration",      roles: ["admin"], adminOnly: true },
+      { label: "Código fuente",          icon: Code2,         href: "/source-code",         roles: ["admin"], adminOnly: true, devOnly: true },
     ],
   },
 ];
