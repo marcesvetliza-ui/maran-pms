@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { PROVINCIAS, getCiudades } from "@/lib/argentina-geo";
 
@@ -49,37 +48,42 @@ export function ProvinciaCiudadSelect({
 
   const selectValue = ciudadEsConocida ? localidad : (localidad === "" && customCiudad === "" ? "" : "__otra__");
 
+  const selectClass =
+    "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="grid gap-2">
         <Label>Provincia</Label>
-        <Select modal={false} value={provincia || ""} onValueChange={handleProvinciaChange}>
-          <SelectTrigger data-testid={testIdProvincia}>
-            <SelectValue placeholder="Seleccionar..." />
-          </SelectTrigger>
-          <SelectContent className="max-h-60">
-            {PROVINCIAS.map((p) => (
-              <SelectItem key={p} value={p}>{p}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <select
+          className={selectClass}
+          value={provincia || ""}
+          onChange={(e) => handleProvinciaChange(e.target.value)}
+          data-testid={testIdProvincia}
+        >
+          <option value="">Seleccionar...</option>
+          {PROVINCIAS.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
       </div>
 
       <div className="grid gap-2">
         <Label>Ciudad / Localidad</Label>
         {provincia ? (
           <>
-            <Select modal={false} value={selectValue} onValueChange={handleCiudadSelectChange}>
-              <SelectTrigger data-testid={testIdLocalidad}>
-                <SelectValue placeholder="Seleccionar..." />
-              </SelectTrigger>
-              <SelectContent className="max-h-60">
-                {ciudades.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-                <SelectItem value="__otra__">Otra localidad...</SelectItem>
-              </SelectContent>
-            </Select>
+            <select
+              className={selectClass}
+              value={selectValue}
+              onChange={(e) => handleCiudadSelectChange(e.target.value)}
+              data-testid={testIdLocalidad}
+            >
+              <option value="">Seleccionar...</option>
+              {ciudades.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+              <option value="__otra__">Otra localidad...</option>
+            </select>
             {selectValue === "__otra__" && (
               <Input
                 placeholder="Escribir localidad"
