@@ -108,22 +108,23 @@ function drawConditions(doc: any, condiciones: string | null, W: number, H: numb
   const contentW = W - margin * 2;
   const lines = condiciones.split("\n").filter(l => l.trim().length > 0);
   let y = startY;
-  // Only require minimal space (header + 1 line) before starting — don't wait for full block to fit
-  if (y + 80 > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
-  // Draw section header bar
+  let bodyH = 10;
+  for (const line of lines) bodyH += doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
+  const boxH = 24 + bodyH + 8;
+  if (y + boxH > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = 158; }
+  doc.roundedRect(margin, y, contentW, boxH, 6).stroke(BORDER);
   doc.roundedRect(margin, y, contentW, 22, 6).fill(NAVY);
   doc.rect(margin, y + 12, contentW, 10).fill(NAVY);
   doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold")
     .text("CONDICIONES Y OBSERVACIONES", margin + 14, y + 7, { characterSpacing: 1, width: contentW - 28 });
   let cy = y + 30;
   for (const line of lines) {
-    const lineH = doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
-    if (cy + lineH > H - 125) { doc.addPage(); drawPageBg(doc, imgPath, W, H); cy = 158; }
+    if (cy > H - 140) { doc.addPage(); drawPageBg(doc, imgPath, W, H); cy = 158; }
     doc.fillColor(DARK).fontSize(8).font("Helvetica")
       .text(line, margin + 14, cy, { width: contentW - 28 });
-    cy += lineH;
+    cy += doc.heightOfString(line, { width: contentW - 28, fontSize: 8 }) + 5;
   }
-  return cy + 10;
+  return y + boxH + 10;
 }
 
 function drawBankData(doc: any, W: number, H: number, margin: number, imgPath: string, y: number): number {
@@ -460,27 +461,14 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
         const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
         if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
-        const rowBg = idx % 2 === 0 ? "#fff" : "#fafafa";
-        doc.rect(M, y, contentW, rowH).fill(rowBg).stroke(BORDER);
+        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
         const cy = y + 6;
-        // Render description — use doc.y to track actual rendered position
         doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
-        if (it.detalle) {
-          const detailStartY = doc.y + 3;
-          doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, detailStartY, { width: Ws.tipo });
-        }
-        // Capture actual bottom from PDFKit's cursor BEFORE rendering numeric columns (which reset doc.y)
-        const actualRowEnd = doc.y + 8;
-        // If pre-calculated rowH overestimated, erase the excess and redraw border at actual bottom
-        if (actualRowEnd < y + rowH - 2) {
-          doc.rect(M + 1, actualRowEnd, contentW - 2, y + rowH - actualRowEnd - 1).fill(rowBg);
-          doc.moveTo(M, actualRowEnd).lineTo(M + contentW, actualRowEnd).strokeColor(BORDER).lineWidth(0.5).stroke();
-        }
-        // Numeric columns — rendered at cy (same top as description)
+        if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
         doc.fillColor(DARK).fontSize(8).font("Helvetica").text(formatNum(it.cantidad), cols.noches, cy, { width: Ws.noches, align: "right" });
         doc.text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
         doc.font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
-        y = Math.min(y + rowH, actualRowEnd);
+        y += rowH;
       });
     }
     y += 8;
@@ -1012,26 +1000,16 @@ export function registerPresupuestosRoutes(app: Express) {
       res.setHeader("Content-Disposition", `inline; filename="${pres.numero}.pdf"`);
       doc.pipe(res);
 
-      if (area === "recepcion") {
+      if (area === "recepcion" || area === "grupos") {
+        // Portada full-bleed antes del contenido (recepcion y grupos)
         const recepCover = path.join(process.cwd(), "server", "assets", "recep-cover.jpg");
+        console.log("[PDF] recep-cover path:", recepCover, "exists:", fs.existsSync(recepCover));
         if (fs.existsSync(recepCover)) {
           doc.image(recepCover, 0, 0, { width: 595, height: 842 });
           doc.addPage();
         }
         generateHockeyPdf(doc, pres, items, conditions);
-      } else if (area === "grupos") {
-        const gruposCover = path.join(process.cwd(), "server", "assets", "grupos-cover.jpg");
-        if (fs.existsSync(gruposCover)) {
-          doc.image(gruposCover, 0, 0, { width: 595, height: 842 });
-          doc.addPage();
-        }
-        generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
-        const eventosCover = path.join(process.cwd(), "server", "assets", "eventos-cover.jpg");
-        if (fs.existsSync(eventosCover)) {
-          doc.image(eventosCover, 0, 0, { width: 595, height: 842 });
-          doc.addPage();
-        }
         generateEventosPdf(doc, pres, items, conditions);
       } else if (area === "spa") {
         generateSpaPdf(doc, pres, items, conditions);
