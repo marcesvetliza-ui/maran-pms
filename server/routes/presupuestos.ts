@@ -461,14 +461,27 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
         const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo, fontSize: 7 }) + 4 : 0;
         const rowH = Math.max(24, descH + detH + 14);
         if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
-        doc.rect(M, y, contentW, rowH).fill(idx % 2 === 0 ? "#fff" : "#fafafa").stroke(BORDER);
+        const rowBg = idx % 2 === 0 ? "#fff" : "#fafafa";
+        doc.rect(M, y, contentW, rowH).fill(rowBg).stroke(BORDER);
         const cy = y + 6;
+        // Render description — use doc.y to track actual rendered position
         doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
-        if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
+        if (it.detalle) {
+          const detailStartY = doc.y + 3;
+          doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, detailStartY, { width: Ws.tipo });
+        }
+        // Capture actual bottom from PDFKit's cursor BEFORE rendering numeric columns (which reset doc.y)
+        const actualRowEnd = doc.y + 8;
+        // If pre-calculated rowH overestimated, erase the excess and redraw border at actual bottom
+        if (actualRowEnd < y + rowH - 2) {
+          doc.rect(M + 1, actualRowEnd, contentW - 2, y + rowH - actualRowEnd - 1).fill(rowBg);
+          doc.moveTo(M, actualRowEnd).lineTo(M + contentW, actualRowEnd).strokeColor(BORDER).lineWidth(0.5).stroke();
+        }
+        // Numeric columns — rendered at cy (same top as description)
         doc.fillColor(DARK).fontSize(8).font("Helvetica").text(formatNum(it.cantidad), cols.noches, cy, { width: Ws.noches, align: "right" });
         doc.text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
         doc.font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
-        y += rowH;
+        y = Math.min(y + rowH, actualRowEnd);
       });
     }
     y += 8;
