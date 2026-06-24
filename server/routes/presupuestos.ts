@@ -87,19 +87,8 @@ const LIGHT_BG = "#f8f9fa";
 const BORDER = "#e0e0e0";
 
 function drawPageBg(doc: any, imgPath: string, W: number, H: number) {
-  // Always fill the whole page white first
-  doc.rect(0, 0, W, H).fill("white");
   if (fs.existsSync(imgPath)) {
-    // Draw background image clipped to header area only (top 148px)
-    doc.save();
-    doc.rect(0, 0, W, 148).clip();
     doc.image(imgPath, 0, 0, { width: W, height: H });
-    doc.restore();
-    // Draw background image clipped to footer area only (bottom 80px)
-    doc.save();
-    doc.rect(0, H - 80, W, 80).clip();
-    doc.image(imgPath, 0, 0, { width: W, height: H });
-    doc.restore();
   } else {
     doc.rect(0, 0, W, 148).fill(NAVY);
     doc.rect(0, 148, W, 4).fill(ORANGE);
