@@ -1010,6 +1010,11 @@ export function registerPresupuestosRoutes(app: Express) {
         }
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
+        const eventosCover = path.join(process.cwd(), "server", "assets", "eventos-cover.jpg");
+        if (fs.existsSync(eventosCover)) {
+          doc.image(eventosCover, 0, 0, { width: 595, height: 842 });
+          doc.addPage();
+        }
         generateEventosPdf(doc, pres, items, conditions);
       } else if (area === "spa") {
         generateSpaPdf(doc, pres, items, conditions);
