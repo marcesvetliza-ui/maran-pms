@@ -683,7 +683,7 @@ export default function CheckOutPage() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {Object.entries(paymentMethodLabels).filter(([v]) => v !== "efectivo").map(([value, label]) => (
+                              {Object.entries(paymentMethodLabels).map(([value, label]) => (
                                 <SelectItem key={value} value={value}>{label}</SelectItem>
                               ))}
                             </SelectContent>
@@ -694,7 +694,7 @@ export default function CheckOutPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label>Tipo de comprobante</Label>
-                        <Select value={paymentReceiptType} onValueChange={(v) => { setPaymentReceiptType(v); if (v === "cierre_habitacion") setPaymentMethod("efectivo"); else if (paymentMethod === "efectivo") setPaymentMethod("tarjeta_debito"); }}>
+                        <Select value={paymentReceiptType} onValueChange={(v) => { setPaymentReceiptType(v); if (v === "cierre_habitacion") setPaymentMethod("efectivo"); }}>
                           <SelectTrigger data-testid="select-receipt-type">
                             <SelectValue />
                           </SelectTrigger>
