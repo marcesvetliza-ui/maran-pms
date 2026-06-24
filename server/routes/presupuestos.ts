@@ -1000,12 +1000,17 @@ export function registerPresupuestosRoutes(app: Express) {
       res.setHeader("Content-Disposition", `inline; filename="${pres.numero}.pdf"`);
       doc.pipe(res);
 
-      if (area === "recepcion" || area === "grupos") {
-        // Portada full-bleed antes del contenido (recepcion y grupos)
+      if (area === "recepcion") {
         const recepCover = path.join(process.cwd(), "server", "assets", "recep-cover.jpg");
-        console.log("[PDF] recep-cover path:", recepCover, "exists:", fs.existsSync(recepCover));
         if (fs.existsSync(recepCover)) {
           doc.image(recepCover, 0, 0, { width: 595, height: 842 });
+          doc.addPage();
+        }
+        generateHockeyPdf(doc, pres, items, conditions);
+      } else if (area === "grupos") {
+        const gruposCover = path.join(process.cwd(), "server", "assets", "grupos-cover.jpg");
+        if (fs.existsSync(gruposCover)) {
+          doc.image(gruposCover, 0, 0, { width: 595, height: 842 });
           doc.addPage();
         }
         generateHockeyPdf(doc, pres, items, conditions);
