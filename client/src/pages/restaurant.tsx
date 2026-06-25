@@ -924,14 +924,9 @@ export default function RestaurantPage() {
   });
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string }[]>({
-    queryKey: ["/api/admin/users"],
+    queryKey: ["/api/staff/users"],
   });
-  const isPrivilegedUser = user?.role === "admin" || user?.role === "manager";
-  const restaurantUsers = allUsers.filter(u =>
-    isPrivilegedUser
-      ? (u.role === "restaurant" || u.role === "admin" || u.role === "manager")
-      : u.role === "restaurant"
-  );
+  const restaurantUsers = allUsers.filter(u => u.role === "restaurant");
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
   });
