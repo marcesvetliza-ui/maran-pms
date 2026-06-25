@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PROVINCIAS, getCiudades } from "@/lib/argentina-geo";
 
 interface ProvinciaCiudadSelectProps {
@@ -11,6 +18,9 @@ interface ProvinciaCiudadSelectProps {
   testIdProvincia?: string;
   testIdLocalidad?: string;
 }
+
+const NONE = "__none__";
+const OTRA = "__otra__";
 
 export function ProvinciaCiudadSelect({
   provincia,
@@ -31,13 +41,15 @@ export function ProvinciaCiudadSelect({
   }, [localidad, ciudadEsConocida]);
 
   const handleProvinciaChange = (val: string) => {
+    if (val === NONE) return;
     onProvinciaChange(val);
     onLocalidadChange("");
     setCustomCiudad("");
   };
 
   const handleCiudadSelectChange = (val: string) => {
-    if (val === "__otra__") {
+    if (val === NONE) return;
+    if (val === OTRA) {
       onLocalidadChange("");
       setCustomCiudad("");
     } else {
@@ -46,45 +58,52 @@ export function ProvinciaCiudadSelect({
     }
   };
 
-  const selectValue = ciudadEsConocida ? localidad : (localidad === "" && customCiudad === "" ? "" : "__otra__");
-
-  const selectClass =
-    "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+  const selectValue = ciudadEsConocida
+    ? localidad
+    : localidad === "" && customCiudad === ""
+    ? NONE
+    : OTRA;
 
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="grid gap-2">
         <Label>Provincia</Label>
-        <select
-          className={selectClass}
-          value={provincia || ""}
-          onChange={(e) => handleProvinciaChange(e.target.value)}
-          data-testid={testIdProvincia}
+        <Select
+          value={provincia || NONE}
+          onValueChange={handleProvinciaChange}
         >
-          <option value="">Seleccionar...</option>
-          {PROVINCIAS.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
+          <SelectTrigger data-testid={testIdProvincia}>
+            <SelectValue placeholder="Seleccionar..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE} disabled>Seleccionar...</SelectItem>
+            {PROVINCIAS.map((p) => (
+              <SelectItem key={p} value={p}>{p}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="grid gap-2">
         <Label>Ciudad / Localidad</Label>
         {provincia ? (
           <>
-            <select
-              className={selectClass}
+            <Select
               value={selectValue}
-              onChange={(e) => handleCiudadSelectChange(e.target.value)}
-              data-testid={testIdLocalidad}
+              onValueChange={handleCiudadSelectChange}
             >
-              <option value="">Seleccionar...</option>
-              {ciudades.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-              <option value="__otra__">Otra localidad...</option>
-            </select>
-            {selectValue === "__otra__" && (
+              <SelectTrigger data-testid={testIdLocalidad}>
+                <SelectValue placeholder="Seleccionar..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE} disabled>Seleccionar...</SelectItem>
+                {ciudades.map((c) => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
+                <SelectItem value={OTRA}>Otra localidad...</SelectItem>
+              </SelectContent>
+            </Select>
+            {selectValue === OTRA && (
               <Input
                 placeholder="Escribir localidad"
                 value={customCiudad}
