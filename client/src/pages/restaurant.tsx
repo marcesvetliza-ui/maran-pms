@@ -1898,7 +1898,9 @@ export default function RestaurantPage() {
     const discAmount = disc > 0
       ? (closeDiscountType === "percent" ? subtotal * disc / 100 : disc)
       : 0;
-    const finalTotal = Math.max(0, subtotal - discAmount);
+    const afterDiscount = Math.max(0, subtotal - discAmount);
+    const advanceAmt = totalAdvanceCredit;
+    const finalTotal = Math.max(0, afterDiscount - advanceAmt);
 
     const rows = items.map(item => `
       <tr>
@@ -1915,6 +1917,19 @@ export default function RestaurantPage() {
       <tr>
         <td colspan="2" style="padding:4px 8px;font-size:12px;color:#2a7a2a">Descuento (${closeDiscountType === "percent" ? `${disc}%` : "$" + disc.toLocaleString("es-AR",{minimumFractionDigits:2})}):</td>
         <td style="padding:4px 8px;text-align:right;font-size:12px;color:#2a7a2a">-$${discAmount.toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
+      </tr>` : "";
+
+    const advanceRow = advanceAmt > 0 ? `
+      <tr>
+        <td colspan="2" style="padding:4px 8px;font-size:12px;color:#1a6a9a">Seña / Anticipo reserva:</td>
+        <td style="padding:4px 8px;text-align:right;font-size:12px;color:#1a6a9a">-$${advanceAmt.toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
+      </tr>` : "";
+
+    const hasDeductions = discAmount > 0 || advanceAmt > 0;
+    const subtotalRow = hasDeductions && discAmount === 0 ? `
+      <tr>
+        <td colspan="2" style="padding:4px 8px;font-size:12px">Subtotal:</td>
+        <td style="padding:4px 8px;text-align:right;font-size:12px">$${subtotal.toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
       </tr>` : "";
 
     win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cuenta</title>
@@ -1936,11 +1951,14 @@ export default function RestaurantPage() {
     <tbody>${rows}</tbody></table>
     <hr>
     <table><tbody>
+      ${subtotalRow}
       ${discountRows}
+      ${advanceRow}
       <tr class="total-row">
-        <td colspan="2">TOTAL${discAmount > 0 ? " CON DESCUENTO" : ""}:</td>
+        <td colspan="2">A COBRAR:</td>
         <td style="text-align:right;font-size:15px">$${finalTotal.toLocaleString("es-AR",{minimumFractionDigits:2})}</td>
       </tr>
+      ${advanceAmt > 0 ? `<tr><td colspan="3" style="padding:4px 8px;font-size:11px;color:#666;text-align:right">Total consumido: $${subtotal.toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>` : ""}
     </tbody></table>
     <hr>
     <p style="text-align:center;font-size:11px;color:#666">Este no es el comprobante fiscal final.</p>
