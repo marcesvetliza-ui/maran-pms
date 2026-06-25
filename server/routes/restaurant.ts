@@ -255,7 +255,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride, reservationAdvanceCredit } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit } = req.body;
       const effectiveReservationId = reservationId || roomReservationId;
       const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || paymentMethod === "cuenta_habitacion";
       const effectivePaymentMethod = isRoomCharge ? "room_charge" : (paymentMethod || "cash");
@@ -422,6 +422,7 @@ export function registerRestaurantRoutes(app: Express) {
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
               cuit: customerCuit || undefined,
+              dni: customerDni || undefined,
               condicionIva: condicion,
             },
             items: invoiceItems,

@@ -819,6 +819,10 @@ export default function RestaurantPage() {
   const [newClientCuit, setNewClientCuit] = useState("");
   const [newClientCondicionIva, setNewClientCondicionIva] = useState<"responsable_inscripto"|"exento"|"monotributista">("exento");
   const [newClientVatContext, setNewClientVatContext] = useState<"factura_a"|"factura_b">("factura_b");
+  // Consumidor Final identification (Factura B anonymous CF → optional name + DNI)
+  const [closeCfIdentificado, setCloseCfIdentificado] = useState(false);
+  const [closeCfNombre, setCloseCfNombre] = useState("");
+  const [closeCfDni, setCloseCfDni] = useState("");
 
   // Clientes tab state
   const [clientSearch, setClientSearch] = useState("");
@@ -4443,7 +4447,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -4721,23 +4725,62 @@ export default function RestaurantPage() {
                                 setCloseBillingName("CONSUMIDOR FINAL");
                                 setCloseBillingCuit("");
                                 setCloseBillingCompanyId("");
+                                setCloseBillingGuestId("");
                                 setBillingSearch("");
+                                setCloseCfIdentificado(false);
+                                setCloseCfNombre("");
+                                setCloseCfDni("");
                               } else {
                                 setCloseBillingName("");
+                                setCloseCfIdentificado(false);
+                                setCloseCfNombre("");
+                                setCloseCfDni("");
                               }
                             }}
                             className="h-4 w-4 cursor-pointer"
                           />
                           <label htmlFor="fb-exento" className="text-sm cursor-pointer select-none">
-                            Persona o empresa identificada — exenta (no es Consumidor Final)
+                            Localizar Contribuyentes (Monotributo / Responsables Inscriptos / Exento)
                           </label>
                         </div>
                       )}
 
                       {!isFactA && !fbIsExento && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/40 rounded px-3 py-2">
-                          <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                          Consumidor Final
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/40 rounded px-3 py-2">
+                            <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                            <span className="flex-1">Consumidor Final</span>
+                            <button
+                              type="button"
+                              onClick={() => { setCloseCfIdentificado(v => !v); if (closeCfIdentificado) { setCloseCfNombre(""); setCloseCfDni(""); } }}
+                              className="text-xs text-primary underline underline-offset-2 hover:no-underline shrink-0"
+                            >
+                              {closeCfIdentificado ? "Quitar identificación" : "Identificar CF"}
+                            </button>
+                          </div>
+                          {closeCfIdentificado && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <Label className="text-xs">Nombre y Apellido</Label>
+                                <Input
+                                  value={closeCfNombre}
+                                  onChange={e => setCloseCfNombre(e.target.value)}
+                                  placeholder="Juan Pérez"
+                                  data-testid="input-cf-nombre"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">DNI</Label>
+                                <Input
+                                  value={closeCfDni}
+                                  onChange={e => setCloseCfDni(e.target.value.replace(/\D/g, ""))}
+                                  placeholder="12345678"
+                                  maxLength={8}
+                                  data-testid="input-cf-dni"
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -5616,8 +5659,15 @@ export default function RestaurantPage() {
                     ccEntityId: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityId : undefined,
                     emitInvoice: isFactura,
                     vatCondition: isFactura ? vatCond : undefined,
-                    customerRazonSocial: isFactura ? (closeBillingName || undefined) : undefined,
+                    customerRazonSocial: isFactura
+                      ? (!isFactA && !fbIsExento && closeCfIdentificado && closeCfNombre
+                          ? closeCfNombre
+                          : (closeBillingName || undefined))
+                      : undefined,
                     customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
+                    customerDni: isFactura && !isFactA && !fbIsExento && closeCfIdentificado && closeCfDni
+                      ? closeCfDni
+                      : undefined,
                     puntoVenta: isFactura && selectedPosNumero ? selectedPosNumero : undefined,
                     reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
                   });
