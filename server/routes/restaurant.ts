@@ -376,10 +376,7 @@ export function registerRestaurantRoutes(app: Express) {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
 
-          // Construir ítems de factura: una línea por ítem del pedido
-          const originalTotal = parseFloat(order.total || "0");
-          const scaleFactor = originalTotal > 0 ? finalTotal / originalTotal : 1;
-
+          // Construir ítems de factura: precio real por ítem + líneas negativas por descuento/seña
           const invoiceItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21"; subtotalNeto: number; subtotal: number }[] = [];
 
           for (const item of orderItemsList) {
@@ -389,7 +386,7 @@ export function registerRestaurantRoutes(app: Express) {
             const notesMatch = (item.notes || "").match(/^\[(.+?)\]/);
             if (notesMatch) itemName = notesMatch[1];
 
-            const grossItem = parseFloat(item.subtotal || "0") * scaleFactor;
+            const grossItem = parseFloat(item.subtotal || "0");
             if (grossItem <= 0.001) continue;
 
             const qty = item.quantity || 1;
@@ -403,11 +400,21 @@ export function registerRestaurantRoutes(app: Express) {
 
           // Fallback: línea única si no hay ítems válidos
           if (invoiceItems.length === 0) {
-            const advLbl = advanceCredit > 0 ? ` (Seña: $${advanceCredit.toFixed(2)})` : "";
-            const discLbl = discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : "";
-            const gross = parseFloat(finalTotal.toFixed(2));
+            const gross = parseFloat((parseFloat(order.total || "0")).toFixed(2));
             const net = parseFloat((gross / 1.21).toFixed(4));
-            invoiceItems.push({ descripcion: `Consumiciones Restaurante — Pedido ${order.orderNumber}${discLbl}${advLbl}`, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross });
+            invoiceItems.push({ descripcion: `Consumiciones Restaurante — Pedido ${order.orderNumber}`, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross });
+          }
+
+          // Línea negativa por descuento (si aplica)
+          if (discountAmount > 0) {
+            const netDisc = parseFloat((discountAmount / 1.21).toFixed(4));
+            invoiceItems.push({ descripcion: `Descuento`, cantidad: 1, precioUnitario: -netDisc, alicuotaIva: "21" as const, subtotalNeto: -netDisc, subtotal: -parseFloat(discountAmount.toFixed(2)) });
+          }
+
+          // Línea negativa por seña/anticipo de reserva (si aplica)
+          if (advanceCredit > 0) {
+            const netAdv = parseFloat((advanceCredit / 1.21).toFixed(4));
+            invoiceItems.push({ descripcion: `Seña / Anticipo reserva`, cantidad: 1, precioUnitario: -netAdv, alicuotaIva: "21" as const, subtotalNeto: -netAdv, subtotal: -parseFloat(advanceCredit.toFixed(2)) });
           }
 
           const invoice = await emitirFactura({
