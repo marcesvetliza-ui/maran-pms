@@ -769,6 +769,7 @@ export default function RestaurantPage() {
   const [advanceNotes, setAdvanceNotes] = useState("");
   const [isAssignTableDialogOpen, setIsAssignTableDialogOpen] = useState(false);
   const [assignTableReservation, setAssignTableReservation] = useState<TableReservation | null>(null);
+  const [assignFromCheckIn, setAssignFromCheckIn] = useState(false);
   const [confirmCancelReservationId, setConfirmCancelReservationId] = useState<string | null>(null);
   const [closeBillingName, setCloseBillingName] = useState("");
   const [closeBillingCuit, setCloseBillingCuit] = useState("");
@@ -1732,7 +1733,11 @@ export default function RestaurantPage() {
         }
       }
     } else {
-      toast({ title: `Check-in — ${reservation.guestName}`, description: "Reserva sin mesa asignada. Asignar mesa para abrir comanda." });
+      // No table assigned: open assign-table dialog so tableId + order are set in one step
+      pendingCheckInReservationRef.current = reservation;
+      setAssignTableReservation(reservation);
+      setAssignFromCheckIn(true);
+      setIsAssignTableDialogOpen(true);
     }
   };
 
@@ -6248,7 +6253,7 @@ export default function RestaurantPage() {
       </AlertDialog>
 
       {/* Assign Table Dialog */}
-      <Dialog open={isAssignTableDialogOpen} onOpenChange={setIsAssignTableDialogOpen}>
+      <Dialog open={isAssignTableDialogOpen} onOpenChange={(v) => { setIsAssignTableDialogOpen(v); if (!v) { setAssignFromCheckIn(false); pendingCheckInReservationRef.current = null; } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Asignar Mesa</DialogTitle>
@@ -6266,7 +6271,17 @@ export default function RestaurantPage() {
                   className={`w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between ${isAlreadyAssigned ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 cursor-default" : hasOrder ? "border-amber-300 bg-amber-50 dark:bg-amber-950/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 cursor-pointer" : "hover:bg-accent cursor-pointer"}`}
                   onClick={() => {
                     if (!assignTableReservation || isAlreadyAssigned) return;
-                    updateReservationMutation.mutate({ id: assignTableReservation.id, data: { tableId: t.id } });
+                    if (assignFromCheckIn) {
+                      // Coming from Check-In on unassigned reservation: set tableId + check_in status together
+                      updateReservationMutation.mutate({ id: assignTableReservation.id, data: { tableId: t.id, status: "check_in" } });
+                      // Create order for that table if it's free
+                      if (!hasOrder) {
+                        createOrderMutation.mutate({ tableId: t.id, covers: assignTableReservation.partySize, waiterName: "" });
+                      }
+                      setAssignFromCheckIn(false);
+                    } else {
+                      updateReservationMutation.mutate({ id: assignTableReservation.id, data: { tableId: t.id } });
+                    }
                     setIsAssignTableDialogOpen(false);
                     setAssignTableReservation(null);
                   }}
