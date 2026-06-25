@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Search, User, Building2, Plus, X, Check, Plane, ChevronsUpDown } from "lucide-react";
 import type { Guest, Company, InsertGuest, InsertCompany, Agency, InsertAgency, Country } from "@shared/schema";
+import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   dni: "DNI", cuit: "CUIT", cuil: "CUIL", passport: "Pasaporte",
@@ -100,6 +101,8 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
     vehiculoModelo: "",
     vehiculoColor: "",
     condicionVentaPredeterminada: "contado",
+    esEmpresaGrande: false,
+    montoBaseFce: "",
   });
 
   const isJuridicaGuest = newGuest.tipoPersona === "juridica";
@@ -148,6 +151,8 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       vehiculoModelo: isJuridicaGuest ? null : (newGuest.vehiculoModelo || null),
       vehiculoColor: isJuridicaGuest ? null : (newGuest.vehiculoColor || null),
       condicionVentaPredeterminada: newGuest.condicionVentaPredeterminada || "contado",
+      esEmpresaGrande: (newGuest as any).esEmpresaGrande || false,
+      montoBaseFce: (newGuest as any).montoBaseFce || null,
       companyId: null,
     } as any);
     setNewGuest({
@@ -161,6 +166,8 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
       fechaNacimiento: "", sexo: "no_especifica", cuilCuit: "",
       vehiculoPatente: "", vehiculoMarca: "", vehiculoModelo: "", vehiculoColor: "",
       condicionVentaPredeterminada: "contado",
+      esEmpresaGrande: false,
+      montoBaseFce: "",
     });
     setMode("search");
   };
@@ -303,11 +310,11 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
             {isJuridicaGuest && (<>
               <div className="space-y-2">
                 <Label htmlFor="firstName">Razón Social *</Label>
-                <Input id="firstName" value={newGuest.firstName} onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })} placeholder="ACME S.A." data-testid="input-guest-razon-social" />
+                <Input id="firstName" value={newGuest.firstName} onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })} placeholder="Ej: ACME S.A." data-testid="input-guest-razon-social" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="lastName">Nombre Fantasía <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-                <Input id="lastName" value={newGuest.lastName} onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })} placeholder="Acme Corp" data-testid="input-guest-nombre-fantasia" />
+                <Label htmlFor="lastName">Nombre Comercial <span className="text-xs text-muted-foreground">(cómo se conoce el negocio)</span></Label>
+                <Input id="lastName" value={newGuest.lastName} onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })} placeholder="Ej: Acme Corp" data-testid="input-guest-nombre-fantasia" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -315,27 +322,59 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                   <Input id="cuilCuit" value={newGuest.cuilCuit} onChange={(e) => setNewGuest({ ...newGuest, cuilCuit: e.target.value })} placeholder="30-12345678-9" data-testid="input-guest-cuilcuit" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" value={newGuest.email} onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })} placeholder="contacto@empresa.com" data-testid="input-guest-email" />
+                  <Label htmlFor="vatConditionJ">Condición ante IVA</Label>
+                  <Select value={newGuest.vatCondition || "responsable_inscripto"} onValueChange={(v) => setNewGuest({ ...newGuest, vatCondition: v })}>
+                    <SelectTrigger id="vatConditionJ" data-testid="select-vat-condition-j"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Teléfono</Label>
-                <Input id="phone" value={newGuest.phone} onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })} placeholder="+54 11 4000-1234" data-testid="input-guest-phone" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="direccion">Dirección</Label>
-                <Input id="direccion" value={newGuest.direccion} onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-guest-direccion" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="localidad">Localidad</Label>
-                  <Input id="localidad" value={newGuest.localidad} onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })} placeholder="CABA" data-testid="input-guest-localidad" />
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={newGuest.email} onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })} placeholder="contacto@empresa.com" data-testid="input-guest-email" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="codigoPostal">Código Postal</Label>
-                  <Input id="codigoPostal" value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1000" data-testid="input-guest-codigopostal" />
+                  <Label htmlFor="phone">Teléfono</Label>
+                  <Input id="phone" value={newGuest.phone} onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })} placeholder="+54 11 1234-5678" data-testid="input-guest-phone" />
                 </div>
+              </div>
+              <div className="border-t pt-3">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide">Domicilio Fiscal</Label>
+                <div className="space-y-2 mt-2">
+                  <Input id="direccion" value={newGuest.direccion} onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-guest-direccion" />
+                </div>
+                <div className="mt-2">
+                  <ProvinciaCiudadSelect
+                    provincia={newGuest.provincia}
+                    localidad={newGuest.localidad}
+                    onProvinciaChange={(v) => setNewGuest({ ...newGuest, provincia: v, localidad: "" })}
+                    onLocalidadChange={(v) => setNewGuest({ ...newGuest, localidad: v })}
+                    testIdProvincia="select-guest-j-provincia"
+                    testIdLocalidad="select-guest-j-localidad"
+                  />
+                </div>
+                <div className="mt-2 space-y-1">
+                  <Label className="text-xs">Código Postal</Label>
+                  <Input value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1043" data-testid="input-guest-j-codigopostal" />
+                </div>
+              </div>
+              <div className="border-t pt-3 space-y-2">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide">Factura de Crédito Electrónica (FCE / MiPyME)</Label>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="esEmpresaGrandeJ" checked={(newGuest as any).esEmpresaGrande || false} onChange={(e) => setNewGuest({ ...newGuest, esEmpresaGrande: e.target.checked } as any)} className="h-4 w-4 rounded border-input" data-testid="check-es-empresa-grande-j" />
+                  <label htmlFor="esEmpresaGrandeJ" className="text-sm text-muted-foreground">Sí, es empresa grande (requiere FCE obligatoria)</label>
+                </div>
+                {(newGuest as any).esEmpresaGrande && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Monto Base FCE ($)</Label>
+                    <Input type="number" value={(newGuest as any).montoBaseFce || ""} onChange={(e) => setNewGuest({ ...newGuest, montoBaseFce: e.target.value } as any)} placeholder="1000000" data-testid="input-monto-base-fce-j" />
+                  </div>
+                )}
               </div>
             </>)}
 
@@ -461,16 +500,33 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                 <div className="space-y-2 mt-2">
                   <Input value={newGuest.direccion} onChange={(e) => setNewGuest({ ...newGuest, direccion: e.target.value })} placeholder="Av. Corrientes 1234" data-testid="input-guest-direccion" />
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Localidad</Label>
-                    <Input value={newGuest.localidad} onChange={(e) => setNewGuest({ ...newGuest, localidad: e.target.value })} placeholder="CABA" data-testid="input-guest-localidad" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Código Postal</Label>
-                    <Input value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1000" data-testid="input-guest-codigopostal" />
-                  </div>
+                <div className="mt-2">
+                  <ProvinciaCiudadSelect
+                    provincia={newGuest.provincia}
+                    localidad={newGuest.localidad}
+                    onProvinciaChange={(v) => setNewGuest({ ...newGuest, provincia: v, localidad: "" })}
+                    onLocalidadChange={(v) => setNewGuest({ ...newGuest, localidad: v })}
+                    testIdProvincia="select-guest-f-provincia"
+                    testIdLocalidad="select-guest-f-localidad"
+                  />
                 </div>
+                <div className="mt-2 space-y-1">
+                  <Label className="text-xs">Código Postal</Label>
+                  <Input value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="3100" data-testid="input-guest-codigopostal" />
+                </div>
+              </div>
+              <div className="border-t pt-3 space-y-2">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide">Factura de Crédito Electrónica (FCE / MiPyME)</Label>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="esEmpresaGrandeF" checked={(newGuest as any).esEmpresaGrande || false} onChange={(e) => setNewGuest({ ...newGuest, esEmpresaGrande: e.target.checked } as any)} className="h-4 w-4 rounded border-input" data-testid="check-es-empresa-grande-f" />
+                  <label htmlFor="esEmpresaGrandeF" className="text-sm text-muted-foreground">Sí, es empresa grande (requiere FCE obligatoria)</label>
+                </div>
+                {(newGuest as any).esEmpresaGrande && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Monto Base FCE ($)</Label>
+                    <Input type="number" value={(newGuest as any).montoBaseFce || ""} onChange={(e) => setNewGuest({ ...newGuest, montoBaseFce: e.target.value } as any)} placeholder="1000000" data-testid="input-monto-base-fce-f" />
+                  </div>
+                )}
               </div>
               <div className="border-t pt-3">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide">Datos del Vehículo (opcional)</Label>
