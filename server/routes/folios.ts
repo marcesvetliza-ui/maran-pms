@@ -399,7 +399,11 @@ export function registerFolioRoutes(app: Express) {
           const resv = await storage.getReservation(entityId);
           if (resv) {
             const g = resv.guest as any;
-            const guestName = g ? `${g.lastName ?? ""} ${g.firstName ?? ""}`.trim() : "";
+            const guestName = g
+              ? (g.tipoPersona === "juridica"
+                  ? (g.firstName ?? "")
+                  : `${g.lastName ?? ""} ${g.firstName ?? ""}`.trim())
+              : "";
             const room = (resv as any).room?.roomNumber ?? resv.roomId;
             entityLabel = `${resv.reservationCode} — ${guestName} — Hab. ${room} (${resv.checkInDate} → ${resv.checkOutDate})`;
           }

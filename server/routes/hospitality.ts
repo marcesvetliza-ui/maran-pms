@@ -27,11 +27,14 @@ async function enrichAlerts(alerts: any[]) {
     ? await db.select({ id: rooms.id, roomNumber: rooms.roomNumber }).from(rooms).where(inArray(rooms.id, roomIds))
     : [];
   const guestRows = guestIds.length > 0
-    ? await db.select({ id: guests.id, firstName: guests.firstName, lastName: guests.lastName }).from(guests).where(inArray(guests.id, guestIds))
+    ? await db.select({ id: guests.id, firstName: guests.firstName, lastName: guests.lastName, tipoPersona: guests.tipoPersona }).from(guests).where(inArray(guests.id, guestIds))
     : [];
 
   const roomMap = new Map(roomRows.map((r) => [r.id, r.roomNumber]));
-  const guestMap = new Map(guestRows.map((g) => [g.id, `${g.firstName} ${g.lastName}`]));
+  const guestMap = new Map(guestRows.map((g) => [
+    g.id,
+    g.tipoPersona === "juridica" ? g.firstName : `${g.firstName} ${g.lastName}`,
+  ]));
   const resMap = new Map(reservationRows.map((r) => [r.id, r]));
 
   return alerts.map((alert) => {

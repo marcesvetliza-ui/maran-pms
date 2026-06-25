@@ -2161,7 +2161,7 @@ export class MemStorage implements IStorage {
         
         reservationsMap[res.id] = {
           id: res.id,
-          guestName: `${guest.firstName} ${guest.lastName}`,
+          guestName: guest.tipoPersona === "juridica" ? guest.firstName : `${guest.lastName} ${guest.firstName}`.trim(),
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,

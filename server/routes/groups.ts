@@ -472,7 +472,9 @@ export function registerGroupsRoutes(app: Express) {
 
         invoiceData.reservations.push({
           reservationCode: reservation.reservationCode,
-          guest: `${reservation.guest?.lastName} ${reservation.guest?.firstName}`,
+          guest: (reservation.guest as any)?.tipoPersona === "juridica"
+            ? (reservation.guest?.firstName ?? "")
+            : `${reservation.guest?.lastName ?? ""} ${reservation.guest?.firstName ?? ""}`.trim(),
           room: reservation.room?.roomNumber,
           nights,
           ratePerNight: rate,
@@ -818,7 +820,9 @@ export function registerGroupsRoutes(app: Express) {
 
         rooms.push({
           reservationId: res.id,
-          guestName: `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
+          guestName: (res.guest as any)?.tipoPersona === "juridica"
+            ? (res.guest?.firstName || "")
+            : `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
           roomNumber: res.room?.roomNumber || "-",
           status: res.status,
           nights: res.nights || 0,
@@ -1173,7 +1177,11 @@ export function registerGroupsRoutes(app: Express) {
 
       for (const row of roomRows) {
         const res = row.reservation;
-        const guest = res.guest ? `${res.guest.lastName} ${res.guest.firstName}`.trim() : "Sin asignar";
+        const guest = res.guest
+          ? ((res.guest as any).tipoPersona === "juridica"
+              ? res.guest.firstName
+              : `${res.guest.lastName} ${res.guest.firstName}`.trim())
+          : "Sin asignar";
         const checkIn = new Date(res.checkInDate);
         const checkOut = new Date(res.checkOutDate);
         const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));

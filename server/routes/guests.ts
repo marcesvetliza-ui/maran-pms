@@ -220,7 +220,7 @@ export function registerGuestsRoutes(app: Express) {
         description: description || "Pago recibido",
         amount: (-parseFloat(amount)).toFixed(2),
         reference: reference || null,
-        guestName: `${guest.firstName} ${guest.lastName}`,
+        guestName: (guest as any).tipoPersona === "juridica" ? guest.firstName : `${guest.firstName} ${guest.lastName}`,
         createdBy: req.body.createdBy || null,
       });
       res.json(movement);
