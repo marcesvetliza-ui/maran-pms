@@ -117,14 +117,25 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
     y += 56;
 
     // ── Items table ─────────────────────────────────────────────
+    // Factura A / NC-A discriminan IVA; B, C, NC-B no discriminan
+    const discriminaIVA = ["FA", "NCA"].includes(tipoKey);
+
     doc.rect(x0, y, W, 16).fillColor("#f0f0f0").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
     doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);
-    doc.text("Descripción", x0 + 4, y + 4, { width: 240 });
-    doc.text("Cant.", x0 + 248, y + 4, { width: 30, align: "right" });
-    doc.text("P. Unit.", x0 + 282, y + 4, { width: 60, align: "right" });
-    doc.text("Alíc. IVA", x0 + 348, y + 4, { width: 55, align: "right" });
-    doc.text("Subtotal", x0 + 407, y + 4, { width: 70, align: "right" });
-    doc.text("IVA", x0 + 480, y + 4, { width: 48, align: "right" });
+
+    if (discriminaIVA) {
+      doc.text("Descripción",  x0 + 4,   y + 4, { width: 240 });
+      doc.text("Cant.",        x0 + 248,  y + 4, { width: 30,  align: "right" });
+      doc.text("P. Unit.",     x0 + 282,  y + 4, { width: 60,  align: "right" });
+      doc.text("Alíc. IVA",   x0 + 348,  y + 4, { width: 55,  align: "right" });
+      doc.text("Subtotal",     x0 + 407,  y + 4, { width: 70,  align: "right" });
+      doc.text("IVA",          x0 + 480,  y + 4, { width: 48,  align: "right" });
+    } else {
+      doc.text("Descripción",  x0 + 4,   y + 4, { width: 320 });
+      doc.text("Cant.",        x0 + 328,  y + 4, { width: 35,  align: "right" });
+      doc.text("P. Unit.",     x0 + 367,  y + 4, { width: 80,  align: "right" });
+      doc.text("Subtotal",     x0 + 451,  y + 4, { width: 80,  align: "right" });
+    }
     y += 16;
 
     const items: any[] = Array.isArray(factura.items) ? factura.items : [];
@@ -133,14 +144,25 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
     for (const item of items) {
       if (y > 700) { doc.addPage(); y = 40; }
       doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
-      const alicLabel = item.alicuotaIva === "21" ? "21%" : item.alicuotaIva === "10.5" ? "10.5%" : item.alicuotaIva === "exento" ? "Exento" : "No Grav.";
-      const iva = item.alicuotaIva === "21" ? item.subtotalNeto * 0.21 : item.alicuotaIva === "10.5" ? item.subtotalNeto * 0.105 : 0;
-      doc.text(item.descripcion ?? "", x0 + 4, y + 3, { width: 240 });
-      doc.text(String(item.cantidad ?? 1), x0 + 248, y + 3, { width: 30, align: "right" });
-      doc.text(`$ ${fPeso(item.precioUnitario ?? 0)}`, x0 + 282, y + 3, { width: 60, align: "right" });
-      doc.text(alicLabel, x0 + 348, y + 3, { width: 55, align: "right" });
-      doc.text(`$ ${fPeso(item.subtotalNeto ?? item.subtotal ?? 0)}`, x0 + 407, y + 3, { width: 70, align: "right" });
-      doc.text(iva > 0 ? `$ ${fPeso(iva)}` : "—", x0 + 480, y + 3, { width: 48, align: "right" });
+      doc.text(item.descripcion ?? "", x0 + 4, y + 3, { width: discriminaIVA ? 240 : 320 });
+
+      if (discriminaIVA) {
+        const alicLabel = item.alicuotaIva === "21" ? "21%" : item.alicuotaIva === "10.5" ? "10.5%" : item.alicuotaIva === "exento" ? "Exento" : "No Grav.";
+        const iva = item.alicuotaIva === "21" ? item.subtotalNeto * 0.21 : item.alicuotaIva === "10.5" ? item.subtotalNeto * 0.105 : 0;
+        doc.text(String(item.cantidad ?? 1), x0 + 248, y + 3, { width: 30,  align: "right" });
+        doc.text(`$ ${fPeso(item.precioUnitario ?? 0)}`, x0 + 282, y + 3, { width: 60,  align: "right" });
+        doc.text(alicLabel,                              x0 + 348, y + 3, { width: 55,  align: "right" });
+        doc.text(`$ ${fPeso(item.subtotalNeto ?? item.subtotal ?? 0)}`, x0 + 407, y + 3, { width: 70, align: "right" });
+        doc.text(iva !== 0 ? `$ ${fPeso(iva)}` : "—",  x0 + 480, y + 3, { width: 48,  align: "right" });
+      } else {
+        // Precio con IVA incluido (no discrimina)
+        const qty = item.cantidad || 1;
+        const grossSubtotal = $n(item.subtotal);
+        const grossUnit = grossSubtotal / qty;
+        doc.text(String(qty),                       x0 + 328, y + 3, { width: 35,  align: "right" });
+        doc.text(`$ ${fPeso(grossUnit)}`,            x0 + 367, y + 3, { width: 80,  align: "right" });
+        doc.text(`$ ${fPeso(grossSubtotal)}`,        x0 + 451, y + 3, { width: 80,  align: "right" });
+      }
       y += 14;
     }
 
@@ -148,26 +170,27 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
 
     // ── Totals ──────────────────────────────────────────────────
     const txL = x0 + W - 200;
-    const txV = x0 + W - 5;
     const tw = 190;
     doc.moveTo(x0, y).lineTo(x0 + W, y).strokeColor("#ccc").lineWidth(0.5).stroke();
     y += 4;
 
     doc.font("Helvetica").fontSize(8);
-    const totals: [string, number][] = [];
-    if ($n(montoNeto) > 0)      totals.push(["Importe Neto Gravado", $n(montoNeto)]);
-    if ($n(montoExento) > 0)    totals.push(["Importe Exento",       $n(montoExento)]);
-    if ($n(montoNoGravado) > 0) totals.push(["Importe No Gravado",   $n(montoNoGravado)]);
-    if ($n(montoIva21) > 0)     totals.push(["IVA 21%",              $n(montoIva21)]);
-    if ($n(montoIva105) > 0)    totals.push(["IVA 10.5%",            $n(montoIva105)]);
 
-    for (const [label, val] of totals) {
-      doc.text(label, txL, y, { width: tw - 70 });
-      doc.text(`$ ${fPeso(val)}`, txL + tw - 70, y, { width: 65, align: "right" });
-      y += 12;
+    if (discriminaIVA) {
+      const totals: [string, number][] = [];
+      if ($n(montoNeto) !== 0)      totals.push(["Importe Neto Gravado", $n(montoNeto)]);
+      if ($n(montoExento) !== 0)    totals.push(["Importe Exento",       $n(montoExento)]);
+      if ($n(montoNoGravado) !== 0) totals.push(["Importe No Gravado",   $n(montoNoGravado)]);
+      if ($n(montoIva21) !== 0)     totals.push(["IVA 21%",              $n(montoIva21)]);
+      if ($n(montoIva105) !== 0)    totals.push(["IVA 10.5%",            $n(montoIva105)]);
+      for (const [label, val] of totals) {
+        doc.text(label, txL, y, { width: tw - 70 });
+        doc.text(`$ ${fPeso(val)}`, txL + tw - 70, y, { width: 65, align: "right" });
+        y += 12;
+      }
     }
 
-    // TOTAL
+    // TOTAL (todas las facturas muestran importe total)
     doc.rect(txL - 4, y - 2, tw + 8, 18).fillColor("#f0f0f0").fill().strokeColor("#ccc").stroke();
     doc.fillColor("#000").font("Helvetica-Bold").fontSize(10)
       .text("IMPORTE TOTAL", txL, y + 2, { width: tw - 70 })
