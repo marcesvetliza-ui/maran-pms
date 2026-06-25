@@ -98,7 +98,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
+import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, Package } from "@shared/schema";
 
 function parseReservationError(error: any): string {
@@ -2180,12 +2180,9 @@ function ReservationDetailDialog({
                     </div>
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</label>
-                      <Input
-                        placeholder="Argentina"
+                      <NationalityCombobox
                         value={newCompanion.nationality}
-                        onChange={e => setNewCompanion(p => ({ ...p, nationality: e.target.value }))}
-                        data-testid="input-companion-nationality"
-                        className="h-8 text-sm"
+                        onChange={(name) => setNewCompanion(p => ({ ...p, nationality: name }))}
                       />
                     </div>
                   </div>

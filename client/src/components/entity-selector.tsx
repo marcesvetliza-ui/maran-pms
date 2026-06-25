@@ -23,7 +23,7 @@ const VAT_CONDITION_LABELS: Record<string, string> = {
   no_responsable: "No Responsable", no_categorizado: "No Categorizado (Extranjero)",
 };
 
-function NationalityCombobox({ value, afipCode, onChange }: {
+export function NationalityCombobox({ value, afipCode, onChange }: {
   value: string; afipCode?: string; onChange: (name: string, code: string) => void;
 }) {
   const [open, setOpen] = useState(false);
