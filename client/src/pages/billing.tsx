@@ -250,14 +250,16 @@ export type EmitirFacturaInitialValues = {
   cuit?: string;
   dni?: string;
   condicionIva?: string;
+  domicilio?: string;
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess }: {
   open: boolean;
   onClose: () => void;
   config: any;
   initialValues?: EmitirFacturaInitialValues;
+  onSuccess?: () => void;
 }) {
   const { toast } = useToast();
   const [tipo, setTipo] = useState<string>("FB");
@@ -273,9 +275,19 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
   useEffect(() => {
     if (open && initialValues) {
       if (initialValues.razonSocial !== undefined) setRazonSocial(initialValues.razonSocial);
-      if (initialValues.cuit !== undefined) { setCuit(initialValues.cuit); if (initialValues.cuit) setTipo("FA"); }
+      if (initialValues.cuit !== undefined) setCuit(initialValues.cuit);
       if (initialValues.dni !== undefined) setDni(initialValues.dni);
+      if (initialValues.domicilio !== undefined) setDomicilio(initialValues.domicilio);
       if (initialValues.condicionIva !== undefined) setCondicionIva(initialValues.condicionIva);
+      // Auto-select comprobante type based on cuit + condición IVA
+      if (initialValues.cuit) {
+        const iva = initialValues.condicionIva || "";
+        if (iva === "Responsable Inscripto" || iva === "Exento") setTipo("FA");
+        else if (iva === "Monotributista" || iva === "No Responsable" || iva === "No Categorizado (Extranjero)") setTipo("FC");
+        else setTipo("FA"); // default for CUIT holders
+      } else {
+        setTipo("FB");
+      }
       if (initialValues.items && initialValues.items.length > 0) {
         setItems(initialValues.items.map(it => {
           const base = it.precioUnitario;
@@ -329,6 +341,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues }: {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       toast({ title: "Factura emitida", description: `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}` });
+      onSuccess?.();
       onClose(); resetForm();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
     },

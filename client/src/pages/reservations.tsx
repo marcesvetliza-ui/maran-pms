@@ -1588,6 +1588,7 @@ function ReservationDetailDialog({
 
   // Factura desde folio
   const [showFacturar, setShowFacturar] = useState(false);
+  const [facturaEmitida, setFacturaEmitida] = useState(false);
   const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
 
   // Companions
@@ -2877,11 +2878,17 @@ function ReservationDetailDialog({
                       size="sm"
                       variant="outline"
                       className="w-full border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300"
-                      onClick={() => setShowFacturar(true)}
+                      onClick={() => {
+                        if (facturaEmitida) {
+                          if (!window.confirm("Ya se emitió una factura para esta reserva en esta sesión. ¿Desea emitir otra igualmente?")) return;
+                        }
+                        setShowFacturar(true);
+                      }}
                       data-testid="button-facturar-folio"
                     >
                       <FileText className="h-4 w-4 mr-1" />
                       Facturar Saldo (${balance.toFixed(2)})
+                      {facturaEmitida && <span className="ml-1 text-xs opacity-70">(ya facturado)</span>}
                     </Button>
                   </div>
                 )}
@@ -3347,6 +3354,8 @@ function ReservationDetailDialog({
         const condicionIva = cuit
           ? (vatMap[guestVat] || "Responsable Inscripto")
           : (vatMap[guestVat] || "Consumidor Final");
+        const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
+        const domicilio = domicilioParts.join(", ");
         const roomNum = reservation.room?.roomNumber || "";
         const desc = `Alojamiento Hab. ${roomNum} — ${reservation.checkInDate} al ${reservation.checkOutDate} (${reservation.nights} noche${reservation.nights !== 1 ? "s" : ""})`;
         const amount = Math.max(balance, 0);
@@ -3355,6 +3364,7 @@ function ReservationDetailDialog({
           cuit,
           dni,
           condicionIva,
+          domicilio,
           items: [{ descripcion: desc, precioUnitario: amount }],
         };
         return (
@@ -3363,6 +3373,7 @@ function ReservationDetailDialog({
             onClose={() => setShowFacturar(false)}
             config={billingConfig}
             initialValues={initialValues}
+            onSuccess={() => setFacturaEmitida(true)}
           />
         );
       })()}
