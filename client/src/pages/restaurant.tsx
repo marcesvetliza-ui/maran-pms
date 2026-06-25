@@ -4856,35 +4856,6 @@ export default function RestaurantPage() {
                             </div>
                           )}
 
-                          {!clientSelected && (
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <Label className="text-xs">O ingresá razón social</Label>
-                                <Input
-                                  value={closeBillingName}
-                                  onChange={e => { setCloseBillingName(e.target.value); setCloseBillingCompanyId(""); }}
-                                  placeholder="Empresa S.A."
-                                  data-testid="input-billing-name"
-                                />
-                              </div>
-                              <div>
-                                <Label className="text-xs flex items-center gap-1">
-                                  CUIT
-                                  {closeBillingCuit && (
-                                    <span className={`ml-1 text-xs font-medium ${cuitValid ? "text-green-600" : "text-destructive"}`}>
-                                      {cuitValid ? "✓ válido" : "✗ inválido"}
-                                    </span>
-                                  )}
-                                </Label>
-                                <Input
-                                  value={closeBillingCuit}
-                                  onChange={e => { setCloseBillingCuit(formatCuit(e.target.value)); setCloseBillingCompanyId(""); }}
-                                  placeholder="30-12345678-9"
-                                  data-testid="input-billing-cuit"
-                                />
-                              </div>
-                            </div>
-                          )}
                         </>
                       )}
                     </div>
