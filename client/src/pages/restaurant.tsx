@@ -4820,11 +4820,31 @@ export default function RestaurantPage() {
                                 <Button type="button" variant="outline" size="sm"
                                   className="shrink-0 gap-1"
                                   onClick={() => {
-                                    setNewClientVatContext(isFactA ? "factura_a" : "factura_b");
-                                    setNewClientCondicionIva(isFactA ? "responsable_inscripto" : "exento");
-                                    setNewClientRazonSocial("");
-                                    setNewClientCuit("");
-                                    setIsNewClientDialogOpen(true);
+                                    setClientEditingId(null);
+                                    setClientForm({
+                                      tipoPersona: isFactA ? "juridica" : "fisica",
+                                      firstName: "",
+                                      lastName: "",
+                                      email: "",
+                                      phone: "",
+                                      documentType: isFactA ? "cuit" : "dni",
+                                      documentNumber: "",
+                                      cuilCuit: "",
+                                      vatCondition: isFactA ? "responsable_inscripto" : "consumidor_final",
+                                      direccion: "",
+                                      provincia: "",
+                                      localidad: "",
+                                      condicionVentaPredeterminada: "contado",
+                                    });
+                                    setClientCreatedForReservation(() => (guest: any) => {
+                                      const fullName = `${guest.firstName} ${guest.lastName || ""}`.toUpperCase().trim();
+                                      setCloseBillingName(fullName);
+                                      setCloseBillingCuit(formatCuit(guest.cuilCuit || ""));
+                                      setCloseBillingGuestId(guest.id);
+                                      setCloseBillingCompanyId("");
+                                      setBillingSearch(fullName);
+                                    });
+                                    setClientDialogOpen(true);
                                   }}
                                   data-testid="button-new-billing-client"
                                 >
