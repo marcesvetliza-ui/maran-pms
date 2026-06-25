@@ -3326,15 +3326,30 @@ function ReservationDetailDialog({
 
       {/* Factura desde folio */}
       {showFacturar && (() => {
-        const guestName = [reservation.guest?.firstName, reservation.guest?.lastName].filter(Boolean).join(" ");
-        const companyName = (reservation.company as any)?.name || "";
+        const g = reservation.guest;
+        const isJuridica = (g as any)?.tipoPersona === "juridica";
+        const guestName = isJuridica
+          ? (g?.firstName || "")
+          : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
+        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || "";
         const razonSocial = companyName || guestName;
-        const cuit = (reservation.company as any)?.cuilCuit || reservation.guest?.cuilCuit || "";
-        const dni = !cuit && reservation.guest?.documentNumber ? reservation.guest.documentNumber : "";
-        const condicionIva = cuit ? "Responsable Inscripto" : "Consumidor Final";
+        const cuit = (reservation.company as any)?.cuilCuit || g?.cuilCuit || "";
+        const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
+        const vatMap: Record<string, string> = {
+          responsable_inscripto: "Responsable Inscripto",
+          monotributista: "Monotributista",
+          exento: "Exento",
+          consumidor_final: "Consumidor Final",
+          no_responsable: "No Responsable",
+          no_categorizado: "No Categorizado (Extranjero)",
+        };
+        const guestVat = (g as any)?.vatCondition || "consumidor_final";
+        const condicionIva = cuit
+          ? (vatMap[guestVat] || "Responsable Inscripto")
+          : (vatMap[guestVat] || "Consumidor Final");
         const roomNum = reservation.room?.roomNumber || "";
         const desc = `Alojamiento Hab. ${roomNum} — ${reservation.checkInDate} al ${reservation.checkOutDate} (${reservation.nights} noche${reservation.nights !== 1 ? "s" : ""})`;
-        const amount = Math.max(parseFloat(String(reservation.totalRoomAmount || "0")), 0);
+        const amount = Math.max(balance, 0);
         const initialValues: EmitirFacturaInitialValues = {
           razonSocial,
           cuit,
