@@ -340,13 +340,14 @@ type AdvanceDialogProps = {
   deleteAdvanceMutation: any;
   posConfigsData?: any[];
   restaurantGuests?: any[];
+  companies?: any[];
 };
 
 function AdvanceDialog({
   reservationId, open, onOpenChange, reservations,
   advanceAmount, setAdvanceAmount, advancePaymentMethod, setAdvancePaymentMethod,
   advanceNotes, setAdvanceNotes, createAdvanceMutation, deleteAdvanceMutation,
-  posConfigsData = [], restaurantGuests = [],
+  posConfigsData = [], restaurantGuests = [], companies = [],
 }: AdvanceDialogProps) {
   const { selectedPosNumero, selectedPosNombre } = useAuth();
   const reservation = reservations.find(r => r.id === reservationId);
@@ -365,12 +366,21 @@ function AdvanceDialog({
   const [advCustomerName, setAdvCustomerName] = useState("");
   const [advCustomerCuit, setAdvCustomerCuit] = useState("");
 
-  // Resolve the registered client linked to this reservation
-  const linkedClient = reservation?.clientId
+  // Resolve the registered client linked to this reservation (guest or company)
+  const linkedGuest = reservation?.clientId
     ? restaurantGuests.find((g: any) => g.id === reservation.clientId) as any ?? null
     : null;
+  const linkedCompany = !linkedGuest && reservation?.clientId
+    ? companies.find((c: any) => c.id === reservation.clientId) as any ?? null
+    : null;
+  const linkedClient = linkedGuest ?? linkedCompany;
   const hasClient = !!linkedClient;
-  const clientVat: string = (linkedClient?.vatCondition as string) || "consumidor_final";
+  // Guests use vatCondition; Companies use condicionIva (default responsable_inscripto)
+  const clientVat: string = linkedGuest
+    ? (linkedGuest.vatCondition as string) || "consumidor_final"
+    : linkedCompany
+    ? (linkedCompany.condicionIva as string) || "responsable_inscripto"
+    : "consumidor_final";
 
   // Compute which receipt types are valid for this reservation
   const availableReceiptTypes: { value: string; label: string }[] = [
@@ -392,10 +402,12 @@ function AdvanceDialog({
     if (open) {
       setAdvReceiptType("voucher");
       setAdvCustomerName(
-        hasClient
-          ? linkedClient?.tipoPersona === "juridica"
-            ? (linkedClient?.firstName || "")
-            : `${linkedClient?.firstName || ""} ${linkedClient?.lastName || ""}`.trim()
+        linkedCompany
+          ? (linkedCompany.razonSocial || linkedCompany.nombreFantasia || linkedCompany.name || "")
+          : linkedGuest
+          ? linkedGuest.tipoPersona === "juridica"
+            ? (linkedGuest.firstName || "")
+            : `${linkedGuest.firstName || ""} ${linkedGuest.lastName || ""}`.trim()
           : ""
       );
       setAdvCustomerCuit(hasClient ? (linkedClient?.cuilCuit || "") : "");
@@ -6206,6 +6218,7 @@ export default function RestaurantPage() {
         deleteAdvanceMutation={deleteAdvanceMutation}
         posConfigsData={posConfigsData}
         restaurantGuests={restaurantGuests}
+        companies={companies}
       />
 
       {/* Confirm Cancel Reservation AlertDialog */}
