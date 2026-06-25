@@ -4072,6 +4072,7 @@ export default function ReservationsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los estados</SelectItem>
+                  <SelectItem value="tentative">Tentativas</SelectItem>
                   <SelectItem value="pending">Pendientes</SelectItem>
                   <SelectItem value="confirmed">Confirmadas</SelectItem>
                   <SelectItem value="web_checkin">Pre Check-In</SelectItem>
