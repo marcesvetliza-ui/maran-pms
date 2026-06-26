@@ -367,6 +367,21 @@ function AuthenticatedApp() {
   const [posConfigs, setPosConfigs] = useState<any[]>([]);
   const [posChecking, setPosChecking] = useState(false);
 
+  const authChannel = useCallback(() => {
+    try { return new BroadcastChannel("maran-auth"); } catch { return null; }
+  }, []);
+
+  const clearPosState = useCallback(() => {
+    localStorage.removeItem("maranPosId");
+    localStorage.removeItem("maranPosNumero");
+    localStorage.removeItem("maranPosNombre");
+    setSelectedPosId(null);
+    setSelectedPosNumero(null);
+    setSelectedPosNombre(null);
+    setShowPosSelector(false);
+    setPosConfigs([]);
+  }, []);
+
   const checkAuth = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
@@ -386,6 +401,24 @@ function AuthenticatedApp() {
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  // Escuchar eventos de auth desde otros tabs del mismo navegador
+  useEffect(() => {
+    const ch = authChannel();
+    if (!ch) return;
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "logout") {
+        clearPosState();
+        setUser(null);
+        queryClient.clear();
+      } else if (e.data?.type === "login") {
+        // Otro tab inició sesión: re-verificar con el servidor para obtener el usuario actualizado
+        checkAuth().then(() => setChecking(false));
+      }
+    };
+    ch.addEventListener("message", handler);
+    return () => { ch.removeEventListener("message", handler); ch.close(); };
+  }, [authChannel, checkAuth, clearPosState]);
 
   const fetchAndSelectPos = useCallback(async () => {
     if (localStorage.getItem("maranPosId")) return;
@@ -445,20 +478,25 @@ function AuthenticatedApp() {
   const handleLogin = (userData: AuthUser) => {
     setUser(userData);
     navigate(getRoleHomePage(userData.role));
+    // Notificar a otros tabs que hubo un nuevo login
+    try {
+      const ch = new BroadcastChannel("maran-auth");
+      ch.postMessage({ type: "login", userId: userData.id });
+      ch.close();
+    } catch {}
   };
 
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch {}
-    localStorage.removeItem("maranPosId");
-    localStorage.removeItem("maranPosNumero");
-    localStorage.removeItem("maranPosNombre");
-    setSelectedPosId(null);
-    setSelectedPosNumero(null);
-    setSelectedPosNombre(null);
-    setShowPosSelector(false);
-    setPosConfigs([]);
+    // Notificar a otros tabs que hubo logout ANTES de limpiar estado local
+    try {
+      const ch = new BroadcastChannel("maran-auth");
+      ch.postMessage({ type: "logout" });
+      ch.close();
+    } catch {}
+    clearPosState();
     setUser(null);
     queryClient.clear();
   };
