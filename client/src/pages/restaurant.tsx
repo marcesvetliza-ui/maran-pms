@@ -821,6 +821,8 @@ export default function RestaurantPage() {
   const [closeCfIdentificado, setCloseCfIdentificado] = useState(false);
   const [closeCfNombre, setCloseCfNombre] = useState("");
   const [closeCfDni, setCloseCfDni] = useState("");
+  const [closeCfSearch, setCloseCfSearch] = useState("");
+  const [closeCfSearchOpen, setCloseCfSearchOpen] = useState(false);
 
   // Clientes tab state
   const [clientSearch, setClientSearch] = useState("");
@@ -4445,7 +4447,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -4630,6 +4632,11 @@ export default function RestaurantPage() {
                             setCloseBillingGuestId("");
                             setCloseBillingCuit("");
                             setBillingSearch("");
+                            setCloseCfSearch("");
+                            setCloseCfSearchOpen(false);
+                            setCloseCfIdentificado(false);
+                            setCloseCfNombre("");
+                            setCloseCfDni("");
                             setCloseBillingName(v === "factura_b" ? "CONSUMIDOR FINAL" : "");
                           }}>
                             <SelectTrigger data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
@@ -4656,6 +4663,14 @@ export default function RestaurantPage() {
                     ? [
                         ...companies
                           .filter(c => {
+                            // Filter companies by condicionIva according to factura type
+                            if (isFactA) {
+                              // Factura A: only RI and Monotributo companies
+                              if (!["responsable_inscripto", "monotributo", "monotributista", null, undefined, ""].includes(c.condicionIva)) return false;
+                            } else {
+                              // Factura B (Exento search): only Exento companies
+                              if (c.condicionIva !== "exento") return false;
+                            }
                             const q = billingSearch.toLowerCase();
                             return c.razonSocial.toLowerCase().includes(q)
                               || (c.name || "").toLowerCase().includes(q)
@@ -4720,6 +4735,8 @@ export default function RestaurantPage() {
                                 setCloseBillingCompanyId("");
                                 setCloseBillingGuestId("");
                                 setBillingSearch("");
+                                setCloseCfSearch("");
+                                setCloseCfSearchOpen(false);
                                 setCloseCfIdentificado(false);
                                 setCloseCfNombre("");
                                 setCloseCfDni("");
@@ -4733,49 +4750,105 @@ export default function RestaurantPage() {
                             className="h-4 w-4 cursor-pointer"
                           />
                           <label htmlFor="fb-exento" className="text-sm cursor-pointer select-none">
-                            Localizar Contribuyentes (Monotributo / Responsables Inscriptos / Exento)
+                            Localizar Contribuyente Exento
                           </label>
                         </div>
                       )}
 
-                      {!isFactA && !fbIsExento && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/40 rounded px-3 py-2">
-                            <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                            <span className="flex-1">Consumidor Final</span>
-                            <button
-                              type="button"
-                              onClick={() => { setCloseCfIdentificado(v => !v); if (closeCfIdentificado) { setCloseCfNombre(""); setCloseCfDni(""); } }}
-                              className="text-xs text-primary underline underline-offset-2 hover:no-underline shrink-0"
-                            >
-                              {closeCfIdentificado ? "Quitar identificación" : "Identificar CF"}
-                            </button>
-                          </div>
-                          {closeCfIdentificado && (
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <Label className="text-xs">Nombre y Apellido</Label>
-                                <Input
-                                  value={closeCfNombre}
-                                  onChange={e => setCloseCfNombre(e.target.value)}
-                                  placeholder="Juan Pérez"
-                                  data-testid="input-cf-nombre"
-                                />
-                              </div>
-                              <div>
-                                <Label className="text-xs">DNI</Label>
-                                <Input
-                                  value={closeCfDni}
-                                  onChange={e => setCloseCfDni(e.target.value.replace(/\D/g, ""))}
-                                  placeholder="12345678"
-                                  maxLength={8}
-                                  data-testid="input-cf-dni"
-                                />
-                              </div>
+                      {!isFactA && !fbIsExento && (() => {
+                        const cfResults = closeCfSearch.length >= 2
+                          ? restaurantGuests.filter(g => {
+                              if (!["consumidor_final", "", null, undefined].includes(g.vatCondition as any)) return false;
+                              const q = closeCfSearch.toLowerCase();
+                              const fullName = `${g.firstName} ${g.lastName || ""}`.toLowerCase();
+                              return fullName.includes(q)
+                                || (g.lastName || "").toLowerCase().includes(q)
+                                || (g.firstName || "").toLowerCase().includes(q)
+                                || (g.documentNumber || "").includes(closeCfSearch.replace(/\D/g, ""));
+                            }).slice(0, 6)
+                          : [];
+                        return (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/40 rounded px-3 py-2">
+                              <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                              <span className="flex-1">Consumidor Final</span>
+                              <button
+                                type="button"
+                                onClick={() => { setCloseCfIdentificado(v => !v); if (closeCfIdentificado) { setCloseCfNombre(""); setCloseCfDni(""); } }}
+                                className="text-xs text-primary underline underline-offset-2 hover:no-underline shrink-0"
+                              >
+                                {closeCfIdentificado ? "Quitar identificación" : "Identificar CF"}
+                              </button>
                             </div>
-                          )}
-                        </div>
-                      )}
+                            {/* CF search from system registry */}
+                            <div className="relative">
+                              <Input
+                                placeholder="Buscar CF registrado en el sistema..."
+                                value={closeCfSearch}
+                                onChange={e => { setCloseCfSearch(e.target.value); setCloseCfSearchOpen(true); }}
+                                onFocus={() => setCloseCfSearchOpen(true)}
+                                onBlur={() => setTimeout(() => setCloseCfSearchOpen(false), 300)}
+                                className="text-sm"
+                                data-testid="input-cf-system-search"
+                              />
+                              {closeCfSearchOpen && cfResults.length > 0 && (
+                                <div
+                                  className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg max-h-44 overflow-y-auto"
+                                  onMouseDown={e => e.preventDefault()}
+                                >
+                                  {cfResults.map(g => {
+                                    const fullName = `${g.firstName} ${g.lastName || ""}`.toUpperCase().trim();
+                                    return (
+                                      <button key={g.id} type="button"
+                                        className="w-full text-left px-3 py-2 hover:bg-accent text-sm flex items-center gap-2"
+                                        onMouseDown={() => {
+                                          setCloseCfNombre(fullName);
+                                          setCloseCfDni((g as any).documentNumber || "");
+                                          setCloseCfIdentificado(true);
+                                          setCloseCfSearch(fullName);
+                                          setCloseCfSearchOpen(false);
+                                        }}
+                                      >
+                                        <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                        <span className="flex-1 font-medium">{fullName}</span>
+                                        {(g as any).documentNumber && (
+                                          <span className="text-xs text-muted-foreground">DNI {(g as any).documentNumber}</span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {closeCfSearch.length >= 2 && cfResults.length === 0 && (
+                                <p className="text-xs text-muted-foreground mt-1">Sin resultados. Usá "Identificar CF" para ingresar datos manualmente.</p>
+                              )}
+                            </div>
+                            {closeCfIdentificado && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <Label className="text-xs">Nombre y Apellido</Label>
+                                  <Input
+                                    value={closeCfNombre}
+                                    onChange={e => setCloseCfNombre(e.target.value)}
+                                    placeholder="Juan Pérez"
+                                    data-testid="input-cf-nombre"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">DNI</Label>
+                                  <Input
+                                    value={closeCfDni}
+                                    onChange={e => setCloseCfDni(e.target.value.replace(/\D/g, ""))}
+                                    placeholder="12345678"
+                                    maxLength={8}
+                                    data-testid="input-cf-dni"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {showClientForm && (
                         <>
@@ -5646,6 +5719,8 @@ export default function RestaurantPage() {
                 setSplitBillingSearches({});
                 setSplitFbIsExento({});
                 setCloseSalesCondition("contado");
+                setCloseCfSearch("");
+                setCloseCfSearchOpen(false);
               }}
               className="w-full sm:w-auto"
             >
