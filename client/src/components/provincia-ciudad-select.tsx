@@ -1,13 +1,18 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { PROVINCIAS, getCiudades } from "@/lib/argentina-geo";
 
 interface ProvinciaCiudadSelectProps {
@@ -19,8 +24,158 @@ interface ProvinciaCiudadSelectProps {
   testIdLocalidad?: string;
 }
 
-const NONE = "__none__";
 const OTRA = "__otra__";
+
+function ProvinciaCombobox({
+  value,
+  onChange,
+  testId,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filtered = PROVINCIAS.filter((p) =>
+    p.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+          data-testid={testId}
+        >
+          <span className="truncate">{value || "Seleccionar..."}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Buscar provincia..."
+            value={search}
+            onValueChange={setSearch}
+          />
+          <CommandList>
+            <CommandEmpty>Sin resultados</CommandEmpty>
+            <CommandGroup>
+              {filtered.map((p) => (
+                <CommandItem
+                  key={p}
+                  value={p}
+                  onSelect={() => {
+                    onChange(p);
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                >
+                  <Check
+                    className={cn("mr-2 h-4 w-4", value === p ? "opacity-100" : "opacity-0")}
+                  />
+                  {p}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CiudadCombobox({
+  provincia,
+  value,
+  onChange,
+  testId,
+}: {
+  provincia: string;
+  value: string;
+  onChange: (v: string) => void;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ciudades = getCiudades(provincia);
+  const ciudadEsConocida = ciudades.includes(value);
+  const showOtra = !ciudadEsConocida && value !== "";
+
+  const filtered = ciudades.filter((c) =>
+    c.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const displayValue = ciudadEsConocida
+    ? value
+    : showOtra
+    ? `${value} (personalizada)`
+    : "Seleccionar...";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={!provincia}
+          className="w-full justify-between font-normal"
+          data-testid={testId}
+        >
+          <span className="truncate">{!provincia ? "Seleccionar provincia primero" : displayValue}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Buscar localidad..."
+            value={search}
+            onValueChange={setSearch}
+          />
+          <CommandList>
+            <CommandEmpty>Sin resultados</CommandEmpty>
+            <CommandGroup>
+              {filtered.map((c) => (
+                <CommandItem
+                  key={c}
+                  value={c}
+                  onSelect={() => {
+                    onChange(c);
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                >
+                  <Check
+                    className={cn("mr-2 h-4 w-4", value === c ? "opacity-100" : "opacity-0")}
+                  />
+                  {c}
+                </CommandItem>
+              ))}
+              <CommandItem
+                value={OTRA}
+                onSelect={() => {
+                  onChange("");
+                  setOpen(false);
+                  setSearch("");
+                }}
+              >
+                <Check className="mr-2 h-4 w-4 opacity-0" />
+                Otra localidad...
+              </CommandItem>
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function ProvinciaCiudadSelect({
   provincia,
@@ -33,96 +188,62 @@ export function ProvinciaCiudadSelect({
   const ciudades = getCiudades(provincia);
   const ciudadEsConocida = provincia && ciudades.includes(localidad);
   const [customCiudad, setCustomCiudad] = useState(!ciudadEsConocida ? localidad : "");
+  const [showCustom, setShowCustom] = useState(false);
 
   useEffect(() => {
-    if (!ciudadEsConocida) {
+    if (!ciudadEsConocida && localidad) {
       setCustomCiudad(localidad);
+      setShowCustom(true);
+    } else if (ciudadEsConocida) {
+      setShowCustom(false);
     }
   }, [localidad, ciudadEsConocida]);
 
-  const handleProvinciaChange = (val: string) => {
-    if (val === NONE) return;
-    onProvinciaChange(val);
-    onLocalidadChange("");
-    setCustomCiudad("");
-  };
-
-  const handleCiudadSelectChange = (val: string) => {
-    if (val === NONE) return;
-    if (val === OTRA) {
+  const handleCiudadChange = (val: string) => {
+    if (val === "") {
+      setShowCustom(true);
+      setCustomCiudad("");
       onLocalidadChange("");
-      setCustomCiudad("");
     } else {
+      setShowCustom(false);
       onLocalidadChange(val);
-      setCustomCiudad("");
     }
   };
-
-  const selectValue = ciudadEsConocida
-    ? localidad
-    : localidad === "" && customCiudad === ""
-    ? NONE
-    : OTRA;
 
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="grid gap-2">
         <Label>Provincia</Label>
-        <Select
-          value={provincia || NONE}
-          onValueChange={handleProvinciaChange}
-        >
-          <SelectTrigger data-testid={testIdProvincia}>
-            <SelectValue placeholder="Seleccionar..." />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE} disabled>Seleccionar...</SelectItem>
-            {PROVINCIAS.map((p) => (
-              <SelectItem key={p} value={p}>{p}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ProvinciaCombobox
+          value={provincia}
+          onChange={(val) => {
+            onProvinciaChange(val);
+            onLocalidadChange("");
+            setCustomCiudad("");
+            setShowCustom(false);
+          }}
+          testId={testIdProvincia}
+        />
       </div>
 
       <div className="grid gap-2">
         <Label>Ciudad / Localidad</Label>
-        {provincia ? (
-          <>
-            <Select
-              value={selectValue}
-              onValueChange={handleCiudadSelectChange}
-            >
-              <SelectTrigger data-testid={testIdLocalidad}>
-                <SelectValue placeholder="Seleccionar..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE} disabled>Seleccionar...</SelectItem>
-                {ciudades.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-                <SelectItem value={OTRA}>Otra localidad...</SelectItem>
-              </SelectContent>
-            </Select>
-            {selectValue === OTRA && (
-              <Input
-                placeholder="Escribir localidad"
-                value={customCiudad}
-                onChange={(e) => {
-                  setCustomCiudad(e.target.value);
-                  onLocalidadChange(e.target.value);
-                }}
-                data-testid={`${testIdLocalidad}-custom`}
-                className="mt-1"
-              />
-            )}
-          </>
-        ) : (
+        <CiudadCombobox
+          provincia={provincia}
+          value={localidad}
+          onChange={handleCiudadChange}
+          testId={testIdLocalidad}
+        />
+        {showCustom && (
           <Input
-            placeholder="Seleccionar provincia primero"
-            value={localidad}
-            onChange={(e) => onLocalidadChange(e.target.value)}
-            data-testid={testIdLocalidad}
-            disabled={!provincia}
+            placeholder="Escribir localidad"
+            value={customCiudad}
+            onChange={(e) => {
+              setCustomCiudad(e.target.value);
+              onLocalidadChange(e.target.value);
+            }}
+            data-testid={`${testIdLocalidad}-custom`}
+            className="mt-1"
           />
         )}
       </div>
