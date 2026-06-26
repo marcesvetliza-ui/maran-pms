@@ -4561,13 +4561,20 @@ export default function RestaurantPage() {
                 {(() => {
                   const updOrder = getUpdatedOrder();
                   const isTableless = updOrder && !updOrder.tableId;
+                  const isFacturaReceipt = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
                   const activePaymentMethods = isTableless
                     ? { efectivo: "Efectivo", pedidos_ya: "Pedidos Ya" }
-                    : paymentMethodLabels;
+                    : isFacturaReceipt
+                      ? paymentMethodLabels
+                      : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => k !== "cuenta_corriente")) as Record<string, string>;
                   const activeReceiptTypes = isTableless
                     ? { voucher: "Voucher Justo Resto", voucher_pedidos_ya: "Voucher Pedidos Ya" }
                     : receiptTypeLabels;
-                  const effPay = isTableless && !activePaymentMethods[closePaymentMethod] ? "efectivo" : closePaymentMethod;
+                  const effPay = isTableless && !activePaymentMethods[closePaymentMethod]
+                    ? "efectivo"
+                    : !isFacturaReceipt && closePaymentMethod === "cuenta_corriente"
+                      ? "efectivo"
+                      : closePaymentMethod;
                   const effRec = isTableless && !activeReceiptTypes[closeReceiptType] ? "voucher" : closeReceiptType;
                   if (effPay !== closePaymentMethod) setTimeout(() => setClosePaymentMethod(effPay), 0);
                   if (effRec !== closeReceiptType) setTimeout(() => setCloseReceiptType(effRec), 0);
@@ -5640,6 +5647,7 @@ export default function RestaurantPage() {
                 if (currentOrder) {
                   const disc = parseFloat(closeDiscount || "0");
                   const isFactura = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
+                  const isFactA = closeReceiptType === "factura_a";
                   const vatCond = closeReceiptType === "factura_a"
                     ? "responsable_inscripto"
                     : fbIsExento ? "exento" : "consumidor_final";
