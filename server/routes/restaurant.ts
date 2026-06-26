@@ -369,6 +369,39 @@ export function registerRestaurantRoutes(app: Express) {
       // Obtener ítems del pedido (necesario tanto para la factura como para el stock)
       const orderItemsList = await storage.getOrderItems(req.params.id);
 
+      // Find-or-create CF guest for auditability (Factura B — CF identificado con DNI)
+      // This ensures the CF always exists as a traceable system record, enabling future NC-B issuance.
+      let cfGuestId: string | undefined;
+      if (emitInvoice && receiptType === "factura_b" && customerDni && customerRazonSocial) {
+        try {
+          const cleanDni = customerDni.replace(/\D/g, "");
+          const matching = await storage.searchGuests(cleanDni);
+          const existing = matching.find(g =>
+            (g.documentNumber || "").replace(/\D/g, "") === cleanDni &&
+            (!g.vatCondition || g.vatCondition === "consumidor_final")
+          );
+          if (existing) {
+            cfGuestId = existing.id;
+          } else {
+            // Parse name: "JUAN PEREZ" → firstName = "JUAN", lastName = "PEREZ"
+            const parts = customerRazonSocial.trim().split(/\s+/);
+            const firstName = parts[0] || customerRazonSocial;
+            const lastName = parts.slice(1).join(" ") || "-";
+            const newCf = await storage.createGuest({
+              firstName,
+              lastName,
+              documentType: "DNI",
+              documentNumber: cleanDni,
+              vatCondition: "consumidor_final",
+              tipoPersona: "fisica",
+            } as any);
+            cfGuestId = newCf.id;
+          }
+        } catch (e) {
+          console.error("[CF Guest] Error en find-or-create para Factura B:", e);
+        }
+      }
+
       // Emitir factura AFIP si se solicitó
       let invoiceId: number | undefined;
       if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
@@ -443,10 +476,10 @@ export function registerRestaurantRoutes(app: Express) {
         if (stockResult.warnings.length > 0) {
           console.warn(`[Stock] Advertencias en orden ${req.params.id}:`, stockResult.warnings);
         }
-        return res.json({ ...updatedOrder, stockDeducted: stockResult.deducted, stockWarnings: stockResult.warnings, invoiceId });
+        return res.json({ ...updatedOrder, stockDeducted: stockResult.deducted, stockWarnings: stockResult.warnings, invoiceId, cfGuestId });
       } catch (stockError) {
         console.error("[Stock] Error en descuento automático:", stockError);
-        return res.json({ ...updatedOrder, invoiceId });
+        return res.json({ ...updatedOrder, invoiceId, cfGuestId });
       }
     } catch (error) {
       res.status(500).json({ error: "Error closing order" });

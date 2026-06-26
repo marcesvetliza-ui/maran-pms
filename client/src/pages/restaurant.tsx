@@ -1403,7 +1403,7 @@ export default function RestaurantPage() {
       discount?: number; discountType?: string; roomReservationId?: string;
       billingName?: string; billingCuit?: string; ccEntityType?: string; ccEntityId?: string;
       emitInvoice?: boolean; vatCondition?: string; customerRazonSocial?: string; customerCuit?: string;
-      puntoVenta?: number; reservationAdvanceCredit?: number;
+      customerDni?: string; puntoVenta?: number; reservationAdvanceCredit?: number;
     }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
@@ -1420,6 +1420,7 @@ export default function RestaurantPage() {
         vatCondition: data.vatCondition,
         customerRazonSocial: data.customerRazonSocial,
         customerCuit: data.customerCuit,
+        customerDni: data.customerDni,
         puntoVenta: data.puntoVenta,
         reservationAdvanceCredit: data.reservationAdvanceCredit,
       });
@@ -1428,6 +1429,9 @@ export default function RestaurantPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+      if (data?.cfGuestId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+      }
       // Auto-complete: if the closed order's table has a check_in reservation today, move it to historical
       if (currentOrder?.tableId) {
         const _closedTableId = currentOrder.tableId;
