@@ -6328,12 +6328,23 @@ export default function RestaurantPage() {
                   onClick={() => {
                     if (!assignTableReservation || isAlreadyAssigned) return;
                     if (assignFromCheckIn) {
-                      // Coming from Check-In on unassigned reservation: set tableId + check_in status together
-                      updateReservationMutation.mutate({ id: assignTableReservation.id, data: { tableId: t.id, status: "check_in" } });
-                      // Create order for that table if it's free
-                      if (!hasOrder) {
-                        createOrderMutation.mutate({ tableId: t.id, covers: assignTableReservation.partySize, waiterName: "" });
-                      }
+                      // Coming from Check-In on unassigned reservation: set tableId + check_in status,
+                      // then create the order ONLY after the reservation is saved (avoids race condition
+                      // where createOrder.onSuccess sees stale tableId=null on the reservation).
+                      const _res = assignTableReservation;
+                      const _hasOrder = hasOrder;
+                      const _tableId = t.id;
+                      pendingCheckInReservationRef.current = _res;
+                      updateReservationMutation.mutate(
+                        { id: _res.id, data: { tableId: _tableId, status: "check_in" } },
+                        {
+                          onSuccess: () => {
+                            if (!_hasOrder) {
+                              createOrderMutation.mutate({ tableId: _tableId, covers: _res.partySize, waiterName: "" });
+                            }
+                          },
+                        }
+                      );
                       setAssignFromCheckIn(false);
                     } else {
                       updateReservationMutation.mutate({ id: assignTableReservation.id, data: { tableId: t.id } });
