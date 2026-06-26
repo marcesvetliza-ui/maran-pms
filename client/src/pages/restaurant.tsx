@@ -705,6 +705,7 @@ export default function RestaurantPage() {
   const pendingCheckInReservationRef = useRef<TableReservation | null>(null);
   const [closeReceiptType, setCloseReceiptType] = useState("cierre_mesa");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
+  const [closeSalesCondition, setCloseSalesCondition] = useState<"contado" | "cuenta_corriente">("contado");
   const [closeDiscount, setCloseDiscount] = useState("");
   const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("percent");
   const [closeRoomId, setCloseRoomId] = useState("");
@@ -933,7 +934,7 @@ export default function RestaurantPage() {
     queryKey: ["/api/restaurant/time-slots"],
   });
 
-  const { data: companies = [] } = useQuery<{ id: string; name: string; razonSocial: string; nombreFantasia?: string | null; cuilCuit: string; condicionIva?: string | null }[]>({
+  const { data: companies = [] } = useQuery<{ id: string; name: string; razonSocial: string; nombreFantasia?: string | null; cuilCuit: string; condicionIva?: string | null; condicionVentaPredeterminada?: string | null }[]>({
     queryKey: ["/api/companies"],
   });
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
@@ -4444,7 +4445,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -4562,40 +4563,56 @@ export default function RestaurantPage() {
                   const updOrder = getUpdatedOrder();
                   const isTableless = updOrder && !updOrder.tableId;
                   const isFacturaReceipt = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
+                  const clientSelectedForCC = !!closeBillingCompanyId || !!closeBillingGuestId;
+                  const isBilledToCC = isFacturaReceipt && closeSalesCondition === "cuenta_corriente" && clientSelectedForCC;
                   const activePaymentMethods = isTableless
                     ? { efectivo: "Efectivo", pedidos_ya: "Pedidos Ya" }
-                    : isFacturaReceipt
-                      ? paymentMethodLabels
+                    : !isFacturaReceipt
+                      ? { efectivo: "Efectivo" }
                       : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => k !== "cuenta_corriente")) as Record<string, string>;
                   const activeReceiptTypes = isTableless
                     ? { voucher: "Voucher Justo Resto", voucher_pedidos_ya: "Voucher Pedidos Ya" }
                     : receiptTypeLabels;
-                  const effPay = isTableless && !activePaymentMethods[closePaymentMethod]
-                    ? "efectivo"
-                    : !isFacturaReceipt && closePaymentMethod === "cuenta_corriente"
+                  const effPay = isBilledToCC
+                    ? "cuenta_corriente"
+                    : isTableless && !activePaymentMethods[closePaymentMethod]
                       ? "efectivo"
-                      : closePaymentMethod;
+                      : !isFacturaReceipt && closePaymentMethod !== "efectivo"
+                        ? "efectivo"
+                        : closePaymentMethod;
                   const effRec = isTableless && !activeReceiptTypes[closeReceiptType] ? "voucher" : closeReceiptType;
-                  if (effPay !== closePaymentMethod) setTimeout(() => setClosePaymentMethod(effPay), 0);
+                  if (!isBilledToCC && effPay !== closePaymentMethod) setTimeout(() => setClosePaymentMethod(effPay), 0);
                   if (effRec !== closeReceiptType) setTimeout(() => setCloseReceiptType(effRec), 0);
                   const isRoomCharge = effPay === "cuenta_habitacion";
                   return (
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                      <div className="space-y-2">
-                        <Label>Forma de Cobro</Label>
-                        <Select value={effPay} onValueChange={(v) => {
-                          setClosePaymentMethod(v);
-                          if (v !== "cuenta_habitacion") { setCloseRoomId(""); setRoomSearchFilter(""); }
-                        }}>
-                          <SelectTrigger data-testid="select-payment-method"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(activePaymentMethods).map(([value, label]) => (
-                              <SelectItem key={value} value={value}>{label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {isTableless && <p className="text-xs text-muted-foreground">Área sin mesas</p>}
-                      </div>
+                      {isBilledToCC ? (
+                        <div className="space-y-2">
+                          <Label>Forma de Cobro</Label>
+                          <div className="flex items-center gap-2 text-sm bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-md px-3 py-2.5 text-blue-800 dark:text-blue-200">
+                            <CreditCard className="h-4 w-4 shrink-0" />
+                            <span>Cta. Corriente</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">Se registra en la cuenta corriente del cliente</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Label>Forma de Cobro</Label>
+                          <Select value={effPay} onValueChange={(v) => {
+                            setClosePaymentMethod(v);
+                            if (v !== "cuenta_habitacion") { setCloseRoomId(""); setRoomSearchFilter(""); }
+                          }}>
+                            <SelectTrigger data-testid="select-payment-method"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(activePaymentMethods).map(([value, label]) => (
+                                <SelectItem key={value} value={value}>{label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {isTableless && <p className="text-xs text-muted-foreground">Área sin mesas</p>}
+                          {!isFacturaReceipt && <p className="text-xs text-muted-foreground">Voucher/Ticket: solo efectivo</p>}
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <Label>Comprobante</Label>
                         {isRoomCharge ? (
@@ -4607,6 +4624,7 @@ export default function RestaurantPage() {
                           <Select value={effRec} onValueChange={(v) => {
                             setCloseReceiptType(v);
                             // Always reset billing state when switching receipt type to avoid stale data
+                            setCloseSalesCondition("contado");
                             setFbIsExento(false);
                             setCloseBillingCompanyId("");
                             setCloseBillingGuestId("");
@@ -4627,37 +4645,6 @@ export default function RestaurantPage() {
                   );
                 })()}
 
-                {/* Selector de empresa/agencia para CC */}
-                {closePaymentMethod === "cuenta_corriente" && (
-                  <div className="space-y-3 p-3 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
-                    <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Cuenta Corriente — ¿A quién se carga?</p>
-                    <div className="flex gap-2">
-                      <Select value={closeCcEntityType} onValueChange={(v) => { setCloseCcEntityType(v as "company" | "agency"); setCloseCcEntityId(""); }}>
-                        <SelectTrigger className="w-32" data-testid="select-cc-entity-type">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="company">Empresa</SelectItem>
-                          <SelectItem value="agency">Agencia</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={closeCcEntityId} onValueChange={setCloseCcEntityId}>
-                        <SelectTrigger className="flex-1" data-testid="select-cc-entity">
-                          <SelectValue placeholder="Seleccionar..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {closeCcEntityType === "company"
-                            ? companies.filter((c: any) => c.id).map((c: any) => <SelectItem key={c.id} value={c.id}>{(c as any).razonSocial || (c as any).nombreFantasia || (c as any).name || c.id}</SelectItem>)
-                            : agencies.filter((a: any) => a.id).map((a: any) => <SelectItem key={a.id} value={a.id}>{(a as any).razonSocial || (a as any).nombreFantasia || (a as any).name || a.id}</SelectItem>)
-                          }
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {!closeCcEntityId && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400">Si no seleccionás una entidad, el cargo no se registrará en ninguna Cuenta Corriente.</p>
-                    )}
-                  </div>
-                )}
 
                 {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && (() => {
                   const isFactA = closeReceiptType === "factura_a";
@@ -4665,7 +4652,7 @@ export default function RestaurantPage() {
                   // clientSelected only when explicitly chosen from dropdown (not just typing in manual field)
                   const clientSelected = !!closeBillingCompanyId || !!closeBillingGuestId;
                   const cuitValid = !closeBillingCuit || clientSelected || validateCuit(closeBillingCuit);
-                  const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest" }[] = billingSearch.length >= 2
+                  const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest"; condicionVenta: string }[] = billingSearch.length >= 2
                     ? [
                         ...companies
                           .filter(c => {
@@ -4676,7 +4663,7 @@ export default function RestaurantPage() {
                               || c.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
                           })
                           .slice(0, 6)
-                          .map(c => ({ id: c.id, label: c.razonSocial, sublabel: c.nombreFantasia || undefined, cuit: formatCuit(c.cuilCuit), type: "company" as const })),
+                          .map(c => ({ id: c.id, label: c.razonSocial, sublabel: c.nombreFantasia || undefined, cuit: formatCuit(c.cuilCuit), type: "company" as const, condicionVenta: c.condicionVentaPredeterminada || "contado" })),
                         ...restaurantGuests
                           .filter(g => {
                             if (!g.cuilCuit) return false;
@@ -4702,6 +4689,7 @@ export default function RestaurantPage() {
                             sublabel: g.vatCondition === "monotributista" || g.vatCondition === "monotributo" ? "Monotributista" : g.vatCondition === "responsable_inscripto" ? "Resp. Inscripto" : g.vatCondition === "exento" ? "Exento" : g.vatCondition || undefined,
                             cuit: formatCuit(g.cuilCuit || ""),
                             type: "guest" as const,
+                            condicionVenta: (g as any).condicionVentaPredeterminada || "contado",
                           })),
                       ]
                     : [];
@@ -4725,6 +4713,7 @@ export default function RestaurantPage() {
                           <input type="checkbox" id="fb-exento" checked={fbIsExento}
                             onChange={e => {
                               setFbIsExento(e.target.checked);
+                              setCloseSalesCondition("contado");
                               if (!e.target.checked) {
                                 setCloseBillingName("CONSUMIDOR FINAL");
                                 setCloseBillingCuit("");
@@ -4791,25 +4780,49 @@ export default function RestaurantPage() {
                       {showClientForm && (
                         <>
                           {clientSelected ? (
-                            <div className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-md">
-                              {closeBillingGuestId
-                                ? <User className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
-                                : <Building2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
-                              }
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{closeBillingName}</p>
-                                {closeBillingCuit && (
-                                  <p className={`text-xs ${cuitValid ? "text-muted-foreground" : "text-destructive font-medium"}`}>
-                                    CUIT: {closeBillingCuit}{!cuitValid ? " ⚠ inválido" : ""}
-                                  </p>
-                                )}
+                            <>
+                              <div className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-md">
+                                {closeBillingGuestId
+                                  ? <User className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                                  : <Building2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                                }
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{closeBillingName}</p>
+                                  {closeBillingCuit && (
+                                    <p className={`text-xs ${cuitValid ? "text-muted-foreground" : "text-destructive font-medium"}`}>
+                                      CUIT: {closeBillingCuit}{!cuitValid ? " ⚠ inválido" : ""}
+                                    </p>
+                                  )}
+                                </div>
+                                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0"
+                                  onClick={() => { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setBillingSearch(""); setCloseSalesCondition("contado"); }}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </Button>
                               </div>
-                              <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0"
-                                onClick={() => { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setBillingSearch(""); }}
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
+                              {/* Condición de cobro — toggle visible tras selección de cliente */}
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">Condición de cobro:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setCloseSalesCondition("contado")}
+                                  className={`text-xs px-2.5 py-1 rounded border transition-colors ${closeSalesCondition === "contado" ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent text-muted-foreground"}`}
+                                  data-testid="button-cond-contado"
+                                >Contado</button>
+                                <button
+                                  type="button"
+                                  onClick={() => setCloseSalesCondition("cuenta_corriente")}
+                                  className={`text-xs px-2.5 py-1 rounded border transition-colors ${closeSalesCondition === "cuenta_corriente" ? "bg-blue-600 text-white border-blue-600" : "border-border hover:bg-accent text-muted-foreground"}`}
+                                  data-testid="button-cond-cc"
+                                >Cta. Corriente</button>
+                              </div>
+                              {closeSalesCondition === "cuenta_corriente" && (
+                                <div className="flex items-center gap-2 text-xs text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded px-2.5 py-1.5">
+                                  <CreditCard className="h-3.5 w-3.5 shrink-0" />
+                                  <span>Se acreditará a la Cta. Cte. de <strong>{closeBillingName}</strong></span>
+                                </div>
+                              )}
+                            </>
                           ) : (
                             <div className="relative">
                               <div className="flex gap-2">
@@ -4837,14 +4850,12 @@ export default function RestaurantPage() {
                                             if (item.type === "company") {
                                               setCloseBillingCompanyId(item.id);
                                               setCloseBillingGuestId("");
-                                              setCloseCcEntityType("company");
-                                              setCloseCcEntityId(item.id);
                                             } else {
                                               setCloseBillingGuestId(item.id);
                                               setCloseBillingCompanyId("");
-                                              setCloseCcEntityType("company");
-                                              setCloseCcEntityId("");
                                             }
+                                            const cond = item.condicionVenta === "cuenta_corriente" ? "cuenta_corriente" : "contado";
+                                            setCloseSalesCondition(cond);
                                             setBillingSearch(item.label);
                                             setBillingSearchOpen(false);
                                           }}
@@ -5634,6 +5645,7 @@ export default function RestaurantPage() {
                 setSplitVatConditions({});
                 setSplitBillingSearches({});
                 setSplitFbIsExento({});
+                setCloseSalesCondition("contado");
               }}
               className="w-full sm:w-auto"
             >
@@ -5651,17 +5663,26 @@ export default function RestaurantPage() {
                   const vatCond = closeReceiptType === "factura_a"
                     ? "responsable_inscripto"
                     : fbIsExento ? "exento" : "consumidor_final";
+                  const clientSelectedForBilling = !!closeBillingCompanyId || !!closeBillingGuestId;
+                  const isBilledToCCNow = isFactura && closeSalesCondition === "cuenta_corriente" && clientSelectedForBilling;
+                  const finalPaymentMethod = isBilledToCCNow ? "cuenta_corriente" : closePaymentMethod;
+                  const ccType = isBilledToCCNow
+                    ? (closeBillingCompanyId ? "company" : "guest")
+                    : undefined;
+                  const ccId = isBilledToCCNow
+                    ? (closeBillingCompanyId || closeBillingGuestId || undefined)
+                    : undefined;
                   closeOrderMutation.mutate({
                     orderId: currentOrder.id,
                     receiptType: closeReceiptType,
-                    paymentMethod: closePaymentMethod,
+                    paymentMethod: finalPaymentMethod,
                     discount: disc > 0 ? disc : undefined,
                     discountType: disc > 0 ? closeDiscountType : undefined,
-                    roomReservationId: closePaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
+                    roomReservationId: finalPaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
                     billingName: closeBillingName || undefined,
                     billingCuit: closeBillingCuit || undefined,
-                    ccEntityType: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityType : undefined,
-                    ccEntityId: closePaymentMethod === "cuenta_corriente" && closeCcEntityId ? closeCcEntityId : undefined,
+                    ccEntityType: ccType,
+                    ccEntityId: ccId,
                     emitInvoice: isFactura,
                     vatCondition: isFactura ? vatCond : undefined,
                     customerRazonSocial: isFactura
