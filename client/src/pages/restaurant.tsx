@@ -367,11 +367,16 @@ function AdvanceDialog({
   const [advCustomerCuit, setAdvCustomerCuit] = useState("");
 
   // Resolve the registered client linked to this reservation (guest or company)
-  const linkedGuest = reservation?.clientId
-    ? restaurantGuests.find((g: any) => g.id === reservation.clientId) as any ?? null
+  // When a company is selected in the reservation form, clientId is stored as "company-{uuid}"
+  const rawClientId = reservation?.clientId || "";
+  const isCompanyClientId = rawClientId.startsWith("company-");
+  const realCompanyId = isCompanyClientId ? rawClientId.replace("company-", "") : null;
+
+  const linkedGuest = !isCompanyClientId && rawClientId
+    ? restaurantGuests.find((g: any) => g.id === rawClientId) as any ?? null
     : null;
-  const linkedCompany = !linkedGuest && reservation?.clientId
-    ? companies.find((c: any) => c.id === reservation.clientId) as any ?? null
+  const linkedCompany = (isCompanyClientId || !linkedGuest) && rawClientId
+    ? companies.find((c: any) => c.id === (realCompanyId || rawClientId)) as any ?? null
     : null;
   const linkedClient = linkedGuest ?? linkedCompany;
   const hasClient = !!linkedClient;
@@ -383,19 +388,11 @@ function AdvanceDialog({
     : "consumidor_final";
 
   // Compute which receipt types are valid for this reservation
+  const riOrMono = ["responsable_inscripto", "monotributista", "monotributo"].includes(clientVat);
   const availableReceiptTypes: { value: string; label: string }[] = [
     { value: "voucher", label: "Voucher (no fiscal)" },
-    ...(hasClient
-      ? [
-          ...( ["consumidor_final", "exento", ""].includes(clientVat)
-            ? [{ value: "factura_b", label: "Factura B" }]
-            : []),
-          ...( ["responsable_inscripto", "monotributo"].includes(clientVat)
-            ? [{ value: "factura_a", label: "Factura A" }]
-            : []),
-        ]
-      : [{ value: "factura_b", label: "Factura B" }]
-    ),
+    { value: "factura_b", label: "Factura B" },
+    ...(hasClient && riOrMono ? [{ value: "factura_a", label: "Factura A" }] : []),
   ];
 
   useEffect(() => {
@@ -936,7 +933,7 @@ export default function RestaurantPage() {
     queryKey: ["/api/restaurant/time-slots"],
   });
 
-  const { data: companies = [] } = useQuery<{ id: string; name: string; razonSocial: string; nombreFantasia?: string | null; cuilCuit: string }[]>({
+  const { data: companies = [] } = useQuery<{ id: string; name: string; razonSocial: string; nombreFantasia?: string | null; cuilCuit: string; condicionIva?: string | null }[]>({
     queryKey: ["/api/companies"],
   });
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
