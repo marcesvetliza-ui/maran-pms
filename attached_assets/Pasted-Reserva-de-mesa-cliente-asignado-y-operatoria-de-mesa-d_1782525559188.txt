@@ -1,0 +1,74 @@
+Reserva de mesa, cliente asignado y operatoria de mesa de consumos directos
+
+Planteó un cambio de operativa por una más rápida
+
+Al momento de cerrar mesa en vez de que el mozo tenga que seleccionar el comprobante para que desencadene la búsqueda del cliente, y todo lo demás y que ha generado un lio barbaro, genera errores, cambiemos a que el sistema parta de un cliente
+
+Nuevo Reserva
+se asigna a un cliente existente 
+no se asigna un cliente, se carga Nombre, esto hace que el sistema asigne al cliente consumidor final 
+
+Seña / Anticipo, cambia la lógica
+Según el cliente seleccionado en la reserva el sistema debe de traer el comprobante según la inscripción de este
+solo se puede cambiar a el voucher no fiscal, no puede aparecer otro comprobante
+ingresar el monto
+seleccionar la forma de pago
+clic en registrar anticipo 
+
+
+Hoy es más lento, puede haber errores y permite hacer una factura B a un R.I., es más hice una. 
+
+
+Plano de mesa, inicialmente aparece el nombre pero si no se puede mantener por x motivo no importa 
+
+
+Nuevo pedido 
+Luego de seleccionar el mozo y la cantidad de comensales abre la comanda
+
+
+
+El cliente debe de mostrar siempre, que es lo mas importante, y este puede ser
+el cliente de la reserva
+si es un consumo directo, el cliente consumidor final 
+
+Si se complica seguir mostrando el nombre del cliente en el plano de mesas no hay problema, mientras que se muestre bien claro al abrir la mesa
+
+
+Cerrar mesa, cambia la lógica
+
+Hoy al no tener la relación con el cliente, al Cerrar Mesa el sistema no se sabe a quién facturar y por ende el mozo debe de estar seleccionando cosas que el sistema por otro lado sabe. Hoy tiene que 
+
+elegir el comprobante lo cual para eso debe de saber la inscripciòn del cliente
+buscar el cliente lo cual hace que no coinciden con el comprobante seleccionado
+crear el cliente si no existe pero puede dejar seleccionado un comprobante equivocado
+Verificar la condición de venta por si hay que cambiarla
+seleccionar la forma de cobro 
+clic confirmar cierre y si esta todo bien puede que arca autorice la factura
+
+Pero si se sabe de antemano a quien facturar el mozo solo debe
+
+Verificar la condición de venta por si hay que cambiarla
+seleccionar las formas de pago con que se abona, hoy solo permite una
+clic en confirmar cierre
+
+Si el cliente solicitara que la factura fuera a otro deberìa
+buscar el cliente o 
+crear uno nuevo si no existe, ver CF también
+el sistema al tener seleccionado el cliente sabe que comprobante tiene que seleccionar, no lo selecciona el mozo 
+el mozo confirma la condición de venta
+se selecciona las formas de pago 
+clic en confirmar cierre
+
+El sistema al saber el cliente debe de seleccionar el comprobante adecuado según su inscripción ante arca, no el mozo, lo que simplificando todo, es más ágil la operatoria y hay menos clic
+
+Acá debe de mostrar el cliente
+
+
+
+
+Cargos a las habitaciones 
+Al ser la mesa asignada al cliente consumidor final el comprobante seleccionado es la factura B por lo cual la forma de pago Cargo a habitación se puede seleccionada ahorrando un clic ya que siempre el comprobante que comienza todo es el ticket / cierre que no tiene esta forma de pago
+
+
+Ticket / Cierre
+Siguiendo la lógica, si se necesita cerrar la mesa porque el cliente no pide factura, solo se debe cambiar a este comprobante y hacer clic en Confirmar cierre 
