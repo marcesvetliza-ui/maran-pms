@@ -284,6 +284,18 @@ const paymentMethodLabels: Record<string, string> = {
   cuenta_habitacion: "Cargo a Habitación",
 };
 
+function deriveReceiptFromVat(vatCondition: string | null | undefined): "factura_a" | "factura_b" | "factura_c" {
+  if (vatCondition === "responsable_inscripto") return "factura_a";
+  if (vatCondition === "monotributista" || vatCondition === "monotributo") return "factura_c";
+  return "factura_b";
+}
+function vatConditionShortLabel(vc: string | null | undefined): string {
+  if (vc === "responsable_inscripto") return "Resp. Inscripto";
+  if (vc === "monotributista" || vc === "monotributo") return "Monotributista";
+  if (vc === "exento") return "Exento";
+  return "Cons. Final";
+}
+
 const menuItemFormSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   categoryId: z.string().min(1, "La categoria es requerida"),
@@ -824,6 +836,17 @@ export default function RestaurantPage() {
   const [closeCfSearch, setCloseCfSearch] = useState("");
   const [closeCfSearchOpen, setCloseCfSearchOpen] = useState(false);
 
+  // Client-first billing redesign
+  const [closeBillingClient, setCloseBillingClient] = useState<null | {
+    id: string; name: string; cuit: string; vatCondition: string;
+    type: "guest" | "company"; condicionVenta: string;
+  }>(null);
+  const [closeBillingClientSearch, setCloseBillingClientSearch] = useState("");
+  const [closeBillingClientSearchOpen, setCloseBillingClientSearchOpen] = useState(false);
+  const [showAlternateClientSearch, setShowAlternateClientSearch] = useState(false);
+  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"" | "cierre_mesa" | "voucher">("");
+  const [closePaymentSplits, setClosePaymentSplits] = useState<{id: string; method: string; amount: string; roomId?: string; roomSearch?: string}[]>([{id: "1", method: "efectivo", amount: ""}]);
+
   // Clientes tab state
   const [clientSearch, setClientSearch] = useState("");
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
@@ -968,6 +991,48 @@ export default function RestaurantPage() {
   const totalAdvanceCredit = closeDialogTableAdvances
     .filter(a => !a.appliedToOrderId)
     .reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
+
+  // Auto-detect billing client from table reservation when close dialog opens
+  useEffect(() => {
+    if (!isCloseDialogOpen || !currentOrder) return;
+    setClosePaymentSplits([{ id: "1", method: "efectivo", amount: parseFloat(currentOrder.total || "0").toFixed(2) }]);
+    setCloseNonFiscalOverride("");
+    setShowAlternateClientSearch(false);
+    setCloseBillingClientSearch("");
+    setCloseBillingClientSearchOpen(false);
+    if (!currentOrder.tableId) { setCloseBillingClient(null); return; }
+    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const linkedRes = (tableReservations || []).find(
+      (r: any) => r.tableId === currentOrder.tableId && r.status === "check_in" && r.reservationDate === todayStr
+    );
+    if (!linkedRes?.clientId) { setCloseBillingClient(null); return; }
+    const guest = (restaurantGuests || []).find((g: any) => g.id === linkedRes.clientId);
+    if (guest) {
+      setCloseBillingClient({
+        id: guest.id,
+        name: `${guest.lastName || ""} ${guest.firstName || ""}`.toUpperCase().trim() || guest.firstName,
+        cuit: guest.cuilCuit || "",
+        vatCondition: guest.vatCondition || "consumidor_final",
+        type: "guest",
+        condicionVenta: (guest as any).condicionVentaPredeterminada || "contado",
+      });
+      return;
+    }
+    const company = (companies || []).find((c: any) => c.id === linkedRes.clientId);
+    if (company) {
+      setCloseBillingClient({
+        id: company.id,
+        name: company.razonSocial,
+        cuit: company.cuilCuit || "",
+        vatCondition: company.condicionIva || "consumidor_final",
+        type: "company",
+        condicionVenta: company.condicionVentaPredeterminada || "contado",
+      });
+    } else {
+      setCloseBillingClient(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCloseDialogOpen]);
 
   type RestaurantGuest = {
     id: string; tipoPersona: string | null; firstName: string; lastName: string;
@@ -1404,6 +1469,7 @@ export default function RestaurantPage() {
       billingName?: string; billingCuit?: string; ccEntityType?: string; ccEntityId?: string;
       emitInvoice?: boolean; vatCondition?: string; customerRazonSocial?: string; customerCuit?: string;
       customerDni?: string; puntoVenta?: number; reservationAdvanceCredit?: number;
+      paymentSplits?: {method: string; amount: number; roomReservationId?: string}[];
     }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
@@ -1423,6 +1489,7 @@ export default function RestaurantPage() {
         customerDni: data.customerDni,
         puntoVenta: data.puntoVenta,
         reservationAdvanceCredit: data.reservationAdvanceCredit,
+        paymentSplits: data.paymentSplits,
       });
       return res.json();
     },
@@ -4566,510 +4633,317 @@ export default function RestaurantPage() {
             {!isSplitMode ? (
               <>
                 {(() => {
-                  const updOrder = getUpdatedOrder();
-                  const isTableless = updOrder && !updOrder.tableId;
-                  const isFacturaReceipt = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
-                  const clientSelectedForCC = !!closeBillingCompanyId || !!closeBillingGuestId;
-                  const isBilledToCC = isFacturaReceipt && closeSalesCondition === "cuenta_corriente" && clientSelectedForCC;
-                  const activePaymentMethods = isTableless
-                    ? { efectivo: "Efectivo", pedidos_ya: "Pedidos Ya" }
-                    : !isFacturaReceipt
-                      ? { efectivo: "Efectivo" }
-                      : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => k !== "cuenta_corriente")) as Record<string, string>;
-                  const activeReceiptTypes = isTableless
-                    ? { voucher: "Voucher Justo Resto", voucher_pedidos_ya: "Voucher Pedidos Ya" }
-                    : receiptTypeLabels;
-                  const effPay = isBilledToCC
-                    ? "cuenta_corriente"
-                    : isTableless && !activePaymentMethods[closePaymentMethod]
-                      ? "efectivo"
-                      : !isFacturaReceipt && closePaymentMethod !== "efectivo"
-                        ? "efectivo"
-                        : closePaymentMethod;
-                  const effRec = isTableless && !activeReceiptTypes[closeReceiptType] ? "voucher" : closeReceiptType;
-                  if (!isBilledToCC && effPay !== closePaymentMethod) setTimeout(() => setClosePaymentMethod(effPay), 0);
-                  if (effRec !== closeReceiptType) setTimeout(() => setCloseReceiptType(effRec), 0);
-                  const isRoomCharge = effPay === "cuenta_habitacion";
+                  const effReceiptType = closeNonFiscalOverride || deriveReceiptFromVat(closeBillingClient?.vatCondition);
+                  const isFactura = ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
+                  const isFactA = effReceiptType === "factura_a";
+                  const isBilledToCC = isFactura && closeSalesCondition === "cuenta_corriente" && !!closeBillingClient;
+                  const hasRoomCharge = !isBilledToCC && closePaymentSplits.some(s => s.method === "cuenta_habitacion");
+                  const total = parseFloat(getUpdatedOrder()?.total || currentOrder?.total || "0");
+                  const disc = parseFloat(closeDiscount || "0");
+                  const discAmt = closeDiscountType === "percent" ? total * disc / 100 : disc;
+                  const finalTotal = Math.max(0, total - discAmt - totalAdvanceCredit);
+                  const splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
+                  const remaining = Math.round((finalTotal - splitTotal) * 100) / 100;
+                  const availablePayMethods = !isFactura
+                    ? { efectivo: "Efectivo" }
+                    : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => k !== "cuenta_corriente")) as Record<string, string>;
+                  const allClientsForSearch: {id: string; name: string; cuit: string; vatCondition: string; type: "guest" | "company"; condicionVenta: string}[] = closeBillingClientSearch.length >= 2 ? [
+                    ...companies.filter(c => {
+                      const q = closeBillingClientSearch.toLowerCase();
+                      return c.razonSocial.toLowerCase().includes(q)
+                        || (c.nombreFantasia || "").toLowerCase().includes(q)
+                        || (c.cuilCuit || "").replace(/-/g,"").includes(closeBillingClientSearch.replace(/-/g,""));
+                    }).slice(0, 5).map(c => ({ id: c.id, name: c.razonSocial, cuit: c.cuilCuit || "", vatCondition: c.condicionIva || "consumidor_final", type: "company" as const, condicionVenta: c.condicionVentaPredeterminada || "contado" })),
+                    ...restaurantGuests.filter(g => {
+                      if (!g.cuilCuit && !g.documentNumber) return false;
+                      const q = closeBillingClientSearch.toLowerCase();
+                      const fullName = `${g.firstName} ${g.lastName || ""}`.toLowerCase();
+                      return fullName.includes(q) || (g.lastName || "").toLowerCase().includes(q)
+                        || (g.cuilCuit || "").replace(/-/g,"").includes(closeBillingClientSearch.replace(/-/g,""))
+                        || (g.documentNumber || "").includes(closeBillingClientSearch.replace(/\D/g,""));
+                    }).slice(0, 4).map(g => ({
+                      id: g.id,
+                      name: `${g.lastName || ""} ${g.firstName || ""}`.toUpperCase().trim() || g.firstName,
+                      cuit: g.cuilCuit || "",
+                      vatCondition: g.vatCondition || "consumidor_final",
+                      type: "guest" as const,
+                      condicionVenta: (g as any).condicionVentaPredeterminada || "contado",
+                    })),
+                  ] : [];
                   return (
-                    <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                      {isBilledToCC ? (
-                        <div className="space-y-2">
-                          <Label>Forma de Cobro</Label>
-                          <div className="flex items-center gap-2 text-sm bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-md px-3 py-2.5 text-blue-800 dark:text-blue-200">
-                            <CreditCard className="h-4 w-4 shrink-0" />
-                            <span>Cta. Corriente</span>
+                    <>
+                      {/* ── CLIENTE ── */}
+                      <div className="pt-4 border-t space-y-3">
+                        <p className="text-sm font-semibold flex items-center gap-2">
+                          <User className="h-4 w-4" />Cliente
+                        </p>
+                        {closeBillingClient ? (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 p-2.5 rounded-md border bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
+                              {closeBillingClient.type === "company"
+                                ? <Building2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                                : <User className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold truncate">{closeBillingClient.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {closeBillingClient.cuit ? `CUIT: ${formatCuit(closeBillingClient.cuit)} · ` : ""}
+                                  {vatConditionShortLabel(closeBillingClient.vatCondition)}
+                                </p>
+                              </div>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0"
+                                onClick={() => { setCloseBillingClient(null); setCloseSalesCondition("contado"); setShowAlternateClientSearch(false); setCloseBillingClientSearch(""); }}
+                                data-testid="button-remove-billing-client"
+                              ><X className="h-3.5 w-3.5" /></Button>
+                            </div>
+                            {!showAlternateClientSearch && (
+                              <button type="button"
+                                className="text-xs text-primary underline underline-offset-2 hover:no-underline"
+                                onClick={() => { setShowAlternateClientSearch(true); setCloseBillingClientSearch(""); }}
+                                data-testid="button-alternate-client"
+                              >Facturar a otro cliente</button>
+                            )}
                           </div>
-                          <p className="text-xs text-muted-foreground">Se registra en la cuenta corriente del cliente</p>
+                        ) : (
+                          <div className="flex items-center gap-2 p-2.5 rounded-md border bg-muted/40">
+                            <User className="h-4 w-4 text-muted-foreground shrink-0" />
+                            <span className="text-sm text-muted-foreground flex-1">Consumidor Final</span>
+                          </div>
+                        )}
+                        {(!closeBillingClient || showAlternateClientSearch) && (
+                          <div className="relative">
+                            <Input
+                              placeholder="Buscar empresa o persona por nombre / CUIT..."
+                              value={closeBillingClientSearch}
+                              onChange={e => { setCloseBillingClientSearch(e.target.value); setCloseBillingClientSearchOpen(true); }}
+                              onFocus={() => setCloseBillingClientSearchOpen(true)}
+                              onBlur={() => setTimeout(() => setCloseBillingClientSearchOpen(false), 350)}
+                              autoComplete="off"
+                              data-testid="input-billing-client-search"
+                            />
+                            {closeBillingClientSearchOpen && allClientsForSearch.length > 0 && (
+                              <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg max-h-52 overflow-y-auto" onMouseDown={e => e.preventDefault()}>
+                                {allClientsForSearch.map(item => (
+                                  <button key={item.id} type="button"
+                                    className="w-full text-left px-3 py-2 hover:bg-accent text-sm flex items-start gap-2"
+                                    onMouseDown={() => {
+                                      setCloseBillingClient(item);
+                                      setCloseSalesCondition(item.condicionVenta === "cuenta_corriente" ? "cuenta_corriente" : "contado");
+                                      setCloseBillingClientSearch("");
+                                      setCloseBillingClientSearchOpen(false);
+                                      setShowAlternateClientSearch(false);
+                                    }}
+                                  >
+                                    {item.type === "company"
+                                      ? <Building2 className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
+                                      : <User className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />}
+                                    <span className="flex-1 min-w-0">
+                                      <span className="font-medium block truncate">{item.name}</span>
+                                      <span className="text-xs text-muted-foreground">{vatConditionShortLabel(item.vatCondition)}</span>
+                                    </span>
+                                    {item.cuit && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">{formatCuit(item.cuit)}</span>}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            {closeBillingClientSearchOpen && closeBillingClientSearch.length >= 2 && allClientsForSearch.length === 0 && (
+                              <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg px-3 py-2 text-sm text-muted-foreground">
+                                Sin resultados para "{closeBillingClientSearch}"
+                              </div>
+                            )}
+                            {closeBillingClientSearch.length < 2 && (
+                              <p className="text-xs text-muted-foreground mt-1">Escribí al menos 2 caracteres para buscar</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ── COMPROBANTE (auto-derivado del cliente) ── */}
+                      <div className="space-y-2">
+                        <p className="text-sm font-semibold">Comprobante</p>
+                        <div className="flex items-center gap-2">
+                          <div className={`flex-1 text-sm font-medium px-3 py-2 rounded-md border flex items-center gap-2 ${isFactura ? "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200" : "bg-muted/40 text-foreground"}`}>
+                            <Receipt className="h-4 w-4 shrink-0" />
+                            <span>{receiptTypeLabels[effReceiptType] || effReceiptType}</span>
+                            {isFactura && selectedPosNumero && (
+                              <span className="ml-auto text-xs font-normal opacity-70">PV {String(selectedPosNumero).padStart(4, "0")}</span>
+                            )}
+                          </div>
+                          <Select value={closeNonFiscalOverride} onValueChange={v => {
+                            setCloseNonFiscalOverride(v as "" | "cierre_mesa" | "voucher");
+                            if (v) setCloseSalesCondition("contado");
+                          }}>
+                            <SelectTrigger className="w-36 h-9 text-xs" data-testid="select-non-fiscal-override">
+                              <SelectValue placeholder="Cambiar..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">Según cliente</SelectItem>
+                              <SelectItem value="cierre_mesa">Ticket / Cierre</SelectItem>
+                              <SelectItem value="voucher">Voucher</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {/* ── CF IDENTIFICACIÓN ── */}
+                      {isFactura && effReceiptType === "factura_b" && (!closeBillingClient || closeBillingClient.vatCondition === "consumidor_final") && (
+                        <div className="space-y-2 p-3 bg-muted/30 border rounded-md">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs text-muted-foreground font-medium">Consumidor Final</p>
+                            <button type="button"
+                              className="text-xs text-primary underline underline-offset-2"
+                              onClick={() => { setCloseCfIdentificado(v => !v); if (closeCfIdentificado) { setCloseCfNombre(""); setCloseCfDni(""); } }}
+                            >{closeCfIdentificado ? "Quitar identificación" : "Identificar CF"}</button>
+                          </div>
+                          {closeCfIdentificado && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <Label className="text-xs">Nombre y Apellido</Label>
+                                <Input value={closeCfNombre} onChange={e => setCloseCfNombre(e.target.value)} placeholder="Juan Pérez" data-testid="input-cf-nombre" />
+                              </div>
+                              <div>
+                                <Label className="text-xs">DNI</Label>
+                                <Input value={closeCfDni} onChange={e => setCloseCfDni(e.target.value.replace(/\D/g, ""))} placeholder="12345678" maxLength={8} data-testid="input-cf-dni" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── CONDICIÓN DE COBRO ── */}
+                      {isFactura && closeBillingClient && closeBillingClient.cuit && (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">Condición de cobro</p>
+                          <div className="flex items-center gap-2">
+                            <button type="button"
+                              onClick={() => setCloseSalesCondition("contado")}
+                              className={`text-xs px-2.5 py-1 rounded border transition-colors ${closeSalesCondition === "contado" ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent text-muted-foreground"}`}
+                              data-testid="button-cond-contado"
+                            >Contado</button>
+                            <button type="button"
+                              onClick={() => setCloseSalesCondition("cuenta_corriente")}
+                              className={`text-xs px-2.5 py-1 rounded border transition-colors ${closeSalesCondition === "cuenta_corriente" ? "bg-blue-600 text-white border-blue-600" : "border-border hover:bg-accent text-muted-foreground"}`}
+                              data-testid="button-cond-cc"
+                            >Cta. Corriente</button>
+                          </div>
+                          {closeSalesCondition === "cuenta_corriente" && (
+                            <div className="flex items-center gap-2 text-xs text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded px-2.5 py-1.5">
+                              <CreditCard className="h-3.5 w-3.5 shrink-0" />
+                              <span>Se acreditará a la Cta. Cte. de <strong>{closeBillingClient.name}</strong></span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── FORMAS DE PAGO (múltiples) ── */}
+                      {isBilledToCC ? (
+                        <div className="flex items-center gap-2 text-sm bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-md px-3 py-2.5 text-blue-800 dark:text-blue-200">
+                          <CreditCard className="h-4 w-4 shrink-0" />
+                          <span>Cta. Corriente — se registra en la cuenta del cliente</span>
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          <Label>Forma de Cobro</Label>
-                          <Select value={effPay} onValueChange={(v) => {
-                            setClosePaymentMethod(v);
-                            if (v !== "cuenta_habitacion") { setCloseRoomId(""); setRoomSearchFilter(""); }
-                          }}>
-                            <SelectTrigger data-testid="select-payment-method"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(activePaymentMethods).map(([value, label]) => (
-                                <SelectItem key={value} value={value}>{label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {isTableless && <p className="text-xs text-muted-foreground">Área sin mesas</p>}
-                          {!isFacturaReceipt && <p className="text-xs text-muted-foreground">Voucher/Ticket: solo efectivo</p>}
-                        </div>
-                      )}
-                      <div className="space-y-2">
-                        <Label>Comprobante</Label>
-                        {isRoomCharge ? (
-                          <div className="text-sm text-muted-foreground bg-muted/40 rounded-md p-2.5 flex items-center gap-2">
-                            <BedDouble className="h-4 w-4 text-blue-500 shrink-0" />
-                            <span className="text-xs">Se carga al folio de la habitación</span>
-                          </div>
-                        ) : (
-                          <Select value={effRec} onValueChange={(v) => {
-                            setCloseReceiptType(v);
-                            // Always reset billing state when switching receipt type to avoid stale data
-                            setCloseSalesCondition("contado");
-                            setFbIsExento(false);
-                            setCloseBillingCompanyId("");
-                            setCloseBillingGuestId("");
-                            setCloseBillingCuit("");
-                            setBillingSearch("");
-                            setCloseCfSearch("");
-                            setCloseCfSearchOpen(false);
-                            setCloseCfIdentificado(false);
-                            setCloseCfNombre("");
-                            setCloseCfDni("");
-                            setCloseBillingName(v === "factura_b" ? "CONSUMIDOR FINAL" : "");
-                          }}>
-                            <SelectTrigger data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(activeReceiptTypes).map(([value, label]) => (
-                                <SelectItem key={value} value={value}>{label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-
-                {(closeReceiptType === "factura_a" || closeReceiptType === "factura_b") && (() => {
-                  const isFactA = closeReceiptType === "factura_a";
-                  const showClientForm = isFactA || fbIsExento;
-                  // clientSelected only when explicitly chosen from dropdown (not just typing in manual field)
-                  const clientSelected = !!closeBillingCompanyId || !!closeBillingGuestId;
-                  const cuitValid = !closeBillingCuit || clientSelected || validateCuit(closeBillingCuit);
-                  const billingResults: { id: string; label: string; sublabel?: string; cuit: string; type: "company" | "guest"; condicionVenta: string }[] = billingSearch.length >= 2
-                    ? [
-                        ...companies
-                          .filter(c => {
-                            // Filter companies by condicionIva according to factura type
-                            if (isFactA) {
-                              // Factura A: only RI and Monotributo companies
-                              if (!["responsable_inscripto", "monotributo", "monotributista", null, undefined, ""].includes(c.condicionIva)) return false;
-                            } else {
-                              // Factura B (Exento search): only Exento companies
-                              if (c.condicionIva !== "exento") return false;
-                            }
-                            const q = billingSearch.toLowerCase();
-                            return c.razonSocial.toLowerCase().includes(q)
-                              || (c.name || "").toLowerCase().includes(q)
-                              || (c.nombreFantasia?.toLowerCase() || "").includes(q)
-                              || c.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
-                          })
-                          .slice(0, 6)
-                          .map(c => ({ id: c.id, label: c.razonSocial, sublabel: c.nombreFantasia || undefined, cuit: formatCuit(c.cuilCuit), type: "company" as const, condicionVenta: c.condicionVentaPredeterminada || "contado" })),
-                        ...restaurantGuests
-                          .filter(g => {
-                            if (!g.cuilCuit) return false;
-                            // For Factura B (exento): only show exento guests
-                            // For Factura A: only show responsable_inscripto / monotributo
-                            if (isFactA) {
-                              if (!["responsable_inscripto", "monotributo", "monotributista"].includes(g.vatCondition || "")) return false;
-                            } else {
-                              // fbIsExento → exento context
-                              if (!["exento"].includes(g.vatCondition || "")) return false;
-                            }
-                            const q = billingSearch.toLowerCase();
-                            const fullName = `${g.firstName} ${g.lastName || ""}`.toLowerCase();
-                            return fullName.includes(q)
-                              || (g.lastName || "").toLowerCase().includes(q)
-                              || (g.firstName || "").toLowerCase().includes(q)
-                              || g.cuilCuit.replace(/-/g,"").includes(billingSearch.replace(/-/g,""));
-                          })
-                          .slice(0, 4)
-                          .map(g => ({
-                            id: g.id,
-                            label: `${g.firstName} ${g.lastName || ""}`.toUpperCase().trim(),
-                            sublabel: g.vatCondition === "monotributista" || g.vatCondition === "monotributo" ? "Monotributista" : g.vatCondition === "responsable_inscripto" ? "Resp. Inscripto" : g.vatCondition === "exento" ? "Exento" : g.vatCondition || undefined,
-                            cuit: formatCuit(g.cuilCuit || ""),
-                            type: "guest" as const,
-                            condicionVenta: (g as any).condicionVentaPredeterminada || "contado",
-                          })),
-                      ]
-                    : [];
-
-                  return (
-                    <div className="space-y-3 p-3 border rounded-md bg-muted/30">
-                      <p className="text-sm font-medium">
-                        Datos de facturación
-                        {!isFactA && <span className="ml-1 text-xs font-normal text-muted-foreground">(cliente opcional para Factura B)</span>}
-                      </p>
-
-                      {selectedPosNumero && (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-3 py-2">
-                          <Monitor className="h-3.5 w-3.5 shrink-0" />
-                          <span>PV {String(selectedPosNumero).padStart(4, "0")}{selectedPosNombre ? ` — ${selectedPosNombre}` : ""}</span>
-                        </div>
-                      )}
-
-                      {!isFactA && (
-                        <div className="flex items-center gap-2">
-                          <input type="checkbox" id="fb-exento" checked={fbIsExento}
-                            onChange={e => {
-                              setFbIsExento(e.target.checked);
-                              setCloseSalesCondition("contado");
-                              if (!e.target.checked) {
-                                setCloseBillingName("CONSUMIDOR FINAL");
-                                setCloseBillingCuit("");
-                                setCloseBillingCompanyId("");
-                                setCloseBillingGuestId("");
-                                setBillingSearch("");
-                                setCloseCfSearch("");
-                                setCloseCfSearchOpen(false);
-                                setCloseCfIdentificado(false);
-                                setCloseCfNombre("");
-                                setCloseCfDni("");
-                              } else {
-                                setCloseBillingName("");
-                                setCloseCfIdentificado(false);
-                                setCloseCfNombre("");
-                                setCloseCfDni("");
-                              }
-                            }}
-                            className="h-4 w-4 cursor-pointer"
-                          />
-                          <label htmlFor="fb-exento" className="text-sm cursor-pointer select-none">
-                            Localizar Contribuyente Exento
-                          </label>
-                        </div>
-                      )}
-
-                      {!isFactA && !fbIsExento && (() => {
-                        const cfResults = closeCfSearch.length >= 2
-                          ? restaurantGuests.filter(g => {
-                              if (!["consumidor_final", "", null, undefined].includes(g.vatCondition as any)) return false;
-                              const q = closeCfSearch.toLowerCase();
-                              const fullName = `${g.firstName} ${g.lastName || ""}`.toLowerCase();
-                              return fullName.includes(q)
-                                || (g.lastName || "").toLowerCase().includes(q)
-                                || (g.firstName || "").toLowerCase().includes(q)
-                                || (g.documentNumber || "").includes(closeCfSearch.replace(/\D/g, ""));
-                            }).slice(0, 6)
-                          : [];
-                        return (
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/40 rounded px-3 py-2">
-                              <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                              <span className="flex-1">Consumidor Final</span>
-                              <button
-                                type="button"
-                                onClick={() => { setCloseCfIdentificado(v => !v); if (closeCfIdentificado) { setCloseCfNombre(""); setCloseCfDni(""); } }}
-                                className="text-xs text-primary underline underline-offset-2 hover:no-underline shrink-0"
-                              >
-                                {closeCfIdentificado ? "Quitar identificación" : "Identificar CF"}
-                              </button>
-                            </div>
-                            {/* CF search from system registry */}
-                            <div className="relative">
+                          <p className="text-sm font-semibold">Formas de Pago</p>
+                          {closePaymentSplits.map((split, idx) => (
+                            <div key={split.id} className="flex items-center gap-2">
+                              <Select value={split.method} onValueChange={v =>
+                                setClosePaymentSplits(prev => prev.map((s, i) => i === idx
+                                  ? { ...s, method: v, roomId: v !== "cuenta_habitacion" ? undefined : s.roomId, roomSearch: v !== "cuenta_habitacion" ? "" : s.roomSearch }
+                                  : s))
+                              }>
+                                <SelectTrigger className="flex-1 h-9" data-testid={`select-pay-method-${idx}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {Object.entries(availablePayMethods).map(([v, l]) => (
+                                    <SelectItem key={v} value={v}>{l}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                               <Input
-                                placeholder="Buscar CF registrado en el sistema..."
-                                value={closeCfSearch}
-                                onChange={e => { setCloseCfSearch(e.target.value); setCloseCfSearchOpen(true); }}
-                                onFocus={() => setCloseCfSearchOpen(true)}
-                                onBlur={() => setTimeout(() => setCloseCfSearchOpen(false), 300)}
-                                className="text-sm"
-                                data-testid="input-cf-system-search"
+                                type="number" min={0} step="0.01"
+                                value={split.amount}
+                                onChange={e => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, amount: e.target.value } : s))}
+                                className="w-32 h-9 text-right"
+                                placeholder="0,00"
+                                data-testid={`input-pay-amount-${idx}`}
                               />
-                              {closeCfSearchOpen && cfResults.length > 0 && (
-                                <div
-                                  className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg max-h-44 overflow-y-auto"
-                                  onMouseDown={e => e.preventDefault()}
-                                >
-                                  {cfResults.map(g => {
-                                    const fullName = `${g.firstName} ${g.lastName || ""}`.toUpperCase().trim();
-                                    return (
-                                      <button key={g.id} type="button"
-                                        className="w-full text-left px-3 py-2 hover:bg-accent text-sm flex items-center gap-2"
-                                        onMouseDown={() => {
-                                          setCloseCfNombre(fullName);
-                                          setCloseCfDni((g as any).documentNumber || "");
-                                          setCloseCfIdentificado(true);
-                                          setCloseCfSearch(fullName);
-                                          setCloseCfSearchOpen(false);
-                                        }}
-                                      >
-                                        <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                        <span className="flex-1 font-medium">{fullName}</span>
-                                        {(g as any).documentNumber && (
-                                          <span className="text-xs text-muted-foreground">DNI {(g as any).documentNumber}</span>
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              {closeCfSearch.length >= 2 && cfResults.length === 0 && (
-                                <p className="text-xs text-muted-foreground mt-1">Sin resultados. Usá "Identificar CF" para ingresar datos manualmente.</p>
+                              {closePaymentSplits.length > 1 && (
+                                <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0"
+                                  onClick={() => setClosePaymentSplits(prev => prev.filter((_, i) => i !== idx))}
+                                ><X className="h-4 w-4" /></Button>
                               )}
                             </div>
-                            {closeCfIdentificado && (
-                              <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                  <Label className="text-xs">Nombre y Apellido</Label>
-                                  <Input
-                                    value={closeCfNombre}
-                                    onChange={e => setCloseCfNombre(e.target.value)}
-                                    placeholder="Juan Pérez"
-                                    data-testid="input-cf-nombre"
-                                  />
-                                </div>
-                                <div>
-                                  <Label className="text-xs">DNI</Label>
-                                  <Input
-                                    value={closeCfDni}
-                                    onChange={e => setCloseCfDni(e.target.value.replace(/\D/g, ""))}
-                                    placeholder="12345678"
-                                    maxLength={8}
-                                    data-testid="input-cf-dni"
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-
-                      {showClientForm && (
-                        <>
-                          {clientSelected ? (
-                            <>
-                              <div className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-md">
-                                {closeBillingGuestId
-                                  ? <User className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
-                                  : <Building2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
-                                }
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium truncate">{closeBillingName}</p>
-                                  {closeBillingCuit && (
-                                    <p className={`text-xs ${cuitValid ? "text-muted-foreground" : "text-destructive font-medium"}`}>
-                                      CUIT: {closeBillingCuit}{!cuitValid ? " ⚠ inválido" : ""}
-                                    </p>
-                                  )}
-                                </div>
-                                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0"
-                                  onClick={() => { setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setBillingSearch(""); setCloseSalesCondition("contado"); }}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                              {/* Condición de cobro — toggle visible tras selección de cliente */}
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-muted-foreground">Condición de cobro:</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setCloseSalesCondition("contado")}
-                                  className={`text-xs px-2.5 py-1 rounded border transition-colors ${closeSalesCondition === "contado" ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent text-muted-foreground"}`}
-                                  data-testid="button-cond-contado"
-                                >Contado</button>
-                                <button
-                                  type="button"
-                                  onClick={() => setCloseSalesCondition("cuenta_corriente")}
-                                  className={`text-xs px-2.5 py-1 rounded border transition-colors ${closeSalesCondition === "cuenta_corriente" ? "bg-blue-600 text-white border-blue-600" : "border-border hover:bg-accent text-muted-foreground"}`}
-                                  data-testid="button-cond-cc"
-                                >Cta. Corriente</button>
-                              </div>
-                              {closeSalesCondition === "cuenta_corriente" && (
-                                <div className="flex items-center gap-2 text-xs text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded px-2.5 py-1.5">
-                                  <CreditCard className="h-3.5 w-3.5 shrink-0" />
-                                  <span>Se acreditará a la Cta. Cte. de <strong>{closeBillingName}</strong></span>
-                                </div>
+                          ))}
+                          {finalTotal > 0 && (
+                            <div className={`flex items-center justify-between text-xs px-1 ${Math.abs(remaining) < 0.01 ? "text-green-600 dark:text-green-400" : remaining > 0 ? "text-amber-600" : "text-destructive"}`}>
+                              <span>{Math.abs(remaining) < 0.01 ? "✓ Total cubierto" : remaining > 0 ? `Faltan $${remaining.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : `Excede por $${Math.abs(remaining).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`}</span>
+                              {remaining > 0.01 && (
+                                <button type="button" className="text-primary underline text-xs"
+                                  onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === prev.length - 1 ? { ...s, amount: (parseFloat(s.amount || "0") + remaining).toFixed(2) } : s))}
+                                >Ajustar último</button>
                               )}
-                            </>
-                          ) : (
-                            <div className="relative">
-                              <div className="flex gap-2">
-                                <div className="relative flex-1">
-                                  <Input
-                                    placeholder="Buscar empresa o persona por nombre o CUIT..."
-                                    value={billingSearch}
-                                    onChange={e => { setBillingSearch(e.target.value); setCloseBillingCompanyId(""); setBillingSearchOpen(true); }}
-                                    onFocus={() => setBillingSearchOpen(true)}
-                                    onBlur={() => setTimeout(() => setBillingSearchOpen(false), 350)}
-                                    data-testid="input-billing-search"
-                                    autoComplete="off"
-                                  />
-                                  {billingSearchOpen && billingResults.length > 0 && (
-                                    <div
-                                      className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg max-h-52 overflow-y-auto"
-                                      onMouseDown={e => e.preventDefault()}
-                                    >
-                                      {billingResults.map(item => (
-                                        <button key={item.id} type="button"
-                                          className="w-full text-left px-3 py-2 hover:bg-accent text-sm flex items-start gap-2"
-                                          onMouseDown={() => {
-                                            setCloseBillingName(item.label);
-                                            setCloseBillingCuit(item.cuit);
-                                            if (item.type === "company") {
-                                              setCloseBillingCompanyId(item.id);
-                                              setCloseBillingGuestId("");
-                                            } else {
-                                              setCloseBillingGuestId(item.id);
-                                              setCloseBillingCompanyId("");
-                                            }
-                                            const cond = item.condicionVenta === "cuenta_corriente" ? "cuenta_corriente" : "contado";
-                                            setCloseSalesCondition(cond);
-                                            setBillingSearch(item.label);
-                                            setBillingSearchOpen(false);
-                                          }}
-                                        >
-                                          <span className="flex-1 min-w-0">
-                                            <span className="font-medium block truncate">{item.label}</span>
-                                            {item.sublabel && <span className="text-xs text-muted-foreground">{item.sublabel}</span>}
-                                          </span>
-                                          <span className="text-xs text-muted-foreground shrink-0 mt-0.5">{item.cuit}</span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                  {billingSearchOpen && billingSearch.length >= 2 && billingResults.length === 0 && (
-                                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg px-3 py-2 text-sm text-muted-foreground">
-                                      Sin resultados para "{billingSearch}"
-                                    </div>
-                                  )}
-                                </div>
-                                <Button type="button" variant="outline" size="sm"
-                                  className="shrink-0 gap-1"
-                                  onClick={() => {
-                                    setClientEditingId(null);
-                                    setClientForm({
-                                      tipoPersona: isFactA ? "juridica" : "fisica",
-                                      firstName: "",
-                                      lastName: "",
-                                      email: "",
-                                      phone: "",
-                                      documentType: isFactA ? "cuit" : "dni",
-                                      documentNumber: "",
-                                      cuilCuit: "",
-                                      vatCondition: isFactA ? "responsable_inscripto" : "consumidor_final",
-                                      direccion: "",
-                                      provincia: "",
-                                      localidad: "",
-                                      condicionVentaPredeterminada: "contado",
-                                    });
-                                    setClientCreatedForReservation(() => (guest: any) => {
-                                      const fullName = `${guest.firstName} ${guest.lastName || ""}`.toUpperCase().trim();
-                                      setCloseBillingName(fullName);
-                                      setCloseBillingCuit(formatCuit(guest.cuilCuit || ""));
-                                      setCloseBillingGuestId(guest.id);
-                                      setCloseBillingCompanyId("");
-                                      setBillingSearch(fullName);
-                                    });
-                                    setClientDialogOpen(true);
-                                  }}
-                                  data-testid="button-new-billing-client"
-                                >
-                                  <UserPlus className="h-3.5 w-3.5" />
-                                  Nuevo
-                                </Button>
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-1">Escribí al menos 2 caracteres para buscar</p>
                             </div>
                           )}
-
-                        </>
+                          {closePaymentSplits.length < 4 && (
+                            <Button variant="outline" size="sm" className="w-full h-8 text-xs"
+                              onClick={() => setClosePaymentSplits(prev => [...prev, { id: String(Date.now()), method: "efectivo", amount: "" }])}
+                              data-testid="button-add-payment-split"
+                            ><Plus className="h-3.5 w-3.5 mr-1" />Agregar forma de pago</Button>
+                          )}
+                        </div>
                       )}
-                    </div>
+
+                      {/* ── CARGO A HABITACIÓN (por cada split cuenta_habitacion) ── */}
+                      {hasRoomCharge && closePaymentSplits
+                        .map((split, idx) => ({ split, idx }))
+                        .filter(({ split }) => split.method === "cuenta_habitacion")
+                        .map(({ split, idx }) => (
+                          <div key={`room-${split.id}`} className="space-y-2">
+                            <Label className="text-xs">Habitación{closePaymentSplits.filter(s => s.method === "cuenta_habitacion").length > 1 ? ` (pago ${idx + 1})` : ""}</Label>
+                            <Input
+                              placeholder="Buscar por número o nombre..."
+                              value={split.roomSearch || ""}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomSearch: val, roomId: "" } : s));
+                                const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(val) || r.guestName.toLowerCase().includes(val.toLowerCase())));
+                                if (matches.length === 1) setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: matches[0].reservationId, roomSearch: "" } : s));
+                              }}
+                              data-testid={`input-room-search-${idx}`}
+                            />
+                            {(split.roomSearch || "").length > 0 && (() => {
+                              const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(split.roomSearch || "") || r.guestName.toLowerCase().includes((split.roomSearch || "").toLowerCase())));
+                              return matches.length > 1 ? (
+                                <div className="border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
+                                  {matches.map(r => (
+                                    <button key={r.roomId} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                                      onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: r.reservationId, roomSearch: "" } : s))}
+                                    ><span className="font-medium">{r.roomNumber}</span> — {r.guestName}</button>
+                                  ))}
+                                </div>
+                              ) : matches.length === 0 ? <p className="text-sm text-muted-foreground">Sin resultados</p> : null;
+                            })()}
+                            {split.roomId && (() => {
+                              const room = inHouseRooms.find(r => r.reservationId === split.roomId);
+                              return room ? (
+                                <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm bg-accent/40" data-testid={`selected-room-${idx}`}>
+                                  <span><span className="font-medium">{room.roomNumber}</span> — {room.guestName}</span>
+                                  <button type="button" onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: "", roomSearch: "" } : s))} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
+                                </div>
+                              ) : null;
+                            })()}
+                            {inHouseRooms.length === 0 && <p className="text-sm text-muted-foreground">No hay habitaciones ocupadas</p>}
+                          </div>
+                        ))}
+
+                      {/* ── DIVIDIR CUENTA ── */}
+                      <div className="pt-2 border-t">
+                        <Button variant="outline" size="sm" className="w-full"
+                          onClick={() => { setIsSplitMode(true); setSplitDialogMode("equal_parts"); }}
+                          data-testid="button-split-bill"
+                        ><Banknote className="h-4 w-4 mr-2" />Dividir Cuenta</Button>
+                      </div>
+                    </>
                   );
                 })()}
-
-                {closePaymentMethod === "cuenta_habitacion" && (
-                  <div className="space-y-2">
-                    <Label>Habitación</Label>
-                    <Input
-                      placeholder="Buscar por número o nombre..."
-                      value={roomSearchFilter}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setRoomSearchFilter(val);
-                        setCloseRoomId("");
-                        if (val !== "") {
-                          const matches = inHouseRooms.filter(r =>
-                            r.reservationId &&
-                            (r.roomNumber.includes(val) || r.guestName.toLowerCase().includes(val.toLowerCase()))
-                          );
-                          if (matches.length === 1) {
-                            setCloseRoomId(matches[0].reservationId);
-                            setRoomSearchFilter("");
-                          }
-                        }
-                      }}
-                      data-testid="input-room-search"
-                    />
-                    {roomSearchFilter !== "" && (() => {
-                      const matches = inHouseRooms.filter(r =>
-                        r.reservationId &&
-                        (r.roomNumber.includes(roomSearchFilter) || r.guestName.toLowerCase().includes(roomSearchFilter.toLowerCase()))
-                      );
-                      return matches.length > 1 ? (
-                        <div className="border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
-                          {matches.map(r => (
-                            <button
-                              key={r.roomId}
-                              type="button"
-                              className="w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-                              onClick={() => { setCloseRoomId(r.reservationId); setRoomSearchFilter(""); }}
-                              data-testid={`option-room-${r.roomNumber}`}
-                            >
-                              <span className="font-medium">{r.roomNumber}</span> — {r.guestName}
-                            </button>
-                          ))}
-                        </div>
-                      ) : matches.length === 0 ? (
-                        <p className="text-sm text-muted-foreground px-1">Sin resultados</p>
-                      ) : null;
-                    })()}
-                    {closeRoomId && (() => {
-                      const room = inHouseRooms.find(r => r.reservationId === closeRoomId);
-                      return room ? (
-                        <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm bg-accent/40" data-testid="selected-room-charge">
-                          <span><span className="font-medium">{room.roomNumber}</span> — {room.guestName}</span>
-                          <button type="button" onClick={() => { setCloseRoomId(""); setRoomSearchFilter(""); }} className="text-muted-foreground hover:text-foreground ml-2 text-xs">✕</button>
-                        </div>
-                      ) : null;
-                    })()}
-                    {inHouseRooms.length === 0 && (
-                      <p className="text-sm text-muted-foreground">No hay habitaciones ocupadas</p>
-                    )}
-                  </div>
-                )}
-
-                <div className="pt-2 border-t">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => { setIsSplitMode(true); setSplitDialogMode("equal_parts"); }}
-                    data-testid="button-split-bill"
-                  >
-                    <Banknote className="h-4 w-4 mr-2" />
-                    Dividir Cuenta
-                  </Button>
-                </div>
               </>
             ) : (
               <div className="pt-4 border-t space-y-4">
@@ -5725,6 +5599,12 @@ export default function RestaurantPage() {
                 setCloseSalesCondition("contado");
                 setCloseCfSearch("");
                 setCloseCfSearchOpen(false);
+                setCloseBillingClient(null);
+                setCloseBillingClientSearch("");
+                setCloseBillingClientSearchOpen(false);
+                setShowAlternateClientSearch(false);
+                setCloseNonFiscalOverride("");
+                setClosePaymentSplits([{ id: "1", method: "efectivo", amount: "" }]);
               }}
               className="w-full sm:w-auto"
             >
@@ -5735,48 +5615,52 @@ export default function RestaurantPage() {
               const splits = (updatedOrder as any)?.splits || [];
               const hasSplits = splits.length > 0;
               const handleConfirmClose = () => {
-                if (currentOrder) {
-                  const disc = parseFloat(closeDiscount || "0");
-                  const isFactura = ["factura_a","factura_b","factura_c"].includes(closeReceiptType);
-                  const isFactA = closeReceiptType === "factura_a";
-                  const vatCond = closeReceiptType === "factura_a"
-                    ? "responsable_inscripto"
-                    : fbIsExento ? "exento" : "consumidor_final";
-                  const clientSelectedForBilling = !!closeBillingCompanyId || !!closeBillingGuestId;
-                  const isBilledToCCNow = isFactura && closeSalesCondition === "cuenta_corriente" && clientSelectedForBilling;
-                  const finalPaymentMethod = isBilledToCCNow ? "cuenta_corriente" : closePaymentMethod;
-                  const ccType = isBilledToCCNow
-                    ? (closeBillingCompanyId ? "company" : "guest")
-                    : undefined;
-                  const ccId = isBilledToCCNow
-                    ? (closeBillingCompanyId || closeBillingGuestId || undefined)
-                    : undefined;
-                  closeOrderMutation.mutate({
-                    orderId: currentOrder.id,
-                    receiptType: closeReceiptType,
-                    paymentMethod: finalPaymentMethod,
-                    discount: disc > 0 ? disc : undefined,
-                    discountType: disc > 0 ? closeDiscountType : undefined,
-                    roomReservationId: finalPaymentMethod === "cuenta_habitacion" && closeRoomId ? closeRoomId : undefined,
-                    billingName: closeBillingName || undefined,
-                    billingCuit: closeBillingCuit || undefined,
-                    ccEntityType: ccType,
-                    ccEntityId: ccId,
-                    emitInvoice: isFactura,
-                    vatCondition: isFactura ? vatCond : undefined,
-                    customerRazonSocial: isFactura
-                      ? (!isFactA && !fbIsExento && closeCfIdentificado && closeCfNombre
-                          ? closeCfNombre
-                          : (closeBillingName || undefined))
-                      : undefined,
-                    customerCuit: isFactura ? (closeBillingCuit || undefined) : undefined,
-                    customerDni: isFactura && !isFactA && !fbIsExento && closeCfIdentificado && closeCfDni
-                      ? closeCfDni
-                      : undefined,
-                    puntoVenta: isFactura && selectedPosNumero ? selectedPosNumero : undefined,
-                    reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
-                  });
-                }
+                if (!currentOrder) return;
+                const disc = parseFloat(closeDiscount || "0");
+                const effReceiptType = closeNonFiscalOverride || deriveReceiptFromVat(closeBillingClient?.vatCondition);
+                const isFactura = ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
+                const isFactA = effReceiptType === "factura_a";
+                const vatCond = isFactA
+                  ? "responsable_inscripto"
+                  : closeBillingClient?.vatCondition === "exento" ? "exento" : "consumidor_final";
+                const isBilledToCCNow = isFactura && closeSalesCondition === "cuenta_corriente" && !!closeBillingClient;
+                const ccType = isBilledToCCNow ? closeBillingClient!.type : undefined;
+                const ccId = isBilledToCCNow ? closeBillingClient!.id : undefined;
+                const primaryPaymentMethod = isBilledToCCNow
+                  ? "cuenta_corriente"
+                  : (closePaymentSplits[0]?.method || "efectivo");
+                const primaryRoomId = closePaymentSplits.find(s => s.method === "cuenta_habitacion")?.roomId || "";
+                const validSplits = isBilledToCCNow
+                  ? undefined
+                  : closePaymentSplits
+                      .filter(s => parseFloat(s.amount || "0") > 0)
+                      .map(s => ({
+                        method: s.method,
+                        amount: parseFloat(s.amount || "0"),
+                        roomReservationId: s.method === "cuenta_habitacion" ? s.roomId : undefined,
+                      }));
+                closeOrderMutation.mutate({
+                  orderId: currentOrder.id,
+                  receiptType: effReceiptType,
+                  paymentMethod: primaryPaymentMethod,
+                  discount: disc > 0 ? disc : undefined,
+                  discountType: disc > 0 ? closeDiscountType : undefined,
+                  roomReservationId: primaryPaymentMethod === "cuenta_habitacion" && primaryRoomId ? primaryRoomId : undefined,
+                  billingName: closeBillingClient?.name || undefined,
+                  billingCuit: closeBillingClient?.cuit || undefined,
+                  ccEntityType: ccType,
+                  ccEntityId: ccId,
+                  emitInvoice: isFactura,
+                  vatCondition: isFactura ? vatCond : undefined,
+                  customerRazonSocial: isFactura
+                    ? (closeBillingClient?.name || (closeCfIdentificado && closeCfNombre ? closeCfNombre : undefined))
+                    : undefined,
+                  customerCuit: isFactura ? (closeBillingClient?.cuit || undefined) : undefined,
+                  customerDni: isFactura && !closeBillingClient && closeCfIdentificado && closeCfDni ? closeCfDni : undefined,
+                  puntoVenta: isFactura && selectedPosNumero ? selectedPosNumero : undefined,
+                  reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
+                  paymentSplits: validSplits && validSplits.length > 1 ? validSplits : undefined,
+                });
               };
               return (
                 <>

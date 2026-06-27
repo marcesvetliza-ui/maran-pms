@@ -255,10 +255,12 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits } = req.body;
       const effectiveReservationId = reservationId || roomReservationId;
-      const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || paymentMethod === "cuenta_habitacion";
-      const effectivePaymentMethod = isRoomCharge ? "room_charge" : (paymentMethod || "cash");
+      const primarySplit = Array.isArray(paymentSplits) && paymentSplits.length > 0 ? paymentSplits[0] : null;
+      const effectivePrimaryMethod = primarySplit ? primarySplit.method : (paymentMethod || "cash");
+      const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || effectivePrimaryMethod === "cuenta_habitacion";
+      const effectivePaymentMethod = isRoomCharge && effectivePrimaryMethod === "cuenta_habitacion" ? "room_charge" : effectivePrimaryMethod;
 
       let finalTotal = parseFloat(order.total || "0");
       let discountAmount = 0;
@@ -288,13 +290,29 @@ export function registerRestaurantRoutes(app: Express) {
         notes: discountAmount > 0 ? `Descuento: $${discountAmount.toFixed(2)}` : undefined,
       });
 
-      if (isRoomCharge && effectiveReservationId) {
+      // Room charges — support multiple cuenta_habitacion splits
+      const today = new Date().toISOString().split("T")[0];
+      const orderLabel = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
+      if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
+        // Multi-split: handle room charges per split
+        for (const split of paymentSplits) {
+          if (split.method === "cuenta_habitacion" && split.roomReservationId) {
+            await storage.createCharge({
+              reservationId: split.roomReservationId,
+              description: `${orderLabel} — $${parseFloat(split.amount || "0").toFixed(2)}`,
+              amount: String(parseFloat(split.amount || "0").toFixed(2)),
+              category: "restaurant",
+              date: today,
+            });
+          }
+        }
+      } else if (isRoomCharge && effectiveReservationId) {
         await storage.createCharge({
           reservationId: effectiveReservationId,
-          description: `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`,
+          description: orderLabel,
           amount: String(finalTotal.toFixed(2)),
           category: "restaurant",
-          date: new Date().toISOString().split("T")[0],
+          date: today,
         });
       }
 
@@ -302,38 +320,79 @@ export function registerRestaurantRoutes(app: Express) {
         await storage.updateRestaurantTable(order.tableId, { status: "available" });
       }
 
-      try {
-        const label = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
-        await storage.registerCashMovement(
-          "restaurant", "restaurant_order", req.params.id, label,
-          effectivePaymentMethod,
-          String(finalTotal.toFixed(2)), "income",
-          undefined, receiptType
-        );
-      } catch (e) {
-        console.error("Error registrando movimiento de caja:", e);
+      const cashLabel = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
+      if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
+        // Multi-split: one cash register entry per split
+        for (const split of paymentSplits) {
+          const splitAmt = parseFloat(split.amount || "0");
+          if (splitAmt <= 0) continue;
+          try {
+            await storage.registerCashMovement(
+              "restaurant", "restaurant_order", req.params.id,
+              `${cashLabel} (${split.method})`,
+              split.method, String(splitAmt.toFixed(2)), "income",
+              undefined, receiptType
+            );
+          } catch (e) {
+            console.error("Error registrando movimiento de caja (split):", e);
+          }
+        }
+      } else {
+        try {
+          await storage.registerCashMovement(
+            "restaurant", "restaurant_order", req.params.id, cashLabel,
+            effectivePaymentMethod,
+            String(finalTotal.toFixed(2)), "income",
+            undefined, receiptType
+          );
+        } catch (e) {
+          console.error("Error registrando movimiento de caja:", e);
+        }
       }
 
       // Motor financiero: escribir al folio del pedido
       {
         const ordLabel = `Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
-        storage.addFolioCharge(
-          "restaurant_order", req.params.id,
-          parseFloat(order.total || "0"),
-          ordLabel,
-          "restaurant_order", req.params.id,
-          (req as any).user?.username,
-        ).then(() => storage.addFolioPayment(
-          "restaurant_order", req.params.id,
-          finalTotal,
-          `Cobro — ${effectivePaymentMethod}`,
-          effectivePaymentMethod, "restaurant_payment", req.params.id,
-          undefined, (req as any).user?.username, receiptType,
-        )).catch(e => console.error("[Folio] Error restaurant:", e));
+        if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
+          // Multi-split: one charge + one payment per split
+          storage.addFolioCharge(
+            "restaurant_order", req.params.id,
+            parseFloat(order.total || "0"),
+            ordLabel,
+            "restaurant_order", req.params.id,
+            (req as any).user?.username,
+          ).then(async () => {
+            for (const split of paymentSplits) {
+              const splitAmt = parseFloat(split.amount || "0");
+              if (splitAmt <= 0) continue;
+              await storage.addFolioPayment(
+                "restaurant_order", req.params.id,
+                splitAmt,
+                `Cobro — ${split.method}`,
+                split.method, "restaurant_payment", req.params.id,
+                undefined, (req as any).user?.username, receiptType,
+              );
+            }
+          }).catch(e => console.error("[Folio] Error restaurant multi-split:", e));
+        } else {
+          storage.addFolioCharge(
+            "restaurant_order", req.params.id,
+            parseFloat(order.total || "0"),
+            ordLabel,
+            "restaurant_order", req.params.id,
+            (req as any).user?.username,
+          ).then(() => storage.addFolioPayment(
+            "restaurant_order", req.params.id,
+            finalTotal,
+            `Cobro — ${effectivePaymentMethod}`,
+            effectivePaymentMethod, "restaurant_payment", req.params.id,
+            undefined, (req as any).user?.username, receiptType,
+          )).catch(e => console.error("[Folio] Error restaurant:", e));
+        }
       }
 
       // Si es cuenta corriente y hay entidad especificada, crear movimiento CC
-      if (paymentMethod === "cuenta_corriente" && ccEntityType && ccEntityId) {
+      if (effectivePrimaryMethod === "cuenta_corriente" && ccEntityType && ccEntityId) {
         try {
           const today = new Date().toISOString().split("T")[0];
           const label = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
