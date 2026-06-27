@@ -1666,6 +1666,17 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  app.patch("/api/reservations/:id/companions/:companionId", requireAuth, async (req, res) => {
+    try {
+      const body = { ...req.body };
+      if (!body.dateOfBirth) delete body.dateOfBirth;
+      const updated = await storage.updateReservationCompanion(req.params.companionId, body);
+      res.json(updated);
+    } catch {
+      res.status(500).json({ error: "Error updating companion" });
+    }
+  });
+
   app.delete("/api/reservations/:id/companions/:companionId", requireAuth, async (req, res) => {
     try {
       await storage.deleteReservationCompanion(req.params.companionId);

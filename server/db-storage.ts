@@ -133,6 +133,13 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async updateReservationCompanion(id: string, data: Partial<InsertReservationCompanion>): Promise<ReservationCompanion> {
+    const updateData: any = { ...data };
+    if (!updateData.dateOfBirth) delete updateData.dateOfBirth;
+    const [updated] = await db.update(reservationCompanions).set(updateData).where(eq(reservationCompanions.id, id)).returning();
+    return updated;
+  }
+
   async deleteReservationCompanion(id: string): Promise<void> {
     await db.delete(reservationCompanions).where(eq(reservationCompanions.id, id));
   }

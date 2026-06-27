@@ -305,6 +305,7 @@ export interface IStorage {
   // Companions
   getReservationCompanions(reservationId: string): Promise<ReservationCompanion[]>;
   addReservationCompanion(data: InsertReservationCompanion): Promise<ReservationCompanion>;
+  updateReservationCompanion(id: string, data: Partial<InsertReservationCompanion>): Promise<ReservationCompanion>;
   deleteReservationCompanion(id: string): Promise<void>;
 
   // Payments
@@ -5176,5 +5177,6 @@ export class MemStorage implements IStorage {
   async getAccountSummary(): Promise<{ companies: any[]; agencies: any[] }> { return { companies: [], agencies: [] }; }
   async getReservationCompanions(_reservationId: string): Promise<ReservationCompanion[]> { return []; }
   async addReservationCompanion(_data: InsertReservationCompanion): Promise<ReservationCompanion> { return {} as ReservationCompanion; }
+  async updateReservationCompanion(_id: string, _data: Partial<InsertReservationCompanion>): Promise<ReservationCompanion> { return {} as ReservationCompanion; }
   async deleteReservationCompanion(_id: string): Promise<void> {}
 }
