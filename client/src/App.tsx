@@ -387,7 +387,16 @@ function AuthenticatedApp() {
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.ok) {
         const userData = await res.json();
-        setUser(userData);
+        // sessionStorage vive solo en la pestaña actual.
+        // Si no existe el flag, esta es una pestaña nueva (favorito, nueva ventana)
+        // y debemos cerrar la sesión del servidor para exigir login explícito.
+        const tabActive = sessionStorage.getItem("maranTabActive");
+        if (!tabActive) {
+          await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
+          setUser(null);
+        } else {
+          setUser(userData);
+        }
       } else {
         setUser(null);
       }
@@ -476,6 +485,8 @@ function AuthenticatedApp() {
   };
 
   const handleLogin = (userData: AuthUser) => {
+    // Marcar esta pestaña como activa — el flag vive solo mientras la pestaña esté abierta
+    sessionStorage.setItem("maranTabActive", "1");
     setUser(userData);
     navigate(getRoleHomePage(userData.role));
     // Notificar a otros tabs que hubo un nuevo login
@@ -487,6 +498,7 @@ function AuthenticatedApp() {
   };
 
   const handleLogout = async () => {
+    sessionStorage.removeItem("maranTabActive");
     try {
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch {}
