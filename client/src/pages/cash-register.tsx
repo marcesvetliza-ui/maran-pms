@@ -565,7 +565,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       const tipoLabel = TURNO_TIPO_OPTIONS.find(t => t.value === turnoTipoOpen)?.label || turnoTipoOpen;
       toast({ title: "Turno abierto", description: `Turno ${tipoLabel} abierto para ${config.areaLabel}` });
       setOpenShiftDialog(false);
-      setOpenedBy(defaultOperatorName);
+      setOpenedBy(user?.fullName || user?.username || "");
       setOpenNotes("");
     },
     onError: (err: any) => {
@@ -681,7 +681,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/autocreados"] });
       toast({ title: "Turno tomado", description: "El operador fue asignado al turno activo." });
       setTomarTurnoDialog(false);
-      setOpenedBy(defaultOperatorName);
+      setOpenedBy(user?.fullName || user?.username || "");
       setTurnoTipoTomar("tarde");
     },
     onError: (err: any) => {

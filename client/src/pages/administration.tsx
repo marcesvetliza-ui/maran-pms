@@ -831,6 +831,7 @@ function NightAuditTab() {
 }
 
 export default function AdministrationPage() {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);

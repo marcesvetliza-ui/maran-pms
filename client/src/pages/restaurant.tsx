@@ -3500,9 +3500,9 @@ export default function RestaurantPage() {
                   <SelectValue placeholder="Seleccionar mozo..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {restaurantUsers.map(u => (
-                    <SelectItem key={u.id} value={u.fullName}>
-                      {u.fullName} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
+                  {restaurantUsers.filter(u => u.fullName || u.username).map(u => (
+                    <SelectItem key={u.id} value={u.fullName || u.username}>
+                      {u.fullName || u.username} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -3568,9 +3568,9 @@ export default function RestaurantPage() {
                   <SelectValue placeholder="Seleccionar mozo..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {restaurantUsers.map(u => (
-                    <SelectItem key={u.id} value={u.fullName}>
-                      {u.fullName} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
+                  {restaurantUsers.filter(u => u.fullName || u.username).map(u => (
+                    <SelectItem key={u.id} value={u.fullName || u.username}>
+                      {u.fullName || u.username} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
                     </SelectItem>
                   ))}
                 </SelectContent>

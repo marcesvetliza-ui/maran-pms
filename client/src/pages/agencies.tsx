@@ -461,7 +461,7 @@ export default function AgenciesPage() {
                             </p>
                           </div>
                           {!searchTerm && (
-                            <Button size="sm" onClick={() => setIsCreating(true)} data-testid="button-empty-new-agency">
+                            <Button size="sm" onClick={() => setShowForm(true)} data-testid="button-empty-new-agency">
                               <Plus className="h-4 w-4 mr-2" />Nueva Agencia
                             </Button>
                           )}

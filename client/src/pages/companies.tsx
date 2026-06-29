@@ -413,7 +413,7 @@ export default function CompaniesPage() {
                         </p>
                       </div>
                       {!searchTerm && (
-                        <Button size="sm" onClick={() => setIsCreating(true)} data-testid="button-empty-new-company">
+                        <Button size="sm" onClick={() => setShowForm(true)} data-testid="button-empty-new-company">
                           <Plus className="h-4 w-4 mr-2" />Nueva Empresa
                         </Button>
                       )}

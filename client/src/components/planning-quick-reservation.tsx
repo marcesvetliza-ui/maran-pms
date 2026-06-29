@@ -448,7 +448,7 @@ export function QuickReservationDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => { onOpenChange(false); resetForm(); }} data-testid="button-cancel-quick">Volver</Button>
-          <Button onClick={handleSubmit} disabled={mutation.isPending || createGuestMutation.isPending} data-testid="button-create-quick">
+          <Button onClick={handleSubmit} disabled={mutation.isPending} data-testid="button-create-quick">
             {mutation.isPending ? "Creando..." : "Crear Reserva"}
           </Button>
         </DialogFooter>
