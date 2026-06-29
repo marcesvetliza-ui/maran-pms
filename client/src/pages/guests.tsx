@@ -162,7 +162,7 @@ function NationalityCombobox({
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-full p-0" align="start">
-          <Command>
+          <Command shouldFilter={false}>
             <CommandInput placeholder="Buscar país..." value={search} onValueChange={setSearch} />
             <CommandList>
               <CommandEmpty>Sin resultados. Podés agregar países en Configuración.</CommandEmpty>
@@ -218,8 +218,8 @@ export function GuestFormDialog({
       return "dni";
     })(),
     documentNumber: g?.documentNumber || "",
-    nationality: g?.nationality || "",
-    nationalityCode: g?.nationalityCode || "",
+    nationality: g?.nationality || "Argentina",
+    nationalityCode: g?.nationalityCode || "200",
     vatCondition: g?.vatCondition || "",
     estadoCivil: g?.estadoCivil || "",
     procedencia: g?.procedencia || "",
@@ -460,15 +460,15 @@ export function GuestFormDialog({
               <ProvinciaCiudadSelect
                 provincia={formData.provincia || ""}
                 localidad={formData.localidad || ""}
-                onProvinciaChange={(v) => setFormData({ ...formData, provincia: v, localidad: "" })}
-                onLocalidadChange={(v) => setFormData({ ...formData, localidad: v })}
+                onProvinciaChange={(v) => setFormData(prev => ({ ...prev, provincia: v, localidad: "" }))}
+                onLocalidadChange={(v) => setFormData(prev => ({ ...prev, localidad: v }))}
                 testIdProvincia="select-guest-provincia"
                 testIdLocalidad="select-guest-localidad"
               />
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="codigoPostal">Código Postal</Label>
-                  <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData({ ...formData, codigoPostal: e.target.value })} placeholder="1043" data-testid="input-codigo-postal" />
+                  <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData(prev => ({ ...prev, codigoPostal: e.target.value }))} placeholder="1043" data-testid="input-codigo-postal" />
                 </div>
               </div>
 
@@ -640,7 +640,7 @@ export function GuestFormDialog({
               <NationalityCombobox
                 value={formData.nationality || ""}
                 afipCode={(formData as any).nationalityCode || ""}
-                onChange={(name, code) => setFormData({ ...formData, nationality: name, nationalityCode: code } as any)}
+                onChange={(name, code) => setFormData(prev => ({ ...prev, nationality: name, nationalityCode: code } as any))}
               />
 
               {/* Datos migratorios — solo para extranjeros (Ley 25.871) */}
@@ -681,15 +681,15 @@ export function GuestFormDialog({
               <ProvinciaCiudadSelect
                 provincia={formData.provincia || ""}
                 localidad={formData.localidad || ""}
-                onProvinciaChange={(v) => setFormData({ ...formData, provincia: v, localidad: "" })}
-                onLocalidadChange={(v) => setFormData({ ...formData, localidad: v })}
+                onProvinciaChange={(v) => setFormData(prev => ({ ...prev, provincia: v, localidad: "" }))}
+                onLocalidadChange={(v) => setFormData(prev => ({ ...prev, localidad: v }))}
                 testIdProvincia="select-guest-provincia"
                 testIdLocalidad="select-guest-localidad"
               />
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="codigoPostal">Código Postal</Label>
-                  <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData({ ...formData, codigoPostal: e.target.value })} placeholder="3100" data-testid="input-codigo-postal" />
+                  <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData(prev => ({ ...prev, codigoPostal: e.target.value }))} placeholder="3100" data-testid="input-codigo-postal" />
                 </div>
               </div>
 
