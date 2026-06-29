@@ -350,6 +350,47 @@ export async function registerRoutes(
     }
   });
 
+  // Breakfast list for tomorrow: reservations staying tonight (checked_in, non-virtual rooms)
+  app.get("/api/dashboard/breakfasts", requireAuth, async (req, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const rows = await db.execute(sql`
+        SELECT
+          r.id            AS reservation_id,
+          rm.room_number,
+          r.check_in_date,
+          r.check_out_date,
+          r.adults,
+          r.children,
+          g.first_name,
+          g.last_name
+        FROM reservations r
+        JOIN rooms rm ON rm.id = r.room_id
+        LEFT JOIN guests g ON g.id = r.guest_id
+        WHERE r.check_in_date <= ${today}
+          AND r.check_out_date > ${today}
+          AND r.status = 'checked_in'
+          AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
+        ORDER BY rm.room_number
+      `);
+      const result = rows.rows.map((row: any) => ({
+        reservationId: row.reservation_id,
+        roomNumber: row.room_number,
+        checkIn: row.check_in_date,
+        checkOut: row.check_out_date,
+        adults: Number(row.adults ?? 0),
+        children: Number(row.children ?? 0),
+        guestName: row.last_name && row.first_name
+          ? `${row.last_name}, ${row.first_name}`
+          : row.last_name || row.first_name || "—",
+      }));
+      res.json(result);
+    } catch (e: any) {
+      console.error("[breakfasts] error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Today's departures (check-outs scheduled for today)
   app.get("/api/dashboard/departures", async (req, res) => {
     try {

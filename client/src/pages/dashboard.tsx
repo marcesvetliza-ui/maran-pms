@@ -166,6 +166,16 @@ function RoomStatusBadge({ status }: { status: string }) {
   return <Badge className={config.className}>{config.label}</Badge>;
 }
 
+type BreakfastEntry = {
+  reservationId: string;
+  roomNumber: string;
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children: number;
+  guestName: string;
+};
+
 type InHouseEntry = {
   reservationId: string;
   roomNumber: string;
