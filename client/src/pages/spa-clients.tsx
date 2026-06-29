@@ -380,8 +380,8 @@ export default function SpaClientsPage() {
             <ProvinciaCiudadSelect
               provincia={form.provincia}
               localidad={form.localidad}
-              onProvinciaChange={(v) => setForm({ ...form, provincia: v, localidad: "" })}
-              onLocalidadChange={(v) => setForm({ ...form, localidad: v })}
+              onProvinciaChange={(v) => setForm(prev => ({ ...prev, provincia: v, localidad: "" }))}
+              onLocalidadChange={(v) => setForm(prev => ({ ...prev, localidad: v }))}
               testIdProvincia="select-client-provincia"
               testIdLocalidad="select-client-localidad"
             />

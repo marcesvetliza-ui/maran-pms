@@ -356,8 +356,8 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                   <ProvinciaCiudadSelect
                     provincia={newGuest.provincia}
                     localidad={newGuest.localidad}
-                    onProvinciaChange={(v) => setNewGuest({ ...newGuest, provincia: v, localidad: "" })}
-                    onLocalidadChange={(v) => setNewGuest({ ...newGuest, localidad: v })}
+                    onProvinciaChange={(v) => setNewGuest(prev => ({ ...prev, provincia: v, localidad: "" }))}
+                    onLocalidadChange={(v) => setNewGuest(prev => ({ ...prev, localidad: v }))}
                     testIdProvincia="select-guest-j-provincia"
                     testIdLocalidad="select-guest-j-localidad"
                   />
@@ -508,8 +508,8 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                   <ProvinciaCiudadSelect
                     provincia={newGuest.provincia}
                     localidad={newGuest.localidad}
-                    onProvinciaChange={(v) => setNewGuest({ ...newGuest, provincia: v, localidad: "" })}
-                    onLocalidadChange={(v) => setNewGuest({ ...newGuest, localidad: v })}
+                    onProvinciaChange={(v) => setNewGuest(prev => ({ ...prev, provincia: v, localidad: "" }))}
+                    onLocalidadChange={(v) => setNewGuest(prev => ({ ...prev, localidad: v }))}
                     testIdProvincia="select-guest-f-provincia"
                     testIdLocalidad="select-guest-f-localidad"
                   />

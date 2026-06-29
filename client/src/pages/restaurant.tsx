@@ -3426,8 +3426,8 @@ export default function RestaurantPage() {
             <ProvinciaCiudadSelect
               provincia={clientForm.provincia}
               localidad={clientForm.localidad}
-              onProvinciaChange={(v) => setClientForm({ ...clientForm, provincia: v, localidad: "" })}
-              onLocalidadChange={(v) => setClientForm({ ...clientForm, localidad: v })}
+              onProvinciaChange={(v) => setClientForm(prev => ({ ...prev, provincia: v, localidad: "" }))}
+              onLocalidadChange={(v) => setClientForm(prev => ({ ...prev, localidad: v }))}
               testIdProvincia="select-client-provincia"
               testIdLocalidad="select-client-localidad"
             />
