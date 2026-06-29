@@ -1003,7 +1003,7 @@ export default function RestaurantPage() {
     setCloseBillingClientSearchOpen(false);
     if (!currentOrder.tableId) { setCloseBillingClient(null); return; }
     const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-    const linkedRes = (tableReservations || []).find(
+    const linkedRes = (reservations || []).find(
       (r: any) => r.tableId === currentOrder.tableId && r.status === "check_in" && r.reservationDate === todayStr
     );
     if (!linkedRes?.clientId) { setCloseBillingClient(null); return; }
