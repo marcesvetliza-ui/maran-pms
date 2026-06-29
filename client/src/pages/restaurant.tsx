@@ -845,7 +845,7 @@ export default function RestaurantPage() {
   const [closeBillingClientSearch, setCloseBillingClientSearch] = useState("");
   const [closeBillingClientSearchOpen, setCloseBillingClientSearchOpen] = useState(false);
   const [showAlternateClientSearch, setShowAlternateClientSearch] = useState(false);
-  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"" | "cierre_mesa" | "voucher">("");
+  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "cierre_mesa" | "voucher">("__default__");
   const [closePaymentSplits, setClosePaymentSplits] = useState<{id: string; method: string; amount: string; roomId?: string; roomSearch?: string}[]>([{id: "1", method: "efectivo", amount: ""}]);
 
   // Clientes tab state
@@ -997,7 +997,7 @@ export default function RestaurantPage() {
   useEffect(() => {
     if (!isCloseDialogOpen || !currentOrder) return;
     setClosePaymentSplits([{ id: "1", method: "efectivo", amount: parseFloat(currentOrder.total || "0").toFixed(2) }]);
-    setCloseNonFiscalOverride("");
+    setCloseNonFiscalOverride("__default__");
     setShowAlternateClientSearch(false);
     setCloseBillingClientSearch("");
     setCloseBillingClientSearchOpen(false);
@@ -4634,7 +4634,7 @@ export default function RestaurantPage() {
             {!isSplitMode ? (
               <>
                 {(() => {
-                  const effReceiptType = closeNonFiscalOverride || deriveReceiptFromVat(closeBillingClient?.vatCondition);
+                  const effReceiptType = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
                   const isFactura = ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
                   const isFactA = effReceiptType === "factura_a";
                   const isBilledToCC = isFactura && closeSalesCondition === "cuenta_corriente" && !!closeBillingClient;
@@ -4777,7 +4777,7 @@ export default function RestaurantPage() {
                               <SelectValue placeholder="Cambiar..." />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="">Según cliente</SelectItem>
+                              <SelectItem value="__default__">Según cliente</SelectItem>
                               <SelectItem value="cierre_mesa">Ticket / Cierre</SelectItem>
                               <SelectItem value="voucher">Voucher</SelectItem>
                             </SelectContent>
@@ -5604,7 +5604,7 @@ export default function RestaurantPage() {
                 setCloseBillingClientSearch("");
                 setCloseBillingClientSearchOpen(false);
                 setShowAlternateClientSearch(false);
-                setCloseNonFiscalOverride("");
+                setCloseNonFiscalOverride("__default__");
                 setClosePaymentSplits([{ id: "1", method: "efectivo", amount: "" }]);
               }}
               className="w-full sm:w-auto"
@@ -5618,7 +5618,7 @@ export default function RestaurantPage() {
               const handleConfirmClose = () => {
                 if (!currentOrder) return;
                 const disc = parseFloat(closeDiscount || "0");
-                const effReceiptType = closeNonFiscalOverride || deriveReceiptFromVat(closeBillingClient?.vatCondition);
+                const effReceiptType = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
                 const isFactura = ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
                 const isFactA = effReceiptType === "factura_a";
                 const vatCond = isFactA
