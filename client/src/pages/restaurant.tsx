@@ -993,10 +993,26 @@ export default function RestaurantPage() {
     .filter(a => !a.appliedToOrderId)
     .reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
 
+  // Cuando los adelantos cargan (query async), corregir el monto del primer split
+  // solo si el usuario todavía no lo modificó (sigue siendo igual al total bruto)
+  useEffect(() => {
+    if (!isCloseDialogOpen || !currentOrder || totalAdvanceCredit <= 0) return;
+    const fullTotal = parseFloat(currentOrder.total || "0");
+    const finalTotal = Math.max(0, fullTotal - totalAdvanceCredit);
+    setClosePaymentSplits(prev => {
+      if (prev.length === 1 && Math.abs(parseFloat(prev[0].amount || "0") - fullTotal) < 0.01) {
+        return [{ ...prev[0], amount: finalTotal.toFixed(2) }];
+      }
+      return prev;
+    });
+  }, [totalAdvanceCredit, isCloseDialogOpen, currentOrder]);
+
   // Auto-detect billing client from table reservation when close dialog opens
   useEffect(() => {
     if (!isCloseDialogOpen || !currentOrder) return;
-    setClosePaymentSplits([{ id: "1", method: "efectivo", amount: parseFloat(currentOrder.total || "0").toFixed(2) }]);
+    const fullTotal = parseFloat(currentOrder.total || "0");
+    const initialAmount = Math.max(0, fullTotal - totalAdvanceCredit);
+    setClosePaymentSplits([{ id: "1", method: "efectivo", amount: initialAmount.toFixed(2) }]);
     setCloseNonFiscalOverride("__default__");
     setShowAlternateClientSearch(false);
     setCloseBillingClientSearch("");
