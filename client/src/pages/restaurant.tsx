@@ -67,6 +67,7 @@ import {
   AlertTriangle,
   Building2,
   UserPlus,
+  User,
   CheckCircle,
   BedDouble,
   FileText,
