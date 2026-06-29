@@ -1069,22 +1069,26 @@ function MobileRoomCard({
             </Button>
           )}
 
-          {/* Active task → Complete */}
-          {activeTask && (
+          {/* Active task OR cleaning-status room → Finalizar limpieza */}
+          {(activeTask || (!activeTask && !pendingTask && room.status === "cleaning")) && (
             <Button
-              className="w-full h-12 text-base bg-green-500 hover:bg-green-600 text-white"
+              className="w-full h-12 text-base bg-green-500 hover:bg-green-600 text-white font-semibold shadow-sm"
               disabled={isUpdating}
               onClick={() => confirm({
-                title: `Marcar lista — Hab. ${room.roomNumber}`,
-                description: `La limpieza duró ${elapsed}. ¿Marcar la habitación como limpia y lista?`,
-                confirmLabel: "Sí, está lista",
+                title: `Finalizar limpieza — Hab. ${room.roomNumber}`,
+                description: activeTask
+                  ? `La limpieza duró ${elapsed}. ¿Marcar la habitación como limpia y lista?`
+                  : "¿Marcar la habitación como limpia y lista?",
+                confirmLabel: "Sí, lista",
                 confirmClass: "bg-green-500 hover:bg-green-600",
-                fn: () => onCompleteTask(activeTask.id),
+                fn: () => activeTask
+                  ? onCompleteTask(activeTask.id)
+                  : onUpdateStatus(room.id, "available"),
               })}
-              data-testid={`button-complete-task-${activeTask.id}`}
+              data-testid={activeTask ? `button-complete-task-${activeTask.id}` : `button-finish-cleaning-${room.id}`}
             >
               <CheckCircle className="h-5 w-5 mr-2" />
-              Marcar lista
+              {activeTask ? `Finalizar (${elapsed})` : "Finalizar limpieza"}
             </Button>
           )}
 
@@ -1326,12 +1330,17 @@ export default function Housekeeping() {
   });
 
   const completeTaskMutation = useMutation({
-    mutationFn: (taskId: string) => apiRequest("POST", `/api/housekeeping/${taskId}/complete`),
-    onSuccess: () => {
+    mutationFn: (taskId: string) => apiRequest("POST", `/api/housekeeping/${taskId}/complete`).then(r => r.json()),
+    onSuccess: (completedTask: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Tarea completada", description: "La habitacion esta lista." });
+      const roomNum = rooms?.find(r => r.id === completedTask?.roomId)?.roomNumber;
+      toast({
+        title: `✅ Limpieza finalizada${roomNum ? ` — Hab. ${roomNum}` : ""}`,
+        description: "La habitación quedó disponible.",
+        duration: 6000,
+      });
     },
     onError: () => {
       toast({ title: "Error", description: "No se pudo completar la tarea.", variant: "destructive" });
@@ -1386,13 +1395,19 @@ export default function Housekeeping() {
       });
       if (!resp.ok) throw new Error("create failed");
       const task = await resp.json();
-      await apiRequest("POST", `/api/housekeeping/${task.id}/start`);
-      return task;
+      const startResp = await apiRequest("POST", `/api/housekeeping/${task.id}/start`);
+      if (!startResp.ok) throw new Error("start failed");
+      return { task, roomId };
     },
-    onSuccess: () => {
+    onSuccess: ({ roomId }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      toast({ title: "Limpieza iniciada" });
+      const roomNum = rooms?.find(r => r.id === roomId)?.roomNumber;
+      toast({
+        title: `🧹 Limpieza iniciada${roomNum ? ` — Hab. ${roomNum}` : ""}`,
+        description: "El cronómetro está corriendo. Presioná \"Finalizar\" cuando termines.",
+        duration: 5000,
+      });
     },
     onError: () => toast({ title: "Error", description: "No se pudo iniciar la limpieza.", variant: "destructive" }),
   });
