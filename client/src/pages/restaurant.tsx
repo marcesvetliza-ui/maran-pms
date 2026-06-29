@@ -5634,6 +5634,27 @@ export default function RestaurantPage() {
               const handleConfirmClose = () => {
                 if (!currentOrder) return;
                 const disc = parseFloat(closeDiscount || "0");
+
+                // Advertir si el monto ingresado excede el A cobrar
+                {
+                  const _effReceipt = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
+                  const _isCC = ["factura_a","factura_b","factura_c"].includes(_effReceipt) && closeSalesCondition === "cuenta_corriente" && !!closeBillingClient;
+                  if (!_isCC) {
+                    const _total = parseFloat(getUpdatedOrder()?.total || currentOrder.total || "0");
+                    const _discAmt = closeDiscountType === "percent" ? _total * disc / 100 : disc;
+                    const _finalTotal = Math.max(0, _total - _discAmt - totalAdvanceCredit);
+                    const _splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
+                    const _excess = Math.round((_splitTotal - _finalTotal) * 100) / 100;
+                    if (_excess > 0) {
+                      toast({
+                        title: "Excedente en el pago",
+                        description: `El monto ingresado supera el total por $${_excess.toLocaleString("es-AR", { minimumFractionDigits: 2 })}. Se registrará el consumo de $${_finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}.`,
+                        variant: "default",
+                      });
+                    }
+                  }
+                }
+
                 const effReceiptType = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
                 const isFactura = ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
                 const isFactA = effReceiptType === "factura_a";
