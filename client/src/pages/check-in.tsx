@@ -826,16 +826,36 @@ export default function CheckInPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {webCheckinReservations && webCheckinReservations.length > 0 ? (
+              {webCheckinReservations && webCheckinReservations.length > 0 ? (() => {
+                // Mapa rápido: reservationId → webCheckin generado
+                const wcByReservation = new Map(
+                  (webCheckinList ?? []).map(wc => [wc.reservationId, wc])
+                );
+                return (
                 <div className="space-y-2">
-                  {webCheckinReservations.map((res) => (
+                  {webCheckinReservations.map((res) => {
+                    const existingWc = wcByReservation.get(res.id);
+                    const isCompleted = res.status === "web_checkin" || existingWc?.status === "completed";
+                    const isPending = !isCompleted && existingWc?.status === "pending";
+
+                    return (
                     <div
                       key={res.id}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                      className={`flex items-center justify-between p-3 border rounded-lg transition-colors ${
+                        isCompleted
+                          ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                          : isPending
+                          ? "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800"
+                          : "hover:bg-muted/50"
+                      }`}
                       data-testid={`webcheckin-res-${res.id}`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
+                        <div className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold ${
+                          isCompleted ? "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300"
+                          : isPending ? "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+                          : "bg-primary/10 text-primary"
+                        }`}>
                           {res.guest?.lastName?.[0]}{res.guest?.firstName?.[0]}
                         </div>
                         <div>
@@ -843,32 +863,69 @@ export default function CheckInPage() {
                           <p className="text-xs text-muted-foreground">
                             Hab. {res.room?.roomNumber} | {formatDateAR(res.checkInDate)} - {formatDateAR(res.checkOutDate)}
                           </p>
+                          {isPending && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5">
+                              <AlertTriangle className="h-3 w-3" />
+                              Link ya generado — pendiente de completar
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge variant={res.status === "confirmed" ? "default" : "secondary"} className="text-xs">
-                          {res.status === "confirmed" ? "Confirmada" : "Pendiente"}
-                        </Badge>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setWebCheckinReservation(res);
-                            setGeneratedLink(null);
-                            setWebCheckinDialogOpen(true);
-                            generateLinkMutation.mutate(res.id);
-                          }}
-                          disabled={generateLinkMutation.isPending}
-                          data-testid={`button-generate-link-${res.id}`}
-                        >
-                          <Link2 className="h-4 w-4 mr-1" />
-                          Generar Link
-                        </Button>
+                        {isCompleted ? (
+                          <Badge className="text-xs bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700 flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Pre-ingreso completado
+                          </Badge>
+                        ) : (
+                          <>
+                            <Badge variant={res.status === "confirmed" ? "default" : "secondary"} className="text-xs">
+                              {res.status === "confirmed" ? "Confirmada" : "Pendiente"}
+                            </Badge>
+                            {isPending ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-amber-400 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                                onClick={() => {
+                                  setWebCheckinReservation(res);
+                                  setGeneratedLink(null);
+                                  setWebCheckinDialogOpen(true);
+                                  generateLinkMutation.mutate(res.id);
+                                }}
+                                disabled={generateLinkMutation.isPending}
+                                data-testid={`button-generate-link-${res.id}`}
+                                title="El link ya fue generado. Podés regenerarlo si es necesario."
+                              >
+                                <Send className="h-4 w-4 mr-1" />
+                                Reenviar Link
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setWebCheckinReservation(res);
+                                  setGeneratedLink(null);
+                                  setWebCheckinDialogOpen(true);
+                                  generateLinkMutation.mutate(res.id);
+                                }}
+                                disabled={generateLinkMutation.isPending}
+                                data-testid={`button-generate-link-${res.id}`}
+                              >
+                                <Link2 className="h-4 w-4 mr-1" />
+                                Generar Link
+                              </Button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
-              ) : (
+                );
+              })() : (
                 <p className="text-sm text-muted-foreground text-center py-6">
                   No hay reservas pendientes o confirmadas para generar web check-in
                 </p>
