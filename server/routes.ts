@@ -2688,6 +2688,8 @@ export async function registerRoutes(
       if ((req.user as any)?.role !== "admin") {
         return res.status(403).json({ error: "Solo administradores" });
       }
+      // Borrar en orden para respetar foreign keys
+      await db.execute(sql`DELETE FROM payment_order_items WHERE invoice_id IS NOT NULL`);
       await db.execute(sql`DELETE FROM purchase_invoices`);
       res.json({ ok: true, mensaje: "Todos los comprobantes de compra fueron eliminados." });
     } catch (e: any) {
