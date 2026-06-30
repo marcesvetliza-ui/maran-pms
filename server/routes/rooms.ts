@@ -3,7 +3,7 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
 
-const ROOMS_WRITE_ROLES = ["admin", "manager", "jefe_recepcion", "resp_administracion"] as [string, ...string[]];
+const ROOMS_WRITE_ROLES = ["admin", "manager", "jefe_recepcion", "resp_administracion", "reception", "housekeeping", "maintenance"] as [string, ...string[]];
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
 
 export function registerRoomsRoutes(app: Express) {
@@ -237,12 +237,15 @@ export function registerRoomsRoutes(app: Express) {
 
   app.patch("/api/rooms/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
     try {
+      console.log(`[PATCH /api/rooms/${req.params.id}] body:`, JSON.stringify(req.body), "user:", (req.user as any)?.username, "role:", (req.user as any)?.role);
       const room = await storage.updateRoom(req.params.id, req.body);
       if (!room) {
+        console.log(`[PATCH /api/rooms/${req.params.id}] room not found`);
         return res.status(404).json({ error: "Room not found" });
       }
       res.json(room);
     } catch (error) {
+      console.error(`[PATCH /api/rooms/${req.params.id}] error:`, error);
       res.status(500).json({ error: "Error updating room" });
     }
   });

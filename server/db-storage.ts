@@ -243,7 +243,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateRoom(id: string, room: Partial<InsertRoom>): Promise<Room | undefined> {
-    const [updated] = await db.update(rooms).set(room as any).where(eq(rooms.id, id)).returning();
+    const safeUpdates: Record<string, any> = {};
+    for (const [key, val] of Object.entries(room)) {
+      if (val !== undefined) safeUpdates[key] = val;
+    }
+    if (Object.keys(safeUpdates).length === 0) {
+      const [existing] = await db.select().from(rooms).where(eq(rooms.id, id));
+      return existing;
+    }
+    const [updated] = await db.update(rooms).set(safeUpdates as any).where(eq(rooms.id, id)).returning();
     return updated;
   }
 
