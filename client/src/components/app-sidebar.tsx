@@ -76,13 +76,13 @@ import type { SystemNotification } from "@shared/schema";
 // Roles disponibles: admin, manager, spa, maintenance, housekeeping, restaurant,
 //   events, reception, resp_deposito, resp_administracion, jefe_recepcion, comercial
 
-const DASHBOARD_ROLES   = ["admin","manager","spa","housekeeping","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
+const DASHBOARD_ROLES   = ["admin","manager","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
 const PLANNING_ROLES    = ["admin","manager","housekeeping","restaurant","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const CORE_RECEPCION    = ["admin","reception","jefe_recepcion","comercial"];
 const CHECKINOUT_ROLES  = ["admin","manager","housekeeping","events","reception","jefe_recepcion","comercial"];
 const HABITACIONES_ROLES= ["admin","manager","housekeeping","reception","jefe_recepcion","comercial"];
 const TARIFAS_ROLES     = ["admin","manager","reception","resp_administracion","jefe_recepcion","comercial"];
-const HUESPEDES_ROLES   = ["admin","housekeeping","events","reception","jefe_recepcion","comercial"];
+const HUESPEDES_ROLES   = ["admin","events","reception","jefe_recepcion","comercial"];
 const PAQUETES_ROLES    = ["admin","spa","reception","jefe_recepcion","comercial"];
 const PRESUPUESTOS_ROLES= ["admin","manager","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const RESTAURANT_ROLES  = ["admin","manager","restaurant","events","reception","resp_deposito","jefe_recepcion","comercial"];
