@@ -713,30 +713,6 @@ export default function PlanningPage() {
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Button variant="outline" size="icon" onClick={() => navigateDays("prev", 7)} title="Semana anterior" data-testid="button-prev-week">
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" onClick={() => navigateDays("prev", 1)} title="Día anterior" data-testid="button-prev-day">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" onClick={goToToday} data-testid="button-today">Hoy</Button>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" data-testid="button-date-picker">
-                  <CalendarSearch className="h-4 w-4 mr-2" />
-                  Ir a fecha
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <CalendarPicker mode="single" selected={new Date(dateRange.start + "T12:00:00")} onSelect={goToDate} initialFocus />
-              </PopoverContent>
-            </Popover>
-            <Button variant="outline" size="icon" onClick={() => navigateDays("next", 1)} title="Día siguiente" data-testid="button-next-day">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" onClick={() => navigateDays("next", 7)} title="Semana siguiente" data-testid="button-next-week">
-              <ChevronsRight className="h-4 w-4" />
-            </Button>
             <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
               <PopoverTrigger asChild>
                 <Button
@@ -837,16 +813,42 @@ export default function PlanningPage() {
 
       <Card className="flex-1 min-h-0 flex flex-col">
         <CardHeader className="py-3 px-4 border-b shrink-0">
-          <CardTitle className="text-base font-medium flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Info className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-base font-medium flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Info className="h-4 w-4" />
               <span>
                 {data ? (() => {
                   const totalReal = data.rooms.filter(r => !(r as any).isVirtual && r.roomNumber !== "REUB").length;
                   return `${filteredRooms.length} habitaciones${filteredRooms.length !== totalReal ? ` (de ${totalReal})` : ""}`;
-                })() : "Cargando..."} | {" "}
-                {dateRange.start} — {dateRange.end}
+                })() : "Cargando..."}
               </span>
+            </div>
+            {/* Navegación de fechas — pegada a la grilla para acceso rápido */}
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => navigateDays("prev", 7)} title="Semana anterior" data-testid="button-prev-week">
+                <ChevronsLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => navigateDays("prev", 1)} title="Día anterior" data-testid="button-prev-day">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={goToToday} data-testid="button-today">Hoy</Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 px-2 text-xs" data-testid="button-date-picker">
+                    <CalendarSearch className="h-3.5 w-3.5 mr-1" />
+                    {dateRange.start}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="center">
+                  <CalendarPicker mode="single" selected={new Date(dateRange.start + "T12:00:00")} onSelect={goToDate} initialFocus />
+                </PopoverContent>
+              </Popover>
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => navigateDays("next", 1)} title="Día siguiente" data-testid="button-next-day">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => navigateDays("next", 7)} title="Semana siguiente" data-testid="button-next-week">
+                <ChevronsRight className="h-3.5 w-3.5" />
+              </Button>
             </div>
             <button
               onClick={toggleRevenue}
