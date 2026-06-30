@@ -302,10 +302,10 @@ export function QuickReservationDialog({
                         <div className="flex flex-col gap-0.5">
                           <span className="font-medium">{rp.name}</span>
                           <span className="text-xs text-muted-foreground">
-                            {rp.currency} {Number(rp.baseRate).toLocaleString("es-AR")}
-                            {rp.rate2pax ? ` · 2P: ${Number(rp.rate2pax).toLocaleString("es-AR")}` : ""}
-                            {rp.rate3pax ? ` · 3P: ${Number(rp.rate3pax).toLocaleString("es-AR")}` : ""}
-                            {rp.rate4pax ? ` · 4P: ${Number(rp.rate4pax).toLocaleString("es-AR")}` : ""}
+                            ${Number(rp.baseRate).toLocaleString("es-AR")}
+                            {rp.rate2pax ? ` · 2P: $${Number(rp.rate2pax).toLocaleString("es-AR")}` : ""}
+                            {rp.rate3pax ? ` · 3P: $${Number(rp.rate3pax).toLocaleString("es-AR")}` : ""}
+                            {rp.rate4pax ? ` · 4P: $${Number(rp.rate4pax).toLocaleString("es-AR")}` : ""}
                             {!hasPaxRates ? " (tarifa fija)" : ""}
                           </span>
                         </div>
@@ -324,7 +324,7 @@ export function QuickReservationDialog({
                 return (
                   <div className="flex items-center gap-1.5 mt-1 px-2 py-1 bg-blue-50 dark:bg-blue-950/40 rounded text-xs text-blue-700 dark:text-blue-300">
                     <span>Tarifa para {numberOfGuests} huésped{numberOfGuests > 1 ? "es" : ""}:</span>
-                    <span className="font-bold">{plan.currency} {Number(effectivePaxRate).toLocaleString("es-AR")}/noche</span>
+                    <span className="font-bold">${Number(effectivePaxRate).toLocaleString("es-AR")}/noche</span>
                     {isPaxSpecific && <span className="text-blue-500">(tarifa {numberOfGuests}P)</span>}
                   </div>
                 );

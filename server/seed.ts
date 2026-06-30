@@ -72,15 +72,15 @@ export async function seedDatabase() {
 
   console.log("Seeding rate plans...");
   await db.insert(ratePlans).values([
-    { id: "rp1", name: "BAR (Mejor Tarifa)", roomTypeId: "rt1", baseRate: "85.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
-    { id: "rp2", name: "BAR (Mejor Tarifa)", roomTypeId: "rt2", baseRate: "120.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
-    { id: "rp3", name: "BAR (Mejor Tarifa)", roomTypeId: "rt3", baseRate: "180.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
-    { id: "rp4", name: "BAR (Mejor Tarifa)", roomTypeId: "rt4", baseRate: "350.00", currency: "USD", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
-    { id: "rp5", name: "No Reembolsable", roomTypeId: "rt1", baseRate: "70.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelacion" },
-    { id: "rp6", name: "No Reembolsable", roomTypeId: "rt2", baseRate: "100.00", currency: "USD", refundable: "false", cancellationPolicy: "Sin reembolso por cancelacion" },
-    { id: "rp7", name: "Corporativo", roomTypeId: "rt1", baseRate: "75.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
-    { id: "rp8", name: "Corporativo", roomTypeId: "rt2", baseRate: "105.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
-    { id: "rp9", name: "Corporativo", roomTypeId: "rt3", baseRate: "160.00", currency: "USD", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
+    { id: "rp1", name: "BAR (Mejor Tarifa)", roomTypeId: "rt1", baseRate: "85.00", currency: "ARS", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+    { id: "rp2", name: "BAR (Mejor Tarifa)", roomTypeId: "rt2", baseRate: "120.00", currency: "ARS", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+    { id: "rp3", name: "BAR (Mejor Tarifa)", roomTypeId: "rt3", baseRate: "180.00", currency: "ARS", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+    { id: "rp4", name: "BAR (Mejor Tarifa)", roomTypeId: "rt4", baseRate: "350.00", currency: "ARS", refundable: "true", cancellationPolicy: "Cancelacion gratuita hasta 24h antes" },
+    { id: "rp5", name: "No Reembolsable", roomTypeId: "rt1", baseRate: "70.00", currency: "ARS", refundable: "false", cancellationPolicy: "Sin reembolso por cancelacion" },
+    { id: "rp6", name: "No Reembolsable", roomTypeId: "rt2", baseRate: "100.00", currency: "ARS", refundable: "false", cancellationPolicy: "Sin reembolso por cancelacion" },
+    { id: "rp7", name: "Corporativo", roomTypeId: "rt1", baseRate: "75.00", currency: "ARS", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
+    { id: "rp8", name: "Corporativo", roomTypeId: "rt2", baseRate: "105.00", currency: "ARS", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
+    { id: "rp9", name: "Corporativo", roomTypeId: "rt3", baseRate: "160.00", currency: "ARS", refundable: "true", cancellationPolicy: "Facturacion a empresa" },
   ]);
 
   console.log("Seeding rooms...");

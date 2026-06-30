@@ -237,8 +237,6 @@ function RatePlanFormDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ARS">ARS (Peso Argentino)</SelectItem>
-                    <SelectItem value="USD">USD (Dólar)</SelectItem>
-                    <SelectItem value="EUR">EUR (Euro)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
