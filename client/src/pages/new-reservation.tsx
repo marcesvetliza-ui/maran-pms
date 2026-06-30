@@ -124,8 +124,7 @@ export default function NewReservationPage() {
   }, [checkInDate, checkOutDate]);
 
   const availableRooms = rooms?.filter((room) =>
-    room.status !== "maintenance" &&
-    room.status !== "out_of_order" &&
+    room.status === "available" &&
     (selectedRoomTypeId ? room.roomTypeId === selectedRoomTypeId : true)
   );
 
@@ -332,7 +331,7 @@ export default function NewReservationPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
-                Fechas
+                Fechas y Servicios especiales
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -362,6 +361,58 @@ export default function NewReservationPage() {
                   <Badge variant="secondary">{nights} noche(s)</Badge>
                 </div>
               )}
+              <div className="border-t pt-3 grid gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sunrise className="h-4 w-4 text-orange-500" />
+                    <Label htmlFor="nr-earlyCheckIn" className="cursor-pointer">Early Check-in</Label>
+                    <span className="text-xs text-muted-foreground">(Estándar: 12:00 hs)</span>
+                  </div>
+                  <Switch
+                    id="nr-earlyCheckIn"
+                    checked={earlyCheckIn}
+                    onCheckedChange={(checked) => { setEarlyCheckIn(checked); if (!checked) { setEarlyCheckInTime(""); setEarlyCheckInCharge(""); } }}
+                    data-testid="switch-early-checkin"
+                  />
+                </div>
+                {earlyCheckIn && (
+                  <div className="grid grid-cols-2 gap-2 pl-6">
+                    <div>
+                      <Label className="text-xs">Hora acordada</Label>
+                      <Input type="time" value={earlyCheckInTime} onChange={(e) => setEarlyCheckInTime(e.target.value)} data-testid="input-early-checkin-time" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Cargo (vacío = cortesía)</Label>
+                      <Input type="number" step="0.01" min="0" placeholder="0.00" value={earlyCheckInCharge} onChange={(e) => setEarlyCheckInCharge(e.target.value)} data-testid="input-early-checkin-charge" />
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sunset className="h-4 w-4 text-purple-500" />
+                    <Label htmlFor="nr-lateCheckOut" className="cursor-pointer">Late Check-out</Label>
+                    <span className="text-xs text-muted-foreground">(Estándar: 11:00 hs)</span>
+                  </div>
+                  <Switch
+                    id="nr-lateCheckOut"
+                    checked={lateCheckOut}
+                    onCheckedChange={(checked) => { setLateCheckOut(checked); if (!checked) { setLateCheckOutTime(""); setLateCheckOutCharge(""); } }}
+                    data-testid="switch-late-checkout"
+                  />
+                </div>
+                {lateCheckOut && (
+                  <div className="grid grid-cols-2 gap-2 pl-6">
+                    <div>
+                      <Label className="text-xs">Hora acordada</Label>
+                      <Input type="time" value={lateCheckOutTime} onChange={(e) => setLateCheckOutTime(e.target.value)} data-testid="input-late-checkout-time" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Cargo (vacío = cortesía)</Label>
+                      <Input type="number" step="0.01" min="0" placeholder="0.00" value={lateCheckOutCharge} onChange={(e) => setLateCheckOutCharge(e.target.value)} data-testid="input-late-checkout-charge" />
+                    </div>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -430,28 +481,17 @@ export default function NewReservationPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {availableRooms?.slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => {
-                          const statusLabel: Record<string, string> = {
-                            available: "✓ Libre",
-                            occupied: "Ocupada",
-                            cleaning: "Limpieza",
-                            checkout: "Check-out hoy",
-                          };
-                          const label = statusLabel[room.status] || room.status;
-                          const isCurrentlyFree = room.status === "available";
                           if (!room.id) return null;
                           return (
                             <SelectItem key={room.id} value={room.id}>
-                              <span>Hab. {room.roomNumber} — Piso {room.floor}</span>
-                              <span className={`ml-2 text-xs ${isCurrentlyFree ? "text-green-600" : "text-amber-600"}`}>
-                                ({label})
-                              </span>
+                              Hab. {room.roomNumber} — Piso {room.floor}
                             </SelectItem>
                           );
                         })}
                       </SelectContent>
                     </Select>
                     {selectedRoomTypeId && availableRooms?.length === 0 && (
-                      <p className="text-sm text-destructive">Todas las habitaciones de este tipo están en mantenimiento</p>
+                      <p className="text-sm text-destructive">No hay habitaciones disponibles para este tipo</p>
                     )}
                   </>
                 )}
@@ -548,64 +588,7 @@ export default function NewReservationPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Servicios especiales</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sunrise className="h-4 w-4 text-orange-500" />
-                  <Label htmlFor="nr-earlyCheckIn" className="cursor-pointer">Early Check-in</Label>
-                  <span className="text-xs text-muted-foreground">(Estándar: 12:00 hs)</span>
-                </div>
-                <Switch
-                  id="nr-earlyCheckIn"
-                  checked={earlyCheckIn}
-                  onCheckedChange={(checked) => { setEarlyCheckIn(checked); if (!checked) { setEarlyCheckInTime(""); setEarlyCheckInCharge(""); } }}
-                  data-testid="switch-early-checkin"
-                />
-              </div>
-              {earlyCheckIn && (
-                <div className="grid grid-cols-2 gap-2 pl-6">
-                  <div>
-                    <Label className="text-xs">Hora acordada</Label>
-                    <Input type="time" value={earlyCheckInTime} onChange={(e) => setEarlyCheckInTime(e.target.value)} data-testid="input-early-checkin-time" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Cargo (vacío = cortesía)</Label>
-                    <Input type="number" step="0.01" min="0" placeholder="0.00" value={earlyCheckInCharge} onChange={(e) => setEarlyCheckInCharge(e.target.value)} data-testid="input-early-checkin-charge" />
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sunset className="h-4 w-4 text-purple-500" />
-                  <Label htmlFor="nr-lateCheckOut" className="cursor-pointer">Late Check-out</Label>
-                  <span className="text-xs text-muted-foreground">(Estándar: 11:00 hs)</span>
-                </div>
-                <Switch
-                  id="nr-lateCheckOut"
-                  checked={lateCheckOut}
-                  onCheckedChange={(checked) => { setLateCheckOut(checked); if (!checked) { setLateCheckOutTime(""); setLateCheckOutCharge(""); } }}
-                  data-testid="switch-late-checkout"
-                />
-              </div>
-              {lateCheckOut && (
-                <div className="grid grid-cols-2 gap-2 pl-6">
-                  <div>
-                    <Label className="text-xs">Hora acordada</Label>
-                    <Input type="time" value={lateCheckOutTime} onChange={(e) => setLateCheckOutTime(e.target.value)} data-testid="input-late-checkout-time" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Cargo (vacío = cortesía)</Label>
-                    <Input type="number" step="0.01" min="0" placeholder="0.00" value={lateCheckOutCharge} onChange={(e) => setLateCheckOutCharge(e.target.value)} data-testid="input-late-checkout-charge" />
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Notas</CardTitle>
@@ -615,6 +598,7 @@ export default function NewReservationPage() {
                 placeholder="Notas adicionales sobre la reserva..."
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+                rows={5}
                 data-testid="input-notes"
               />
             </CardContent>
@@ -697,6 +681,7 @@ export default function NewReservationPage() {
               )}
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
 

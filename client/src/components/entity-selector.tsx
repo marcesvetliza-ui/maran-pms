@@ -347,6 +347,19 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                   <Input id="phone" value={newGuest.phone} onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })} placeholder="+54 11 1234-5678" data-testid="input-guest-phone" />
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label>Condición de Venta</Label>
+                <Select value={newGuest.condicionVentaPredeterminada} onValueChange={(v) => setNewGuest({ ...newGuest, condicionVentaPredeterminada: v })}>
+                  <SelectTrigger data-testid="select-guest-j-condicion-venta"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contado">Contado</SelectItem>
+                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    <SelectItem value="30_dias">30 días</SelectItem>
+                    <SelectItem value="60_dias">60 días</SelectItem>
+                    <SelectItem value="90_dias">90 días</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="border-t pt-3">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide">Domicilio Fiscal</Label>
                 <div className="space-y-2 mt-2">
@@ -361,10 +374,6 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                     testIdProvincia="select-guest-j-provincia"
                     testIdLocalidad="select-guest-j-localidad"
                   />
-                </div>
-                <div className="mt-2 space-y-1">
-                  <Label className="text-xs">Código Postal</Label>
-                  <Input value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="1043" data-testid="input-guest-j-codigopostal" />
                 </div>
               </div>
               <div className="border-t pt-3 space-y-2">
@@ -437,6 +446,19 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Condición de Venta</Label>
+                <Select value={newGuest.condicionVentaPredeterminada} onValueChange={(v) => setNewGuest({ ...newGuest, condicionVentaPredeterminada: v })}>
+                  <SelectTrigger data-testid="select-guest-condicion-venta"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contado">Contado</SelectItem>
+                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    <SelectItem value="30_dias">30 días</SelectItem>
+                    <SelectItem value="60_dias">60 días</SelectItem>
+                    <SelectItem value="90_dias">90 días</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Estado Civil</Label>
@@ -514,10 +536,6 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                     testIdLocalidad="select-guest-f-localidad"
                   />
                 </div>
-                <div className="mt-2 space-y-1">
-                  <Label className="text-xs">Código Postal</Label>
-                  <Input value={newGuest.codigoPostal} onChange={(e) => setNewGuest({ ...newGuest, codigoPostal: e.target.value })} placeholder="3100" data-testid="input-guest-codigopostal" />
-                </div>
               </div>
               <div className="border-t pt-3 space-y-2">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide">Factura de Crédito Electrónica (FCE / MiPyME)</Label>
@@ -556,20 +574,6 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
                 </div>
               </div>
             </>)}
-
-            <div className="space-y-2">
-              <Label>Condición de Venta</Label>
-              <Select value={newGuest.condicionVentaPredeterminada} onValueChange={(v) => setNewGuest({ ...newGuest, condicionVentaPredeterminada: v })}>
-                <SelectTrigger data-testid="select-guest-condicion-venta"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="contado">Contado</SelectItem>
-                  <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
-                  <SelectItem value="30_dias">30 días</SelectItem>
-                  <SelectItem value="60_dias">60 días</SelectItem>
-                  <SelectItem value="90_dias">90 días</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
 
             <Button
               type="button"
