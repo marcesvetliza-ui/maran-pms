@@ -1625,6 +1625,8 @@ export default function PurchaseInvoices() {
     totalSaldo: r.total_saldo,
   }));
 
+  const [clearAllOpen, setClearAllOpen] = useState(false);
+
   const anularMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/purchase-invoices/${id}`),
     onSuccess: () => {
@@ -1633,6 +1635,21 @@ export default function PurchaseInvoices() {
       setAnularId(null);
     },
     onError: (e: any) => {},
+  });
+
+  const { toast } = useToast();
+
+  const clearAllMut = useMutation({
+    mutationFn: () => apiRequest("DELETE", "/api/admin/purchase-invoices/truncate-all"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      setClearAllOpen(false);
+      toast({ title: "Listo", description: "Todos los comprobantes fueron eliminados." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo limpiar. Verificá que tenés rol admin.", variant: "destructive" });
+    },
   });
 
   const filteredInvoices = useMemo(() => {
@@ -1679,6 +1696,14 @@ export default function PurchaseInvoices() {
             </Link>
             <Button onClick={() => setNewOpen(true)} data-testid="btn-new-invoice">
               <Plus className="h-4 w-4 mr-2" />Nuevo Comprobante
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setClearAllOpen(true)}
+              data-testid="btn-clear-all-invoices"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />Limpiar todo
             </Button>
           </div>
         </div>
@@ -1918,6 +1943,28 @@ export default function PurchaseInvoices() {
               data-testid="btn-confirm-anular"
             >
               Anular
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar todos los comprobantes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción borrará <strong>permanentemente</strong> todos los comprobantes de compra registrados. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => clearAllMut.mutate()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={clearAllMut.isPending}
+              data-testid="btn-confirm-clear-all"
+            >
+              {clearAllMut.isPending ? "Eliminando..." : "Sí, eliminar todo"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

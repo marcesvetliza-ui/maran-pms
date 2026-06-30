@@ -19,7 +19,7 @@ export function serveStatic(app: Express) {
     }
   }));
 
-  app.use("*", (_req, res) => {
+  app.get("*", (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.resolve(distPath, "index.html"));
   });
