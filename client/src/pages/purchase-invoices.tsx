@@ -1698,14 +1698,6 @@ export default function PurchaseInvoices() {
             <Button onClick={() => setNewOpen(true)} data-testid="btn-new-invoice">
               <Plus className="h-4 w-4 mr-2" />Nuevo Comprobante
             </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setClearAllOpen(true)}
-              data-testid="btn-clear-all-invoices"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />Limpiar todo
-            </Button>
           </div>
         </div>
 
