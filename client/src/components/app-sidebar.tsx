@@ -76,28 +76,28 @@ import type { SystemNotification } from "@shared/schema";
 // Roles disponibles: admin, manager, spa, maintenance, housekeeping, restaurant,
 //   events, reception, resp_deposito, resp_administracion, jefe_recepcion, comercial
 
-const DASHBOARD_ROLES   = ["admin","manager","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
-const PLANNING_ROLES    = ["admin","manager","housekeeping","restaurant","events","reception","resp_administracion","jefe_recepcion","comercial"];
+const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
+const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","restaurant","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const CORE_RECEPCION    = ["admin","reception","jefe_recepcion","comercial"];
-const CHECKINOUT_ROLES  = ["admin","manager","housekeeping","events","reception","jefe_recepcion","comercial"];
-const HABITACIONES_ROLES= ["admin","manager","housekeeping","reception","jefe_recepcion","comercial"];
-const TARIFAS_ROLES     = ["admin","manager","reception","resp_administracion","jefe_recepcion","comercial"];
+const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","jefe_recepcion","comercial"];
+const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","jefe_recepcion","comercial"];
+const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","jefe_recepcion","comercial"];
 const HUESPEDES_ROLES   = ["admin","events","reception","jefe_recepcion","comercial"];
 const PAQUETES_ROLES    = ["admin","spa","reception","jefe_recepcion","comercial"];
-const PRESUPUESTOS_ROLES= ["admin","manager","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
-const RESTAURANT_ROLES  = ["admin","manager","restaurant","events","reception","resp_deposito","jefe_recepcion","comercial"];
-const RECETAS_ROLES     = ["admin","manager","events","resp_deposito"];
-const SPA_ROLES         = ["admin","manager","spa","reception","jefe_recepcion","comercial"];
-const SPA_CLIENTS_ROLES = ["admin","manager","spa"];
-const EVENTOS_ROLES     = ["admin","manager","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
-const HK_MODULE_ROLES   = ["admin","manager","housekeeping","reception","jefe_recepcion","comercial"];
-const MANT_MODULE_ROLES = ["admin","manager","housekeeping","reception","jefe_recepcion","comercial"];
-const INVENTARIO_ROLES  = ["admin","manager","spa","resp_deposito","resp_administracion"];
-const HOSPITALIDAD_ROLES= ["admin","manager","spa","housekeeping","restaurant","events","reception","jefe_recepcion","comercial"];
-const RESENAS_ROLES     = ["admin","manager","reception","jefe_recepcion","comercial"];
+const PRESUPUESTOS_ROLES= ["admin","manager","ama_de_llaves","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
+const RESTAURANT_ROLES  = ["admin","manager","ama_de_llaves","restaurant","events","reception","resp_deposito","jefe_recepcion","comercial"];
+const RECETAS_ROLES     = ["admin","manager","ama_de_llaves","events","resp_deposito"];
+const SPA_ROLES         = ["admin","manager","ama_de_llaves","spa","reception","jefe_recepcion","comercial"];
+const SPA_CLIENTS_ROLES = ["admin","manager","ama_de_llaves","spa"];
+const EVENTOS_ROLES     = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
+const HK_MODULE_ROLES   = ["admin","manager","ama_de_llaves","housekeeping","reception","jefe_recepcion","comercial"];
+const MANT_MODULE_ROLES = ["admin","manager","ama_de_llaves","housekeeping","reception","jefe_recepcion","comercial"];
+const INVENTARIO_ROLES  = ["admin","manager","ama_de_llaves","spa","resp_deposito","resp_administracion"];
+const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping","restaurant","events","reception","jefe_recepcion","comercial"];
+const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","jefe_recepcion","comercial"];
 const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","jefe_recepcion"];
 const CAJA_ROLES        = ["admin","manager","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
-const GERENCIA_ROLES    = ["admin","manager","resp_administracion","jefe_recepcion","comercial"];
+const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","jefe_recepcion","comercial"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MÓDULOS DEL SISTEMA — cada sección corresponde a un módulo vendible.
