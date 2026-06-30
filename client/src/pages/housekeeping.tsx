@@ -126,6 +126,7 @@ const priorityConfig: Record<Priority, { label: string; className: string }> = {
 function RoomCard({ 
   room, 
   tasks, 
+  isOccupied,
   onStartTask, 
   onCompleteTask,
   onCreateTask,
@@ -135,6 +136,7 @@ function RoomCard({
 }: { 
   room: RoomWithType;
   tasks: HousekeepingTaskWithRoom[];
+  isOccupied: boolean;
   onStartTask: (taskId: string) => void;
   onCompleteTask: (taskId: string) => void;
   onCreateTask: (roomId: string) => void;
@@ -191,12 +193,24 @@ function RoomCard({
                     size="sm" 
                     variant="ghost" 
                     className="w-full justify-start h-8 text-xs"
-                    onClick={() => onUpdateStatus(room.id, "available")}
+                    onClick={() => onUpdateStatus(room.id, isOccupied ? "limpia_ocupada" : "available")}
                     data-testid={`button-quick-available-${room.id}`}
                   >
                     <CheckCircle className="h-3 w-3 mr-2 text-green-500" />
-                    Marcar Disponible
+                    Marcar Limpia
                   </Button>
+                  {isOccupied && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="w-full justify-start h-8 text-xs"
+                      onClick={() => onUpdateStatus(room.id, "no_molestar")}
+                      data-testid={`button-quick-no-molestar-${room.id}`}
+                    >
+                      <Ban className="h-3 w-3 mr-2 text-purple-500" />
+                      No molestar
+                    </Button>
+                  )}
                   <Button 
                     size="sm" 
                     variant="ghost" 
@@ -303,7 +317,7 @@ function RoomCard({
                 size="sm" 
                 variant="outline" 
                 className="h-6 px-2 text-xs"
-                onClick={() => onUpdateStatus(room.id, "available")}
+                onClick={() => onUpdateStatus(room.id, isOccupied ? "limpia_ocupada" : "available")}
                 data-testid={`button-finish-clean-${room.id}`}
               >
                 <CheckCircle className="h-3 w-3 mr-1" />
@@ -958,6 +972,7 @@ function MobileRoomCard({
   tasks,
   checkoutToday,
   checkinToday,
+  isOccupied,
   onStartTask,
   onCompleteTask,
   onInspectTask,
@@ -969,6 +984,7 @@ function MobileRoomCard({
   tasks: HousekeepingTaskWithRoom[];
   checkoutToday: boolean;
   checkinToday: boolean;
+  isOccupied: boolean;
   onStartTask: (taskId: string) => void;
   onCompleteTask: (taskId: string) => void;
   onInspectTask: (taskId: string) => void;
@@ -1129,7 +1145,7 @@ function MobileRoomCard({
                 confirmClass: "bg-green-500 hover:bg-green-600",
                 fn: () => activeTask
                   ? onCompleteTask(activeTask.id)
-                  : onUpdateStatus(room.id, "available"),
+                  : onUpdateStatus(room.id, isOccupied ? "limpia_ocupada" : "available"),
               })}
               data-testid={activeTask ? `button-complete-task-${activeTask.id}` : `button-finish-cleaning-${room.id}`}
             >
@@ -1167,8 +1183,8 @@ function MobileRoomCard({
         </div>
 
         {/* Quick status row */}
-        <div className="flex items-center gap-2 pt-1 border-t border-border/50">
-          <span className="text-xs text-muted-foreground flex-1">Cambiar estado:</span>
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/50">
+          <span className="text-xs text-muted-foreground w-full mb-0.5">Cambiar estado:</span>
           <button
             className="text-[11px] px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
@@ -1181,6 +1197,32 @@ function MobileRoomCard({
             data-testid={`button-set-available-${room.id}`}
           >
             Disponible
+          </button>
+          <button
+            className="text-[11px] px-2 py-1.5 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium disabled:opacity-40"
+            onClick={() => confirm({
+              title: `Limpia ocupada — Hab. ${room.roomNumber}`,
+              description: "¿Marcar esta habitación como limpia con huésped?",
+              confirmLabel: "Sí",
+              fn: () => onUpdateStatus(room.id, "limpia_ocupada"),
+            })}
+            disabled={isUpdating || room.status === "limpia_ocupada"}
+            data-testid={`button-set-limpia-ocupada-${room.id}`}
+          >
+            Limpia ocup.
+          </button>
+          <button
+            className="text-[11px] px-2 py-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium disabled:opacity-40"
+            onClick={() => confirm({
+              title: `No molestar — Hab. ${room.roomNumber}`,
+              description: "¿Activar estado No molestar?",
+              confirmLabel: "Sí",
+              fn: () => onUpdateStatus(room.id, "no_molestar"),
+            })}
+            disabled={isUpdating || room.status === "no_molestar"}
+            data-testid={`button-set-no-molestar-${room.id}`}
+          >
+            No molestar
           </button>
           <button
             className="text-[11px] px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
@@ -1822,6 +1864,10 @@ export default function Housekeeping() {
                 tasks={getTasksForRoom(room.id)}
                 checkoutToday={checkoutRoomIds.has(room.id)}
                 checkinToday={checkinRoomIds.has(room.id)}
+                isOccupied={
+                  (room.status === "occupied" || room.status === "cleaning" || room.status === "limpia_ocupada" || room.status === "no_molestar") &&
+                  !checkoutRoomIds.has(room.id)
+                }
                 onStartTask={(taskId) => startTaskMutation.mutate(taskId)}
                 onCompleteTask={(taskId) => completeTaskMutation.mutate(taskId)}
                 onInspectTask={(taskId) => inspectTaskMutation.mutate(taskId)}
@@ -1856,6 +1902,10 @@ export default function Housekeeping() {
                         key={room.id}
                         room={room}
                         tasks={getTasksForRoom(room.id)}
+                        isOccupied={
+                          (room.status === "occupied" || room.status === "cleaning" || room.status === "limpia_ocupada" || room.status === "no_molestar") &&
+                          !checkoutRoomIds.has(room.id)
+                        }
                         onStartTask={(taskId) => startTaskMutation.mutate(taskId)}
                         onCompleteTask={(taskId) => completeTaskMutation.mutate(taskId)}
                         onCreateTask={handleCreateTask}
