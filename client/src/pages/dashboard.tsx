@@ -178,11 +178,13 @@ type BreakfastEntry = {
 
 type InHouseEntry = {
   reservationId: string;
+  reservationNumber: string | null;
   roomNumber: string;
   checkIn: string;
   checkOut: string;
   adults: number;
   children: number;
+  numberOfGuests: number;
   guest: {
     id: string;
     firstName: string;
@@ -193,6 +195,10 @@ type InHouseEntry = {
     dateOfBirth: string;
     phone: string;
     email: string;
+    direccion: string | null;
+    localidad: string | null;
+    provincia: string | null;
+    procedencia: string | null;
   };
   companions: {
     firstName: string;
@@ -209,6 +215,9 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const [inHouseOpen, setInHouseOpen] = useLocalState(false);
   const [breakfastOpen, setBreakfastOpen] = useLocalState(false);
+  const [inHouseDate, setInHouseDate] = useLocalState(() =>
+    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+  );
 
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
@@ -233,7 +242,12 @@ export default function Dashboard() {
   const departures = departuresRaw.filter((r) => r.checkOutDate <= todayDash);
 
   const { data: inHouseData = [], isLoading: inHouseLoading } = useQuery<InHouseEntry[]>({
-    queryKey: ["/api/dashboard/inhouse"],
+    queryKey: ["/api/dashboard/inhouse", inHouseDate],
+    queryFn: async () => {
+      const res = await fetch(`/api/dashboard/inhouse?date=${inHouseDate}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error cargando listado");
+      return res.json();
+    },
     enabled: inHouseOpen,
   });
 
@@ -246,26 +260,33 @@ export default function Dashboard() {
 
   const printInHouseList = () => {
     const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-    const dateStr = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+    const selectedDateObj = new Date(inHouseDate + "T12:00:00");
+    const dateStr = selectedDateObj.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+    const totalPax = inHouseData.reduce((s, e) => s + (e.numberOfGuests || e.adults + e.children), 0);
+
     const rows = inHouseData.flatMap((entry) => {
+      const g = entry.guest;
+      const domicilio = [g.direccion, g.localidad, g.provincia].filter(Boolean).join(", ") || "—";
       const mainRow = `<tr>
         <td>${entry.roomNumber}</td>
-        <td>${entry.guest.lastName ?? "—"}, ${entry.guest.firstName ?? "—"}</td>
-        <td>${entry.guest.documentType?.toUpperCase() ?? "—"}</td>
-        <td>${entry.guest.documentNumber ?? "—"}</td>
-        <td>${entry.guest.nationality ?? "—"}</td>
-        <td>${entry.guest.dateOfBirth ? fmt(entry.guest.dateOfBirth) : "—"}</td>
+        <td><b>${(g.lastName || "—").toUpperCase()}, ${g.firstName || "—"}</b></td>
+        <td>${g.documentType?.toUpperCase() ?? "—"}</td>
+        <td>${g.documentNumber ?? "—"}</td>
+        <td>${g.nationality ?? "—"}</td>
+        <td>${g.dateOfBirth ? fmt(g.dateOfBirth) : "—"}</td>
+        <td>${domicilio}</td>
         <td>${fmt(entry.checkIn)}</td>
         <td>${fmt(entry.checkOut)}</td>
         <td>Titular</td>
       </tr>`;
       const compRows = entry.companions.map((c: any) => `<tr class="comp">
         <td>${entry.roomNumber}</td>
-        <td style="padding-left:16px">${c.lastName ?? "—"}, ${c.firstName ?? "—"}</td>
+        <td style="padding-left:12px">${(c.lastName || "—").toUpperCase()}, ${c.firstName || "—"}</td>
         <td>${c.documentType?.toUpperCase() ?? "—"}</td>
         <td>${c.documentNumber ?? "—"}</td>
         <td>${c.nationality ?? "—"}</td>
         <td>${c.dateOfBirth ? fmt(c.dateOfBirth) : "—"}</td>
+        <td>—</td>
         <td>${fmt(entry.checkIn)}</td>
         <td>${fmt(entry.checkOut)}</td>
         <td>Acomp.</td>
@@ -276,21 +297,21 @@ export default function Dashboard() {
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
     <title>Listado In House — ${dateStr}</title>
     <style>
-      body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
-      h1 { font-size: 15px; margin-bottom: 2px; }
-      p.sub { font-size: 11px; color: #555; margin: 0 0 12px; }
+      body { font-family: Arial, sans-serif; font-size: 10px; margin: 15px; color: #111; }
+      h1 { font-size: 14px; margin-bottom: 2px; }
+      p.sub { font-size: 10px; color: #555; margin: 0 0 10px; }
       table { width: 100%; border-collapse: collapse; }
-      th { background: #f0f0f0; border: 1px solid #ccc; padding: 5px 6px; text-align: left; font-size: 10px; text-transform: uppercase; }
-      td { border: 1px solid #ddd; padding: 4px 6px; }
-      tr.comp td { background: #fafafa; color: #555; }
-      @media print { @page { margin: 15mm; } }
+      th { background: #e8e8e8; border: 1px solid #aaa; padding: 4px 5px; text-align: left; font-size: 9px; text-transform: uppercase; }
+      td { border: 1px solid #ccc; padding: 3px 5px; vertical-align: top; }
+      tr.comp td { background: #f8f8f8; color: #444; }
+      @media print { @page { margin: 12mm; size: landscape; } }
     </style></head><body>
     <h1>Listado In House — Maran Suites & Towers</h1>
-    <p class="sub">${dateStr} · ${inHouseData.length} habitación(es) · ${totalInHouse} persona(s)</p>
+    <p class="sub">${dateStr} &nbsp;·&nbsp; ${inHouseData.length} habitación(es) &nbsp;·&nbsp; ${totalPax} persona(s)</p>
     <table>
       <thead><tr>
         <th>Hab.</th><th>Apellido y Nombre</th><th>Tipo Doc.</th><th>N° Doc.</th>
-        <th>Nac.</th><th>F. Nac.</th><th>Ingreso</th><th>Egreso</th><th>Rol</th>
+        <th>Nac.</th><th>F. Nac.</th><th>Domicilio</th><th>Ingreso</th><th>Egreso</th><th>Rol</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -476,12 +497,23 @@ export default function Dashboard() {
       {inHouseOpen && (
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Hotel className="h-5 w-5" />
-                Listado In House — {new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                Listado In House
               </CardTitle>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Fecha:</label>
+                  <input
+                    type="date"
+                    value={inHouseDate}
+                    max={new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })}
+                    onChange={(e) => setInHouseDate(e.target.value)}
+                    data-testid="input-inhouse-date"
+                    className="text-xs border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
                 {!inHouseLoading && inHouseData.length > 0 && (
                   <Button variant="outline" size="sm" onClick={printInHouseList} data-testid="button-print-inhouse">
                     <Printer className="h-4 w-4 mr-1" />
@@ -491,13 +523,16 @@ export default function Dashboard() {
                 <Button variant="ghost" size="sm" onClick={() => setInHouseOpen(false)}>Cerrar</Button>
               </div>
             </div>
-            <CardDescription>Huéspedes principales y acompañantes alojados en este momento</CardDescription>
+            <CardDescription>
+              {new Date(inHouseDate + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
+              {" · "}{inHouseData.length} habitación(es) · {inHouseData.reduce((s, e) => s + (e.numberOfGuests || e.adults + e.children), 0)} persona(s)
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {inHouseLoading ? (
               <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
             ) : inHouseData.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No hay huéspedes con check-in activo.</p>
+              <p className="text-sm text-muted-foreground text-center py-4">No hay huéspedes alojados en esa fecha.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -509,6 +544,7 @@ export default function Dashboard() {
                       <th className="text-left py-2 px-2 font-medium">N° Doc.</th>
                       <th className="text-left py-2 px-2 font-medium">Nac.</th>
                       <th className="text-left py-2 px-2 font-medium">F. Nac.</th>
+                      <th className="text-left py-2 px-2 font-medium">Domicilio</th>
                       <th className="text-left py-2 px-2 font-medium">Ingreso</th>
                       <th className="text-left py-2 px-2 font-medium">Egreso</th>
                       <th className="text-left py-2 px-2 font-medium">Rol</th>
@@ -517,15 +553,18 @@ export default function Dashboard() {
                   <tbody>
                     {inHouseData.flatMap((entry) => {
                       const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                      const g = entry.guest;
+                      const domicilio = [g.direccion, g.localidad, g.provincia].filter(Boolean).join(", ") || "—";
                       const rows = [];
                       rows.push(
                         <tr key={`${entry.reservationId}-main`} className="border-b hover:bg-muted/40">
                           <td className="py-1.5 px-2 font-semibold">{entry.roomNumber}</td>
-                          <td className="py-1.5 px-2 font-medium">{entry.guest.lastName}, {entry.guest.firstName}</td>
-                          <td className="py-1.5 px-2">{entry.guest.documentType?.toUpperCase() || "—"}</td>
-                          <td className="py-1.5 px-2">{entry.guest.documentNumber || "—"}</td>
-                          <td className="py-1.5 px-2">{entry.guest.nationality || "—"}</td>
-                          <td className="py-1.5 px-2">{entry.guest.dateOfBirth ? fmt(entry.guest.dateOfBirth) : "—"}</td>
+                          <td className="py-1.5 px-2 font-medium">{g.lastName ? g.lastName.toUpperCase() : "—"}, {g.firstName || "—"}</td>
+                          <td className="py-1.5 px-2">{g.documentType?.toUpperCase() || "—"}</td>
+                          <td className="py-1.5 px-2">{g.documentNumber || "—"}</td>
+                          <td className="py-1.5 px-2">{g.nationality || "—"}</td>
+                          <td className="py-1.5 px-2">{g.dateOfBirth ? fmt(g.dateOfBirth) : "—"}</td>
+                          <td className="py-1.5 px-2 text-xs text-muted-foreground max-w-[150px] truncate" title={domicilio}>{domicilio}</td>
                           <td className="py-1.5 px-2">{fmt(entry.checkIn)}</td>
                           <td className="py-1.5 px-2">{fmt(entry.checkOut)}</td>
                           <td className="py-1.5 px-2"><Badge variant="outline" className="text-xs">Titular</Badge></td>
@@ -535,11 +574,12 @@ export default function Dashboard() {
                         rows.push(
                           <tr key={`${entry.reservationId}-comp-${ci}`} className="border-b bg-muted/20 hover:bg-muted/40">
                             <td className="py-1.5 px-2 text-muted-foreground">{entry.roomNumber}</td>
-                            <td className="py-1.5 px-2 pl-4">{c.lastName}, {c.firstName}</td>
+                            <td className="py-1.5 px-2 pl-4">{c.lastName ? c.lastName.toUpperCase() : "—"}, {c.firstName || "—"}</td>
                             <td className="py-1.5 px-2">{c.documentType?.toUpperCase() || "—"}</td>
                             <td className="py-1.5 px-2">{c.documentNumber || "—"}</td>
                             <td className="py-1.5 px-2">{c.nationality || "—"}</td>
                             <td className="py-1.5 px-2">{c.dateOfBirth ? fmt(c.dateOfBirth) : "—"}</td>
+                            <td className="py-1.5 px-2">—</td>
                             <td className="py-1.5 px-2">{fmt(entry.checkIn)}</td>
                             <td className="py-1.5 px-2">{fmt(entry.checkOut)}</td>
                             <td className="py-1.5 px-2"><Badge variant="secondary" className="text-xs">Acomp.</Badge></td>

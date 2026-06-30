@@ -263,43 +263,65 @@ export async function registerRoutes(
     try {
       const { reservationCompanions } = await import("@shared/schema");
 
-      // 1. Get all occupied rooms
-      const occupiedRooms = await db.select({ id: rooms.id, roomNumber: rooms.roomNumber })
-        .from(rooms)
-        .where(eq(rooms.status, "occupied"));
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const requestedDate = typeof req.query.date === "string" && req.query.date ? req.query.date : today;
+      const isPastDate = requestedDate < today;
 
-      if (occupiedRooms.length === 0) {
-        return res.json([]);
+      let activeReservations: typeof reservations.$inferSelect[] = [];
+      let roomNumberMap = new Map<string, string>();
+
+      if (isPastDate) {
+        // Para fechas pasadas: buscar reservas que estaban activas ese día por rango de fechas
+        // Incluye checked_out porque ya salieron
+        const rows = await db.select({
+          reservation: reservations,
+          roomNumber: rooms.roomNumber,
+        })
+          .from(reservations)
+          .innerJoin(rooms, eq(rooms.id, reservations.roomId))
+          .where(
+            and(
+              sql`${reservations.checkInDate} <= ${requestedDate}`,
+              sql`${reservations.checkOutDate} > ${requestedDate}`,
+              ne(reservations.status, "cancelled"),
+              sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`
+            )
+          );
+        for (const row of rows) {
+          activeReservations.push(row.reservation);
+          roomNumberMap.set(row.reservation.roomId, row.roomNumber);
+        }
+      } else {
+        // Para hoy: habitaciones físicamente ocupadas
+        const occupiedRooms = await db.select({ id: rooms.id, roomNumber: rooms.roomNumber })
+          .from(rooms)
+          .where(and(eq(rooms.status, "occupied"), sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`));
+
+        if (occupiedRooms.length === 0) return res.json([]);
+        roomNumberMap = new Map(occupiedRooms.map((r) => [r.id, r.roomNumber]));
+        const occupiedRoomIds = occupiedRooms.map((r) => r.id);
+
+        activeReservations = await db.select()
+          .from(reservations)
+          .where(
+            and(
+              inArray(reservations.roomId, occupiedRoomIds),
+              ne(reservations.status, "cancelled"),
+              ne(reservations.status, "checked_out")
+            )
+          );
       }
 
-      const occupiedRoomIds = occupiedRooms.map((r) => r.id);
-      const roomNumberMap = new Map(occupiedRooms.map((r) => [r.id, r.roomNumber]));
-
-      // 2. Get reservations for those rooms (exclude cancelled/checked_out)
-      const activeReservations = await db.select()
-        .from(reservations)
-        .where(
-          and(
-            inArray(reservations.roomId, occupiedRoomIds),
-            ne(reservations.status, "cancelled"),
-            ne(reservations.status, "checked_out")
-          )
-        );
-
-      if (activeReservations.length === 0) {
-        return res.json([]);
-      }
+      if (activeReservations.length === 0) return res.json([]);
 
       const reservationIds = activeReservations.map((r) => r.id);
       const guestIds = activeReservations.map((r) => r.guestId).filter(Boolean) as string[];
 
-      // 3. Get guests
       const guestList = guestIds.length > 0
         ? await db.select().from(guests).where(inArray(guests.id, guestIds))
         : [];
       const guestMap = new Map(guestList.map((g) => [g.id, g]));
 
-      // 4. Get companions
       const companionList = await db.select().from(reservationCompanions)
         .where(inArray(reservationCompanions.reservationId, reservationIds));
       const companionsByRes = new Map<string, typeof companionList>();
@@ -308,7 +330,6 @@ export async function registerRoutes(
         companionsByRes.get(c.reservationId)!.push(c);
       }
 
-      // 5. Assemble response sorted by room number
       const result = activeReservations
         .sort((a, b) => (roomNumberMap.get(a.roomId) ?? "").localeCompare(roomNumberMap.get(b.roomId) ?? ""))
         .map((r) => {
@@ -323,11 +344,13 @@ export async function registerRoutes(
           }));
           return {
             reservationId: r.id,
+            reservationNumber: (r as any).reservationNumber ?? null,
             roomNumber: roomNumberMap.get(r.roomId) ?? "",
             checkIn: r.checkInDate,
             checkOut: r.checkOutDate,
             adults: r.adults,
             children: r.children,
+            numberOfGuests: r.numberOfGuests,
             guest: {
               id: g?.id ?? null,
               firstName: g?.firstName ?? null,
@@ -335,9 +358,13 @@ export async function registerRoutes(
               documentType: g?.documentType ?? null,
               documentNumber: g?.documentNumber ?? null,
               nationality: g?.nationality ?? null,
-              dateOfBirth: g?.dateOfBirth ?? null,
+              dateOfBirth: (g as any)?.fechaNacimiento ?? g?.dateOfBirth ?? null,
               phone: g?.phone ?? null,
               email: g?.email ?? null,
+              direccion: g?.direccion ?? null,
+              localidad: g?.localidad ?? null,
+              provincia: g?.provincia ?? null,
+              procedencia: g?.procedencia ?? null,
             },
             companions: comps,
           };
