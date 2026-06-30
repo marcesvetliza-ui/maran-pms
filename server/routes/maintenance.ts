@@ -51,6 +51,22 @@ export function registerMaintenanceRoutes(app: Express) {
     }
   });
 
+  // System users with maintenance role (for assignment dropdown)
+  app.get("/api/maintenance/system-users", requireAuth, async (req, res) => {
+    try {
+      const allUsers = await storage.getSystemUsers();
+      const maintenanceUsers = allUsers
+        .filter((u: any) => u.role === "maintenance")
+        .map((u: any) => ({
+          id: u.id,
+          name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username,
+        }));
+      res.json(maintenanceUsers);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching maintenance users" });
+    }
+  });
+
   // Work Orders
   app.get("/api/maintenance/work-orders", async (req, res) => {
     try {

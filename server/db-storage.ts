@@ -3108,7 +3108,20 @@ export class DatabaseStorage implements IStorage {
 
   private async enrichWorkOrder(wo: WorkOrder): Promise<WorkOrderWithDetails> {
     const room = wo.roomId ? (await db.select().from(rooms).where(eq(rooms.id, wo.roomId)))[0] : undefined;
-    const assignedTo = wo.assignedToId ? (await db.select().from(maintenanceStaff).where(eq(maintenanceStaff.id, wo.assignedToId)))[0] : undefined;
+    let assignedTo: { id: string; name: string } | undefined;
+    if (wo.assignedToId && wo.assignedToId !== "externo") {
+      // Try system users first (maintenance role), then legacy maintenance_staff
+      const sysUser = (await db.select().from(systemUsers).where(eq(systemUsers.id, wo.assignedToId)))[0];
+      if (sysUser) {
+        assignedTo = {
+          id: sysUser.id,
+          name: [sysUser.firstName, sysUser.lastName].filter(Boolean).join(" ") || sysUser.username,
+        };
+      } else {
+        const staffMember = (await db.select().from(maintenanceStaff).where(eq(maintenanceStaff.id, wo.assignedToId)))[0];
+        if (staffMember) assignedTo = { id: staffMember.id, name: staffMember.name };
+      }
+    }
     return { ...wo, room, assignedTo };
   }
 

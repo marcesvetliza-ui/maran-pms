@@ -487,6 +487,10 @@ export default function MaintenancePage() {
     queryKey: ["/api/maintenance/staff"],
   });
 
+  const { data: maintenanceUsers = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/maintenance/system-users"],
+  });
+
   const { data: rooms = [] } = useQuery<Room[]>({
     queryKey: ["/api/rooms"],
   });
@@ -926,8 +930,8 @@ export default function MaintenancePage() {
                               <SelectValue placeholder="Asignar" />
                             </SelectTrigger>
                             <SelectContent>
-                              {staff.filter(s => s.isActive === "true").map((s) => (
-                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                              {maintenanceUsers.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                               ))}
                               <SelectItem value="externo">🔧 Personal externo</SelectItem>
                             </SelectContent>
@@ -1257,8 +1261,8 @@ export default function MaintenancePage() {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">Sin asignar</SelectItem>
-                        {staff.filter(s => s.isActive === "true").map((s) => (
-                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                        {maintenanceUsers.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                         ))}
                         <SelectItem value="externo">🔧 Personal externo</SelectItem>
                       </SelectContent>

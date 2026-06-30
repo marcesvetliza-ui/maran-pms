@@ -1559,7 +1559,7 @@ export type WorkOrder = typeof workOrders.$inferSelect;
 
 export type WorkOrderWithDetails = WorkOrder & {
   room?: Room;
-  assignedTo?: MaintenanceStaff;
+  assignedTo?: { id: string; name: string };
   maintenanceBlock?: MaintenanceBlock;
 };
 
