@@ -1644,8 +1644,9 @@ export default function PurchaseInvoices() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payment-orders"] });
       setClearAllOpen(false);
-      toast({ title: "Listo", description: "Todos los comprobantes fueron eliminados." });
+      toast({ title: "Listo", description: "Todos los comprobantes y OPs fueron eliminados." });
     },
     onError: () => {
       toast({ title: "Error", description: "No se pudo limpiar. Verificá que tenés rol admin.", variant: "destructive" });

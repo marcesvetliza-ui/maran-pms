@@ -2689,6 +2689,8 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Solo administradores" });
       }
       // Borrar en orden para respetar foreign keys
+      await db.execute(sql`DELETE FROM iibb_retentions`);
+      await db.execute(sql`UPDATE admin_cash_movements SET payment_order_id = NULL WHERE payment_order_id IS NOT NULL`);
       await db.execute(sql`DELETE FROM payment_order_items`);
       await db.execute(sql`DELETE FROM payment_orders`);
       await db.execute(sql`DELETE FROM purchase_invoices`);
