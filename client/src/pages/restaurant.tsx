@@ -5635,7 +5635,7 @@ export default function RestaurantPage() {
                 if (!currentOrder) return;
                 const disc = parseFloat(closeDiscount || "0");
 
-                // Advertir si el monto ingresado excede el A cobrar
+                // Validar exceso en formas de pago
                 {
                   const _effReceipt = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
                   const _isCC = ["factura_a","factura_b","factura_c"].includes(_effReceipt) && closeSalesCondition === "cuenta_corriente" && !!closeBillingClient;
@@ -5645,6 +5645,16 @@ export default function RestaurantPage() {
                     const _finalTotal = Math.max(0, _total - _discAmt - totalAdvanceCredit);
                     const _splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
                     const _excess = Math.round((_splitTotal - _finalTotal) * 100) / 100;
+                    const _hasRoomChargeSplit = closePaymentSplits.some(s => s.method === "cuenta_habitacion");
+                    if (_excess > 0 && _hasRoomChargeSplit) {
+                      // Bloqueo duro: no se puede transferir más de lo que se debe a una habitación
+                      toast({
+                        title: "No se puede procesar el cargo",
+                        description: `El monto de "Cargo a Habitación" ($${_splitTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}) supera el total a cobrar ($${_finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}). Corrija el monto antes de continuar.`,
+                        variant: "destructive",
+                      });
+                      return;
+                    }
                     if (_excess > 0) {
                       toast({
                         title: "Excedente en el pago",
@@ -5712,16 +5722,28 @@ export default function RestaurantPage() {
                       Ver División ({splits.filter((s: OrderSplit) => s.isPaid === "true").length}/{splits.length} pagadas)
                     </Button>
                   )}
-                  <Button
-                    variant="destructive"
-                    onClick={handleConfirmClose}
-                    disabled={closeOrderMutation.isPending}
-                    className="w-full sm:w-auto"
-                    data-testid="button-confirm-close"
-                  >
-                    {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    Confirmar Cierre
-                  </Button>
+                  {(() => {
+                    const _disc = parseFloat(closeDiscount || "0");
+                    const _total = parseFloat(getUpdatedOrder()?.total || currentOrder?.total || "0");
+                    const _discAmt = closeDiscountType === "percent" ? _total * _disc / 100 : _disc;
+                    const _finalTotal = Math.max(0, _total - _discAmt - totalAdvanceCredit);
+                    const _splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
+                    const _hasRoomChargeSplit = closePaymentSplits.some(s => s.method === "cuenta_habitacion");
+                    const _roomChargeExcess = _hasRoomChargeSplit && Math.round((_splitTotal - _finalTotal) * 100) / 100 > 0;
+                    return (
+                      <Button
+                        variant="destructive"
+                        onClick={handleConfirmClose}
+                        disabled={closeOrderMutation.isPending || _roomChargeExcess}
+                        title={_roomChargeExcess ? `El monto excede el total a cobrar ($${_finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}). Corrija el monto de "Cargo a Habitación".` : undefined}
+                        className="w-full sm:w-auto"
+                        data-testid="button-confirm-close"
+                      >
+                        {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        Confirmar Cierre
+                      </Button>
+                    );
+                  })()}
                 </>
               );
             })()}
