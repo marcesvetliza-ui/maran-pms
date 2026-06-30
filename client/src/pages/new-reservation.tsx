@@ -59,7 +59,7 @@ export default function NewReservationPage() {
   const [notes, setNotes] = useState<string>("");
   const [discountType, setDiscountType] = useState<string>("none");
   const [discountValue, setDiscountValue] = useState<string>("0");
-  const [bedTypeNotes, setBedTypeNotes] = useState<string>("");
+  const [bedTypeNotes, setBedTypeNotes] = useState<string>("MAT");
   const [earlyCheckIn, setEarlyCheckIn] = useState(false);
   const [earlyCheckInTime, setEarlyCheckInTime] = useState("");
   const [earlyCheckInCharge, setEarlyCheckInCharge] = useState("");
