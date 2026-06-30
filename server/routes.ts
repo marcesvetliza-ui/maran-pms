@@ -2682,6 +2682,19 @@ export async function registerRoutes(
     }
   });
 
+  // Endpoint temporal de limpieza — solo admin
+  app.delete("/api/admin/purchase-invoices/truncate-all", requireAuth, async (req, res) => {
+    try {
+      if ((req.user as any)?.role !== "admin") {
+        return res.status(403).json({ error: "Solo administradores" });
+      }
+      await db.execute(sql`DELETE FROM purchase_invoices`);
+      res.json({ ok: true, mensaje: "Todos los comprobantes de compra fueron eliminados." });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════════
   // MÓDULO CONTABLE — Órdenes de Pago
   // ═══════════════════════════════════════════════════════════════
