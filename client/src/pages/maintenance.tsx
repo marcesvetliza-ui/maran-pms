@@ -897,7 +897,7 @@ export default function MaintenancePage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {order.assignedTo ? order.assignedTo.name : (
+                        {order.assignedToId === "externo" ? "Personal externo" : order.assignedTo ? order.assignedTo.name : (
                           <Select onValueChange={(value) => handleAssign(order, value)}>
                             <SelectTrigger className="w-[140px]" data-testid={`select-assign-${order.id}`}>
                               <SelectValue placeholder="Asignar" />
@@ -906,6 +906,7 @@ export default function MaintenancePage() {
                               {staff.filter(s => s.isActive === "true").map((s) => (
                                 <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                               ))}
+                              <SelectItem value="externo">🔧 Personal externo</SelectItem>
                             </SelectContent>
                           </Select>
                         )}
@@ -1236,6 +1237,7 @@ export default function MaintenancePage() {
                         {staff.filter(s => s.isActive === "true").map((s) => (
                           <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                         ))}
+                        <SelectItem value="externo">🔧 Personal externo</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -1463,7 +1465,7 @@ export default function MaintenancePage() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Asignado a</p>
-                  <p className="font-medium">{selectedOrder.assignedTo?.name || "Sin asignar"}</p>
+                  <p className="font-medium">{selectedOrder.assignedToId === "externo" ? "Personal externo" : selectedOrder.assignedTo?.name || "Sin asignar"}</p>
                 </div>
               </div>
               {selectedOrder.completedAt && (
