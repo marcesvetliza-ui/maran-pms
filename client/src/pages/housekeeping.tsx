@@ -567,6 +567,7 @@ function LostFoundForm({
                           <CommandItem
                             key={g.id}
                             onSelect={() => handleSelectGuest(g)}
+                            onClick={() => handleSelectGuest(g)}
                             data-testid={`item-lf-guest-${g.id}`}
                           >
                             <div>
