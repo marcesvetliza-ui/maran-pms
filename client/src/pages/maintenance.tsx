@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -516,6 +516,29 @@ export default function MaintenancePage() {
       specialty: "",
     },
   });
+
+  // Auto-open "Nueva Orden" when navigated from Housekeeping (?newOrder=roomId&roomNumber=XXX)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const newOrderRoomId = params.get("newOrder");
+    const roomNumber = params.get("roomNumber");
+    if (newOrderRoomId && roomNumber && rooms.length > 0) {
+      orderForm.reset({
+        title: `Hab. ${roomNumber} — mantenimiento`,
+        roomId: newOrderRoomId,
+        description: "",
+        location: `Hab. ${roomNumber}`,
+        category: "general",
+        priority: "medium",
+        assignedToId: "",
+        scheduledDate: "",
+        estimatedCost: "",
+        notes: "",
+      });
+      setIsNewOrderDialogOpen(true);
+      window.history.replaceState({}, "", "/maintenance");
+    }
+  }, [rooms]);
 
   const createOrderMutation = useMutation({
     mutationFn: async (data: WorkOrderFormValues) => {

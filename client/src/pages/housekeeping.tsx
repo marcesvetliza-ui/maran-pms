@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { useAuth } from "@/App";
 import {
   Sparkles,
@@ -141,6 +142,7 @@ function RoomCard({
   onOpenDetails: (roomId: string) => void;
   onEditBedConfig: (roomId: string, currentConfig: string) => void;
 }) {
+  const [, navigate] = useLocation();
   const config = statusConfig[room.status];
   const Icon = config.icon;
   const pendingTasks = tasks.filter(t => t.status === "pending" || t.status === "in_progress");
@@ -209,7 +211,10 @@ function RoomCard({
                     size="sm" 
                     variant="ghost" 
                     className="w-full justify-start h-8 text-xs"
-                    onClick={() => onUpdateStatus(room.id, "maintenance")}
+                    onClick={() => {
+                      onUpdateStatus(room.id, "maintenance");
+                      navigate(`/maintenance?newOrder=${room.id}&roomNumber=${encodeURIComponent(room.roomNumber)}`);
+                    }}
                     data-testid={`button-quick-maintenance-${room.id}`}
                   >
                     <Wrench className="h-3 w-3 mr-2 text-red-500" />
@@ -971,6 +976,7 @@ function MobileRoomCard({
   onQuickStart: (roomId: string) => void;
   isUpdating: boolean;
 }) {
+  const [, navigate] = useLocation();
   const config = statusConfig[room.status];
   const Icon = config.icon;
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -1195,7 +1201,10 @@ function MobileRoomCard({
               title: `Mantenimiento — Hab. ${room.roomNumber}`,
               description: "¿Pasar esta habitación a estado de mantenimiento?",
               confirmLabel: "Sí, mantenimiento",
-              fn: () => onUpdateStatus(room.id, "maintenance"),
+              fn: () => {
+                onUpdateStatus(room.id, "maintenance");
+                navigate(`/maintenance?newOrder=${room.id}&roomNumber=${encodeURIComponent(room.roomNumber)}`);
+              },
             })}
             disabled={isUpdating || room.status === "maintenance"}
             data-testid={`button-set-maintenance-${room.id}`}
