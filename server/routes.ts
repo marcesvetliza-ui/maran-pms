@@ -2689,9 +2689,10 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Solo administradores" });
       }
       // Borrar en orden para respetar foreign keys
-      await db.execute(sql`DELETE FROM payment_order_items WHERE invoice_id IS NOT NULL`);
+      await db.execute(sql`DELETE FROM payment_order_items`);
+      await db.execute(sql`DELETE FROM payment_orders`);
       await db.execute(sql`DELETE FROM purchase_invoices`);
-      res.json({ ok: true, mensaje: "Todos los comprobantes de compra fueron eliminados." });
+      res.json({ ok: true, mensaje: "Comprobantes y órdenes de pago eliminados." });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
