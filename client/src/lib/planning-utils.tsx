@@ -33,6 +33,8 @@ export const PLANNING_COLORS: Record<PlanningCellStatus, { bg: string; text: str
   late_blocked:   { bg: "bg-pink-100 dark:bg-pink-900/30",        text: "text-pink-800",                          label: "Late check-out",   border: "border-pink-200 dark:border-pink-700 border-dashed" },
   inspected:      { bg: "bg-green-50 dark:bg-green-900/20",       text: "text-green-700",                         label: "Inspeccionada",    border: "border-green-200 dark:border-green-700" },
   checked_out:    { bg: "bg-zinc-100 dark:bg-zinc-800/40",        text: "text-zinc-400 dark:text-zinc-500",       label: "Check-out realizado", border: "border-zinc-200 dark:border-zinc-700 border-dashed" },
+  limpia_ocupada: { bg: "bg-emerald-200 dark:bg-emerald-800",     text: "text-emerald-900 dark:text-emerald-100", label: "Limpia ocupada",   border: "border-emerald-500 dark:border-emerald-400 border-dashed" },
+  no_molestar:    { bg: "bg-purple-200 dark:bg-purple-900/60",    text: "text-purple-900 dark:text-purple-100",   label: "No molestar",      border: "border-purple-400 dark:border-purple-500" },
 };
 
 export function getStatusColor(status: PlanningCellStatus): string {
@@ -132,11 +134,13 @@ export const bedConfigLabels: Record<string, string> = {
 };
 
 export const ROOM_STATUS_OPTIONS: { value: string; label: string; dot: string }[] = [
-  { value: "available",    label: "Libre limpia",    dot: "bg-green-500" },
-  { value: "dirty",        label: "Libre sucia",     dot: "bg-orange-500" },
-  { value: "cleaning",     label: "En limpieza",     dot: "bg-yellow-400" },
-  { value: "inspected",    label: "Inspeccionada",   dot: "bg-blue-500" },
-  { value: "maintenance",  label: "Mantenimiento",   dot: "bg-red-500" },
+  { value: "available",      label: "Libre limpia",    dot: "bg-green-500" },
+  { value: "dirty",          label: "Libre sucia",     dot: "bg-orange-500" },
+  { value: "cleaning",       label: "En limpieza",     dot: "bg-yellow-400" },
+  { value: "inspected",      label: "Inspeccionada",   dot: "bg-blue-500" },
+  { value: "maintenance",    label: "Mantenimiento",   dot: "bg-red-500" },
+  { value: "limpia_ocupada", label: "Limpia ocupada",  dot: "bg-emerald-500" },
+  { value: "no_molestar",    label: "No molestar",     dot: "bg-purple-500" },
 ];
 
 export function Legend({ activeStatuses }: { activeStatuses?: Set<PlanningCellStatus> }) {

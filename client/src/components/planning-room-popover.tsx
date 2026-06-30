@@ -1,4 +1,4 @@
-import { AlertCircle, RefreshCw, CheckCircle2, Wrench, TriangleAlert } from "lucide-react";
+import { AlertCircle, RefreshCw, CheckCircle2, Wrench, TriangleAlert, ShieldCheck, Ban } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { featureIconMap, bedConfigLabels, ROOM_STATUS_OPTIONS } from "@/lib/planning-utils";
 import type { RoomWithType } from "@shared/schema";
@@ -43,6 +43,12 @@ export function RoomPopover({
           )}
           {room.status === "maintenance" && (
             <span title="Mantenimiento"><Wrench className="h-3 w-3 text-red-500 shrink-0" /></span>
+          )}
+          {room.status === "limpia_ocupada" && (
+            <span title="Limpia ocupada"><ShieldCheck className="h-3 w-3 text-emerald-500 shrink-0" /></span>
+          )}
+          {room.status === "no_molestar" && (
+            <span title="No molestar"><Ban className="h-3 w-3 text-purple-500 shrink-0" /></span>
           )}
           {room.status !== "maintenance" && maintenanceAlertRoomIds.has(room.id) && (
             <span title="Orden de mantenimiento pendiente"><Wrench className="h-3 w-3 text-orange-400 shrink-0" /></span>

@@ -33,6 +33,8 @@ import {
   Users,
   CalendarClock,
   X,
+  Ban,
+  ShieldCheck,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -93,6 +95,8 @@ const statusConfig: Record<RoomStatus, { label: string; icon: typeof Sparkles; c
   cleaning: { label: "Limpiando", icon: Sparkles, className: "text-yellow-600 dark:text-yellow-400", bgClass: "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800" },
   maintenance: { label: "Mantenimiento", icon: Wrench, className: "text-red-600 dark:text-red-400", bgClass: "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800" },
   oos: { label: "Fuera Servicio", icon: XCircle, className: "text-gray-600 dark:text-gray-400", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" },
+  limpia_ocupada: { label: "Limpia ocupada", icon: ShieldCheck, className: "text-emerald-600 dark:text-emerald-400", bgClass: "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 border-dashed" },
+  no_molestar: { label: "No molestar", icon: Ban, className: "text-purple-600 dark:text-purple-400", bgClass: "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800" },
 };
 
 const taskStatusConfig: Record<TaskStatus, { label: string; className: string }> = {
@@ -310,6 +314,41 @@ function RoomCard({
                 data-testid={`button-mark-dirty-${room.id}`}
               >
                 Marcar Sucia
+              </Button>
+            )}
+            {(room.status === "occupied" || room.status === "no_molestar") && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-xs border-emerald-400 text-emerald-700"
+                onClick={() => onUpdateStatus(room.id, "limpia_ocupada")}
+                data-testid={`button-limpia-ocupada-${room.id}`}
+              >
+                <ShieldCheck className="h-3 w-3 mr-1" />
+                Limpia ocupada
+              </Button>
+            )}
+            {(room.status === "occupied" || room.status === "limpia_ocupada") && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-xs border-purple-400 text-purple-700"
+                onClick={() => onUpdateStatus(room.id, "no_molestar")}
+                data-testid={`button-no-molestar-${room.id}`}
+              >
+                <Ban className="h-3 w-3 mr-1" />
+                No molestar
+              </Button>
+            )}
+            {(room.status === "limpia_ocupada" || room.status === "no_molestar") && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs text-muted-foreground"
+                onClick={() => onUpdateStatus(room.id, "occupied")}
+                data-testid={`button-back-occupied-${room.id}`}
+              >
+                Quitar estado
               </Button>
             )}
           </div>

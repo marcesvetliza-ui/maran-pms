@@ -22,6 +22,8 @@ import {
   AlertTriangle,
   ReceiptText,
   X,
+  Ban,
+  ShieldCheck,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -75,6 +77,8 @@ function RoomStatusBadge({ status }: { status: RoomStatus }) {
     maintenance: { label: "Mantenimiento", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
     oos: { label: "Fuera de Servicio", className: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" },
     inspected: { label: "Inspeccionada", className: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400" },
+    limpia_ocupada: { label: "Limpia ocupada", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" },
+    no_molestar: { label: "No molestar", className: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400" },
   };
 
   const config = statusConfig[status] ?? { label: status, className: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" };
@@ -619,6 +623,18 @@ export default function RoomsPage() {
                           Enviar a Limpieza
                         </DropdownMenuItem>
                         <DropdownMenuItem
+                          onClick={() => updateStatusMutation.mutate({ id: room.id, status: "limpia_ocupada" })}
+                        >
+                          <ShieldCheck className="mr-2 h-4 w-4 text-emerald-600" />
+                          Limpia ocupada
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => updateStatusMutation.mutate({ id: room.id, status: "no_molestar" })}
+                        >
+                          <Ban className="mr-2 h-4 w-4 text-purple-600" />
+                          No molestar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
                         >
                           <Wrench className="mr-2 h-4 w-4 text-orange-500" />
@@ -726,6 +742,18 @@ export default function RoomsPage() {
                           >
                             <Sparkles className="mr-2 h-4 w-4 text-yellow-600" />
                             Enviar a Limpieza
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => updateStatusMutation.mutate({ id: room.id, status: "limpia_ocupada" })}
+                          >
+                            <ShieldCheck className="mr-2 h-4 w-4 text-emerald-600" />
+                            Limpia ocupada
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => updateStatusMutation.mutate({ id: room.id, status: "no_molestar" })}
+                          >
+                            <Ban className="mr-2 h-4 w-4 text-purple-600" />
+                            No molestar
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}

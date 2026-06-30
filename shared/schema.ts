@@ -45,7 +45,7 @@ export type InsertRatePlan = z.infer<typeof insertRatePlanSchema>;
 export type RatePlan = typeof ratePlans.$inferSelect;
 
 // Rooms
-export type RoomStatus = "available" | "occupied" | "dirty" | "cleaning" | "maintenance" | "oos" | "inspected";
+export type RoomStatus = "available" | "occupied" | "dirty" | "cleaning" | "maintenance" | "oos" | "inspected" | "limpia_ocupada" | "no_molestar";
 export type RoomFeature = "accessible" | "balcony" | "separable_bed" | "sofa_bed" | "shower_only" | "extra_bed" | "twin_config" | "living_room";
 export type BedConfig = "MAT" | "TWIN" | "MAT_CC" | "TWIN_CC" | "MAT_EXTRA" | "MAT_CC_EXTRA";
 
@@ -397,7 +397,7 @@ export type RoomWithType = Room & {
 };
 
 // Planning types
-export type PlanningCellStatus = "available" | "booked" | "web_checkin" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked" | "inspected" | "checked_out";
+export type PlanningCellStatus = "available" | "booked" | "web_checkin" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked" | "inspected" | "checked_out" | "limpia_ocupada" | "no_molestar";
 
 export type PlanningData = {
   rooms: RoomWithType[];
