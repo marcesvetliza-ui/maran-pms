@@ -598,49 +598,43 @@ function LostFoundForm({
                 </Button>
               </div>
             ) : (
-              <Popover open={guestPopoverOpen} onOpenChange={setGuestPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full justify-start text-muted-foreground font-normal mt-1"
-                    data-testid="button-lf-guest-selector"
-                  >
-                    <Search className="mr-2 h-4 w-4" />
-                    Buscar huésped por nombre o DNI...
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="p-0 w-80" align="start">
-                  <Command>
-                    <CommandInput
-                      placeholder="Nombre, apellido o DNI..."
-                      value={guestSearch}
-                      onValueChange={setGuestSearch}
-                      data-testid="input-lf-guest-search"
-                    />
-                    <CommandList>
-                      <CommandEmpty>No se encontraron huéspedes</CommandEmpty>
-                      <CommandGroup>
-                        {filteredGuests.map(g => (
-                          <CommandItem
-                            key={g.id}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onSelect={() => handleSelectGuest(g)}
-                            data-testid={`item-lf-guest-${g.id}`}
-                          >
-                            <div>
-                              <p className="text-sm font-medium">{g.lastName} {g.firstName}</p>
-                              {g.documentNumber && (
-                                <p className="text-xs text-muted-foreground">DNI/Pas: {g.documentNumber}</p>
-                              )}
-                            </div>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <div className="relative mt-1">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Buscar huésped por nombre o DNI..."
+                    value={guestSearch}
+                    onChange={e => { setGuestSearch(e.target.value); setGuestPopoverOpen(e.target.value.length > 0); }}
+                    onFocus={() => { if (guestSearch.length > 0) setGuestPopoverOpen(true); }}
+                    onBlur={() => setTimeout(() => setGuestPopoverOpen(false), 150)}
+                    className="pl-8"
+                    data-testid="input-lf-guest-search"
+                  />
+                </div>
+                {guestPopoverOpen && filteredGuests.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 border rounded-md bg-popover shadow-md max-h-52 overflow-y-auto">
+                    {filteredGuests.map(g => (
+                      <button
+                        key={g.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
+                        onPointerDown={(e) => { e.preventDefault(); handleSelectGuest(g); }}
+                        data-testid={`item-lf-guest-${g.id}`}
+                      >
+                        <p className="font-medium">{g.lastName} {g.firstName}</p>
+                        {g.documentNumber && (
+                          <p className="text-xs text-muted-foreground">DNI/Pas: {g.documentNumber}</p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {guestPopoverOpen && guestSearch.length > 0 && filteredGuests.length === 0 && (
+                  <div className="absolute z-50 w-full mt-1 border rounded-md bg-popover shadow-md px-3 py-2 text-sm text-muted-foreground">
+                    No se encontraron huéspedes
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
