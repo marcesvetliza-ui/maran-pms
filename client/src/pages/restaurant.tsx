@@ -73,6 +73,7 @@ import {
   FileText,
   Monitor,
   RotateCcw,
+  Download,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -791,6 +792,8 @@ export default function RestaurantPage() {
   const [invoiceForNC, setInvoiceForNC] = useState<any | null>(null);
   const [ncMotivo, setNcMotivo] = useState("");
   const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0]);
+  const [ncTipo, setNcTipo] = useState("todos");
+  const [ncCliente, setNcCliente] = useState("");
   const [ncDateTo, setNcDateTo] = useState(new Date().toISOString().split("T")[0]);
   const [billingSearch, setBillingSearch] = useState("");
   const [billingSearchOpen, setBillingSearchOpen] = useState(false);
@@ -1694,7 +1697,7 @@ export default function RestaurantPage() {
   const { data: billingInvoices = [], isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", ncDateFrom, ncDateTo],
     queryFn: async () => {
-      const res = await apiRequest("GET", `/api/billing/invoices?desde=${ncDateFrom}&hasta=${ncDateTo}`);
+      const res = await apiRequest("GET", `/api/billing/invoices?desde=${ncDateFrom}&hasta=${ncDateTo}&area=restaurant`);
       return res.json();
     },
     enabled: activeTab === "notas_credito",
@@ -3132,9 +3135,10 @@ export default function RestaurantPage() {
                 <FileX className="h-5 w-5" />
                 Notas de Crédito
               </CardTitle>
-              <p className="text-sm text-muted-foreground">Emitir notas de crédito sobre facturas A o B ya cerradas.</p>
+              <p className="text-sm text-muted-foreground">Emitir notas de crédito sobre facturas ya cerradas. Solo se muestran facturas de los puntos de venta del restaurante.</p>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Filters */}
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                   <Label className="text-sm whitespace-nowrap">Desde:</Label>
@@ -3144,6 +3148,26 @@ export default function RestaurantPage() {
                   <Label className="text-sm whitespace-nowrap">Hasta:</Label>
                   <Input type="date" value={ncDateTo} onChange={e => setNcDateTo(e.target.value)} className="w-36 h-8" data-testid="input-nc-date-to" />
                 </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm whitespace-nowrap">Tipo:</Label>
+                  <Select value={ncTipo} onValueChange={setNcTipo}>
+                    <SelectTrigger className="w-32 h-8" data-testid="select-nc-tipo">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos</SelectItem>
+                      <SelectItem value="FA">Factura A</SelectItem>
+                      <SelectItem value="FB">Factura B</SelectItem>
+                      <SelectItem value="FC">Factura C</SelectItem>
+                      <SelectItem value="NCA">NC A</SelectItem>
+                      <SelectItem value="NCB">NC B</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm whitespace-nowrap">Cliente:</Label>
+                  <Input placeholder="Buscar..." value={ncCliente} onChange={e => setNcCliente(e.target.value)} className="w-40 h-8" data-testid="input-nc-cliente" />
+                </div>
                 <Button size="sm" variant="outline" onClick={() => refetchInvoices()} data-testid="button-nc-refresh">
                   <Search className="h-3.5 w-3.5 mr-1" />Buscar
                 </Button>
@@ -3152,52 +3176,122 @@ export default function RestaurantPage() {
               {invoicesLoading ? (
                 <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
               ) : (() => {
-                const facturas = billingInvoices.filter((inv: any) => ["FA", "FB", "FC"].includes(inv.tipo_comprobante));
-                if (!facturas.length) return <p className="text-center text-muted-foreground py-8">No hay facturas en el período seleccionado.</p>;
+                const searchLower = ncCliente.toLowerCase();
+                const allFiltered = billingInvoices.filter((inv: any) => {
+                  if (ncTipo && ncTipo !== "todos" && inv.tipo_comprobante !== ncTipo) return false;
+                  if (searchLower && !((inv.cliente_razon_social || "").toLowerCase().includes(searchLower))) return false;
+                  return true;
+                });
+                const showFacturas = !ncTipo || ncTipo === "todos" || ["FA","FB","FC"].includes(ncTipo);
+                const showNC = !ncTipo || ncTipo === "todos" || ["NCA","NCB","NCC"].includes(ncTipo);
+                const facturas = allFiltered.filter((inv: any) => ["FA","FB","FC"].includes(inv.tipo_comprobante));
+                const notasCredito = allFiltered.filter((inv: any) => ["NCA","NCB","NCC"].includes(inv.tipo_comprobante));
+
                 return (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nro.</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Fecha</TableHead>
-                        <TableHead>Cliente</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {facturas.map((inv: any) => (
-                        <TableRow key={inv.id}>
-                          <TableCell className="font-mono text-sm">{inv.numero_completo || `${inv.tipo_comprobante}-${String(inv.numero).padStart(8,"0")}`}</TableCell>
-                          <TableCell><Badge variant="outline">{inv.tipo_comprobante}</Badge></TableCell>
-                          <TableCell className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</TableCell>
-                          <TableCell className="text-sm max-w-[160px] truncate">{inv.cliente_razon_social || "Consumidor Final"}</TableCell>
-                          <TableCell className="text-right font-semibold">${parseFloat(inv.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                          <TableCell>
-                            {inv.estado === "anulada"
-                              ? <Badge variant="destructive">Anulada</Badge>
-                              : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
-                            }
-                          </TableCell>
-                          <TableCell>
-                            {inv.estado !== "anulada" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                                onClick={() => { setInvoiceForNC(inv); setNcMotivo(""); }}
-                                data-testid={`button-emitir-nc-${inv.id}`}
-                              >
-                                <FileX className="h-3.5 w-3.5 mr-1" />Emitir NC
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <div className="space-y-6">
+                    {/* Facturas — para emitir NC */}
+                    {showFacturas && (
+                      <div>
+                        <h3 className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Facturas — Emitir Nota de Crédito</h3>
+                        {facturas.length === 0 ? (
+                          <p className="text-center text-muted-foreground py-4 text-sm">No hay facturas en el período seleccionado.</p>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Nro.</TableHead>
+                                <TableHead>Tipo</TableHead>
+                                <TableHead>Fecha</TableHead>
+                                <TableHead>Cliente</TableHead>
+                                <TableHead className="text-right">Total</TableHead>
+                                <TableHead>Estado</TableHead>
+                                <TableHead></TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {facturas.map((inv: any) => (
+                                <TableRow key={inv.id}>
+                                  <TableCell className="font-mono text-sm">{inv.numero_completo || `${inv.tipo_comprobante}-${String(inv.numero).padStart(8,"0")}`}</TableCell>
+                                  <TableCell><Badge variant="outline">{inv.tipo_comprobante}</Badge></TableCell>
+                                  <TableCell className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</TableCell>
+                                  <TableCell className="text-sm max-w-[160px] truncate">{inv.cliente_razon_social || "Consumidor Final"}</TableCell>
+                                  <TableCell className="text-right font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                                  <TableCell>
+                                    {inv.estado === "anulada"
+                                      ? <Badge variant="destructive">Anulada</Badge>
+                                      : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
+                                    }
+                                  </TableCell>
+                                  <TableCell>
+                                    {inv.estado !== "anulada" && (
+                                      <Button size="sm" variant="outline" className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                                        onClick={() => { setInvoiceForNC(inv); setNcMotivo(""); }} data-testid={`button-emitir-nc-${inv.id}`}>
+                                        <FileX className="h-3.5 w-3.5 mr-1" />Emitir NC
+                                      </Button>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Notas de Crédito emitidas — historial */}
+                    {showNC && (
+                      <div>
+                        <h3 className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Notas de Crédito Emitidas</h3>
+                        {notasCredito.length === 0 ? (
+                          <p className="text-center text-muted-foreground py-4 text-sm">No hay notas de crédito en el período seleccionado.</p>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Nro.</TableHead>
+                                <TableHead>Tipo</TableHead>
+                                <TableHead>Fecha</TableHead>
+                                <TableHead>Cliente</TableHead>
+                                <TableHead className="text-right">Total</TableHead>
+                                <TableHead>CAE</TableHead>
+                                <TableHead>Estado</TableHead>
+                                <TableHead></TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {notasCredito.map((inv: any) => (
+                                <TableRow key={inv.id}>
+                                  <TableCell className="font-mono text-sm">{inv.numero_completo || `${inv.tipo_comprobante}-${String(inv.numero).padStart(8,"0")}`}</TableCell>
+                                  <TableCell><Badge variant="secondary">{inv.tipo_comprobante}</Badge></TableCell>
+                                  <TableCell className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</TableCell>
+                                  <TableCell className="text-sm max-w-[160px] truncate">{inv.cliente_razon_social || "Consumidor Final"}</TableCell>
+                                  <TableCell className="text-right font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                                  <TableCell className="text-xs font-mono text-muted-foreground">
+                                    {inv.cae ? (
+                                      <>
+                                        <div>{inv.modo_ficticio ? <span className="text-amber-600 dark:text-amber-400">Ficticio</span> : `${String(inv.cae).slice(0,8)}...`}</div>
+                                        {inv.cae_fecha_vto && <div className="text-[10px]">Vto: {format(new Date(inv.cae_fecha_vto), "dd/MM/yy")}</div>}
+                                      </>
+                                    ) : "-"}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-300">Emitida</Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Button size="sm" variant="ghost" title="Descargar PDF"
+                                      onClick={() => window.open(`/api/billing/invoices/${inv.id}/pdf`, "_blank")}
+                                      data-testid={`button-nc-pdf-${inv.id}`}>
+                                      <Download className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })()}
             </CardContent>
@@ -5773,7 +5867,7 @@ export default function RestaurantPage() {
               Emitir Nota de Crédito
             </DialogTitle>
             <DialogDescription>
-              Se emitirá una NC sobre la factura <strong>{invoiceForNC?.numero_completo || invoiceForNC?.tipo_comprobante}</strong> por <strong>${parseFloat(invoiceForNC?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>. La factura original quedará <strong>anulada</strong>.
+              Se emitirá una NC sobre la factura <strong>{invoiceForNC?.numero_completo || invoiceForNC?.tipo_comprobante}</strong> por <strong>${parseFloat(invoiceForNC?.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>. La factura original quedará <strong>anulada</strong>.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">

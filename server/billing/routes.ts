@@ -6,6 +6,7 @@ import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF } from "./invoicePdf";
 import { requireAuth } from "../auth";
+import { storage } from "../db-storage";
 
 export function registerBillingRoutes(app: Express) {
 
@@ -190,12 +191,14 @@ export function registerBillingRoutes(app: Express) {
   // GET /api/billing/invoices
   app.get("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { desde, hasta, tipo, clienteCuit } = req.query as Record<string, string>;
+      const { desde, hasta, tipo, clienteCuit, area, cliente } = req.query as Record<string, string>;
       let whereClause = sql`1=1`;
       if (desde) whereClause = sql`${whereClause} AND fecha_emision >= ${desde}`;
       if (hasta) whereClause = sql`${whereClause} AND fecha_emision <= ${hasta}`;
       if (tipo) whereClause = sql`${whereClause} AND tipo_comprobante = ${tipo}`;
       if (clienteCuit) whereClause = sql`${whereClause} AND cliente_cuit = ${clienteCuit}`;
+      if (area) whereClause = sql`${whereClause} AND punto_venta IN (SELECT numero FROM pos_configs WHERE area = ${area} AND activo = true)`;
+      if (cliente) whereClause = sql`${whereClause} AND LOWER(cliente_razon_social) LIKE ${'%' + cliente.toLowerCase() + '%'}`;
 
       const rows = await db.execute(sql`
         SELECT * FROM sales_invoices
@@ -308,7 +311,7 @@ export function registerBillingRoutes(app: Express) {
       }
 
       const { motivo, items } = req.body;
-      const tipoNC = original.tipo_comprobante === "FA" ? "NCA" : "NCB";
+      const tipoNC = original.tipo_comprobante === "FA" ? "NCA" : original.tipo_comprobante === "FC" ? "NCC" : "NCB";
       const user = (req as any).user;
 
       const nc = await emitirFactura({
@@ -323,6 +326,7 @@ export function registerBillingRoutes(app: Express) {
         items: items ?? original.items ?? [],
         facturaOriginalId: original.id,
         operador: user?.fullName || user?.username,
+        puntoVentaOverride: original.punto_venta,
       } as NewInvoiceData);
 
       // Mark original as anulada
@@ -330,6 +334,30 @@ export function registerBillingRoutes(app: Express) {
         UPDATE sales_invoices SET estado = 'anulada', nota_credito_id = ${nc.id}
         WHERE id = ${id}
       `);
+
+      // Register cash movement (egreso) in the corresponding area
+      try {
+        const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
+        const pvArea = (pvRow.rows[0] as any)?.area || "restaurant";
+        const totalNC = parseFloat(String((nc as any).montoTotal || "0"));
+        if (totalNC > 0) {
+          const nroOriginal = `${original.tipo_comprobante}-${String(original.numero).padStart(8, "0")}`;
+          const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+          await storage.registerCashMovement(
+            pvArea,
+            "nota_credito",
+            String(nc.id),
+            `${nroNC} s/${nroOriginal}${motivo ? ` — ${motivo}` : ""}`,
+            "nc",
+            String(totalNC.toFixed(2)),
+            "outcome",
+            user?.fullName || user?.username,
+            nc.tipoComprobante
+          );
+        }
+      } catch (cashErr) {
+        console.error("[NC] Error registrando movimiento de caja:", cashErr);
+      }
 
       res.status(201).json(nc);
     } catch (e: any) {
