@@ -407,62 +407,6 @@ export default function InventoryPage() {
     setIsMovementDialogOpen(true);
   };
 
-  const MovementForm = () => {
-    const [quantity, setQuantity] = useState(1);
-    const [notes, setNotes] = useState("");
-
-    return (
-      <div className="space-y-4">
-        <div className="p-3 bg-muted rounded-md">
-          <div className="font-medium">{selectedItem?.name}</div>
-          <div className="text-sm text-muted-foreground">
-            Stock actual: {selectedItem?.currentStock} {selectedItem?.unit}
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label>Cantidad</Label>
-          <Input
-            type="number"
-            min={1}
-            value={quantity}
-            onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-            data-testid="input-movement-quantity"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Notas (opcional)</Label>
-          <Textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Ej: Proveedor XYZ, Factura #123"
-            data-testid="input-movement-notes"
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setIsMovementDialogOpen(false)}>
-            Cancelar
-          </Button>
-          <Button
-            onClick={() => {
-              if (selectedItem) {
-                createMovementMutation.mutate({
-                  itemId: selectedItem.id,
-                  movementType,
-                  quantity,
-                  notes: notes || undefined,
-                });
-              }
-            }}
-            disabled={createMovementMutation.isPending}
-            data-testid="button-confirm-movement"
-          >
-            {createMovementMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Confirmar {movementType === "entrada" ? "Entrada" : "Salida"}
-          </Button>
-        </DialogFooter>
-      </div>
-    );
-  };
 
   if (itemsLoading) {
     return (
@@ -1339,7 +1283,22 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               Registrar {movementType === "entrada" ? "Entrada" : "Salida"} de Stock
             </DialogTitle>
           </DialogHeader>
-          <MovementForm />
+          <MovementForm
+            selectedItem={selectedItem}
+            movementType={movementType}
+            onSubmit={({ quantity, notes }) => {
+              if (selectedItem) {
+                createMovementMutation.mutate({
+                  itemId: selectedItem.id,
+                  movementType,
+                  quantity,
+                  notes: notes || undefined,
+                });
+              }
+            }}
+            isPending={createMovementMutation.isPending}
+            onCancel={() => setIsMovementDialogOpen(false)}
+          />
         </DialogContent>
       </Dialog>
 
@@ -1427,6 +1386,7 @@ function NewItemForm({
       <div className="space-y-2">
         <Label>Nombre</Label>
         <Input
+          autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Nombre del artículo"
@@ -1692,6 +1652,67 @@ function WarehouseMovementForm({
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           {movementType === "entrada" ? <ArrowDownCircle className="h-4 w-4 mr-2 text-green-500" /> : <ArrowUpCircle className="h-4 w-4 mr-2 text-red-500" />}
           Registrar {movementType === "entrada" ? "Entrada" : "Salida"}
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+function MovementForm({
+  selectedItem,
+  movementType,
+  onSubmit,
+  isPending,
+  onCancel,
+}: {
+  selectedItem: { id: string; name: string; currentStock: number; unit?: string } | null;
+  movementType: "entrada" | "salida";
+  onSubmit: (data: { quantity: number; notes: string }) => void;
+  isPending: boolean;
+  onCancel: () => void;
+}) {
+  const [quantity, setQuantity] = useState(1);
+  const [notes, setNotes] = useState("");
+
+  return (
+    <div className="space-y-4">
+      <div className="p-3 bg-muted rounded-md">
+        <div className="font-medium">{selectedItem?.name}</div>
+        <div className="text-sm text-muted-foreground">
+          Stock actual: {selectedItem?.currentStock} {selectedItem?.unit}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Cantidad</Label>
+        <Input
+          autoFocus
+          type="number"
+          min={1}
+          value={quantity}
+          onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+          data-testid="input-movement-quantity"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>Notas (opcional)</Label>
+        <Textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Ej: Proveedor XYZ, Factura #123"
+          data-testid="input-movement-notes"
+        />
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>
+          Cancelar
+        </Button>
+        <Button
+          onClick={() => onSubmit({ quantity, notes })}
+          disabled={isPending}
+          data-testid="button-confirm-movement"
+        >
+          {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+          Confirmar {movementType === "entrada" ? "Entrada" : "Salida"}
         </Button>
       </DialogFooter>
     </div>
