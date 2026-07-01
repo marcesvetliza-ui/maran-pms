@@ -327,13 +327,11 @@ export default function Dashboard() {
     const tomorrowDate = new Date();
     tomorrowDate.setDate(tomorrowDate.getDate() + 1);
     const tomorrowStr = tomorrowDate.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-    const totalPax = breakfastData.reduce((s, e) => s + e.adults + e.children, 0);
+    const totalPax = breakfastData.reduce((s, e) => s + e.adults, 0);
     const rows = breakfastData.map((e) => `<tr>
       <td>${e.roomNumber}</td>
       <td>${e.guestName}</td>
       <td style="text-align:center">${e.adults}</td>
-      <td style="text-align:center">${e.children}</td>
-      <td style="text-align:center">${e.adults + e.children}</td>
       <td>${fmt(e.checkIn)}</td>
       <td>${fmt(e.checkOut)}</td>
     </tr>`).join("");
@@ -353,11 +351,11 @@ export default function Dashboard() {
     <p class="sub">${tomorrowStr} · ${breakfastData.length} habitación(es) · ${totalPax} persona(s)</p>
     <table>
       <thead><tr>
-        <th>Hab.</th><th>Titular</th><th>Adultos</th><th>Niños</th><th>Total Pax</th><th>Ingreso</th><th>Egreso</th>
+        <th>Hab.</th><th>Titular</th><th>Pax</th><th>Ingreso</th><th>Egreso</th>
       </tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr>
-        <td colspan="4">TOTAL</td>
+        <td colspan="2">TOTAL</td>
         <td style="text-align:center">${totalPax}</td>
         <td colspan="2"></td>
       </tr></tfoot>
@@ -632,9 +630,7 @@ export default function Dashboard() {
                     <tr className="border-b text-muted-foreground text-xs uppercase">
                       <th className="text-left py-2 px-2 font-medium">Hab.</th>
                       <th className="text-left py-2 px-2 font-medium">Titular</th>
-                      <th className="text-center py-2 px-2 font-medium">Adultos</th>
-                      <th className="text-center py-2 px-2 font-medium">Niños</th>
-                      <th className="text-center py-2 px-2 font-medium">Total Pax</th>
+                      <th className="text-center py-2 px-2 font-medium">Pax</th>
                       <th className="text-left py-2 px-2 font-medium">Ingreso</th>
                       <th className="text-left py-2 px-2 font-medium">Egreso</th>
                     </tr>
@@ -646,9 +642,7 @@ export default function Dashboard() {
                         <tr key={entry.reservationId} className="border-b hover:bg-muted/40">
                           <td className="py-1.5 px-2 font-semibold">{entry.roomNumber}</td>
                           <td className="py-1.5 px-2 font-medium">{entry.guestName}</td>
-                          <td className="py-1.5 px-2 text-center">{entry.adults}</td>
-                          <td className="py-1.5 px-2 text-center">{entry.children}</td>
-                          <td className="py-1.5 px-2 text-center font-semibold">{entry.adults + entry.children}</td>
+                          <td className="py-1.5 px-2 text-center font-semibold">{entry.adults}</td>
                           <td className="py-1.5 px-2">{fmt(entry.checkIn)}</td>
                           <td className="py-1.5 px-2">{fmt(entry.checkOut)}</td>
                         </tr>
@@ -657,9 +651,9 @@ export default function Dashboard() {
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 bg-muted/30">
-                      <td colSpan={4} className="py-1.5 px-2 font-semibold text-xs uppercase text-muted-foreground">Total</td>
+                      <td colSpan={2} className="py-1.5 px-2 font-semibold text-xs uppercase text-muted-foreground">Total</td>
                       <td className="py-1.5 px-2 text-center font-bold">
-                        {breakfastData.reduce((s, e) => s + e.adults + e.children, 0)}
+                        {breakfastData.reduce((s, e) => s + e.adults, 0)}
                       </td>
                       <td colSpan={2} />
                     </tr>

@@ -380,15 +380,15 @@ export async function registerRoutes(
   // Breakfast list for tomorrow: reservations staying tonight (checked_in, non-virtual rooms)
   app.get("/api/dashboard/breakfasts", requireAuth, async (req, res) => {
     try {
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const { getArgentinaToday } = await import("./db-storage");
+      const today = getArgentinaToday();
       const rows = await db.execute(sql`
         SELECT
-          r.id            AS reservation_id,
+          r.id               AS reservation_id,
           rm.room_number,
           r.check_in_date,
           r.check_out_date,
-          r.adults,
-          r.children,
+          r.number_of_guests AS total_guests,
           g.first_name,
           g.last_name
         FROM reservations r
@@ -405,8 +405,8 @@ export async function registerRoutes(
         roomNumber: row.room_number,
         checkIn: row.check_in_date,
         checkOut: row.check_out_date,
-        adults: Number(row.adults ?? 0),
-        children: Number(row.children ?? 0),
+        adults: Number(row.total_guests ?? 1),
+        children: 0,
         guestName: row.last_name && row.first_name
           ? `${row.last_name}, ${row.first_name}`
           : row.last_name || row.first_name || "—",
