@@ -4874,14 +4874,27 @@ export default function RestaurantPage() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                              <Input
-                                type="number" min={0} step="0.01"
-                                value={split.amount}
-                                onChange={e => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, amount: e.target.value } : s))}
-                                className="w-32 h-9 text-right"
-                                placeholder="0,00"
-                                data-testid={`input-pay-amount-${idx}`}
-                              />
+                              <div className="relative flex items-center">
+                                <Input
+                                  type="number" min={0} step="0.01"
+                                  value={split.amount}
+                                  onChange={e => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, amount: e.target.value } : s))}
+                                  className="w-32 h-9 text-right"
+                                  placeholder="0,00"
+                                  data-testid={`input-pay-amount-${idx}`}
+                                />
+                                {/* Auto-fill button: show when amount is empty and there's remaining to assign */}
+                                {(!split.amount || split.amount === "0" || split.amount === "0.00") && remaining > 0 && (
+                                  <button
+                                    type="button"
+                                    className="absolute -top-5 right-0 text-[10px] text-primary underline whitespace-nowrap"
+                                    onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, amount: remaining.toFixed(2) } : s))}
+                                    data-testid={`button-autofill-amount-${idx}`}
+                                  >
+                                    = ${remaining.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                  </button>
+                                )}
+                              </div>
                               {closePaymentSplits.length > 1 && (
                                 <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0"
                                   onClick={() => setClosePaymentSplits(prev => prev.filter((_, i) => i !== idx))}
@@ -4901,7 +4914,7 @@ export default function RestaurantPage() {
                           )}
                           {closePaymentSplits.length < 4 && (
                             <Button variant="outline" size="sm" className="w-full h-8 text-xs"
-                              onClick={() => setClosePaymentSplits(prev => [...prev, { id: String(Date.now()), method: "efectivo", amount: "" }])}
+                              onClick={() => setClosePaymentSplits(prev => [...prev, { id: String(Date.now()), method: "efectivo", amount: remaining > 0 ? remaining.toFixed(2) : "" }])}
                               data-testid="button-add-payment-split"
                             ><Plus className="h-3.5 w-3.5 mr-1" />Agregar forma de pago</Button>
                           )}
