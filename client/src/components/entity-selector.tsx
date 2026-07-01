@@ -48,7 +48,7 @@ export function NationalityCombobox({ value, afipCode, onChange }: {
             <CommandEmpty>Sin resultados.</CommandEmpty>
             <CommandGroup>
               {filtered.map(c => (
-                <CommandItem key={c.id} value={c.name} onSelect={() => { onChange(c.name, String(c.afipCode)); setOpen(false); setSearch(""); }}>
+                <CommandItem key={c.id} value={c.name} onMouseDown={(e) => e.preventDefault()} onSelect={() => { onChange(c.name, String(c.afipCode)); setOpen(false); setSearch(""); }}>
                   <Check className={`mr-2 h-4 w-4 ${value === c.name ? "opacity-100" : "opacity-0"}`} />
                   <span className="flex-1">{c.name}</span>
                   <span className="text-xs text-muted-foreground font-mono ml-2">{c.afipCode}</span>

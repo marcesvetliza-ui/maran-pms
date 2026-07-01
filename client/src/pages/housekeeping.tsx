@@ -624,8 +624,8 @@ function LostFoundForm({
                         {filteredGuests.map(g => (
                           <CommandItem
                             key={g.id}
+                            onMouseDown={(e) => e.preventDefault()}
                             onSelect={() => handleSelectGuest(g)}
-                            onClick={() => handleSelectGuest(g)}
                             data-testid={`item-lf-guest-${g.id}`}
                           >
                             <div>

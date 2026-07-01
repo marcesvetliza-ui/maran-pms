@@ -168,7 +168,7 @@ function NationalityCombobox({
               <CommandEmpty>Sin resultados. Podés agregar países en Configuración.</CommandEmpty>
               <CommandGroup>
                 {filtered.map(c => (
-                  <CommandItem key={c.id} value={c.name} onSelect={() => { onChange(c.name, String(c.afipCode)); setOpen(false); setSearch(""); }}>
+                  <CommandItem key={c.id} value={c.name} onMouseDown={(e) => e.preventDefault()} onSelect={() => { onChange(c.name, String(c.afipCode)); setOpen(false); setSearch(""); }}>
                     <Check className={`mr-2 h-4 w-4 ${value === c.name ? "opacity-100" : "opacity-0"}`} />
                     <span className="flex-1">{c.name}</span>
                     <span className="text-xs text-muted-foreground font-mono ml-2">{c.afipCode}</span>
@@ -510,11 +510,11 @@ export function GuestFormDialog({
                       <CommandList>
                         <CommandEmpty>Sin resultados.</CommandEmpty>
                         <CommandGroup>
-                          <CommandItem value="__none__" onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
+                          <CommandItem value="__none__" onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
                             <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />Sin empresa
                           </CommandItem>
                           {companies?.map(c => (
-                            <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
+                            <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
                               <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
                               {c.nombreFantasia || c.razonSocial}
                               {c.nombreFantasia && <span className="ml-1 text-xs text-muted-foreground">({c.razonSocial})</span>}
@@ -724,11 +724,11 @@ export function GuestFormDialog({
                       <CommandList>
                         <CommandEmpty>Sin resultados.</CommandEmpty>
                         <CommandGroup>
-                          <CommandItem value="__none__" onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
+                          <CommandItem value="__none__" onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
                             <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />Sin empresa
                           </CommandItem>
                           {companies?.map(c => (
-                            <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
+                            <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
                               <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
                               {c.nombreFantasia || c.razonSocial}
                               {c.nombreFantasia && <span className="ml-1 text-xs text-muted-foreground">({c.razonSocial})</span>}
