@@ -889,8 +889,6 @@ export async function refreshRealData() {
       } catch (e) {}
     }
 
-    await db.delete(spaAppointments);
-    await db.delete(spaCabins);
     await db.insert(spaCabins).values([
       { id: "cab1", name: "Agua", description: "Gabinete Agua", isActive: "true" },
       { id: "cab2", name: "Fuego", description: "Gabinete Fuego", isActive: "true" },
