@@ -2420,7 +2420,8 @@ export default function CashRegister() {
   // Roles with full global visibility (all areas + historial + resumen)
   const GLOBAL_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"];
   const isAdminOrManager = GLOBAL_ROLES.includes(user?.role ?? "");
-  const canSeeGlobalTabs = isAdminOrManager;
+  // Any authenticated user who reaches this page can at least see global tabs (historial/resumen/night-audit)
+  const canSeeGlobalTabs = true;
 
   const [parteSeleccionado, setParteSeleccionado] = useState<string | null>(() =>
     sessionStorage.getItem("caja_parte_activo")
@@ -2466,7 +2467,7 @@ export default function CashRegister() {
     ? parteSeleccionado
     : visibleConfigs.length > 0
     ? visibleConfigs[0].area
-    : (canSeeGlobalTabs ? "historial" : "");
+    : "historial";
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -2535,34 +2536,21 @@ export default function CashRegister() {
         </Dialog>
       )}
 
-      {visibleConfigs.length === 0 && !canSeeGlobalTabs ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <DollarSign className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">Sin área de caja asignada</p>
-            <p className="text-sm mt-1">Tu usuario ({user?.role}) no tiene un área de caja configurada. El administrador debe asignarte un departamento en la gestión de usuarios.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Tabs value={currentTab ?? defaultTab} onValueChange={setCurrentTab}>
+      <Tabs value={currentTab ?? defaultTab} onValueChange={setCurrentTab}>
           <TabsList data-testid="tabs-cash-areas">
             {visibleConfigs.map((c) => (
               <TabsTrigger key={c.area} value={c.area} data-testid={`tab-${c.area}`}>
                 {c.areaLabel}
               </TabsTrigger>
             ))}
-            {canSeeGlobalTabs && (
-              <TabsTrigger value="historial" data-testid="tab-historial">
-                Historial
-              </TabsTrigger>
-            )}
-            {canSeeGlobalTabs && (
-              <TabsTrigger value="resumen-dia" data-testid="tab-resumen-dia">
-                <BarChart3 className="h-4 w-4 mr-1" />
-                Resumen del Día
-              </TabsTrigger>
-            )}
-            {canSeeGlobalTabs && (
+            <TabsTrigger value="historial" data-testid="tab-historial">
+              Historial
+            </TabsTrigger>
+            <TabsTrigger value="resumen-dia" data-testid="tab-resumen-dia">
+              <BarChart3 className="h-4 w-4 mr-1" />
+              Resumen del Día
+            </TabsTrigger>
+            {isAdminOrManager && (
               <TabsTrigger value="night-audit" data-testid="tab-night-audit">
                 <Moon className="h-4 w-4 mr-1" />
                 Night Audit
@@ -2570,31 +2558,35 @@ export default function CashRegister() {
             )}
           </TabsList>
 
+          {visibleConfigs.length === 0 && !isAdminOrManager && (
+            <div className="mt-4 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-4 py-3">
+              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                Tu usuario <strong>({user?.role})</strong> no tiene un área de caja asignada. Podés consultar el historial, pero para operar en caja contactá al administrador.
+              </p>
+            </div>
+          )}
+
           {visibleConfigs.map((c) => (
             <TabsContent key={c.area} value={c.area}>
               <AreaTab area={c.area} config={c} />
             </TabsContent>
           ))}
 
-          {canSeeGlobalTabs && (
-            <TabsContent value="historial">
-              <HistorialTab />
-            </TabsContent>
-          )}
+          <TabsContent value="historial">
+            <HistorialTab />
+          </TabsContent>
 
-          {canSeeGlobalTabs && (
-            <TabsContent value="resumen-dia">
-              <ResumenDiaTab />
-            </TabsContent>
-          )}
+          <TabsContent value="resumen-dia">
+            <ResumenDiaTab />
+          </TabsContent>
 
-          {canSeeGlobalTabs && (
+          {isAdminOrManager && (
             <TabsContent value="night-audit">
               <NightAuditTab />
             </TabsContent>
           )}
         </Tabs>
-      )}
     </div>
   );
 }
