@@ -1975,155 +1975,154 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Charge Dialog */}
-      <Dialog open={isAddChargeOpen} onOpenChange={setIsAddChargeOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Agregar Cargo</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Servicio / Concepto</label>
-              <Select value={chargeType} onValueChange={(val) => {
-                setChargeType(val);
-                if (val === "cargo_editable") {
-                  setChargeDescription("");
-                  setChargePrice("");
-                } else {
-                  const treatment = treatments.find(t => t.id === val);
-                  if (treatment) {
-                    setChargeDescription(treatment.name);
-                    setChargePrice(treatment.price);
-                  }
-                }
-              }}>
-                <SelectTrigger data-testid="select-charge-type">
-                  <SelectValue placeholder="Seleccionar servicio..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {treatments.filter(t => t.id && t.isActive === "true").map(t => (
-                    <SelectItem key={t.id} value={t.id}>{t.name} — ${parseFloat(t.price).toFixed(2)}</SelectItem>
-                  ))}
-                  <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-sm font-medium">Descripción</label>
-              <Input value={chargeDescription} onChange={(e) => setChargeDescription(e.target.value)} placeholder="Ej: Toalla extra" disabled={chargeType !== "cargo_editable"} data-testid="input-charge-description" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium">Precio Unit.</label>
-                <Input type="number" step="0.01" value={chargePrice} onChange={(e) => setChargePrice(e.target.value)} disabled={chargeType !== "cargo_editable"} data-testid="input-charge-price" />
+          {/* Add Charge Dialog — nested inside Folio dialog to avoid Radix aria-hidden blocking inputs on desktop */}
+          <Dialog open={isAddChargeOpen} onOpenChange={setIsAddChargeOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Agregar Cargo</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium">Servicio / Concepto</label>
+                  <Select value={chargeType} onValueChange={(val) => {
+                    setChargeType(val);
+                    if (val === "cargo_editable") {
+                      setChargeDescription("");
+                      setChargePrice("");
+                    } else {
+                      const treatment = treatments.find(t => t.id === val);
+                      if (treatment) {
+                        setChargeDescription(treatment.name);
+                        setChargePrice(treatment.price);
+                      }
+                    }
+                  }}>
+                    <SelectTrigger data-testid="select-charge-type">
+                      <SelectValue placeholder="Seleccionar servicio..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {treatments.filter(t => t.id && t.isActive === "true").map(t => (
+                        <SelectItem key={t.id} value={t.id}>{t.name} — ${parseFloat(t.price).toFixed(2)}</SelectItem>
+                      ))}
+                      <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Descripción</label>
+                  <Input value={chargeDescription} onChange={(e) => setChargeDescription(e.target.value)} placeholder="Ej: Toalla extra" disabled={chargeType !== "cargo_editable"} data-testid="input-charge-description" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Precio Unit.</label>
+                    <Input type="number" step="0.01" value={chargePrice} onChange={(e) => setChargePrice(e.target.value)} disabled={chargeType !== "cargo_editable"} data-testid="input-charge-price" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Cantidad</label>
+                    <Input type="number" min="1" value={chargeQuantity} onChange={(e) => setChargeQuantity(e.target.value)} data-testid="input-charge-quantity" />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAddChargeOpen(false)}>Cancelar</Button>
+                  <Button
+                    disabled={!chargeDescription || !chargePrice || addChargeMutation.isPending}
+                    onClick={() => {
+                      if (selectedAccount) {
+                        addChargeMutation.mutate({
+                          accountId: selectedAccount.id,
+                          description: chargeDescription,
+                          quantity: parseInt(chargeQuantity) || 1,
+                          unitPrice: chargePrice,
+                          itemType: chargeType === "cargo_editable" ? "extra" : "service",
+                        });
+                      }
+                    }}
+                    data-testid="button-submit-charge"
+                  >
+                    {addChargeMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Agregar
+                  </Button>
+                </DialogFooter>
               </div>
-              <div>
-                <label className="text-sm font-medium">Cantidad</label>
-                <Input type="number" min="1" value={chargeQuantity} onChange={(e) => setChargeQuantity(e.target.value)} data-testid="input-charge-quantity" />
+            </DialogContent>
+          </Dialog>
+
+          {/* Add Payment Dialog — nested inside Folio dialog to avoid Radix aria-hidden blocking inputs on desktop */}
+          <Dialog open={isAddPaymentOpen} onOpenChange={setIsAddPaymentOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Registrar Pago</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium">Método de Pago</label>
+                  <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); if (v !== "room_charge") setPaymentReservationId(""); }}>
+                    <SelectTrigger data-testid="select-payment-method">
+                      <SelectValue placeholder="Seleccionar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cash">Efectivo</SelectItem>
+                      <SelectItem value="debit_card">Tarjeta Débito</SelectItem>
+                      <SelectItem value="credit_card">Tarjeta Crédito</SelectItem>
+                      <SelectItem value="transfer">Transferencia</SelectItem>
+                      <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                      <SelectItem value="room_charge">Cargo a Habitación</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {paymentMethod === "room_charge" && (
+                  <div>
+                    <label className="text-sm font-medium">Habitación</label>
+                    <Select value={paymentReservationId} onValueChange={setPaymentReservationId}>
+                      <SelectTrigger data-testid="select-payment-room">
+                        <SelectValue placeholder="Seleccionar habitación" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {checkedInReservations.filter(res => res.id).sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0")).map((res) => (
+                          <SelectItem key={res.id} value={res.id}>
+                            Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-sm font-medium">Monto</label>
+                  <Input type="number" step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} placeholder={accountBalance > 0 ? `Saldo: $${accountBalance.toLocaleString()}` : ""} data-testid="input-payment-amount" />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="is-advance" checked={isPaymentAdvance} onChange={(e) => setIsPaymentAdvance(e.target.checked)} className="rounded" />
+                  <label htmlFor="is-advance" className="text-sm">Es seña / anticipo</label>
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAddPaymentOpen(false)}>Cancelar</Button>
+                  <Button
+                    disabled={!paymentAmount || !paymentMethod || addPaymentMutation.isPending || (paymentMethod === "room_charge" && !paymentReservationId)}
+                    onClick={() => {
+                      if (selectedAccount) {
+                        addPaymentMutation.mutate({
+                          accountId: selectedAccount.id,
+                          amount: paymentAmount,
+                          method: paymentMethod,
+                          isAdvance: isPaymentAdvance,
+                          reservationId: paymentMethod === "room_charge" ? paymentReservationId : undefined,
+                        });
+                      }
+                    }}
+                    data-testid="button-submit-payment"
+                  >
+                    {addPaymentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Registrar
+                  </Button>
+                </DialogFooter>
               </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddChargeOpen(false)}>Cancelar</Button>
-              <Button
-                disabled={!chargeDescription || !chargePrice || addChargeMutation.isPending}
-                onClick={() => {
-                  if (selectedAccount) {
-                    addChargeMutation.mutate({
-                      accountId: selectedAccount.id,
-                      description: chargeDescription,
-                      quantity: parseInt(chargeQuantity) || 1,
-                      unitPrice: chargePrice,
-                      itemType: chargeType === "cargo_editable" ? "extra" : "service",
-                    });
-                  }
-                }}
-                data-testid="button-submit-charge"
-              >
-                {addChargeMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Agregar
-              </Button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Payment Dialog */}
-      <Dialog open={isAddPaymentOpen} onOpenChange={setIsAddPaymentOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Registrar Pago</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Método de Pago</label>
-              <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); if (v !== "room_charge") setPaymentReservationId(""); }}>
-                <SelectTrigger data-testid="select-payment-method">
-                  <SelectValue placeholder="Seleccionar" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Efectivo</SelectItem>
-                  <SelectItem value="debit_card">Tarjeta Débito</SelectItem>
-                  <SelectItem value="credit_card">Tarjeta Crédito</SelectItem>
-                  <SelectItem value="transfer">Transferencia</SelectItem>
-                  <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                  <SelectItem value="room_charge">Cargo a Habitación</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {paymentMethod === "room_charge" && (
-              <div>
-                <label className="text-sm font-medium">Habitación</label>
-                <Select value={paymentReservationId} onValueChange={setPaymentReservationId}>
-                  <SelectTrigger data-testid="select-payment-room">
-                    <SelectValue placeholder="Seleccionar habitación" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {checkedInReservations.filter(res => res.id).sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0")).map((res) => (
-                      <SelectItem key={res.id} value={res.id}>
-                        Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <div>
-              <label className="text-sm font-medium">Monto</label>
-              <Input type="number" step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} placeholder={accountBalance > 0 ? `Saldo: $${accountBalance.toLocaleString()}` : ""} data-testid="input-payment-amount" />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="is-advance" checked={isPaymentAdvance} onChange={(e) => setIsPaymentAdvance(e.target.checked)} className="rounded" />
-              <label htmlFor="is-advance" className="text-sm">Es seña / anticipo</label>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddPaymentOpen(false)}>Cancelar</Button>
-              <Button
-                disabled={!paymentAmount || !paymentMethod || addPaymentMutation.isPending || (paymentMethod === "room_charge" && !paymentReservationId)}
-                onClick={() => {
-                  if (selectedAccount) {
-                    addPaymentMutation.mutate({
-                      accountId: selectedAccount.id,
-                      amount: paymentAmount,
-                      method: paymentMethod,
-                      isAdvance: isPaymentAdvance,
-                      reservationId: paymentMethod === "room_charge" ? paymentReservationId : undefined,
-                    });
-                  }
-                }}
-                data-testid="button-submit-payment"
-              >
-                {addPaymentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Registrar
-              </Button>
-            </DialogFooter>
-          </div>
+            </DialogContent>
+          </Dialog>
         </DialogContent>
       </Dialog>
 
