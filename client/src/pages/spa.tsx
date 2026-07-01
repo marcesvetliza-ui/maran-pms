@@ -1586,7 +1586,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <Select onValueChange={(val) => { field.onChange(val); handleReservationAutoFill(val); }} value={field.value || undefined}>
                     <FormControl><SelectTrigger data-testid="select-reservation"><SelectValue placeholder="Sin asociar" /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {checkedInReservations.filter(res => res.id).map((res) => (
+                      {checkedInReservations.filter(res => res.id).sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0")).map((res) => (
                         <SelectItem key={res.id} value={res.id}>
                           Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
                         </SelectItem>
@@ -2082,7 +2082,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     <SelectValue placeholder="Seleccionar habitación" />
                   </SelectTrigger>
                   <SelectContent>
-                    {checkedInReservations.filter(res => res.id).map((res) => (
+                    {checkedInReservations.filter(res => res.id).sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0")).map((res) => (
                       <SelectItem key={res.id} value={res.id}>
                         Hab. {res.room?.roomNumber} - {res.guest?.lastName} {res.guest?.firstName}
                       </SelectItem>
