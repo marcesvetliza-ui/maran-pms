@@ -6048,7 +6048,7 @@ export default function RestaurantPage() {
                         r.tableId &&
                         r.reservationDate === watchedDate &&
                         r.reservationTime === watchedTime &&
-                        r.status !== "cancelled" && r.status !== "completed"
+                        ["pending", "confirmed", "check_in", "seated"].includes(r.status)
                       )
                       .map(r => r.tableId!)
                   );
