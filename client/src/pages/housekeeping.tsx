@@ -606,7 +606,7 @@ function LostFoundForm({
                     value={guestSearch}
                     onChange={e => { setGuestSearch(e.target.value); setGuestPopoverOpen(e.target.value.length > 0); }}
                     onFocus={() => { if (guestSearch.length > 0) setGuestPopoverOpen(true); }}
-                    onBlur={() => setTimeout(() => setGuestPopoverOpen(false), 150)}
+                    onBlur={() => setTimeout(() => setGuestPopoverOpen(false), 300)}
                     className="pl-8"
                     data-testid="input-lf-guest-search"
                   />
@@ -618,7 +618,8 @@ function LostFoundForm({
                         key={g.id}
                         type="button"
                         className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
-                        onPointerDown={(e) => { e.preventDefault(); handleSelectGuest(g); }}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handleSelectGuest(g)}
                         data-testid={`item-lf-guest-${g.id}`}
                       >
                         <p className="font-medium">{g.lastName} {g.firstName}</p>
