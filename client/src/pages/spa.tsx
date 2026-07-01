@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { format, addDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks } from "date-fns";
+import { format, addDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
@@ -1149,12 +1149,13 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                   const colSpan = getAppointmentColSpan(appointment);
                                   for (let i = 1; i < colSpan; i++) skipSlots.add(slotIdx + i);
                                   const isCancelled = appointment.status === "cancelled";
+                                  const isPast = isBefore(parseISO(appointment.appointmentDate), startOfDay(new Date()));
                                   
                                   return (
                                     <td key={slotIdx} colSpan={colSpan} className="border-b border-r p-0.5 h-14">
                                       <div
-                                        className={`h-full rounded px-2 py-1 cursor-pointer flex flex-col justify-center ${appointmentStatusColors[appointment.status]} ${isCancelled ? "opacity-50 line-through" : ""}`}
-                                        onClick={() => setSelectedAppointment(appointment)}
+                                        className={`h-full rounded px-2 py-1 flex flex-col justify-center ${isPast ? "bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 opacity-50 cursor-default" : `cursor-pointer ${appointmentStatusColors[appointment.status]} ${isCancelled ? "opacity-50 line-through" : ""}`}`}
+                                        onClick={isPast ? undefined : () => setSelectedAppointment(appointment)}
                                         title={`${appointment.guestName} ${appointment.guestLastName || ""} - ${treatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
                                         data-testid={`appointment-${appointment.id}`}
                                       >
@@ -1172,8 +1173,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                   );
                                 }
                                 if (appointment && !isStart) return null;
+                                const isDatePast = isBefore(startOfDay(selectedDate), startOfDay(new Date()));
                                 return (
-                                  <td key={slotIdx} className="border-b border-r p-0.5 h-14 cursor-pointer hover:bg-muted/50" onClick={() => handleCellClick(cabin.id, time)} data-testid={`cell-${cabin.id}-${time}`} />
+                                  <td key={slotIdx} className={`border-b border-r p-0.5 h-14 ${isDatePast ? "bg-muted/20" : "cursor-pointer hover:bg-muted/50"}`} onClick={isDatePast ? undefined : () => handleCellClick(cabin.id, time)} data-testid={`cell-${cabin.id}-${time}`} />
                                 );
                               })}
                             </tr>
@@ -1771,45 +1773,47 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 <Button variant="outline" size="sm" onClick={() => printComandaTermica(selectedAppointment)} data-testid="button-print-confirmation">
                   <Printer className="h-4 w-4 mr-1" /> Reimprimir comanda
                 </Button>
-                {["pending", "confirmed"].includes(selectedAppointment.status) && (
-                  <Button variant="outline" size="sm" onClick={() => handleEditAppointment(selectedAppointment)} data-testid="button-edit-appointment">
-                    <Pencil className="h-4 w-4 mr-1" /> Editar
-                  </Button>
-                )}
-                {selectedAppointment.status === "confirmed" && (
-                  <Button variant="default" size="sm" onClick={() => {
-                    updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "in_progress" });
-                    setSelectedAppointment(null);
-                  }} disabled={updateAppointmentMutation.isPending} data-testid="button-start-appointment">
-                    Iniciar
-                  </Button>
-                )}
-                {["in_progress", "confirmed"].includes(selectedAppointment.status) && selectedAccount && selectedAccount.status === "open" && (
-                  <Button variant="default" size="sm" onClick={handleOpenFolio} data-testid="button-open-folio">
-                    <CreditCard className="h-4 w-4 mr-1" /> Folio
-                  </Button>
-                )}
-                {selectedAppointment.status === "pending" && (
-                  <Button variant="default" size="sm" onClick={() => {
-                    updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "confirmed" });
-                    setSelectedAppointment(null);
-                  }} disabled={updateAppointmentMutation.isPending} data-testid="button-confirm-appointment">
-                    Confirmar
-                  </Button>
-                )}
-                {["pending", "confirmed"].includes(selectedAppointment.status) && (
-                  <>
-                    <Button variant="outline" size="sm" onClick={() => {
-                      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "no_show" });
+                {!isBefore(parseISO(selectedAppointment.appointmentDate), startOfDay(new Date())) && (<>
+                  {["pending", "confirmed"].includes(selectedAppointment.status) && (
+                    <Button variant="outline" size="sm" onClick={() => handleEditAppointment(selectedAppointment)} data-testid="button-edit-appointment">
+                      <Pencil className="h-4 w-4 mr-1" /> Editar
+                    </Button>
+                  )}
+                  {selectedAppointment.status === "confirmed" && (
+                    <Button variant="default" size="sm" onClick={() => {
+                      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "in_progress" });
                       setSelectedAppointment(null);
-                    }} disabled={updateAppointmentMutation.isPending} data-testid="button-noshow-appointment">
-                      No Show
+                    }} disabled={updateAppointmentMutation.isPending} data-testid="button-start-appointment">
+                      Iniciar
                     </Button>
-                    <Button variant="destructive" size="sm" onClick={() => setIsCancelConfirmOpen(true)} data-testid="button-cancel-appointment">
-                      <X className="h-4 w-4 mr-1" /> Cancelar
+                  )}
+                  {["in_progress", "confirmed"].includes(selectedAppointment.status) && selectedAccount && selectedAccount.status === "open" && (
+                    <Button variant="default" size="sm" onClick={handleOpenFolio} data-testid="button-open-folio">
+                      <CreditCard className="h-4 w-4 mr-1" /> Folio
                     </Button>
-                  </>
-                )}
+                  )}
+                  {selectedAppointment.status === "pending" && (
+                    <Button variant="default" size="sm" onClick={() => {
+                      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "confirmed" });
+                      setSelectedAppointment(null);
+                    }} disabled={updateAppointmentMutation.isPending} data-testid="button-confirm-appointment">
+                      Confirmar
+                    </Button>
+                  )}
+                  {["pending", "confirmed"].includes(selectedAppointment.status) && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => {
+                        updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "no_show" });
+                        setSelectedAppointment(null);
+                      }} disabled={updateAppointmentMutation.isPending} data-testid="button-noshow-appointment">
+                        No Show
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => setIsCancelConfirmOpen(true)} data-testid="button-cancel-appointment">
+                        <X className="h-4 w-4 mr-1" /> Cancelar
+                      </Button>
+                    </>
+                  )}
+                </>)}
               </DialogFooter>
             </div>
           )}

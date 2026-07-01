@@ -18,7 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { format, addDays, startOfDay, parseISO, isSameDay, addWeeks, subWeeks, isValid } from "date-fns";
+import { format, addDays, startOfDay, parseISO, isSameDay, addWeeks, subWeeks, isValid, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
 import { 
   Plus, 
@@ -970,28 +970,32 @@ export default function EventsPage() {
                       </TableCell>
                       {weekDays.map((day) => {
                         const cellEvents = getEventsForCell(room.id, day);
+                        const isDayPast = isBefore(startOfDay(day), startOfDay(new Date()));
                         return (
                           <TableCell
                             key={day.toISOString()}
-                            className="p-1 align-top cursor-pointer hover-elevate min-h-[80px]"
-                            onClick={() => cellEvents.length === 0 && handleCellClick(room.id, day)}
+                            className={`p-1 align-top min-h-[80px] ${isDayPast ? "" : "cursor-pointer hover-elevate"}`}
+                            onClick={() => !isDayPast && cellEvents.length === 0 && handleCellClick(room.id, day)}
                             data-testid={`cell-${room.id}-${format(day, "yyyy-MM-dd")}`}
                           >
                             <div className="flex flex-col gap-1">
-                              {cellEvents.map((event) => (
-                                <div
-                                  key={event.id}
-                                  className={`p-1.5 rounded-md text-xs cursor-pointer ${eventTypeColors[event.eventType] || eventTypeColors.other}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleEventClick(event.id);
-                                  }}
-                                  data-testid={`event-${event.id}`}
-                                >
-                                  <div className="font-medium truncate">{event.name}</div>
-                                  <div className="text-xs opacity-80 truncate">{eventTypeLabels[event.eventType] || event.eventType}</div>
-                                </div>
-                              ))}
+                              {cellEvents.map((event) => {
+                                const isEventPast = isBefore(parseISO(event.endDate), startOfDay(new Date()));
+                                return (
+                                  <div
+                                    key={event.id}
+                                    className={`p-1.5 rounded-md text-xs cursor-pointer ${isEventPast ? "bg-gray-100 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 opacity-70" : (eventTypeColors[event.eventType] || eventTypeColors.other)}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEventClick(event.id);
+                                    }}
+                                    data-testid={`event-${event.id}`}
+                                  >
+                                    <div className="font-medium truncate">{event.name}</div>
+                                    <div className="text-xs opacity-80 truncate">{eventTypeLabels[event.eventType] || event.eventType}</div>
+                                  </div>
+                                );
+                              })}
                               {cellEvents.length === 0 && (
                                 <div className="h-16 flex items-center justify-center">
                                   <Plus className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -1697,58 +1701,84 @@ export default function EventsPage() {
                 )}
 
                 <div className="flex flex-wrap gap-2 pt-4 border-t">
-                  {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
-                    <Button
-                      variant="outline"
-                      onClick={handleOpenEdit}
-                      data-testid="button-edit-event"
-                    >
-                      <Edit className="h-4 w-4 mr-2" />
-                      Editar
-                    </Button>
-                  )}
-                  {selectedEvent.status === "tentative" && (
-                    <Button
-                      onClick={() => {
-                        updateEventMutation.mutate({ 
-                          id: selectedEvent.id, 
-                          data: { status: "confirmed" } 
-                        });
-                        setSelectedEvent({ ...selectedEvent, status: "confirmed" });
-                      }}
-                      data-testid="button-confirm-event"
-                    >
-                      Confirmar
-                    </Button>
-                  )}
-                  {selectedEvent.status === "confirmed" && (
-                    <Button
-                      onClick={() => {
-                        updateEventMutation.mutate({ 
-                          id: selectedEvent.id, 
-                          data: { status: "in_progress" } 
-                        });
-                        setSelectedEvent({ ...selectedEvent, status: "in_progress" });
-                      }}
-                      data-testid="button-start-event"
-                    >
-                      Iniciar
-                    </Button>
-                  )}
-                  {selectedEvent.status === "in_progress" && (
-                    <Button
-                      onClick={() => {
-                        updateEventMutation.mutate({ 
-                          id: selectedEvent.id, 
-                          data: { status: "completed" } 
-                        });
-                        setSelectedEvent({ ...selectedEvent, status: "completed" });
-                      }}
-                      data-testid="button-complete-event"
-                    >
-                      Completar
-                    </Button>
-                  )}
+                  {!isBefore(parseISO(selectedEvent.endDate), startOfDay(new Date())) && (<>
+                    {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
+                      <Button
+                        variant="outline"
+                        onClick={handleOpenEdit}
+                        data-testid="button-edit-event"
+                      >
+                        <Edit className="h-4 w-4 mr-2" />
+                        Editar
+                      </Button>
+                    )}
+                    {selectedEvent.status === "tentative" && (
+                      <Button
+                        onClick={() => {
+                          updateEventMutation.mutate({ 
+                            id: selectedEvent.id, 
+                            data: { status: "confirmed" } 
+                          });
+                          setSelectedEvent({ ...selectedEvent, status: "confirmed" });
+                        }}
+                        data-testid="button-confirm-event"
+                      >
+                        Confirmar
+                      </Button>
+                    )}
+                    {selectedEvent.status === "confirmed" && (
+                      <Button
+                        onClick={() => {
+                          updateEventMutation.mutate({ 
+                            id: selectedEvent.id, 
+                            data: { status: "in_progress" } 
+                          });
+                          setSelectedEvent({ ...selectedEvent, status: "in_progress" });
+                        }}
+                        data-testid="button-start-event"
+                      >
+                        Iniciar
+                      </Button>
+                    )}
+                    {selectedEvent.status === "in_progress" && (
+                      <Button
+                        onClick={() => {
+                          updateEventMutation.mutate({ 
+                            id: selectedEvent.id, 
+                            data: { status: "completed" } 
+                          });
+                          setSelectedEvent({ ...selectedEvent, status: "completed" });
+                        }}
+                        data-testid="button-complete-event"
+                      >
+                        Completar
+                      </Button>
+                    )}
+                    {(selectedEvent.status === "tentative" || selectedEvent.status === "confirmed") && (
+                      <Button
+                        variant="destructive"
+                        onClick={() => setCancelConfirmOpen(true)}
+                        data-testid="button-cancel-event"
+                      >
+                        Cancelar Evento
+                      </Button>
+                    )}
+                    {selectedEvent.status !== "invoiced" && (
+                      <Button
+                        variant="outline"
+                        className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20"
+                        onClick={() => {
+                          setEventToDelete(selectedEvent);
+                          setSelectedEvent(null);
+                          setTimeout(() => setDeleteEventConfirmOpen(true), 50);
+                        }}
+                        data-testid="button-delete-event"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Eliminar
+                      </Button>
+                    )}
+                  </>)}
                   {canShowFolio(selectedEvent) && (
                     <Button
                       variant="outline"
@@ -1760,30 +1790,6 @@ export default function EventsPage() {
                     >
                       <Receipt className="h-4 w-4 mr-2" />
                       Folio / Facturar
-                    </Button>
-                  )}
-                  {(selectedEvent.status === "tentative" || selectedEvent.status === "confirmed") && (
-                    <Button
-                      variant="destructive"
-                      onClick={() => setCancelConfirmOpen(true)}
-                      data-testid="button-cancel-event"
-                    >
-                      Cancelar Evento
-                    </Button>
-                  )}
-                  {selectedEvent.status !== "invoiced" && (
-                    <Button
-                      variant="outline"
-                      className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20"
-                      onClick={() => {
-                        setEventToDelete(selectedEvent);
-                        setSelectedEvent(null);
-                        setTimeout(() => setDeleteEventConfirmOpen(true), 50);
-                      }}
-                      data-testid="button-delete-event"
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Eliminar
                     </Button>
                   )}
                   {["pending", "tentative", "confirmed", "in_progress", "completed", "invoiced"].includes(selectedEvent.status) && (
