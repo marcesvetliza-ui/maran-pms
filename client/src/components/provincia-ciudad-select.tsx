@@ -1,18 +1,6 @@
 import { useState, useEffect } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { Check, ChevronsUpDown } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { PROVINCIAS, getCiudades } from "@/lib/argentina-geo";
 
 interface ProvinciaCiudadSelectProps {
@@ -24,159 +12,96 @@ interface ProvinciaCiudadSelectProps {
   testIdLocalidad?: string;
 }
 
-const OTRA = "__otra__";
-
-function ProvinciaCombobox({
+function GeoDropdown({
   value,
+  options,
+  placeholder,
+  disabled,
   onChange,
   testId,
+  extraOption,
+  onExtraOption,
 }: {
   value: string;
+  options: string[];
+  placeholder: string;
+  disabled?: boolean;
   onChange: (v: string) => void;
   testId?: string;
+  extraOption?: string;
+  onExtraOption?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
 
-  const filtered = PROVINCIAS.filter((p) =>
-    p.toLowerCase().includes(search.toLowerCase())
+  const filtered = options.filter((o) =>
+    o.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleSelect = (v: string) => {
+    onChange(v);
+    setSearch("");
+    setOpen(false);
+  };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="w-full justify-between font-normal"
+    <div className="relative">
+      {/* Show selected value as button, click to re-open */}
+      {value && !open ? (
+        <button
+          type="button"
+          className="w-full h-9 px-3 text-left text-sm border border-input rounded-md bg-background flex items-center justify-between gap-2 hover:bg-accent/50"
+          onClick={() => { setSearch(""); setOpen(true); }}
           data-testid={testId}
+          disabled={disabled}
         >
-          <span className="truncate">{value || "Seleccionar..."}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-        <Command shouldFilter={false}>
-          <CommandInput
-            placeholder="Buscar provincia..."
-            value={search}
-            onValueChange={setSearch}
-          />
-          <CommandList>
-            <CommandEmpty>Sin resultados</CommandEmpty>
-            <CommandGroup>
-              {filtered.map((p) => (
-                <CommandItem
-                  key={p}
-                  value={p}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onSelect={() => {
-                    onChange(p);
-                    setOpen(false);
-                    setSearch("");
-                  }}
-                >
-                  <Check
-                    className={cn("mr-2 h-4 w-4", value === p ? "opacity-100" : "opacity-0")}
-                  />
-                  {p}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function CiudadCombobox({
-  provincia,
-  value,
-  onChange,
-  testId,
-}: {
-  provincia: string;
-  value: string;
-  onChange: (v: string) => void;
-  testId?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const ciudades = getCiudades(provincia);
-  const ciudadEsConocida = ciudades.includes(value);
-  const showOtra = !ciudadEsConocida && value !== "";
-
-  const filtered = ciudades.filter((c) =>
-    c.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const displayValue = ciudadEsConocida
-    ? value
-    : showOtra
-    ? `${value} (personalizada)`
-    : "Seleccionar...";
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={!provincia}
-          className="w-full justify-between font-normal"
+          <span className="truncate">{value}</span>
+          <span className="text-muted-foreground text-xs shrink-0">✕</span>
+        </button>
+      ) : (
+        <Input
+          placeholder={disabled ? "Seleccionar provincia primero" : placeholder}
+          value={search}
+          disabled={disabled}
+          onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 300)}
+          className="h-9 text-sm"
           data-testid={testId}
-        >
-          <span className="truncate">{!provincia ? "Seleccionar provincia primero" : displayValue}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-        <Command shouldFilter={false}>
-          <CommandInput
-            placeholder="Buscar localidad..."
-            value={search}
-            onValueChange={setSearch}
-          />
-          <CommandList>
-            <CommandEmpty>Sin resultados</CommandEmpty>
-            <CommandGroup>
-              {filtered.map((c) => (
-                <CommandItem
-                  key={c}
-                  value={c}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onSelect={() => {
-                    onChange(c);
-                    setOpen(false);
-                    setSearch("");
-                  }}
-                >
-                  <Check
-                    className={cn("mr-2 h-4 w-4", value === c ? "opacity-100" : "opacity-0")}
-                  />
-                  {c}
-                </CommandItem>
-              ))}
-              <CommandItem
-                value={OTRA}
-                onMouseDown={(e) => e.preventDefault()}
-                onSelect={() => {
-                  onChange("");
-                  setOpen(false);
-                  setSearch("");
-                }}
-              >
-                <Check className="mr-2 h-4 w-4 opacity-0" />
-                Otra localidad...
-              </CommandItem>
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+          autoComplete="off"
+        />
+      )}
+
+      {open && !disabled && (
+        <div className="absolute z-[200] w-full mt-1 border rounded-md bg-popover shadow-lg max-h-52 overflow-y-auto">
+          {filtered.length === 0 && !extraOption && (
+            <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
+          )}
+          {filtered.map((o) => (
+            <button
+              key={o}
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex items-center gap-2"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelect(o)}
+            >
+              <span className={`text-primary text-xs ${value === o ? "opacity-100" : "opacity-0"}`}>✓</span>
+              {o}
+            </button>
+          ))}
+          {extraOption && onExtraOption && (
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-accent text-muted-foreground italic"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onExtraOption(); setOpen(false); setSearch(""); }}
+            >
+              {extraOption}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -189,9 +114,9 @@ export function ProvinciaCiudadSelect({
   testIdLocalidad = "select-localidad",
 }: ProvinciaCiudadSelectProps) {
   const ciudades = getCiudades(provincia);
-  const ciudadEsConocida = provincia && ciudades.includes(localidad);
-  const [customCiudad, setCustomCiudad] = useState(!ciudadEsConocida ? localidad : "");
+  const ciudadEsConocida = provincia !== "" && ciudades.includes(localidad);
   const [showCustom, setShowCustom] = useState(false);
+  const [customCiudad, setCustomCiudad] = useState("");
 
   useEffect(() => {
     if (!ciudadEsConocida && localidad) {
@@ -202,28 +127,19 @@ export function ProvinciaCiudadSelect({
     }
   }, [localidad, ciudadEsConocida]);
 
-  const handleCiudadChange = (val: string) => {
-    if (val === "") {
-      setShowCustom(true);
-      setCustomCiudad("");
-      onLocalidadChange("");
-    } else {
-      setShowCustom(false);
-      onLocalidadChange(val);
-    }
-  };
-
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="grid gap-2">
         <Label>Provincia</Label>
-        <ProvinciaCombobox
+        <GeoDropdown
           value={provincia}
-          onChange={(val) => {
-            onProvinciaChange(val);
+          options={PROVINCIAS}
+          placeholder="Buscar provincia..."
+          onChange={(v) => {
+            onProvinciaChange(v);
             onLocalidadChange("");
-            setCustomCiudad("");
             setShowCustom(false);
+            setCustomCiudad("");
           }}
           testId={testIdProvincia}
         />
@@ -231,10 +147,21 @@ export function ProvinciaCiudadSelect({
 
       <div className="grid gap-2">
         <Label>Ciudad / Localidad</Label>
-        <CiudadCombobox
-          provincia={provincia}
-          value={localidad}
-          onChange={handleCiudadChange}
+        <GeoDropdown
+          value={ciudadEsConocida ? localidad : ""}
+          options={ciudades}
+          placeholder="Buscar localidad..."
+          disabled={!provincia}
+          onChange={(v) => {
+            setShowCustom(false);
+            onLocalidadChange(v);
+          }}
+          extraOption="Otra localidad..."
+          onExtraOption={() => {
+            setShowCustom(true);
+            setCustomCiudad("");
+            onLocalidadChange("");
+          }}
           testId={testIdLocalidad}
         />
         {showCustom && (
