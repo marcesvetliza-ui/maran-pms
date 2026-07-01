@@ -96,7 +96,7 @@ const INVENTARIO_ROLES  = ["admin","manager","ama_de_llaves","spa","resp_deposit
 const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping","restaurant","events","reception","jefe_recepcion","comercial"];
 const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","jefe_recepcion","comercial"];
 const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","jefe_recepcion"];
-const CAJA_ROLES        = ["admin","manager","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
+const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","jefe_recepcion","comercial"];
 
 // ─────────────────────────────────────────────────────────────────────────────
