@@ -70,6 +70,7 @@ function ProvinciaCombobox({
                 <CommandItem
                   key={p}
                   value={p}
+                  onMouseDown={(e) => e.preventDefault()}
                   onSelect={() => {
                     onChange(p);
                     setOpen(false);
@@ -146,6 +147,7 @@ function CiudadCombobox({
                 <CommandItem
                   key={c}
                   value={c}
+                  onMouseDown={(e) => e.preventDefault()}
                   onSelect={() => {
                     onChange(c);
                     setOpen(false);
@@ -160,6 +162,7 @@ function CiudadCombobox({
               ))}
               <CommandItem
                 value={OTRA}
+                onMouseDown={(e) => e.preventDefault()}
                 onSelect={() => {
                   onChange("");
                   setOpen(false);
