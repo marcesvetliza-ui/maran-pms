@@ -227,7 +227,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, cashArea, cashFormaPago, cashLabel: cashLabelBody } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -241,6 +241,30 @@ export function registerBillingRoutes(app: Express) {
         operador: user?.fullName || user?.username,
         puntoVentaOverride: pvBody ? parseInt(pvBody) : undefined,
       } as NewInvoiceData);
+
+      // Registrar movimiento de caja si se especificó un área
+      if (cashArea && cashFormaPago) {
+        try {
+          const total = parseFloat(String((factura as any).montoTotal || "0"));
+          if (total > 0) {
+            const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
+            await storage.registerCashMovement(
+              cashArea,
+              "comprobante",
+              String(factura.id),
+              cashLabelBody || nroFac,
+              cashFormaPago,
+              String(total.toFixed(2)),
+              "income",
+              user?.fullName || user?.username,
+              factura.tipoComprobante
+            );
+          }
+        } catch (cashErr) {
+          console.error("[Billing] Error registrando movimiento de caja:", cashErr);
+        }
+      }
+
       res.status(201).json(factura);
     } catch (e: any) {
       res.status(500).json({ error: e.message });

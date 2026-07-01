@@ -794,6 +794,18 @@ export default function RestaurantPage() {
   const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0]);
   const [ncTipo, setNcTipo] = useState("todos");
   const [ncCliente, setNcCliente] = useState("");
+  const [isEmitirComprobanteOpen, setIsEmitirComprobanteOpen] = useState(false);
+  const [compTipo, setCompTipo] = useState("FB");
+  const [compRazonSocial, setCompRazonSocial] = useState("CONSUMIDOR FINAL");
+  const [compCuit, setCompCuit] = useState("");
+  const [compDni, setCompDni] = useState("");
+  const [compCondicionIva, setCompCondicionIva] = useState("Consumidor Final");
+  const [compDomicilio, setCompDomicilio] = useState("");
+  const [compItems, setCompItems] = useState<{ descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: string; subtotalNeto: number; subtotal: number }[]>(
+    [{ descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 }]
+  );
+  const [compPv, setCompPv] = useState("");
+  const [compFormaPago, setCompFormaPago] = useState("efectivo");
   const [ncDateTo, setNcDateTo] = useState(new Date().toISOString().split("T")[0]);
   const [billingSearch, setBillingSearch] = useState("");
   const [billingSearchOpen, setBillingSearchOpen] = useState(false);
@@ -967,6 +979,11 @@ export default function RestaurantPage() {
     queryKey: ["/api/companies"],
   });
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
+  const { data: billingConfig } = useQuery<any>({
+    queryKey: ["/api/billing/config"],
+    queryFn: async () => { const r = await apiRequest("GET", "/api/billing/config"); return r.json(); },
+    enabled: isEmitirComprobanteOpen,
+  });
   const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string }[]>({
     queryKey: ["/api/staff/users"],
   });
@@ -1738,6 +1755,24 @@ export default function RestaurantPage() {
     onError: (e: any) => toast({ title: "Error al crear cliente", description: e.message, variant: "destructive" }),
   });
 
+  const emitirComprobanteMutation = useMutation({
+    mutationFn: async (body: any) => {
+      const r = await apiRequest("POST", "/api/billing/invoices", body);
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Error al emitir"); }
+      return r.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      toast({ title: "Comprobante emitido", description: `${data.tipo_comprobante} ${String(data.punto_venta).padStart(4,"0")}-${String(data.numero).padStart(8,"0")}` });
+      setIsEmitirComprobanteOpen(false);
+      setCompTipo("FB"); setCompRazonSocial("CONSUMIDOR FINAL"); setCompCuit(""); setCompDni("");
+      setCompCondicionIva("Consumidor Final"); setCompDomicilio(""); setCompFormaPago("efectivo"); setCompPv("");
+      setCompItems([{ descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 }]);
+      setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
+    },
+    onError: (e: any) => toast({ title: "Error al emitir comprobante", description: e.message, variant: "destructive" }),
+  });
+
   const emitirNCMutation = useMutation({
     mutationFn: async ({ invoiceId, motivo }: { invoiceId: number; motivo: string }) => {
       const res = await apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, { motivo });
@@ -2103,6 +2138,55 @@ export default function RestaurantPage() {
     win.document.close();
   };
 
+  function updateCompItem(idx: number, field: string, value: any) {
+    setCompItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[idx], [field]: value };
+      const base = item.cantidad * item.precioUnitario;
+      const isFA = compTipo === "FA";
+      if (!isFA) {
+        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat((base / 1.21).toFixed(2)); item.subtotal = base; }
+        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
+        else { item.subtotalNeto = base; item.subtotal = base; }
+      } else {
+        if (item.alicuotaIva === "21" || item.alicuotaIva === "10.5") {
+          item.subtotalNeto = base; item.subtotal = parseFloat((base * (1 + (item.alicuotaIva === "21" ? 0.21 : 0.105))).toFixed(2));
+        } else { item.subtotalNeto = base; item.subtotal = base; }
+      }
+      updated[idx] = item;
+      return updated;
+    });
+  }
+
+  const compPreview = compItems.reduce((acc, it) => {
+    acc.neto += it.subtotalNeto;
+    if (it.alicuotaIva === "21") acc.iva21 += it.subtotalNeto * 0.21;
+    if (it.alicuotaIva === "10.5") acc.iva105 += it.subtotalNeto * 0.105;
+    if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
+    if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
+    return acc;
+  }, { neto: 0, iva21: 0, iva105: 0, exento: 0, ng: 0 });
+  const compTotal = compPreview.neto + compPreview.iva21 + compPreview.iva105 + compPreview.exento + compPreview.ng;
+
+  const restaurantPVs = posConfigsData.filter((p: any) => p.activo && p.area === "restaurant");
+  const compAmbiente: string = billingConfig?.arcaAmbiente ?? "ficticio";
+
+  function handleEmitirComprobante() {
+    if (!compRazonSocial.trim()) return toast({ title: "Ingrese Razón Social / Nombre", variant: "destructive" });
+    if (compTipo === "FA" && !compCuit.trim()) return toast({ title: "CUIT es requerido para Factura A", variant: "destructive" });
+    if (compItems.some(it => !it.descripcion.trim())) return toast({ title: "Todos los ítems deben tener descripción", variant: "destructive" });
+    const pvNum = compPv || (restaurantPVs.length > 0 ? String(restaurantPVs[0].numero) : undefined);
+    emitirComprobanteMutation.mutate({
+      tipoComprobante: compTipo,
+      cliente: { razonSocial: compRazonSocial, cuit: compCuit || undefined, dni: compDni || undefined, condicionIva: compCondicionIva, domicilio: compDomicilio || undefined },
+      items: compItems,
+      puntoVenta: pvNum ? parseInt(pvNum) : undefined,
+      cashArea: "restaurant",
+      cashFormaPago: compFormaPago,
+      cashLabel: `${compTipo} — ${compRazonSocial}`,
+    });
+  }
+
   if (areasLoading || tablesLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -2135,6 +2219,16 @@ export default function RestaurantPage() {
             {todayReservations.length > 0 && (
               <Badge variant="secondary" className="ml-2">{todayReservations.length}</Badge>
             )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setIsEmitirComprobanteOpen(true)}
+            data-testid="button-emitir-comprobante"
+          >
+            <Receipt className="h-4 w-4" />
+            Emitir Comprobante
           </Button>
           <Badge variant="outline" className="gap-1">
             <UtensilsCrossed className="h-3 w-3" />
@@ -5889,6 +5983,183 @@ export default function RestaurantPage() {
               data-testid="button-confirm-nc"
             >
               {emitirNCMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo...</> : "Confirmar NC"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Emitir Comprobante Dialog */}
+      <Dialog open={isEmitirComprobanteOpen} onOpenChange={(open) => { if (!open) setIsEmitirComprobanteOpen(false); }}>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5" />
+              Emitir Comprobante
+            </DialogTitle>
+            <DialogDescription>Factura electrónica sin mesa — se registra en la caja del restaurante.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1">
+            <Label>Tipo de comprobante</Label>
+            <Select value={compTipo} onValueChange={v => { setCompTipo(v); setCompCondicionIva(v === "FA" ? "Responsable Inscripto" : "Consumidor Final"); }}>
+              <SelectTrigger data-testid="select-comp-tipo"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>
+                <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>
+                <SelectItem value="FC">Factura C — Monotributista</SelectItem>
+              </SelectContent>
+            </Select>
+            {compAmbiente === "ficticio" && (
+              <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-center gap-1 mt-1">
+                <AlertTriangle className="w-3 h-3" />
+                Modo ficticio — CAE simulado, no válido fiscalmente
+              </p>
+            )}
+            {compAmbiente === "homologacion" && (
+              <p className="text-xs text-blue-700 dark:text-blue-400 flex items-center gap-1 mt-1">
+                <AlertTriangle className="w-3 h-3" />
+                Homologación — CAE real de ARCA, ambiente de pruebas
+              </p>
+            )}
+          </div>
+
+          {restaurantPVs.length > 1 && (
+            <div className="space-y-1">
+              <Label>Punto de Venta</Label>
+              <Select value={compPv} onValueChange={setCompPv}>
+                <SelectTrigger data-testid="select-comp-pv"><SelectValue placeholder="PV por defecto" /></SelectTrigger>
+                <SelectContent>
+                  {restaurantPVs.map((p: any) => (
+                    <SelectItem key={p.id} value={String(p.numero)}>
+                      PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <Separator />
+
+          <div className="space-y-3">
+            <Label className="text-sm font-semibold">Datos del receptor</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2 space-y-1">
+                <Label className="text-xs">{compTipo === "FA" ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
+                <Input value={compRazonSocial} onChange={e => setCompRazonSocial(e.target.value)} placeholder="CONSUMIDOR FINAL" data-testid="input-comp-razon-social" />
+              </div>
+              {compTipo === "FA" ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">CUIT *</Label>
+                  <Input value={compCuit} onChange={e => setCompCuit(e.target.value)} placeholder="XX-XXXXXXXX-X" data-testid="input-comp-cuit" />
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Label className="text-xs">DNI (opcional)</Label>
+                  <Input value={compDni} onChange={e => setCompDni(e.target.value)} placeholder="00000000" data-testid="input-comp-dni" />
+                </div>
+              )}
+              <div className="space-y-1">
+                <Label className="text-xs">Condición IVA</Label>
+                <Select value={compCondicionIva} onValueChange={setCompCondicionIva}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento"].map(o => (
+                      <SelectItem key={o} value={o}>{o}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label className="text-xs">Domicilio (opcional)</Label>
+                <Input value={compDomicilio} onChange={e => setCompDomicilio(e.target.value)} placeholder="Calle 123, Ciudad" data-testid="input-comp-domicilio" />
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">Ítems</Label>
+              <Button variant="outline" size="sm" onClick={() => setCompItems(p => [...p, { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 }])} data-testid="btn-comp-add-item">
+                <Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{compTipo === "FA" ? "Ingrese precios sin IVA (neto)" : "Ingrese precios con IVA incluido"}</p>
+            <div className="space-y-2">
+              {compItems.map((item, idx) => (
+                <div key={idx} className="border rounded-lg p-3 space-y-2" data-testid={`comp-item-row-${idx}`}>
+                  <div className="grid grid-cols-12 gap-2">
+                    <div className="col-span-5 space-y-1">
+                      <Label className="text-xs">Descripción *</Label>
+                      <Input value={item.descripcion} onChange={e => updateCompItem(idx, "descripcion", e.target.value)} placeholder="Desayuno, consumición..." />
+                    </div>
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs">Cant.</Label>
+                      <Input type="number" min="0.01" step="0.01" value={item.cantidad} onChange={e => updateCompItem(idx, "cantidad", parseFloat(e.target.value) || 1)} />
+                    </div>
+                    <div className="col-span-3 space-y-1">
+                      <Label className="text-xs">P. Unit.</Label>
+                      <Input type="number" min="0" step="0.01" value={item.precioUnitario || ""} onChange={e => updateCompItem(idx, "precioUnitario", parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                    </div>
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs">IVA</Label>
+                      <Select value={item.alicuotaIva} onValueChange={v => updateCompItem(idx, "alicuotaIva", v)}>
+                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="21">21%</SelectItem>
+                          <SelectItem value="10.5">10.5%</SelectItem>
+                          <SelectItem value="exento">Exento</SelectItem>
+                          <SelectItem value="no_gravado">No Grav.</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      {compTipo === "FA"
+                        ? `Neto: $${item.subtotalNeto.toLocaleString("es-AR", { minimumFractionDigits: 2 })} → Total: $${item.subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+                        : `Total c/IVA: $${item.subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })} (neto: $${item.subtotalNeto.toLocaleString("es-AR", { minimumFractionDigits: 2 })})`}
+                    </span>
+                    {compItems.length > 1 && (
+                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive h-6 text-xs" onClick={() => setCompItems(p => p.filter((_, i) => i !== idx))}>Quitar</Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
+            <div className="flex justify-between text-muted-foreground text-xs"><span>Importe Neto:</span><span>${compPreview.neto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+            {compPreview.iva21 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 21%:</span><span>${compPreview.iva21.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+            {compPreview.iva105 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 10.5%:</span><span>${compPreview.iva105.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+            {compPreview.exento > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>Exento:</span><span>${compPreview.exento.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+            <div className="flex justify-between font-bold border-t pt-1 mt-1"><span>TOTAL:</span><span>${compTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-1">
+            <Label className="text-sm font-semibold">Forma de cobro</Label>
+            <Select value={compFormaPago} onValueChange={setCompFormaPago}>
+              <SelectTrigger data-testid="select-comp-forma-pago"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="efectivo">Efectivo</SelectItem>
+                <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                <SelectItem value="transferencia">Transferencia</SelectItem>
+                <SelectItem value="mercado_pago">Mercado Pago</SelectItem>
+                <SelectItem value="cuenta_habitacion">Cuenta Habitación</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEmitirComprobanteOpen(false)}>Cancelar</Button>
+            <Button onClick={handleEmitirComprobante} disabled={emitirComprobanteMutation.isPending} data-testid="btn-comp-emitir">
+              {emitirComprobanteMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo...</> : "Emitir y descargar PDF"}
             </Button>
           </DialogFooter>
         </DialogContent>
