@@ -300,7 +300,9 @@ export function registerSpaRoutes(app: Express) {
 
       res.status(201).json(appointment);
     } catch (error) {
-      res.status(500).json({ error: "Error creating appointment" });
+      console.error("[SPA] Error creating appointment:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: "Error creating appointment", detail: msg });
     }
   });
 

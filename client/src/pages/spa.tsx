@@ -394,7 +394,7 @@ export default function SpaPage() {
       
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.message || err.error || "Error al crear turno");
+        throw new Error(err.detail || err.message || err.error || "Error al crear turno");
       }
       return res.json();
     },

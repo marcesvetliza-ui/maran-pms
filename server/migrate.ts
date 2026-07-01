@@ -639,6 +639,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  // ── SPA appointments — guest_id column (added after initial migration) ───
+  await withTimeout("spa_appointments.guest_id", T, () =>
+    db.execute(sql`ALTER TABLE spa_appointments ADD COLUMN IF NOT EXISTS guest_id varchar`)
+  );
+
   // ── Unificación clientes SPA → guests ────────────────────────────────────
   await withTimeout("spa_clients → guests migration", T, async () => {
     await db.execute(sql`
