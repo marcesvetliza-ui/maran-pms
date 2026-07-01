@@ -2416,7 +2416,10 @@ export default function CashRegister() {
   });
 
   const allActiveConfigs = configs?.filter((c) => c.isActive) || [];
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+
+  // Roles with full global visibility (all areas + historial + resumen)
+  const GLOBAL_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"];
+  const isAdminOrManager = GLOBAL_ROLES.includes(user?.role ?? "");
   const canSeeGlobalTabs = isAdminOrManager;
 
   const [parteSeleccionado, setParteSeleccionado] = useState<string | null>(() =>
@@ -2445,7 +2448,7 @@ export default function CashRegister() {
     setMostrarSelectorParte(true);
   }
 
-  // Non-admin/manager users see their assigned department OR their role-matching area
+  // Admin/manager/global roles see all areas; others see their assigned department or role-matching area
   const visibleConfigs = isAdminOrManager
     ? allActiveConfigs
     : allActiveConfigs.filter((c) => c.area === user?.department || c.area === user?.role);
@@ -2536,8 +2539,8 @@ export default function CashRegister() {
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             <DollarSign className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">Sin departamento asignado</p>
-            <p className="text-sm mt-1">Tu usuario no tiene un área de caja asignada. Contactá al administrador del sistema.</p>
+            <p className="font-medium">Sin área de caja asignada</p>
+            <p className="text-sm mt-1">Tu usuario ({user?.role}) no tiene un área de caja configurada. El administrador debe asignarte un departamento en la gestión de usuarios.</p>
           </CardContent>
         </Card>
       ) : (
