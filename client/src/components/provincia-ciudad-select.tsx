@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PROVINCIAS, getCiudades } from "@/lib/argentina-geo";
 
 interface ProvinciaCiudadSelectProps {
@@ -12,98 +19,7 @@ interface ProvinciaCiudadSelectProps {
   testIdLocalidad?: string;
 }
 
-function GeoDropdown({
-  value,
-  options,
-  placeholder,
-  disabled,
-  onChange,
-  testId,
-  extraOption,
-  onExtraOption,
-}: {
-  value: string;
-  options: string[];
-  placeholder: string;
-  disabled?: boolean;
-  onChange: (v: string) => void;
-  testId?: string;
-  extraOption?: string;
-  onExtraOption?: () => void;
-}) {
-  const [search, setSearch] = useState("");
-  const [open, setOpen] = useState(false);
-
-  const filtered = options.filter((o) =>
-    o.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const handleSelect = (v: string) => {
-    onChange(v);
-    setSearch("");
-    setOpen(false);
-  };
-
-  return (
-    <div className="relative">
-      {/* Show selected value as button, click to re-open */}
-      {value && !open ? (
-        <button
-          type="button"
-          className="w-full h-9 px-3 text-left text-sm border border-input rounded-md bg-background flex items-center justify-between gap-2 hover:bg-accent/50"
-          onClick={() => { setSearch(""); setOpen(true); }}
-          data-testid={testId}
-          disabled={disabled}
-        >
-          <span className="truncate">{value}</span>
-          <span className="text-muted-foreground text-xs shrink-0">✕</span>
-        </button>
-      ) : (
-        <Input
-          placeholder={disabled ? "Seleccionar provincia primero" : placeholder}
-          value={search}
-          disabled={disabled}
-          onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 300)}
-          className="h-9 text-sm"
-          data-testid={testId}
-          autoComplete="off"
-        />
-      )}
-
-      {open && !disabled && (
-        <div className="absolute z-[200] w-full mt-1 border rounded-md bg-popover shadow-lg max-h-52 overflow-y-auto">
-          {filtered.length === 0 && !extraOption && (
-            <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
-          )}
-          {filtered.map((o) => (
-            <button
-              key={o}
-              type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex items-center gap-2"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => handleSelect(o)}
-            >
-              <span className={`text-primary text-xs ${value === o ? "opacity-100" : "opacity-0"}`}>✓</span>
-              {o}
-            </button>
-          ))}
-          {extraOption && onExtraOption && (
-            <button
-              type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-accent text-muted-foreground italic"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { onExtraOption(); setOpen(false); setSearch(""); }}
-            >
-              {extraOption}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+const OTRA_SENTINEL = "__otra__";
 
 export function ProvinciaCiudadSelect({
   provincia,
@@ -115,8 +31,8 @@ export function ProvinciaCiudadSelect({
 }: ProvinciaCiudadSelectProps) {
   const ciudades = getCiudades(provincia);
   const ciudadEsConocida = provincia !== "" && ciudades.includes(localidad);
-  const [showCustom, setShowCustom] = useState(false);
-  const [customCiudad, setCustomCiudad] = useState("");
+  const [showCustom, setShowCustom] = useState(!ciudadEsConocida && localidad !== "");
+  const [customCiudad, setCustomCiudad] = useState(!ciudadEsConocida ? localidad : "");
 
   useEffect(() => {
     if (!ciudadEsConocida && localidad) {
@@ -127,43 +43,59 @@ export function ProvinciaCiudadSelect({
     }
   }, [localidad, ciudadEsConocida]);
 
+  const handleProvinciaChange = (v: string) => {
+    onProvinciaChange(v);
+    onLocalidadChange("");
+    setShowCustom(false);
+    setCustomCiudad("");
+  };
+
+  const handleLocalidadChange = (v: string) => {
+    if (v === OTRA_SENTINEL) {
+      setShowCustom(true);
+      setCustomCiudad("");
+      onLocalidadChange("");
+    } else {
+      setShowCustom(false);
+      onLocalidadChange(v);
+    }
+  };
+
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="grid gap-2">
         <Label>Provincia</Label>
-        <GeoDropdown
-          value={provincia}
-          options={PROVINCIAS}
-          placeholder="Buscar provincia..."
-          onChange={(v) => {
-            onProvinciaChange(v);
-            onLocalidadChange("");
-            setShowCustom(false);
-            setCustomCiudad("");
-          }}
-          testId={testIdProvincia}
-        />
+        <Select value={provincia || "__empty__"} onValueChange={(v) => handleProvinciaChange(v === "__empty__" ? "" : v)}>
+          <SelectTrigger data-testid={testIdProvincia}>
+            <SelectValue placeholder="Seleccionar..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__empty__">Seleccionar...</SelectItem>
+            {PROVINCIAS.map((p) => (
+              <SelectItem key={p} value={p}>{p}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="grid gap-2">
         <Label>Ciudad / Localidad</Label>
-        <GeoDropdown
-          value={ciudadEsConocida ? localidad : ""}
-          options={ciudades}
-          placeholder="Buscar localidad..."
+        <Select
+          value={ciudadEsConocida ? localidad : showCustom ? OTRA_SENTINEL : "__empty__"}
+          onValueChange={handleLocalidadChange}
           disabled={!provincia}
-          onChange={(v) => {
-            setShowCustom(false);
-            onLocalidadChange(v);
-          }}
-          extraOption="Otra localidad..."
-          onExtraOption={() => {
-            setShowCustom(true);
-            setCustomCiudad("");
-            onLocalidadChange("");
-          }}
-          testId={testIdLocalidad}
-        />
+        >
+          <SelectTrigger data-testid={testIdLocalidad}>
+            <SelectValue placeholder={!provincia ? "Seleccionar provincia primero" : "Seleccionar..."} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__empty__">Seleccionar...</SelectItem>
+            {ciudades.map((c) => (
+              <SelectItem key={c} value={c}>{c}</SelectItem>
+            ))}
+            <SelectItem value={OTRA_SENTINEL}>Otra localidad...</SelectItem>
+          </SelectContent>
+        </Select>
         {showCustom && (
           <Input
             placeholder="Escribir localidad"
