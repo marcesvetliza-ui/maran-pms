@@ -27,7 +27,6 @@ import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { VAT_CONDITION_LABELS } from "@/pages/guests";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
 import {
   Plus,
   UtensilsCrossed,
@@ -6040,7 +6039,7 @@ export default function RestaurantPage() {
             </div>
           )}
 
-          <Separator />
+          <div className="border-t border-border" />
 
           <div className="space-y-3">
             <Label className="text-sm font-semibold">Datos del receptor</Label>
@@ -6078,7 +6077,7 @@ export default function RestaurantPage() {
             </div>
           </div>
 
-          <Separator />
+          <div className="border-t border-border" />
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -6140,7 +6139,7 @@ export default function RestaurantPage() {
             <div className="flex justify-between font-bold border-t pt-1 mt-1"><span>TOTAL:</span><span>${compTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
           </div>
 
-          <Separator />
+          <div className="border-t border-border" />
 
           <div className="space-y-1">
             <Label className="text-sm font-semibold">Forma de cobro</Label>
