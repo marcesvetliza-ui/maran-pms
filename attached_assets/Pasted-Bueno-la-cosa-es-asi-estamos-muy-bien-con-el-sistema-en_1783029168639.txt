@@ -1,0 +1,3212 @@
+Bueno la cosa es asi, estamos muy bien con el sistema en cuanto a lo operativo, estamos haciendo la pruebo al mismo tiempo que el sistema actual y venimos solucionando cosas.
+Hoy nos juntamos con el programador que nos esta dando una mano respecto al sistema ya que el fue quien llevo adelante el sistema que estamos usando actualmente en el hotel.
+La charla es sobre el aspecto contable del sistema. 
+Como darle forma en la programación y operativamente.
+Te copio mas abajo el resumen de los charlado, y la transcripción.
+Yo tengo el plan de cuentas actual, y también ítem por ítem en que cuenta va.
+Más allá de eso quiero el consejo real de que conviene, si hacerlo bien ahora al modulo contable o mas adelante.
+Teniendo en cuenta que la parte contable de compras ya esta funcionando bastante bien respecto a lo que nosotros necesitamos hoy.
+Y que más allá de lo que hagamos contablemente si necesito que los reportes e informes de facturación, compras, ventas, salgan bien y den datos reales y útiles. 
+
+Dame tu evaluacion, recomendación y como harías todo.
+
+
+Gestión de Compras y Carga de Facturas
+
+Se discutió la necesidad de que Julián cambie su metodología de trabajo; debe cargar la factura completa (artículos, costos y cantidades) en lugar de solo conceptos, para que el sistema refleje el stock real y los costos precisos.
+
+Aylin se encarga actualmente de cargar las facturas que no son de mercadería directa, como los servicios o compras de housekeeping, mientras que Ana controla las cantidades.
+
+El objetivo es que la carga de artículos dispare automáticamente los asientos contables, evitando que administración tenga que intervenir en la transcripción de datos operativos básicos.
+
+Estructura Contable y Configuración de Asientos
+
+Speaker 3 recomendó asignar una cuenta contable de compra y otra de venta a cada producto individual para ganar flexibilidad, criticando la rigidez de otros sistemas web que agrupan demasiado los conceptos.
+
+Es fundamental definir la configuración de los asientos para que cada comprobante (facturas, notas de débito y crédito) dispare el movimiento correcto en el debe y el haber, incluyendo las distintas alícuotas de IVA (10.5%, 21%, 27%).
+
+Se identificó la falta de un módulo para "asientos manuales" que permita registrar movimientos que no provienen de facturas, como transferencias bancarias, depósitos o salidas de caja menores.
+
+Speaker 1 verificará si el plan de cuentas cargado coincide exactamente con el que utiliza actualmente la contadora para asegurar una transición fluida.
+
+Operatividad en Restaurante y Cocina
+
+Se propuso simplificar el menú eliminando opciones que no son útiles para los mozos y unificando las secciones de "Receta" y "Costos" en una sola vista para Diego (cocina) y Gonzalo (restaurante).
+
+La idea es automatizar la asignación contable mediante categorías: si un plato se marca como "Entrada" o "Principal", el sistema ya sabe internamente que debe ir a la cuenta de "Comestibles" sin que el usuario lo seleccione manualmente.
+
+Se discutió la posibilidad de triplicar artículos (como el agua mineral) si se venden en diferentes puntos como el Spa, el Hotel o el Restaurante, siguiendo la lógica de sistemas como Pecson, aunque esto depende de cómo se gestionen los depósitos.
+
+Decisiones sobre el Lanzamiento y Cierre
+
+Se planteó la posibilidad de lanzar el sistema centrándose primero en la parte operativa y de ventas, dejando la automatización contable total para una segunda etapa, dado que muchos hoteles operan entregando listados de ventas a contadores externos.
+
+Se acordó que hay un margen de tiempo (hasta el próximo ejercicio contable) para terminar de pulir el módulo de contabilidad detallada.
+
+La próxima semana se realizarán pruebas físicas con las impresoras y comanderas para asegurar que el flujo desde el pedido hasta la impresión del ticket funcione correctamente.
+
+Suggested Action Items
+
+Julián debe comenzar a cargar las facturas de compra ítem por ítem con sus respectivos costos y cantidades.
+
+Speaker 1 debe verificar si el plan de cuentas entregado por Aylin coincide con el cargado en el sistema.
+
+Speaker 1 desarrollará un módulo específico para la creación de asientos manuales (transferencias, depósitos, etc.).
+
+Speaker 1 integrará en la configuración la posibilidad de definir qué comprobantes disparan qué cuentas contables.
+
+El equipo realizará pruebas de las impresoras comanderas y la facturación la próxima semana.
+
+Speaker 1 consultará con contactos en el Hotel Pullman o similares sobre el funcionamiento operativo de los pasos de platos en monitores digitales.
+
+Transcripcion:
+
+0:00:00 Speaker 1
+Anduvo, anduvo
+
+0:00:00 Speaker 2
+Porque la-- ya la probé esa tarde en una nochecita y el cliente del restaurante no, no, no hacía nada.
+
+0:00:10 Speaker 1
+Fue más tarde, fue más tarde. Pero, pero pude, pude. Creo que pude. No sé qué...
+
+0:00:17 Speaker 2
+Millones de desplegables.
+
+0:00:18 Speaker 1
+Sí, sí, sí. Ese no, no, increíble. No sé qué carajos.
+
+0:00:24 Speaker 2
+No, no, es que el problema es gracioso.
+
+0:00:26 Speaker 1
+Sí, sí. Lo vamos a ver desde ahí, ¿no?
+
+0:00:31 Speaker 2
+Sí. Ah, sí, no sé, no sé.
+
+0:00:34 Speaker 1
+Lo que quieras, como quieras.
+
+0:00:35 Speaker 2
+No, pues no, no sé. Algo que quieran hacer. Hago hoteles.
+
+0:00:39 Speaker 3
+No, no.
+
+0:00:39 Speaker 1
+No hace falta. O si no la compu.
+
+0:00:42 Speaker 3
+Sí. No, no, no, no. Sí, es más, más bien para organizar que-
+
+0:00:45 Speaker 1
+Claro. ¿Hace falta que lo veamos?
+
+0:00:48 Speaker 3
+Sí, sí. Sí.
+
+0:00:50 Speaker 1
+Sí, sí, sí.
+
+0:00:52 Speaker 3
+Sí. Sí, porque... Me sorprende la velocidad que... Lo principal, no cierto, para saber de la contabilidad es cómo vas a encarar la parte de ventas. No es cierto, porque, eh, yo estaba viendo la parte de stock, ¿no es cierto? Y bueno, hay muchas formas de encarar la parte de contabilidad, de cómo, es decir, el que se encarga del inventario, ¿no es cierto? Por eso te dije, el que carga precio y demás, eso se ve, acá se-
+
+0:01:29 Speaker 1
+Tal cual. Sí, sí, es operativo, es operativo. Tal cual.
+
+0:01:32 Speaker 3
+Pero se puede hacer desde asign-- como es actualmente, asignarle una cuenta contable a cada uno de los productos, o, y eso, que después cuando vos armás el asiento, que eso yo no sé cómo vos lo armaste. Estuve viendo la parte de administración-
+
+0:01:47 Speaker 1
+Sí.
+
+0:01:48 Speaker 3
+Y vi la parte que tenían asiento, que tenían asiento, pero no sé cómo, eh, cómo lo estás haciendo, cómo, cómo se dispara eso, porque normalmente cualquier sistema contable tienes una, una parte de configuración.
+
+0:02:00 Speaker 1
+Sí, sí. Los asientos, eh, el plan de cuentas.
+
+0:02:03 Speaker 3
+El plan, dentro del plan de cuentas, dentro de las series, dentro de las minutas, eh, dentro... Y cómo después, dentro del plan de cuentas se lo asignás, porque vos podés asignarle cuando configurás las facturas, es decir, configurás el asiento que dispara cada uno de los comprobantes, cómo le asignás. Puede ser a través de decirle: "Bueno, mirá, al alojamiento va acá, eh, y la naranja va acá, esto va acá", o como, eh, con permisos o con algo que describa y que sea: "Bueno, si es de acá, va a esta cuenta contable, va de acá a acá".
+
+0:02:43 Speaker 1
+Sí, sí, sí.
+
+0:02:44 Speaker 3
+No sé cómo lo encaraste, porque eso hay que, hay que configurarlo ahí.
+
+0:02:48 Speaker 1
+Yo le subí el plan de cuentas.
+
+0:02:50 Speaker 3
+Sí, vos subiste un plan de cuentas.
+
+0:02:51 Speaker 1
+Exactamente. El plan de cuentas, eh, está bastante detallado lo, lo, lo que me pasó Aylin, no el tema de qué va a qué lado.
+
+0:03:01 Speaker 3
+Eso es lo que... Por eso hay que definir eso, porque si vos, si... La parte de restaurante ya está casi, casi lista.
+
+0:03:08 Speaker 1
+Exacto.
+
+0:03:10 Speaker 3
+Boludeces, la parte de más parte de cocina, no, no tanto de restaurante. Ya restaurante, si vos sacás, como yo te dije, sacás ese menú, organizás en cocina todo restaurante.
+
+0:03:20 Speaker 1
+Ya está.
+
+0:03:21 Speaker 3
+Ya está. No hay que hacer nada. Pero el problema es que si sacamos cocina que la armamos así, todo va a una cuenta contable. O va a una cuenta contable o le decís: "Bueno, la, el plato de cocina tal, ravioli con tuco o el café va a una cuenta contable o lo definís de otra forma.
+
+0:03:42 Speaker 1
+Pero e-eso a mí ayer me quedó la duda. El café no va a la cuenta contable, lo que va a la cuenta contable es el ticket.
+
+0:03:50 Speaker 3
+Mmm, todo depende. De lo que vos quieras verificar. El otro día también, eh, si vos querés saber dentro de qué se vendió de alojamiento. Cada artículo, digamos así, cada, cada artículo, digamos así, tiene una cuenta contable. Entonces, sí, el café tiene una cuenta contable, porque si vos querés después decir: "Yo quiero saber todo lo que-
+
+0:04:11 Speaker 2
+Independientemente de lo, de, de la forma con que vos cierres ese café.
+
+0:04:16 Speaker 3
+Por eso, no. Ahí entra lo cierto a jugar. Cada comprobante dispara un tipo de asiento determinado. Facturas de, de venta son como, son iguales. Es decir, facturas y notas de débito son idénticos, los asientos, el formato del asiento es idéntico, las notas de crédito es inverso, los proveedores es como este y la compra y la nota de crédito es como este. Es decir, pero ¿cómo lo definís? ¿Cómo pensás definir cada una de esas cosas?
+
+0:04:45 Speaker 1
+Yo entiendo lo que me decís ahora. Yo me acuerdo que con el sistema que estamos usando ahora, por producto se cargaba cuenta corriente y se cobraba.
+
+0:04:54 Speaker 3
+Se hace, se le pone una cuenta contable de compra y una de venta.
+
+0:04:58 Speaker 1
+Exactamente. Sí, sí, sí.
+
+0:04:58 Speaker 3
+En el sistema de web, el otro, ¿no es cierto? Se le declara un tipo de producto y según el tipo de producto, cuando vos armás el asiento, es decir, si este es producto, entonces sí va a ir, va a ir a este, a este, a esta cuenta contable.
+
+0:05:15 Speaker 1
+Esto, claro, que todos los, los, los platos vayan a comestible y comestible vaya a tal cuenta.
+
+0:05:22 Speaker 3
+Exactamente.
+
+0:05:22 Speaker 1
+Por ejemplo. Algo así.
+
+0:05:23 Speaker 3
+Y cada forma de pago, no cierto, tiene su forma de pago. Si tarjeta de crédito va a tal, tal cuenta contable, tarjeta de débito tal cuenta contable. Pero ahí falta definir eso.
+
+0:05:33 Speaker 1
+Bien. ¿Cuál es la mejor forma para vos para de, definir eso? O sea, a lo que voy es-
+
+0:05:40 Speaker 3
+No sé cómo lo armaste vos. La parte de compra, porque si ya está armado no puedo decirte: "No, vamos a desarmar toda la parte de compra porque la parte de venta es totalmente diferente". Tiene que ser compatible.
+
+0:05:51 Speaker 1
+Está armado, está armado, pero no, no estoy seguro hoy que un plato que se cargó... Gen-gen-genera el asiento. Lo que genera el asiento hoy es de, eh, eh, es el ticket
+
+0:06:05 Speaker 3
+Es que eso lo genera el asiento
+
+0:06:07 Speaker 1
+Sí, sí, sí. No, no, entiendo, entiendo. Eh, eh, esa o-otra parte a lo, a lo que voy, hay que agregarla. Entonces, ¿cuál es la mejor forma para vos de agregarla?
+
+0:06:16 Speaker 3
+¿Y cómo vos hiciste la parte de compra? Porque Aylin com-- eh, carga com-- eh, sí. Por lo que yo estuve viendo, si voy a entrar en la parte de administración, vos podés cargar, eh, un con-- un concepto tomado así como ella hace. Nosotros cuando configuramos el sistema de escritorio-
+
+0:06:35 Speaker 1
+Sí.
+
+0:06:36 Speaker 3
+Definimos que Julián cargaba los artículos y cargaba los precios.
+
+0:06:40 Speaker 1
+Sí, no, eso está mal. Eso yo ya le dije que, que está ma... Jo-Jo-Julián tiene que cargar una factura entera. Precio y-
+
+0:06:47 Speaker 3
+Por eso.
+
+0:06:47 Speaker 1
+Y a, y art- y artículos.
+
+0:06:49 Speaker 3
+Por eso. Y, y a ella, ¿no es cierto?, le día-- le dábamos solamente las, eh... No era ella, era... Estaba...
+
+0:06:58 Speaker 1
+Raúl.
+
+0:06:58 Speaker 3
+Raúl.
+
+0:06:59 Speaker 1
+Y después Carlos.
+
+0:07:00 Speaker 3
+Y Carlos, ¿no es cierto?, que cargaba el concepto y eso disparaba el asiento.
+
+0:07:04 Speaker 1
+Sí.
+
+0:07:04 Speaker 3
+Entonces, yo al cargar, darle a, a Julián que cargue la factura entera, artículo por artículo, yo ya sabía el costo del producto, ya sabía la cantidad de artículos que yo ya tengo en el stock para ese inventario.
+
+0:07:21 Speaker 1
+Exacto.
+
+0:07:21 Speaker 3
+Ya sabía todo.
+
+0:07:23 Speaker 1
+Mhm.
+
+0:07:23 Speaker 3
+Y administración le decía: "Bueno, eh, cargá". Eh, eso no disparaba ningún tipo de asiento, porque solamente tenía costos.
+
+0:07:31 Speaker 1
+Claro, sí, sí.
+
+0:07:32 Speaker 3
+Costos y cantidades. Y entonces, yo le daba la parte de administración y le decía: "Mirá, vos solamente cargá la factura, el... Un, un IVA", le digo, "veintiuno punto cinco, así. Y si va a cuenta corriente, o si lo pagás-
+
+0:07:47 Speaker 1
+Exacto.
+
+0:07:47 Speaker 3
+En efectivo". Eso disparaba el asiento.
+
+0:07:49 Speaker 1
+Sí, sí.
+
+0:07:50 Speaker 3
+No sé si vas a seguir con ese concepto.
+
+0:07:52 Speaker 1
+Eso está, po-po-por-
+
+0:07:54 Speaker 3
+Eso yo ya lo vi. Eso me parece que era-
+
+0:07:55 Speaker 1
+Incluso Ju-Ju-Julián puede que eso hay que ver si está bien o no, si lo... eh, a-agregar stock acá s-sin poner una factura.
+
+0:08:07 Speaker 3
+No.
+
+0:08:08 Speaker 1
+Por eso. No, no, no, no podría.
+
+0:08:11 Speaker 3
+No.
+
+0:08:11 Speaker 1
+Eh...
+
+0:08:12 Speaker 3
+Pero eso-
+
+0:08:13 Speaker 1
+Pero-
+
+0:08:13 Speaker 3
+Eso, eso es una partecita. Julián debería poder cargar. Llega la factura, como hace hoy, descarga todo, carga así cada uno de los artículos. También hay que ver la-
+
+0:08:25 Speaker 1
+Pero no, pará. Esa parte es de... Es que no congen... No sé. Por ser bueno. Es de-- es que no congeniamos co-co-co-con Julián. Eso está mal hecho. O sea, Ju-Julián, yo ya le dije, tiene que acostumbrarse y cargar la, la, la factura. Es co-- es copiar datos. No es muy... muy complicado.
+
+0:08:46 Speaker 3
+Nada de artículo por artículo y sino dar de alta la, dar de alta los artículos que faltan.
+
+0:08:51 Speaker 4
+Él se-- nula cuando le empiezan a pedir lo de ingreso bruto, que figura-
+
+0:08:56 Speaker 1
+Sí, sí.
+
+0:08:56 Speaker 4
+En la factura, lo de si esto no es lo grabado.
+
+0:08:59 Speaker 3
+Por eso, pero-
+
+0:09:00 Speaker 4
+O los diferentes IVA que a veces te llegan y la carne y eso. Se marea en esa parte, digamos.
+
+0:09:05 Speaker 3
+Pero por eso, lo que yo le decía.
+
+0:09:06 Speaker 4
+Yo no lo quiero tocar, porque después le voy a explicar mal a Aylin.
+
+0:09:10 Speaker 3
+Yo lo que le decía: "Julián, vos no tenés que cargar la parte de IVA, vos solamente tenés que cargar el artículo, la cantidad y el costo".
+
+0:09:16 Speaker 4
+Bueno, ahora sí.
+
+0:09:18 Speaker 3
+Ah.
+
+0:09:18 Speaker 4
+Entendés. Ahora vos cargas factura de compra.
+
+0:09:21 Speaker 3
+Sí, eso ya lo vi.
+
+0:09:22 Speaker 1
+Sí, sí, claro.
+
+0:09:23 Speaker 4
+Está todo.
+
+0:09:23 Speaker 3
+Está todo.
+
+0:09:24 Speaker 4
+Y hoy quería cargar y no...
+
+0:09:26 Speaker 1
+Bueno, pero eso es igual, es práctica. Eso tiene, tiene, tiene que aprenderlo porque es, es copiar, digamos. No, no es nada...
+
+0:09:34 Speaker 3
+Es transcribir.
+
+0:09:35 Speaker 1
+Exactamente.
+
+0:09:36 Speaker 3
+Es, es, primero se tiene que dar de alta el producto. Al darse de alta el producto se le asigna una cuenta contable, una, una asignación determinada para disparar un asiento. El que dispara el asiento va a ser entonces Julián, no va a ser Aylin.
+
+0:09:51 Speaker 1
+Sí.
+
+0:09:51 Speaker 3
+Y Aylin, ¿qué va a hacer?
+
+0:09:54 Speaker 1
+Los que no recibe Julián. Ha-hay un montón que no son mercadería.
+
+0:09:57 Speaker 3
+No son todo la otra parte de-
+
+0:09:59 Speaker 1
+Exactamente.
+
+0:09:59 Speaker 3
+La parte que, que llega.
+
+0:10:00 Speaker 1
+De compra, exactamente.
+
+0:10:01 Speaker 3
+De compra.
+
+0:10:02 Speaker 1
+O servicio o compra de, de housekeeping, por ejemplo, sí lo carga Aylin. Y Ana controla la cantidad, pero lo... todo.
+
+0:10:11 Speaker 3
+Entonces, ya esta, sabiendo eso, ya tenés una gran parte. Lo que pasa, hay que definir cómo hiciste la parte para que eso dispare asiento.
+
+0:10:20 Speaker 1
+Sí.
+
+0:10:20 Speaker 3
+Eso no se tiene que modificar.
+
+0:10:23 Speaker 1
+No, no, no. Eso yo s-
+
+0:10:25 Speaker 3
+Y eso tiene que trasladarse a la parte de venta.
+
+0:10:28 Speaker 1
+Exacto.
+
+0:10:29 Speaker 3
+Y cómo impacta en productos de venta.
+
+0:10:31 Speaker 1
+Mhm. Sí, sí.
+
+0:10:33 Speaker 3
+Eso es... Yo ahí ya no sé cómo lo, lo-
+
+0:10:35 Speaker 1
+No, es que a mí-
+
+0:10:36 Speaker 3
+Hiciste ahí.
+
+0:10:38 Speaker 1
+A, a, a mí lo que me interesa saber es que para vos, cómo es lo mejor. No, no, no, no cómo hacerlo, sino cómo se carga en eso. Es decir, yo, yo cargo un plato y le cargo como este sistema, eh, o yo para mí lo mejor es tipo todos los platos van a comestible, la bebida a, a bebida y algún cuatro o cinco conceptos más.
+
+0:11:05 Speaker 4
+Trata de hacerlo lo más simplificado posible desde el principio, digamos.
+
+0:11:08 Speaker 3
+Hacerlo simplificado está bárbaro, pero cómo, cómo le... Es decir, yo, eh, soy... ¿Cómo se llama este chico? Se me olvidó el nombre... que está en el restaurante.
+
+0:11:19 Speaker 4
+Gonzalo.
+
+0:11:20 Speaker 3
+Gonzalo.
+
+0:11:20 Speaker 1
+Gonza.
+
+0:11:21 Speaker 3
+Llega, eh, o el de, el de cocina.
+
+0:11:24 Speaker 1
+Sí.
+
+0:11:24 Speaker 3
+El que tiene que armar un plato.
+
+0:11:26 Speaker 1
+Diego. Sí.
+
+0:11:26 Speaker 3
+Diego. Arma así, eh, la carne, la pimienta asada, ta, listo. Yo tengo-
+
+0:11:32 Speaker 1
+La receta.
+
+0:11:33 Speaker 3
+Tenés la receta, ya tenés tres platos ahí.
+
+0:11:35 Speaker 1
+Sí.
+
+0:11:35 Speaker 4
+Sí.
+
+0:11:36 Speaker 3
+Y ya tenés un artículo.
+
+0:11:37 Speaker 1
+Exacto.
+
+0:11:38 Speaker 3
+Al tener el artículo, después Gonzalo lo vende.
+
+0:11:42 Speaker 1
+Sí.
+
+0:11:43 Speaker 3
+Al venderlo, se dispara un asiento. ¿Quién hace que vaya ese plato a tal cuenta contable?
+
+0:11:52 Speaker 1
+Yo, yo, por eso.
+
+0:11:53 Speaker 3
+Pero ¿cómo?
+
+0:11:54 Speaker 1
+Con-- si, si le ponemos que los platos todos son comestibles, en este caso.
+
+0:11:58 Speaker 3
+¿En qué parte?
+
+0:11:59 Speaker 1
+Va a la cuenta comestible. Claro, eso, eso es lo que, que te consulto, que dónde te parece que es lo mejor-
+
+0:12:05 Speaker 3
+Y se puede poner. Por eso, hay dos formas. Yo conozco dos formas.
+
+0:12:09 Speaker 4
+Vos estás hablando de como ahora usamos los grupos, un grupo de esas cosas.
+
+0:12:13 Speaker 3
+No, no, no.
+
+0:12:13 Speaker 4
+Y bueno, la cuenta contable.
+
+0:12:15 Speaker 3
+De las cuentas contables-
+
+0:12:15 Speaker 1
+Viste lo que le pedimos ahora que, que nos diga de, de ho-hotel que se facturó en alojamiento-
+
+0:12:22 Speaker 3
+Sí.
+
+0:12:22 Speaker 1
+Y que era de, de-
+
+0:12:24 Speaker 3
+Y que era solamente-
+
+0:12:25 Speaker 1
+Eso.
+
+0:12:25 Speaker 3
+Eso, estamos hablando de cuentas contables y cuando se define la... un artículo tiene, si vos te fijas en el sistema de escritorio, vos tenés una cuenta contable de compra y otra de venta. ¿Por qué? Porque el sistema cuando, eh... encuentra que tiene que emitir una, un, un asiento, se fija en la cuenta contable, sea de compra o de venta, depende de cómo sea. Toma eso, entonces hace un detalle por cada, es decir, el renglón está compuesto por los artículos que lo conforman y la forma de pago, la parte impositiva y la forma de pago. Es un botones el asiento entre el debe y el haber.
+
+0:13:01 Speaker 1
+Sí. Buenas tardes.
+
+0:13:04 Speaker 3
+Hola, Rossi.
+
+0:13:04 Speaker 1
+¿Solo café?
+
+0:13:06 Speaker 3
+El señor.
+
+0:13:07 Speaker 1
+José Pablo.
+
+0:13:10 Speaker 3
+La puso.
+
+0:13:19 Speaker 1
+La misma para vos, ¿no, Marco? Sí. Para mí y el cortadito para Marce. ¿Tengo algo para retirar? Muchas gracias, Rossi. Eh, allá si querés, Rossi, sí. Por favor. Muchas gracias. Muchas gracias. Ehm...
+
+0:13:48 Speaker 3
+Vos cómo le, eh, vos tenés una configuración de asientos.
+
+0:13:52 Speaker 1
+Cuál eso. Esa parte yo no la tengo acá, porque yo se lo cargué, pero tengo que ponerle.
+
+0:13:57 Speaker 3
+Ah.
+
+0:13:58 Speaker 1
+La, la configuración contable, exactamente.
+
+0:14:00 Speaker 3
+Te siento cómo se arma cada uno.
+
+0:14:02 Speaker 1
+Tal cual.
+
+0:14:03 Speaker 3
+Cómo le estás, cómo, cómo disparaste todo asiento que vos tenés ahí.
+
+0:14:06 Speaker 1
+Se lo cargué, pero yo lo hice en el back. No, no tengo acá.
+
+0:14:10 Speaker 3
+No lo hiciste por sistema.
+
+0:14:11 Speaker 1
+No, exactamente. Por eso, por eso, por eso. Exactamente.
+
+0:14:16 Speaker 3
+Ahora sí.
+
+0:14:17 Speaker 1
+Por eso te, te decía entender bien tu lógica, que es lo que me planteás vos para yo plantearlo. Y sí, ya dejarlo co-co-co-- configurarlo acá para en, en un futuro sí cambiarlo o no.
+
+0:14:30 Speaker 3
+Sí, porque vos necesitás tener un módulo.
+
+0:14:34 Speaker 1
+Exacto.
+
+0:14:34 Speaker 3
+Un cierto donde vos tengas. En ese sentido, los dos sistemas son similares al sistema web y el sistema de escritorio. Uno que se define el, eh, periodo contable.
+
+0:14:45 Speaker 1
+Mhm.
+
+0:14:46 Speaker 3
+De tal fecha hasta tal fecha. Uno que se define la minuta, puede hacerlo en el mismo lugar, puede hacerlo en dos menús diferentes, o ahí a gusto y piacere. Es lo mismo. Cada minuta es un asiento, entonces vos podés sacar. Eso es la configuración básica. Después, cómo realizar la configuración del asiento. Ahí, eh... optamos, eh... yo por lo menos estuve averiguando en otros sistemas y los otros en Texel y otros más, todos trabajan igual, más o menos. Le decís que el artículo pertenezca a una cuenta contable de compra o de venta.
+
+0:15:22 Speaker 1
+Sí.
+
+0:15:23 Speaker 3
+Directamente decís cuatro, uno, uno, dos, tres.
+
+0:15:26 Speaker 1
+Sí.
+
+0:15:27 Speaker 3
+Así. O le decís, como en el sistema de escritorio, que para mí lo complicaron y ahora se están dando cuenta de que lo complicaron, pierde la pla-- la, la fa-- la flexibilidad, porque si vos le decís: este artículo pertenece al, al rest-- a plato, este pertenece a bebida, este pertenece a acá, así, el asiento, ¿no es cierto? Vos le tenés que decir: bueno, si es así, va a esta cuenta contable, ¿sí? Es muy, es fijo.
+
+0:15:54 Speaker 1
+Está claro. Sí, sí, sí.
+
+0:15:55 Speaker 3
+Es fijo, lo, lo fijás vos.
+
+0:15:56 Speaker 1
+Demasiado fijo.
+
+0:15:57 Speaker 3
+Es muy fijo. En cambio, el otro como toma... no, me fijo en la cuenta contable que tiene el producto y lo traigo. Entonces, ahí sí hago todo ese listadito. Los, de nuevo, ¿los has visto?
+
+0:16:10 Speaker 1
+¿A cuál?
+
+0:16:10 Speaker 3
+A la parte del sistema de escritorio.
+
+0:16:12 Speaker 1
+Pero que...
+
+0:16:13 Speaker 3
+En la parte contable.
+
+0:16:14 Speaker 1
+No, no.
+
+0:16:16 Speaker 3
+Entonces, eso hace que sea más flexible.
+
+0:16:19 Speaker 1
+Bien.
+
+0:16:19 Speaker 3
+Si yo creo más cuentas contables, yo necesito crear más cuentas contables, porque nunca se sabe. Nunca se sabe. Lo único que tengo que hacer es crearlo y asignarlo. En cambio, el otro como está-
+
+0:16:32 Speaker 1
+Asignarle que las cuentas vayan ahí, sí.
+
+0:16:34 Speaker 3
+Le tengo... si yo creo la cuenta contable, tengo que ver si después el producto es de acá, me tengo que fijar si después va acá y se hace el asiento. Para mí lo mejor es poner una cuenta contable directamente visible, decirle: bueno, esto pertenece a acá, esto pertenece a allá. Después que el producto pertenezca a housekeeping, que pertenezca al restaurante, que per-- eso es otro.
+
+0:17:01 Speaker 1
+Otra cosa. Sí, sí, sí. Esto es contable.
+
+0:17:03 Speaker 3
+Esto es contable. Entonces, lo que ahí, lo que le falta al inventario es definir a Mickey.
+
+0:17:10 Speaker 1
+Mhm, sí, sí, sí, sí.
+
+0:17:11 Speaker 3
+Puede cada uno lo hace-
+
+0:17:12 Speaker 1
+La cuenta contable.
+
+0:17:13 Speaker 3
+Es la cuenta contable. Entonces, cuando vos ar-- tenés la configuración del asiento, si querés te lo muestro en el sistema cómo se hace.
+
+0:17:21 Speaker 1
+Ajá.
+
+0:17:21 Speaker 3
+En el sistema de escritorio.
+
+0:17:22 Speaker 1
+Sí.
+
+0:17:23 Speaker 3
+¿No es cierto? Eh...
+
+0:17:25 Speaker 1
+Eh... el de escritorio yo tengo el de... no, el de web tengo acá. No, no, eh, el de escritorio, el de escritorio, el sistema de escritorio.
+
+0:17:36 Speaker 3
+Para mí es mejor. No sé qué es. Allá ahora se están dando cuenta que... me tiro la pata hasta el árbol. Tardás mucho más en configurarlo. Tardás una barbaridad en configurarlo.
+
+0:17:51 Speaker 1
+¿Querés mostrar un Excel?
+
+0:17:53 Speaker 3
+Para, che. Para configurar el tipo de asiento. Gestión de... mirá, yo tengo un Excel, gestión de edición de, de asientos. Este es el... yo utilizo yo para, para armar los asientos. Por eso yo quería mostrarte, porque es simple. Es que vivirlo es imposible.
+
+0:18:21 Speaker 1
+Claro.
+
+0:18:29 Speaker 3
+Esto es más viejo, pero no importa. Cada artículo del stock tiene una cuenta asociada, sea de compra o sea de venta, ¿eh? Dependiendo de qué vaya a ser, qué es lo que... Entonces, en la parte de contabilidad yo tengo el plan de cuenta, lo que tenés que tener así, de momento, una-
+
+0:18:47 Speaker 1
+Claro
+
+0:18:48 Speaker 3
+...una cosa así por lo menos. Eh, el ejercicio contable, que los ejercicios contables van a ir... Son activos, ah, ¿mm? La minuta que tiene cada uno de los ejercicios contables, que vas a asignarle cada factura apunte... Vamos a buscar algo. Factura. Que cada factura... Eh, ¿dónde está asiento? ¿Ve? Tengo un asiento contable.
+
+0:19:17 Speaker 1
+Sí.
+
+0:19:18 Speaker 3
+No es cierto. ¿Cómo se configura esto? Desde "tipos de asiento", no es cierto, acá van a, a... Este, este asiento es esto.
+
+0:19:27 Speaker 1
+Claro. Sí, sí.
+
+0:19:29 Speaker 3
+Tipo de asiento. Vos le decís, ¿eh?, que tome la cuenta contable... Tiene una configuración esto, ahora sí. Que tome una cuenta contable determinada. Ah, esto ya... Que tome acá, ¿ve? La cuenta contable que tiene la... el producto. Tome... Y que vaya y que haga no sé qué, que tome la cuenta contable de acá y que vaya, no es cierto, que arme, el haber o el debe, y después le decís: según la forma de pago, según los impuestos, ¿eh? Este sería el neto del artículo en sí, este sería el, el, la parte del, la parte impositiva.
+
+0:20:16 Speaker 1
+Mhm.
+
+0:20:17 Speaker 3
+¿Ve? Esto, no es cierto, se saca de mantenimiento de impuestos, fórmula, es decir, esto tiene esto. A ver, a ver. Ahí sí, acá es más, más complicado que el otro. Este es el impuesto. Esto tiene una fórmula, una don... una variable, un campo donde se totaliza, que yo lo utilizo para todo lo que son los de reportería, no es cierto. Y eso además tiene una fórmula, no es cierto, que es esto. Esto es lo que va acá. Es decir, esto se une a esto y esto se une a esto. Entonces, yo tengo o tener... Acá puedo decir... Acá vos tenés solamente IVA veintiuno.
+
+0:21:02 Speaker 1
+Sí, sí, sí.
+
+0:21:03 Speaker 3
+Pero si vos tenés diez coma cinco, veintisiete...
+
+0:21:07 Speaker 1
+Sí, sí, son otras fuentes.
+
+0:21:09 Speaker 3
+Es otra... Vamos a buscar otra... La parte de pro... A ver, acá, ¿ve? Proveedores. Acá sí tenés.
+
+0:21:16 Speaker 1
+Exacto.
+
+0:21:17 Speaker 3
+Y ve, tenés el dos coma cinco, el cinco, el diez coma cinco, el veintiuno, el veintisiete. Tenés una cantidad de IVAs que la gente no conoce.
+
+0:21:27 Speaker 1
+No, no.
+
+0:21:28 Speaker 3
+Existe. Existe. Entonces, para definir esto, no es cierto, vos tenés que partir inicialmente... No, ni idea de dónde está esto. Y acá.
+
+0:21:41 Speaker 1
+Sí, sí, está bueno. Sí.
+
+0:21:43 Speaker 3
+Y esto es lo que está faltando definir. Como yo vi asientos, yo dije: no puedo decirle nada porque ya tiene definido-
+
+0:21:52 Speaker 1
+No, es que-
+
+0:21:53 Speaker 3
+Esto.
+
+0:21:54 Speaker 1
+Cargamos eso, asiento, exactamente.
+
+0:21:55 Speaker 3
+No, yo pensé que tenía definido esto.
+
+0:21:58 Speaker 1
+Lo de compras.
+
+0:22:00 Speaker 3
+Sí.
+
+0:22:00 Speaker 1
+Claro. No de ventas.
+
+0:22:01 Speaker 3
+No importa, pero si vos ya tenés definido esto...
+
+0:22:04 Speaker 1
+Mhm, sí.
+
+0:22:05 Speaker 3
+Definido, ya está.
+
+0:22:06 Speaker 1
+Sí, sí, está bien.
+
+0:22:06 Speaker 3
+Vos ponés el problema acá de comprobante. Debe o haber, va...
+
+0:22:10 Speaker 1
+Tal cual.
+
+0:22:11 Speaker 3
+Y qué comprobante es para cada cosa.
+
+0:22:14 Speaker 1
+Exacto.
+
+0:22:16 Speaker 3
+Mmm. Pero yo pensé que vos tenías ya definido esto.
+
+0:22:20 Speaker 1
+A medias está.
+
+0:22:21 Speaker 3
+A medias.
+
+0:22:22 Speaker 1
+Exacto.
+
+0:22:23 Speaker 3
+Esto para mí es lo mejo... la forma más práctica.
+
+0:22:26 Speaker 1
+Bien.
+
+0:22:27 Speaker 3
+¿Por qué? Porque es mucho más flexible. Claro, tenés que adaptarlo, no es cierto. Vos le decís que cada uno de los productos apunte un, un... apunte al... ¿a una cuenta contable?
+
+0:22:39 Speaker 1
+Sí, sí, a la cuenta contable, tal cual.
+
+0:22:41 Speaker 3
+Al definir eso-
+
+0:22:41 Speaker 1
+Cada producto tiene que ir a una cuenta contable.
+
+0:22:43 Speaker 3
+A una cuenta contable. En el sistema de, en el sistema web debés de tener esto: tiene un concepto.
+
+0:22:49 Speaker 1
+Mhm.
+
+0:22:50 Speaker 3
+El concepto después vos lo tenés que decirle: no, el grabado va a ser según el concepto.
+
+0:22:57 Speaker 1
+El número, digamos, de asiento está asociado a...
+
+0:22:59 Speaker 3
+Y lo fijás acá.
+
+0:23:01 Speaker 1
+Mhm.
+
+0:23:02 Speaker 3
+En cambio, los asientos, eh, la configuración se hace mucho más grande, porque vos tenés que tomar en cuenta cada una de las cuentas contables que pueden venir para cada una de las facturas. ¿Me entendés? Porque ¿qué es el grabado? En una factura de venta va a ser, eh, esta, puede ser esta, como puede ser... Bueno, puede ser otra.
+
+0:23:28 Speaker 1
+Sí, sí, está bien.
+
+0:23:28 Speaker 3
+O puede ser otra, o puede ser otra. Y para la parte de compras también puede ser, puede ser esta, esta, esta y esta.
+
+0:23:34 Speaker 1
+Relajado.
+
+0:23:35 Speaker 3
+O sea, vos tenés que planificarlo pensando todas las probabilidades. En cambio, de esta forma, vos le dejás que sea, eh, un campo de detalle, que tome el detalle, ¿ve? Como dice acá, que tome el detalle de acá.
+
+0:23:53 Speaker 1
+Bien.
+
+0:23:53 Speaker 3
+Y después le decís todo lo demás. Si esto tiene IVA, si no tiene IVA, si ta, ta, ta, ta, ta, ta, ta, ta, ta, para mí es la forma más-
+
+0:24:04 Speaker 1
+Más fácil
+
+0:24:04 Speaker 3
+...práctica que decir. Allá la complicaron de una forma tal, que hasta digo: mañana no sé lo que nos dice. Esto lo hicieron para la NASA, no sé qué estaban pensando.
+
+0:24:12 Speaker 1
+Claro. Bueno-
+
+0:24:13 Speaker 3
+Y eso complica. Entonces, vos tenés que definir enton... a los artí... Y otra cosa, yo vi que vos tenías los platos por un lado, inventario por otro, ahí le tenía... Todo junto, todo es stock. Todo eso. Podés definirlo de otra forma, podés-- pero tiene que estar más o menos correlacionado todo, porque después si no después no podés buscar nada. Y uno buscaba acá, el otro buscó-- eso es con-- eso es una idea. Allá todavía sigue entrando y Pecson, que es uno que más me gusta a mí del sistema de, de hotelería, también tiene todo junto. La única diferencia es que ellos acá, cuando-- cómo yo defino que esto va al restaurante. En el sistema de, del sistema de acá va todo.
+
+0:25:05 Speaker 4
+Sí.
+
+0:25:05 Speaker 3
+En el sistema web tenemos recursos. Yo le digo: "No, los recursos estos, recursos de restaurante, el usuario este va a ver solamente esto, entonces solamente vas a ver esto para la parte de venta". En los de Pecson, aparte de tener recursos, trabajan con puntos de venta. Le decís que este artículo solamente se va a vender en el punto de venta veintiuno. Y yo me-- y yo le pregunto, y le pregunté a la guía: ¿y qué pasa si el agua, el agua mineral lo utiliza el spa, el hotel? Ah, lo tiene, lo tiene que triplicar.
+
+0:25:39 Speaker 4
+Ah, mirá. Sí, tiene que haber tres artículos diferentes.
+
+0:25:41 Speaker 3
+Tiene que haber tres artículos, sí, porque si vos solamente fijás...
+
+0:25:45 Speaker 4
+Como hablábamos hoy, en diferentes depósitos.
+
+0:25:47 Speaker 3
+En diferente-
+
+0:25:48 Speaker 4
+Pero tres, tres artículos con tres códigos diferentes.
+
+0:25:51 Speaker 3
+Sí, con tres códigos diferentes.
+
+0:25:52 Speaker 4
+O sea, no es el mismo artículo.
+
+0:25:53 Speaker 3
+No es el mismo artículo. ¿Por qué? Porque vos le tenés que decir: "No, perteneces solamente a este".
+
+0:25:57 Speaker 4
+Agua hotel, agua restaurante.
+
+0:25:59 Speaker 3
+Como son módulos, como ellos te venden modulitos, te puedo-- y ellos te-- lo más lindo de todo, yo le pregunté a Pecson: ¿y cómo yo hago como hotel para migrar si yo tengo el sistema? Yo te doy el mismo sistema, te descargo un Excel, vos lo llenás y vos lo subís. Nadie interviene.
+
+0:26:18 Speaker 4
+Claro.
+
+0:26:18 Speaker 3
+Y si tenés un problema, sacá un ticket.
+
+0:26:21 Speaker 4
+Sí, sí, claro.
+
+0:26:22 Speaker 3
+Sacá un ticket y endóllalo.
+
+0:26:23 Speaker 4
+Claro, sí, sí, sí, sí.
+
+0:26:26 Speaker 3
+No te-
+
+0:26:27 Speaker 4
+No, nada.
+
+0:26:27 Speaker 3
+Importa algo.
+
+0:26:28 Speaker 4
+No, no, nada.
+
+0:26:29 Speaker 3
+Nada. Es que es un tema. Ese es un tema.
+
+0:26:33 Speaker 4
+Gran tema, gran tema.
+
+0:26:34 Speaker 3
+Entonces, vos acá, yo para mí, lo que tenés que hacer, vos después lo organizás, así, meterle al, al platos también.
+
+0:26:45 Speaker 4
+Sí se lo pierde a él, claro, sí.
+
+0:26:46 Speaker 3
+Al plato también, a todo producto, porque hasta los housekeeping.
+
+0:26:52 Speaker 4
+Sí, sí, sí.
+
+0:26:53 Speaker 3
+Entonces, vos tenés un control absoluto de todos los movimientos que tengas. Y después, en el momen-- en la configuración de los asientos, vos tenés-- tomás ese detalle, ¿no es cierto? Y después armás, IVA, eh, los formas de pago. Cada forma de pago tiene una, una, una fórmula, una, un fórmula o algo que busque la, la forma de pago, el grupo forma de pago, y eso es un tercer asiento.
+
+0:27:21 Speaker 4
+Sí, sí, sí. Bien.
+
+0:27:22 Speaker 3
+Entonces, la parte de contabilidad...
+
+0:27:24 Speaker 4
+De contabilidad.
+
+0:27:24 Speaker 3
+No es otra, la parte de consultas de contabilidad. No es otro, vos podés decir: "Yo quiero saber, a ver, de la cuenta de, de, de alojamiento, del código". Eso es otra cosa que acá no tiene, pero este sí tiene, que la loja se puede utilizar para facturar en mil cosas, igual que el sistema web lo puedo tomar y facturar y para hacer cualquier cosa. Y ahí se empieza... Ahí es donde viene la configuración. Hay que desasociar un poco, ¿por qué? Porque una factura puede ser de alojamiento, como puedo haber yo tomado el stock para hacer un adelanto. Y ahí se empieza, o, o lo tomo para hacer cualquier coso. Entonces, ahí ten-- ahí sí hay que filtrarlo un poquito, sí.
+
+0:28:07 Speaker 4
+Exacto. Hacerlo más...
+
+0:28:09 Speaker 3
+Más, más compartimentado. ¿Por qué? Porque después si yo quiero decir: "Bueno, eh, ya pasaron tres años y contador me dice: 'Che, nos llegó una, una cosa de, de arca diciéndole que nos faltó pagar'".
+
+0:28:23 Speaker 4
+Sí, está bueno.
+
+0:28:24 Speaker 3
+Lo que vos querías. Yo quiero saber de la, de solamente de la-
+
+0:28:27 Speaker 4
+Sí, sí, solo alojamiento.
+
+0:28:29 Speaker 3
+Tanto. Y la única forma es que código de stock.
+
+0:28:34 Speaker 4
+Exacto.
+
+0:28:35 Speaker 3
+De inventario. El nombre que vos quieras ponerle. Ese vaya a una cuenta contable determinada y que solamente se utilice para el proceso de-- el proceso hotelero, como yo le digo.
+
+0:28:47 Speaker 4
+Tal cual.
+
+0:28:48 Speaker 3
+Que es de abrir una reserva, de alguna forma, si viene Walkin o lo que sea, abrir la reserva y facturar eso.
+
+0:28:58 Speaker 4
+Sí, no, no, no.
+
+0:28:58 Speaker 3
+Y facturar eso. Entonces, ahí sí, creo que lo que está faltando ahí sería... Yo, por eso yo, cuando yo vi asientos, yo ya dije: "No puedo seguir".
+
+0:29:08 Speaker 4
+Tal cual.
+
+0:29:08 Speaker 3
+Porque ya tiene definido.
+
+0:29:10 Speaker 4
+Eso, bien. Bien, bien. Entonces, ahora cada uno que cargue, que ahora, bueno, va a empezar a cargar Ana también, que hasta ahora no lo hacía, por sistema, va a tener que seleccionar, como nosotros cargábamos por INB, que teníamos para cargar el, el número de asiento, digamos, va que, digamos, poníamos el gasto extraordinario, que llegábamos hasta, hasta la parte justo de restaurante y te cargaba solo el cuatro punto cero punto uno punto dos. Em, ahora también cargue según tú o yo, Ana, tiene que seleccionar.
+
+0:29:39 Speaker 3
+Y tiene que seleccionar... Por eso, hay dos formas. Para mí, la más fácil, la más flexible, es que vos le digas a este artículo para acá. Porque si yo le digo que va a pertenecer al sector de housekeeping, puede tener housekeeping cuatro cuentas contables, ponele. Ponele que vos decías blanco sea una. Pero vos, ¿qué necesitás saber también? Cuanto más desagregado lo tenés, mejor.
+
+0:30:04 Speaker 4
+Más detalle.
+
+0:30:04 Speaker 3
+Más detalle tenés. Entonces, yo quiero saber cuánto se gastó de blanco. Los blancos son cuenta contable.
+
+0:30:11 Speaker 4
+Sí, sí.
+
+0:30:11 Speaker 3
+Cuánto se gastó de, eh, esto, de mobiliario. Esa es otra cuenta contable. Entonces, cuando yo armo el asiento, la configuración del asiento que hace que dispare eso, ahí yo tengo que tener... Bueno, entonces, tengo que fijarme, guardarme de memoria todas las cuentas contables que puede llegar a incluir eso y decir: "Bueno, el grabado va a ser el neto, el neto va a ser para esta cuenta contable, para esta cuenta contable, para esta cuenta contable, para esta cuenta". Lo fijo.
+
+0:30:38 Speaker 4
+Sí, sí.
+
+0:30:38 Speaker 3
+Cada vez que hay una cuenta contable nueva, tengo que volver a modificar el, el, la, la configuración del asiento para agregarle la cuenta contable.
+
+0:30:48 Speaker 1
+No, hay un quilombo. ¿Sí? ¿No?
+
+0:30:51 Speaker 3
+Es decir, necesita gente que sea muy ducha, eh, que, que esté continuamente mirando eso. En cambio, si vos decís: no, el artículo pertenece a esta cuenta contable y el asiento toma, toma-
+
+0:31:03 Speaker 1
+Sí, sí, toma.
+
+0:31:05 Speaker 3
+Toma, toma, toma.
+
+0:31:08 Speaker 1
+Sí. Sí, sí, más fácil.
+
+0:31:10 Speaker 3
+Para mí es fácil. Por eso yo cuando lo vi, yo dije: no, no puedo decir nada, porque ya tiene la conclusión. Y no le encontraba-
+
+0:31:17 Speaker 1
+Sí, sí, incluso lo... Sí, no, no, no. Que no te hagas-
+
+0:31:21 Speaker 3
+Eh... Yo creo que el-
+
+0:31:23 Speaker 1
+¿Cómo hace para disparar? ¿Dónde tiene la configuración de los asientos? Si no me equivoco, el plan de cuenta que, que yo tengo ca-cargado acá es el que estamos usando hoy. De-debería ser. Por lo tanto, es cuestión de cargarle el plan de cuenta y que cuando creás un artículo se le pone a dónde va y listo.
+
+0:31:40 Speaker 3
+Se le pone a dónde va.
+
+0:31:41 Speaker 1
+Y viste.
+
+0:31:42 Speaker 3
+Por eso para mí es más flexible eso.
+
+0:31:45 Speaker 1
+Exacto. Sí, sí, sí.
+
+0:31:46 Speaker 3
+Yo no sé cómo recibir el programa. Yo la impresión me quedé-
+
+0:31:50 Speaker 1
+Se puede asociar un número de, de asiento con, con un concepto. O sea, para que, o sea, Ana cargue que los toallones van a ir a blanco housekeeping y ese va a ser un asiento contable.
+
+0:32:03 Speaker 3
+Es que-
+
+0:32:04 Speaker 1
+O va a tener que usar el código de-
+
+0:32:05 Speaker 3
+Dentro del arbolito.
+
+0:32:06 Speaker 1
+Claro. Sí, sí, exactamente.
+
+0:32:07 Speaker 3
+Dentro del arbolito. Sí, sí, sí, me acuerdo. Dentro del arbolito.
+
+0:32:12 Speaker 1
+El plan de cuenta dice ac-activo, tanto, tanto.
+
+0:32:14 Speaker 3
+Yo digo para simplificar eso. ¿Se puede usar un concepto que en vez de ir al arbolito de-
+
+0:32:19 Speaker 1
+Eso depende acá del programador.
+
+0:32:21 Speaker 3
+Eh...
+
+0:32:22 Speaker 1
+No sé, digo porque para hacerla, digo para que, porque si no después vamos a empezar a ver números que capaz que metimos mal el dedo y no sé, cargamos los blancos, lo cargamos en...
+
+0:32:31 Speaker 3
+Igualmente, eso es en, en un principio, es una sola vez.
+
+0:32:35 Speaker 1
+Una sola vez.
+
+0:32:36 Speaker 3
+Ana lo va a cargar solo una vez.
+
+0:32:37 Speaker 1
+Es decir, Ana puede ser que cargue-
+
+0:32:39 Speaker 3
+Vos cargás.
+
+0:32:40 Speaker 1
+Pero cada vez que se agregue un artículo-
+
+0:32:43 Speaker 3
+Tu asiento va acá. Después si, si Ana carga más toallones, ya tenés cargado todo. Sí, sí, sí. Son artículos cuando, ponele, cambian la sábana, cambia ahora o compro una sábana nueva, desactivo la sábana-
+
+0:32:57 Speaker 1
+Sí, sí, porque te iniciaba a cargar todo una vez. Ana no creo que siga cargando cosas nuevas. Por ahí con materia prima es más compli-- bah, se van agregando...
+
+0:33:05 Speaker 3
+Pero no es tanta mate-- porque queso gruyère es lo mismo.
+
+0:33:08 Speaker 1
+Vamos a decir, eh, sí.
+
+0:33:10 Speaker 3
+Cambia la marca, pero no, no ponés marca. Ahí entra, por eso, la cocina, cocina tendrá una, un, una cuenta contable, dos al sumo. Porque es cocina, son platos.
+
+0:33:25 Speaker 1
+Exactamente, claro. Sí, sí, sí.
+
+0:33:26 Speaker 3
+No arma, eh, no se le dice que el vino, que el malbec o... Cocina arma platos, nada más. Gonzalo puede ser que tenga que tener un poquito más...
+
+0:33:37 Speaker 1
+No, pensé como que si la idea era hacerlo más detallado, como íbamos a tener bebidas sin alcohol, una cuenta contable, bebidas con alcohol, otra cuenta contable.
+
+0:33:44 Speaker 3
+No, no, no, no, no.
+
+0:33:45 Speaker 1
+Carnes, otra cuenta contable. Digo, porque si después queremos saber eso, cuánto, no sé, gastamos en lomo durante todo el año.
+
+0:33:54 Speaker 3
+Pero eso viene en la parte de compra y el lomo tiene una s, una cuenta contable de compra y tiene una cuenta contable de venta, digámoslo así. Son dos, una de entrada y otra de salida.
+
+0:34:05 Speaker 1
+Sí, igualmente, a lo que voy a decir, son dos cosas de, eh... En el sentido, una cosa es la parte contable, por ahí no, no sabés cuánto facturaste de lomo, pero sí podés buscar cuánto compraste de lomo o cuánto plato vendiste de lomo. Eso sí.
+
+0:34:20 Speaker 3
+Por eso, ahí Gonzalo sería el que más tiene que tener en la cabeza, más o menos. También son cinco cuentas contables como sumo.
+
+0:34:31 Speaker 1
+Sí, sí, está bueno. Porque, digo, que mobiliario es una para todo. O sea, es una para la cama de Ana como para la camilla de spa.
+
+0:34:42 Speaker 3
+Te pegás un papelito acá y decís: eh, la cuenta contable, si es para bebidas tal, si después ya te la...
+
+0:34:49 Speaker 1
+Sí, incluso estoy pensando, no ha-- no hay forma de, de imprimir un listado del artículo con su cuenta contable, ¿no?
+
+0:34:57 Speaker 3
+En el sistema de escritorio.
+
+0:34:58 Speaker 1
+Sí. No imprimir, sino o un Excel. Porque por ahí lo, lo, lo cargo así acá y ya están los, los artículos creados con su a dónde va. Tengo que ver si, si, si coincide el plan de cuenta.
+
+0:35:14 Speaker 3
+Sí.
+
+0:35:14 Speaker 1
+Si coincide el plan de cuenta.
+
+0:35:14 Speaker 3
+Si coincide el plan de cuenta, eh, no pueden-- el, que el sistema este, el sistema de escritorio, como es un módulo aparte, que se... como yo siempre digo, eh, las pilas se venden aparte, eh, te permite grabar artículos sin cuenta contable.
+
+0:35:29 Speaker 1
+Ajá.
+
+0:35:30 Speaker 3
+Acá vos no deberías poder grabar un artículo sin que vos le pongas, porque eso pasa acá.
+
+0:35:37 Speaker 1
+Sí, sí, sí.
+
+0:35:38 Speaker 3
+Y al no tener la cuenta contable revienta. Porque te encuentra enseguida error, no te hace el asiento. Y entonces ahí entra lo que yo le decía siempre a Lin, pero vos controlalo las facturas, quiero decir, Gonzalo se puede equivocar con este sistema, se puede equivocar, se puede olvidar, eh, Diego se puede olvidar de... Se puede olvidar de ponerle cuenta contable y entonces tenés faltantes de asiento.
+
+0:36:02 Speaker 1
+Claro. Sí, sí, está bien.
+
+0:36:03 Speaker 3
+No, yo no controlo nada. Entonces, ¿qué sentido tiene tener la contabilidad acá?
+
+0:36:10 Speaker 1
+Sí, no, y otra cosa es dejar automático, esto estoy pensando así, que toda, que toda receta que, que, que se cree ya vaya a la cuenta contable com-co-co-comestible o, o plato justo, que ni lo tengan que, que hacer, digamos.
+
+0:36:27 Speaker 3
+Sí, por eso, eso es, eso lo, lo, lo podés hasta ni siquiera lo... Sí, ni siquiera se puede llegar a preguntar.
+
+0:36:37 Speaker 1
+Por eso, por eso. Porque vos creás una receta de plato y ya va para comestible o plato justo.
+
+0:36:43 Speaker 3
+Internamente ya busca.
+
+0:36:44 Speaker 1
+Ya está, ya va.
+
+0:36:46 Speaker 3
+Al buscar el agrupamiento sabe dónde va o ponerle Si querés podés ponerle, agregarle, hacer algo así, porque el agrupamiento muchas veces... ¿Y qué hace tam-- es-- poner algún concepto, un tipo de artículo o un lugar donde se-
+
+0:37:03 Speaker 1
+Sí.
+
+0:37:03 Speaker 3
+O algo...
+
+0:37:04 Speaker 1
+O se me ocurre, eh, enlazarlo como tienen de, de después para co-comandar en entrada, plato principal, postre, por ejemplo. Y lo, y lo tenés incluso más, más detallado.
+
+0:37:16 Speaker 3
+Sí, es algo como para poder que sea.
+
+0:37:20 Speaker 1
+Entonces, si ellos lo que cargan es la receta de una entrada, ya va a-
+
+0:37:24 Speaker 3
+Ya va a contar-
+
+0:37:25 Speaker 1
+De entradas.
+
+0:37:26 Speaker 3
+De entradas. Eso es interno. O sea, no tenés que ni siquiera-
+
+0:37:29 Speaker 1
+Por eso, por eso.
+
+0:37:29 Speaker 3
+Modificar nada del stock. Internamente ya sabe que es en entrada. Entonces, ah, busco acá.
+
+0:37:34 Speaker 1
+Exacto.
+
+0:37:35 Speaker 3
+La cosa es que tenés que tener una configuración.
+
+0:37:39 Speaker 1
+Sí, sí, claro.
+
+0:37:39 Speaker 3
+Algo, una BM que diga entrada acá.
+
+0:37:43 Speaker 1
+Sí, tal cual. Sí, sí, por eso.
+
+0:37:44 Speaker 3
+Si no, no...
+
+0:37:45 Speaker 1
+No, no, tiene que estar claro eso.
+
+0:37:47 Speaker 3
+Tiene que estar creado eso, que si no porque después no... Querías cuenta contable y después decís...
+
+0:37:53 Speaker 1
+Sí, sí, y no, no, no se conecta.
+
+0:37:54 Speaker 3
+No, no, no llega nunca. ¿Por qué? Porque no le dijiste que va a portar lado.
+
+0:37:57 Speaker 1
+Exacto. Sí, sí, está bueno.
+
+0:37:59 Speaker 3
+Ah, está perfecto.
+
+0:38:01 Speaker 1
+Está bueno. Está bueno. Sí, esa parte está entendida.
+
+0:38:04 Speaker 3
+¿Pudiste hacer la parte de cocina que yo te decía? Sacar ese menú y hacer un solo de cocina receta.
+
+0:38:10 Speaker 1
+No, no vi eso porque no quería hablar hoy. Esto. Lo que vos decís, que es porque-
+
+0:38:19 Speaker 3
+Un cierto, cuando vos ahí, por empezar.
+
+0:38:22 Speaker 1
+Lo de receta y costos, ¿eso?
+
+0:38:24 Speaker 3
+No, no, no. Andate al restaurante.
+
+0:38:26 Speaker 1
+Restaurante. Ah, menú, acá.
+
+0:38:28 Speaker 3
+Menú. Esto. Esto tiene-- es decir, para un mozo no le sirve.
+
+0:38:34 Speaker 1
+Sí. No, no, no.
+
+0:38:36 Speaker 3
+No le sirve. Vos podés haber, eh, vendido, yo lo puse en un documento. Yo vendí un levite naranja y después yo hago clic en eliminar y lo eliminé.
+
+0:38:48 Speaker 1
+Mhm.
+
+0:38:48 Speaker 3
+Y se, y se eliminó.
+
+0:38:49 Speaker 1
+Sí, sí, sí, sí, sí. Sí, sí.
+
+0:38:52 Speaker 3
+Es decir, eh, esto no tiene sentido.
+
+0:38:56 Speaker 1
+Mhm.
+
+0:38:57 Speaker 3
+Esto es parte... Y aparte-
+
+0:38:59 Speaker 1
+Receta y costo. Sí, sí, sí.
+
+0:39:00 Speaker 3
+¿Qué pasa? Receta y costo. ¿Por qué? Porque vos agregas plato y esto está bien.
+
+0:39:06 Speaker 1
+Exacto.
+
+0:39:06 Speaker 3
+Pero le falta la parte de... esto.
+
+0:39:12 Speaker 1
+De la receta. Claro, exactamente.
+
+0:39:13 Speaker 3
+Si vos unís esos dos...
+
+0:39:15 Speaker 1
+Mhm. Sí, sí, está cual.
+
+0:39:17 Speaker 3
+Y lo tenés en un solo lugar.
+
+0:39:18 Speaker 1
+En un solo...
+
+0:39:19 Speaker 3
+Porque te digo, menú, yo le, le busco la vuelta, le busco la vuelta y no tiene sentido, no, em...
+
+0:39:27 Speaker 1
+Está igual. No, no, está bien, está bueno.
+
+0:39:29 Speaker 3
+No, no, no, no. Aparte, nuevas categorías. Nuevas categorías, eh, hay que ver bien quién va a llevar el inventario.
+
+0:39:35 Speaker 1
+No, no, el tema acá es que re-
+
+0:39:38 Speaker 3
+Aparte-
+
+0:39:38 Speaker 1
+Receta y costo de-de-deberían verlo solo, eh, Gonza y Diego, no los mozos.
+
+0:39:45 Speaker 3
+Nueva categoría. Vos podés crear, crear, crear, crear, crear, crear. Ajá. Y después, si yo no-- necesito creé mal, me tengo que ir a inventario.
+
+0:39:54 Speaker 1
+Ah, está cual. Sí, sí, está cual. Sí.
+
+0:39:57 Speaker 3
+Al menú de ABM de inventario para poder localizar donde están los agrupamientos, poderlo modificar. No tiene sentido.
+
+0:40:02 Speaker 1
+Sí, no, está cual.
+
+0:40:04 Speaker 3
+No tiene sentido porque le complicás la vida a la gente, digámoslo así. Es decir, uy, dale. Esto no va. Este-
+
+0:40:12 Speaker 1
+Sí, sí.
+
+0:40:12 Speaker 3
+Este-
+
+0:40:13 Speaker 1
+Ese tampoco.
+
+0:40:13 Speaker 3
+No va, pero el agregar plato con la receta...
+
+0:40:18 Speaker 1
+Receta y costo, sí, está cual.
+
+0:40:19 Speaker 3
+Y eso va, y volvemos a la parte de contabilidad-
+
+0:40:21 Speaker 1
+Sí, sí, eso tiene que irse a su...
+
+0:40:24 Speaker 3
+Va asociado a una, algo que dispara la cuenta contable, que sea transparente o no, eso es a mano del programador acá.
+
+0:40:35 Speaker 1
+Sí, sí, está cual, está cual. Sí. Ah, lo único...
+
+0:40:38 Speaker 3
+Y tenés que tener un lugar donde sea contabilidad.
+
+0:40:41 Speaker 1
+Exactamente, sí, sí.
+
+0:40:42 Speaker 3
+Probablemente donde...
+
+0:40:43 Speaker 1
+Y cargarla ahí todo, sí.
+
+0:40:44 Speaker 3
+Y después tenés que tener en cuenta algo. Cuando vos terminas, finalizás el periodo contable.
+
+0:40:51 Speaker 1
+Mhm.
+
+0:40:51 Speaker 3
+No es cierto. Ahora ya se finalizó.
+
+0:40:54 Speaker 1
+Sí, sí.
+
+0:40:55 Speaker 3
+No es cierto. ¿Qué pasa? Te están llegando facturas viejas.
+
+0:40:57 Speaker 1
+Mhm.
+
+0:40:59 Speaker 3
+En el sistema de escritorio, ¿no es cierto? Eh, yo le digo: Aylin, poné el, el periodo este, este actual a mayo, no junio, a mayo, para que cuando te llegue la factura vieja, cargado en este cuen-- en este, en este periodo contable.
+
+0:41:15 Speaker 1
+Ajá.
+
+0:41:15 Speaker 3
+Y después lo pasás al otro. ¿Por qué? Porque como está cerrado.
+
+0:41:21 Speaker 1
+Sí.
+
+0:41:21 Speaker 3
+Para abrirlo tenés que abrirlo, tenés que hacer en el sistema que tenés un quilombo.
+
+0:41:27 Speaker 1
+Mhm.
+
+0:41:28 Speaker 3
+Un quilombo.
+
+0:41:29 Speaker 1
+Sí.
+
+0:41:29 Speaker 3
+La... no, no está, no está bien pensado. Es como yo diga, las pilas vienen aparte y verdaderamente las pilas no, no calzan bien. En el otro sistema es más flexible, porque vos le decís a qué periodo contable va.
+
+0:41:41 Speaker 1
+Claro, y ahí ya entra. Exactamente.
+
+0:41:43 Speaker 3
+Y sigue la, la minuta. Ah, esta factura es de mayo. Estamos en junio. Mayo, sí. Ah, pero mayo pertenece al periodo ejercicio anterior. Te, te va a decir ejercicio, digámoslo así, ejercicio. Ah, estaba acá. Sigue, sigue el número de minuta.
+
+0:41:57 Speaker 1
+Bien.
+
+0:41:58 Speaker 3
+Porque si no te vas a encontrar con eso, porque si lo cerrás, verdaderamente cuando se cierre es cuando-
+
+0:42:05 Speaker 1
+Sí, sí, se cierra.
+
+0:42:05 Speaker 3
+Ahí sí está.
+
+0:42:06 Speaker 1
+Exactamente. Está todo.
+
+0:42:08 Speaker 3
+Y una de las cuestiones, yo, es una pelea que yo siempre tuve con Diego, o sea, yo tengo un cliente, un cliente, en Miló Park, en Vinotinto Tuerto, que la contabilidad todo se hace desde el sistema.
+
+0:42:22 Speaker 1
+Mhm.
+
+0:42:23 Speaker 3
+Y él tiene el concepto, no, que el sistema es una... le da una herramienta para que los contadores dibujen. Eso es Manprint.
+
+0:42:34 Speaker 1
+Sí.
+
+0:42:35 Speaker 3
+Pero no voy a comparar Manprint, que tiene un sistema sueco de por medio.
+
+0:42:39 Speaker 1
+Exacto.
+
+0:42:40 Speaker 3
+Que tiene que mandar los datos a Suecia. Eh, está en un quilombo. Entonces sí, pero ellos dibujan.
+
+0:42:47 Speaker 1
+Bien.
+
+0:42:47 Speaker 3
+Entonces, vos tenés que ver acá qué, cuál es tu objetivo de la contabilidad.
+
+0:42:51 Speaker 1
+No, no, no. Mie-mientras más podamos hacer acá, mejor.
+
+0:42:55 Speaker 3
+Porque desde acá mismo vos le podés dar a la contadora...
+
+0:42:58 Speaker 1
+Todos los informes hechos ya.
+
+0:43:00 Speaker 3
+El acceso.
+
+0:43:00 Speaker 1
+Ah, entonces.
+
+0:43:01 Speaker 3
+El acceso.
+
+0:43:01 Speaker 1
+El acceso también, sí.
+
+0:43:02 Speaker 3
+Al menú y que ella vaya cargando los asientos manuales que vaya necesitando para... Ajustar.
+
+0:43:10 Speaker 1
+También, sí.
+
+0:43:10 Speaker 3
+Porque vos necesitas asientos manuales.
+
+0:43:12 Speaker 1
+Exacto.
+
+0:43:12 Speaker 3
+Un depósito bancario, una transferencia, eh, un pago.
+
+0:43:17 Speaker 1
+Mhm.
+
+0:43:18 Speaker 3
+Que no va por factura.
+
+0:43:19 Speaker 1
+No, no.
+
+0:43:19 Speaker 3
+Es una salida de caja o una transferencia a, a, a estos que yo tengo un cobro por esto.
+
+0:43:25 Speaker 1
+Sí, sí, exacto. No, no.
+
+0:43:27 Speaker 3
+Entonces, ¿qué hacés? Un asiento manual donde diga de tal cuenta a tal cuenta. Entonces, vos dirás-
+
+0:43:33 Speaker 1
+Para eso estaba la de... Esto de la, de, de la caja.
+
+0:43:36 Speaker 3
+Exacto.
+
+0:43:36 Speaker 1
+De, de administración.
+
+0:43:38 Speaker 3
+De administración.
+
+0:43:38 Speaker 1
+Que la idea es esa.
+
+0:43:39 Speaker 3
+Pero, eh...
+
+0:43:40 Speaker 1
+Que pueda hacer cosa a, a Ailin, digamos.
+
+0:43:42 Speaker 3
+Sí, eh, pero darle, no es cierto, la posibilidad de tener, generar asientos manuales-
+
+0:43:48 Speaker 1
+Mhm.
+
+0:43:49 Speaker 3
+A tales periodos contables. Y también lo que te van a pedir ahí, que ya ella de contabilidad no hace tanto, es el inicio de ejercicio contable.
+
+0:43:58 Speaker 1
+Exacto, está bien.
+
+0:43:59 Speaker 3
+Que es una suma, es como siempre me dice yo: es un dibujo.
+
+0:44:03 Speaker 1
+Sí, sí, sí. Sí, sí. Es un dibujo, está igual.
+
+0:44:04 Speaker 3
+Es un dibujo-
+
+0:44:05 Speaker 1
+Está igual.
+
+0:44:05 Speaker 3
+Donde vos ponés todas las cuentas con todo así y vos iniciás con esto.
+
+0:44:08 Speaker 1
+Arrancás con eso, sí.
+
+0:44:09 Speaker 3
+Arrancás con esto y finalizás el cierre de pedido contable. Por eso lo-- verdaderamente, se cierra el pedido contable cuando vos hacés el asiento de cierre de pedido contable.
+
+0:44:19 Speaker 1
+Sí, sí, sí.
+
+0:44:19 Speaker 3
+Y ahí si deshabilitás y no se toca.
+
+0:44:23 Speaker 1
+Allá no se toca. No, está igual.
+
+0:44:24 Speaker 3
+Más.
+
+0:44:24 Speaker 1
+El balance.
+
+0:44:25 Speaker 3
+Y solamente lo activo yo, que soy el dueño del hotel.
+
+0:44:28 Speaker 1
+Del a-- sí, sí, sí, está igual. Es así, está igual.
+
+0:44:32 Speaker 3
+De mientras está flexible.
+
+0:44:34 Speaker 1
+Mhm.
+
+0:44:34 Speaker 3
+Hasta que se den cerrado. Cerrado ya no se toca más. Esto así se presentó, se imprimió, si se imprime.
+
+0:44:41 Speaker 1
+Sí, sí.
+
+0:44:41 Speaker 3
+Antes se imprimía. No sé si se imprime.
+
+0:44:44 Speaker 1
+No, ahora ya no, ya no, ya no. Ya no. Ahora ya no.
+
+0:44:48 Speaker 3
+Me imaginaba los libros diarios.
+
+0:44:50 Speaker 1
+No, no. Una locura, toda una locura.
+
+0:44:52 Speaker 3
+Pero se pedía.
+
+0:44:53 Speaker 1
+Sí, sí. No, no, es que había y lo, lo balance y todo, hasta hace poco. Ahora ya no.
+
+0:44:59 Speaker 3
+Entonces, si vos le das esto armado, que la contadora puede armar el inicio del periodo cont-- el inicio, el asiento de inicio de periodo contable, el asiento de cierre contable, que vos le puedas dar de alguna forma la información para que ella haga eso.
+
+0:45:14 Speaker 1
+Lo cargue, sí.
+
+0:45:15 Speaker 3
+Ya no necesitás...
+
+0:45:16 Speaker 1
+No, está igual, está todo acá.
+
+0:45:18 Speaker 3
+Lo tenías acá, no necesitás ni... Es más, no necesitás ni una contadora externa.
+
+0:45:22 Speaker 1
+Exacto.
+
+0:45:22 Speaker 3
+Lo tenías adentro. Una contadora que te haga así, no tenía problema.
+
+0:45:26 Speaker 1
+Mhm, sí, sí. Sí, sí. Está igual.
+
+0:45:28 Speaker 3
+Y lo tenés desde acá. Pero tenés que tener las herramientas.
+
+0:45:32 Speaker 1
+Tiene que estar todo...
+
+0:45:33 Speaker 3
+Las herramientas y que vos digas: bueno, un asiento de un-- tenga una, un módulo específico para asientos manuales, donde diga la observación, cuánto al debe, cuánto al haber, importe.
+
+0:45:46 Speaker 1
+Y chao. Sí.
+
+0:45:48 Speaker 3
+Porque muchísimas cosas, depósitos, transferencias, pagos.
+
+0:45:51 Speaker 1
+Sí, sí, se hace un montón, se hace un montón.
+
+0:45:54 Speaker 3
+No le vas a decir: "Ah, este es de la nafta que fui, me fui yo y acá está la nafta". No va a hacer eso.
+
+0:46:00 Speaker 1
+No, no, está bien, está bien.
+
+0:46:02 Speaker 3
+Entonces, todo eso lo va haciendo la contadora o la parte administrativa.
+
+0:46:07 Speaker 1
+Sí, sí, sí, todo eso va a ser necesario.
+
+0:46:08 Speaker 3
+Entonces, vos ya tenés, ahí sí tenés un sistema contable hecho y derecho.
+
+0:46:14 Speaker 1
+Sí.
+
+0:46:14 Speaker 3
+Hay que ver también Tango cómo funcionará, porque Tango es un sistema de contabilidad.
+
+0:46:20 Speaker 1
+De contabilidad, eso, exactamente. Sí.
+
+0:46:21 Speaker 3
+Hay que fijarse también cómo funciona. Ya ella no...
+
+0:46:24 Speaker 1
+Mhm, sí, sí.
+
+0:46:25 Speaker 3
+No tiene idea.
+
+0:46:26 Speaker 1
+Es otra cosa.
+
+0:46:26 Speaker 3
+Pero es algo que vos podrías llegar a aspirar, ver cómo funciona Tango. Tango no trabaja con artículo, no. Tiene una parte de facturación, pero es muy endeble, digámoslo así.
+
+0:46:38 Speaker 1
+Ajá.
+
+0:46:38 Speaker 3
+No es función, la función es llevar-
+
+0:46:41 Speaker 1
+No, no.
+
+0:46:41 Speaker 3
+Tango...
+
+0:46:42 Speaker 1
+Llevar la contabilidad, sí, sí. O Bejerman, todo eso viene así.
+
+0:46:45 Speaker 3
+O Bejerman. Bejerman es... Era en su momento muy bueno, no sé cómo está ahora. Pero, eh, no lo sé muy bien. Pero, eh, eso es lo que yo quería hablar, porque como yo vi asientos, dije: ¿Y dónde? Yo empecé a decir...
+
+0:46:58 Speaker 1
+No, no, no, no tiene, está, está igual. Sí. Bueno, eh, escuchá. ¿Hay forma de, de bajar un Excel? Lo... Y creo que... Me gustaría corroborar que el plan de cuentas que me pasó Ailin sea el mismo. ¿Vos lo tenés a ti también?
+
+0:47:21 Speaker 3
+Sí, está acá.
+
+0:47:22 Speaker 1
+Como para la nueva rápida.
+
+0:47:26 Speaker 3
+A ver. Dios, sí.
+
+0:47:31 Speaker 1
+La cuenta acá.
+
+0:47:34 Speaker 3
+Pensé que la cámara está tapada. Si te digo.
+
+0:47:50 Speaker 1
+Sí.
+
+0:48:02 Speaker 3
+Ahí ya está. Ahí tenés los números. Vos sabés que tengo un problema yo con esto, no sé si lo...
+
+0:48:15 Speaker 1
+Bueno, pero lo supones que tiene que...
+
+0:48:17 Speaker 3
+¿Cómo le paso a mi compu, compu? Ahí.
+
+0:48:21 Speaker 1
+¿Con VPN?
+
+0:48:21 Speaker 3
+Claro.
+
+0:48:22 Speaker 1
+Ah, sabes...
+
+0:48:25 Speaker 3
+Es escritor remoto. Es más, eh, yo le había descubierto que escritor remoto puede compartir por compu. Entonces, si vos tenés escritor remoto, así vos podés imprimir con impresoras fiscales con-- a través de, de... Bueno, a través de acá vos podés hacerle imprimir una impresora fiscal. No te recomiendo comprar impresoras fiscales. A mí me enseñaron y luego cada una...
+
+0:48:54 Speaker 1
+No, ya lo hablamos.
+
+0:48:55 Speaker 3
+Es una... No, no.
+
+0:48:57 Speaker 1
+No, no.
+
+0:48:58 Speaker 3
+No, no. Aparte...
+
+0:49:00 Speaker 1
+Me acordé un poquito
+
+0:49:01 Speaker 3
+El problema de las cuen-- del sistema web son de que, como yo te dije, no pueden abrir puerto, no pueden abrir nada, porque cada vez que abren es un... Todos los-- todos los muchachos de Rusia vienen así los coreanos.
+
+0:49:13 Speaker 1
+Abrime una, por favor. Está bueno eso. Abrime una, dale.
+
+0:49:16 Speaker 3
+Entonces todo el mundo fue a instrucción electrónica y los americanos todavía siguen siendo de con, con, con puerto, con impresión fiscal.
+
+0:49:25 Speaker 1
+Claro. Sí, sí.
+
+0:49:26 Speaker 3
+No, es muy, muy difícil. Y después vos tenés stock. Eh... Acá va a tener más, más tiempo que, que la de alcohol y opera. Acá si no va a tener un error de esos. Sí, son... Porque tenés mucho... Ah, ya está. Eh, ahí te lo vas a tener que depurar un poco. Ahí te va a dar cuenta todos los errores que tiene. Y sí, porque siempre me llaman y me dicen: "Che, pero es que es siempre tan difícil. Me presenté a cosas: "Ay, no, que no entendés que..." Acá vas a tener que sacar una cantidad de cosas, pero... Eh, ponele, alojamiento en el hotel, el alojamiento en el hotel. Ah, tenés que tener en cuenta esto también, la unidad de... a veces en el código.
+
+0:50:29 Speaker 1
+Ah, ahí te cuento. Sí.
+
+0:50:31 Speaker 3
+Esto se llama mucho más fácil. Y, y esto, el código un, el código es la parte de venta y el código dos es la de compra.
+
+0:50:38 Speaker 1
+De compra.
+
+0:50:39 Speaker 3
+Compra. Esta es venta, compra.
+
+0:50:41 Speaker 1
+Te vas a dar cuenta que todo tiene vinculado, tenés que hacer un canal.
+
+0:50:44 Speaker 3
+Eh, bien, sacale todo lo demás, no es cierto, pero de, de acá. Y tenés que tener en cuenta esto. Si vos querés llevar cantidad de stocks, saber, el stock se lleva y eso lo lleva todo el sistema por, eh, por movimiento de comprobante. No se pone como se ponía en la época cuando yo programaba en los noventa, un campito que dice: "Comenzar con catorce".
+
+0:51:10 Speaker 1
+Claro, no, no, no.
+
+0:51:11 Speaker 3
+O sea, si... Este comprobante es uno, este comprobante es otro.
+
+0:51:14 Speaker 1
+Sí, sí, está bueno. Sí, sí.
+
+0:51:15 Speaker 3
+Y ahí te pone. Pero el problema son con las medidas.
+
+0:51:20 Speaker 1
+Exactamente.
+
+0:51:21 Speaker 3
+¿Qué pasa?
+
+0:51:21 Speaker 1
+Sí, sí.
+
+0:51:21 Speaker 3
+Porque yo muchas veces yo jodo acá en todos mis datos. Porque, eh, te podés meter en un lío, porque siempre un kilo, esto yo lo compro en kilo, lo vendo en gramo. Compro en pack de cuatro, ocho, doce, dieciséis, a mí me da por unidad. Vos me estás haciendo conversiones de medida... Si sos programador, que Dios te ayude.
+
+0:51:46 Speaker 1
+Sí, sí, sí, está bueno. Sí, sí.
+
+0:51:48 Speaker 3
+¿Me entendés? Es decir, eso que entran ahí y empiezan a putear los programadores, porque ¿qué pasa? El problema está que qué pasa si vos hoy al... Este artículo, la Coca-Cola, yo lo compraba por cuatro.
+
+0:52:02 Speaker 1
+Mhm.
+
+0:52:02 Speaker 3
+Y mañana me lo cambian a seis. Si yo le cambio la unidad de medida...
+
+0:52:08 Speaker 1
+Sí.
+
+0:52:10 Speaker 3
+No tengo stock. Porque ¿cómo miro para atrás si ahora compro desde acá?
+
+0:52:16 Speaker 1
+Mhm.
+
+0:52:16 Speaker 3
+Entonces...
+
+0:52:18 Speaker 1
+Es por litros.
+
+0:52:19 Speaker 3
+Es por unidad.
+
+0:52:21 Speaker 1
+Claro, sí.
+
+0:52:21 Speaker 3
+O por... Yo siempre voy por unidad, o ponele kilo, ponele el nombre kilo y kilo es uno, y la unidad es uno, eh, siempre es uno.
+
+0:52:30 Speaker 1
+Mhm.
+
+0:52:31 Speaker 3
+Entonces vos podés decir: "Sí, eh, yo compré diez unidades de, no sé, doscientos kilos de carne, doscientas unidades de Coca-Cola, doscientos...". Y después lo puedo fraccionar cero coma y es la mismo. Es decir, es lo mismo, le digo-
+
+0:52:49 Speaker 1
+Sí, sí, sí.
+
+0:52:49 Speaker 3
+Cambias la palabra. O sea que quedás con-- todos quedan contentos.
+
+0:52:53 Speaker 1
+Contentos, sí.
+
+0:52:54 Speaker 3
+Es la realidad.
+
+0:52:55 Speaker 1
+Sí, sí, sí, está cual, está cual.
+
+0:52:57 Speaker 3
+Metro. El problema son con los metros, centímetros, así que como en la ferretería que compran rollo-
+
+0:53:03 Speaker 1
+Claro.
+
+0:53:03 Speaker 3
+De cable, que lo fraccionan. Ahí sí, ya es un berenje, pero eso ya no, no, ese no es nuestro problema.
+
+0:53:10 Speaker 1
+No, no, no. Está bien, está bien. ¿Yo voy a tener problemas con las A?
+
+0:53:13 Speaker 3
+No, no.
+
+0:53:13 Speaker 1
+Ah.
+
+0:53:13 Speaker 3
+No, no. No, no. Bueno, entonces faltaba.
+
+0:53:16 Speaker 1
+Bien.
+
+0:53:17 Speaker 3
+Eso que vos puedas agregar eso de alguna forma, no sé si lo vas a hacer a la vista o no.
+
+0:53:22 Speaker 1
+No, no, yo, yo ahora voy a agregar acá en configuración la, la parte de contacto.
+
+0:53:27 Speaker 3
+Pero necesitas eso, ¿no es cierto?
+
+0:53:28 Speaker 1
+Exacto. Sí, sí, sí. Plan de cuentas, los asientos.
+
+0:53:31 Speaker 3
+Plan de cuentas, puede ser una BM de plan de cuentas, si querés tomarlo en cuenta ahí.
+
+0:53:35 Speaker 1
+Sí, sí, está bueno.
+
+0:53:35 Speaker 3
+Un lugar donde puedas poner los ejercicios.
+
+0:53:38 Speaker 1
+Exacto.
+
+0:53:39 Speaker 3
+Ejercicios con la, con la minuta. Puede ser unido en un solo, un solo programita, un solo ítem. Nosotros llamamos ítem, yo muchas veces hablo de ítem, porque estamos acostumbrados a que ya son ítem de menú.
+
+0:53:50 Speaker 1
+Claro. Ah, está bien.
+
+0:53:51 Speaker 3
+Ítem de menú para los programadores, y que los acordeones... Ya estoy viejo para esto, ya... Por eso los ítem, crear un programa que sea un ítem con el ejercicio y la minuta, que me, Elena dice ahora que creó: "Yo no sé qué poner el número". El número de minuta. ¿Y qué número se pone? A ver, eh... ¿Vos estudiaste contabilidad?
+
+0:54:19 Speaker 1
+La contadora, sí, sí, sí.
+
+0:54:20 Speaker 3
+Yo me muerdo la lengua porque yo digo: "Puta, yo soy, yo soy, yo soy analista de computación, esa imagen vos no puedes..."
+
+0:54:28 Speaker 1
+Sí, sí. Es así.
+
+0:54:28 Speaker 3
+Nos setecientos mil pesos.
+
+0:54:30 Speaker 1
+Es así, es así.
+
+0:54:32 Speaker 3
+Pero bueno, eh, creá eso.
+
+0:54:34 Speaker 1
+Bien.
+
+0:54:35 Speaker 3
+Tenés todo eso para hacer. ¿Cómo? Pero necesitas crear los menús, necesitas crear un programa, un, un programita que sea para la configuración donde diga: "Este asiento, este asiento va a disparar estos comprobantes".
+
+0:54:50 Speaker 1
+Exacto. Sí, sí, sí.
+
+0:54:51 Speaker 3
+¿No es cierto? La parte impositiva. Decir: "Bien, el IVA va a ir acá, el IVA tiene esto, el IVA lo otro". Porque tenés también eso. Hoy estamos con IVA veintiuno.
+
+0:55:04 Speaker 1
+Sí, sí, pero no sabés...
+
+0:55:05 Speaker 3
+No sabés qué puede llegar a pasar dentro de cinco años.
+
+0:55:08 Speaker 1
+No, no. Tal cual.
+
+0:55:10 Speaker 3
+El impuesto al cheque supuestamente era por seis meses.
+
+0:55:14 Speaker 1
+Sí, sí
+
+0:55:15 Speaker 3
+Donde dice que no se puede. Acá vivimos-
+
+0:55:17 Speaker 1
+No, no, es imposible.
+
+0:55:18 Speaker 3
+Gran superviviente en ese sentido. Pero necesitas tener algo que sea flexible para que-
+
+0:55:22 Speaker 1
+Sí, sí, claro
+
+0:55:22 Speaker 3
+Después si vos digas cambio-
+
+0:55:24 Speaker 1
+Se modifican, se cambian
+
+0:55:25 Speaker 3
+El porcentaje del IVA, me lo cambiaron, me lo subieron, como Uruguay subió el año pasado de, de veinti- de veintidós lo subió a veintitrés, vos podás solamente cambiar el número-
+
+0:55:35 Speaker 1
+Exacto
+
+0:55:35 Speaker 3
+Y que no tengas que hacer todo. Este sistema de escritorio es... Yo, yo me espero, mmm, jubilarme antes de, de que me cambien del IVA. Pero, eh, en el sistema web no. Es subir el número.
+
+0:55:47 Speaker 1
+Claro, sí, sí.
+
+0:55:47 Speaker 3
+Y ya está.
+
+0:55:47 Speaker 1
+Y cambia.
+
+0:55:48 Speaker 3
+Y cambia. Los sistemas de escritorio que están, son fijos.
+
+0:55:52 Speaker 1
+Mhm.
+
+0:55:52 Speaker 3
+¿No es cierto? Tenés que cambiar los números a mano dentro del programa. Eso también tiene que tener en cuenta. Y después todo unirlo en un solo paquetito y que diga: bueno, el detalle de este dispará acá y esto va o al haber o al debe.
+
+0:56:08 Speaker 1
+Bien.
+
+0:56:08 Speaker 3
+Entonces, después de ahí tenés que tomar los libros diarios, libros. Y todas las consultas que se te pueden llegar a ocurrir. Por eso lo que yo veo acá es que no tenés un lanzador de consultas.
+
+0:56:19 Speaker 1
+No, no, yo le dije a Papo que, que eso iba a hacerlo ahora porque quiero... Yo ya tengo un resumen de la, de las consultas que quería ver con todas las áreas a-a las cuales-
+
+0:56:30 Speaker 3
+Bonza me pidió una muy específica-
+
+0:56:31 Speaker 1
+Mhm.
+
+0:56:32 Speaker 3
+Que con este chico que trajiste de Victoria.
+
+0:56:34 Speaker 1
+Sí.
+
+0:56:35 Speaker 3
+¿Sí? Que yo le hice para el sistema de escritorio, porque lo utilizan en supermercados también.
+
+0:56:39 Speaker 1
+Claro.
+
+0:56:39 Speaker 3
+Es muy, está muy bien hecha. Eso preguntarle a él porque está muy bien.
+
+0:56:43 Speaker 1
+Buenísimo.
+
+0:56:44 Speaker 3
+Como ellos tienen descarga de desayuno.
+
+0:56:47 Speaker 1
+Exacto.
+
+0:56:47 Speaker 3
+Necesitas una emisión de comprobante o algo que pueda Bonza o cualquiera decir: bueno, yo elijo este comprobante de descarga de desayuno, que me va a descargar del stock todo lo que yo quiero hacer. Yo de ahí también puedo saber qué cantidad de productos utilicé.
+
+0:57:02 Speaker 1
+Mhm.
+
+0:57:03 Speaker 3
+Sobre eso. Yo puedo saber que no utilicé, qué costo tiene cada uno de los artículos. Uno tiene una emis-una emisión de comprobante como tener mansura. Pero vos pensá que nosotros somos comerciales.
+
+0:57:14 Speaker 1
+Mhm.
+
+0:57:15 Speaker 3
+Y esto es algo... Va bien cerrado.
+
+0:57:17 Speaker 1
+Sí, está cual, está cual, sí, sí.
+
+0:57:18 Speaker 3
+Pero necesitás algo de-
+
+0:57:19 Speaker 1
+No, igual tiene que estar. Yo no le dije por estar esperando esto, pero tiene que estar tanto en recepción-
+
+0:57:24 Speaker 3
+Sí
+
+0:57:25 Speaker 1
+Como en restaurant, por lo que hablábamos de la nota de crédito, po-por cierto, esas cosas tiene que estar la, la emisión de, de comprobante.
+
+0:57:32 Speaker 3
+La nota de crédito yo te lo puse ahí.
+
+0:57:34 Speaker 1
+Sí, sí, eh, hoy, hoy está acá, pero no iría ahí. Yo estaba esperando a, a esto, a la emisión de comprobante, que creo que ya lo puse acá. Acá.
+
+0:57:44 Speaker 3
+Sí.
+
+0:57:44 Speaker 1
+Y la nota de, de crédito tiene que ir en, en los reportes también.
+
+0:57:48 Speaker 3
+El... En el sistema de escritorio a mí me gu-- me gusta más en ese sentido. El sistema de escritorio, eh, puede ser flexible, porque una nota de crédito puede ser parcial.
+
+0:57:56 Speaker 1
+Mhm. Sí.
+
+0:57:57 Speaker 3
+En el sistema web no.
+
+0:57:59 Speaker 1
+Claro.
+
+0:58:00 Speaker 3
+El sistema, por el proceso hotelero no. Yo dije: ¿pero cómo no va a ser? Y yo ya estoy cansado, ya estoy viejo para estar peleándome con, con pendejos de mi, de la edad de mi hijo, porque la verdad son de la edad de mi hijo. Entonces acá, a ver, acá esto... Y bien.
+
+0:58:15 Speaker 1
+No, no, no, no. Pero no, no va ahí, no va ahí.
+
+0:58:18 Speaker 3
+Emitís, emitís sobre el total.
+
+0:58:20 Speaker 1
+No, no, está cual, está cual.
+
+0:58:21 Speaker 3
+No es cierto. Ah, tiene que coincidir. Eso es un error que yo vi, ¿no es cierto? Que la... Si vos estás emitiendo desde el punto de venta este, la nota tiene que ser el mismo punto de venta, el mismo cliente.
+
+0:58:33 Speaker 1
+Eso ya lo cambiamos, ya, ya está. Pero esto ya no iría, incluso eso ya no se usaría, porque, po-po-porque ya está acá.
+
+0:58:41 Speaker 3
+Sí.
+
+0:58:41 Speaker 1
+Acá ya ve que falta, pero va ahí.
+
+0:58:44 Speaker 3
+Sí, no es tan complicado, ¿no es cierto?
+
+0:58:47 Speaker 1
+Exacto.
+
+0:58:48 Speaker 3
+Y si también si es cuenta corriente, también tiene que tomar en cuenta la cuenta corriente.
+
+0:58:51 Speaker 1
+Tal cual.
+
+0:58:52 Speaker 3
+Tiene que restarla, tiene que...
+
+0:58:53 Speaker 1
+Mhm. Sí, sí, sí, sí. Buenísimo, buenísimo.
+
+0:58:57 Speaker 4
+¿Algo más que hayas visto?
+
+0:58:59 Speaker 3
+Era eso, porque yo quería ver la parte de contabilidad.
+
+0:59:01 Speaker 1
+Sí, sí, toda esa, esa-
+
+0:59:02 Speaker 3
+Yo te juro, cuando lo vi dije: acá estoy muerto.
+
+0:59:06 Speaker 1
+Mhm.
+
+0:59:07 Speaker 3
+Porque yo no le puedo decir: che, modificame acá, porque así, porque me afecta acá.
+
+0:59:11 Speaker 1
+Sí, sí, no, está todo eso. Claro, tal cual, tal cual.
+
+0:59:14 Speaker 3
+Afecta todo lo que estaba acá. Y yo después empecé a buscar por todos lados dónde estaba la configuración. No lo encontraba. ¿Dónde está? ¿Y dónde está? ¿Y dónde está?
+
+0:59:22 Speaker 1
+No, no, no.
+
+0:59:22 Speaker 3
+¿Cómo, cómo hizo esos asientos?
+
+0:59:23 Speaker 1
+Claro.
+
+0:59:24 Speaker 3
+¿Cómo lo está disparando? Entonces era: no, Marcelo.
+
+0:59:28 Speaker 1
+No, no, sí, sí.
+
+0:59:31 Speaker 3
+Porque yo no, no decir... Te frena muchísimo.
+
+0:59:34 Speaker 1
+Está cual.
+
+0:59:34 Speaker 3
+Porque si no, porque te falta una pata. Porque si vos decís: no voy a tener contabilidad, pero seguí más adelante.
+
+0:59:39 Speaker 1
+Claro. No, no, si-
+
+0:59:40 Speaker 3
+Mañana.
+
+0:59:41 Speaker 1
+La idea es que, es que haya.
+
+0:59:43 Speaker 3
+Pero... Y con eso ya después le das a la contadora y hacete todas así, haceme la tal acá.
+
+0:59:48 Speaker 1
+Esos mismos, tal cual. Listo, bien. Buenísimo.
+
+0:59:52 Speaker 4
+Genial.
+
+0:59:53 Speaker 1
+Buenísimo. Bien.
+
+0:59:54 Speaker 3
+Estamos de acuerdo.
+
+0:59:55 Speaker 1
+Excelente, excelente.
+
+0:59:57 Speaker 4
+Después lo que deberíamos poder hacer también es, eh, probar las impresoras, las comanderas, todas esas cosas.
+
+1:00:03 Speaker 3
+Eso, eh, la impresión directa, eh... Nosotros tenemos un, un, un... Es decir, los web-
+
+1:00:11 Speaker 4
+Para poder terminar de hacer, digo, todo el-
+
+1:00:13 Speaker 1
+Sí, sí, estaba el proceso.
+
+1:00:14 Speaker 4
+Llegó hasta la parte de facturación.
+
+1:00:16 Speaker 1
+Sí, claro, obvio, no hay problema.
+
+1:00:18 Speaker 3
+El problema de los web es como yo te digo, no imprimen directo, generan normalmente PDF y después del PDF-
+
+1:00:24 Speaker 1
+Bueno, mirá, eh-
+
+1:00:25 Speaker 3
+Disparan.
+
+1:00:25 Speaker 1
+Por ejemplo, que-
+
+1:00:26 Speaker 3
+Nosotros allá lo logramos.
+
+1:00:27 Speaker 1
+En el único que lo tenemos ya-
+
+1:00:29 Speaker 3
+Allá no sé cómo hicieron, pero lo, lo lograron hacer.
+
+1:00:33 Speaker 1
+Yo hoy tengo acá en spa... Eh, bueno, pará, vamos, vamos a hacer un... Porque acá en spa viste que cuando cuando hacen un, un masaje para la habitación le, le imprimen el voucher.
+
+1:00:51 Speaker 3
+Sí, eh-
+
+1:00:52 Speaker 1
+Te acordás que lo habíamos visto, Papo, de...
+
+1:00:54 Speaker 3
+Yo pregunto: ¿por qué el spa no factura? Lo he preguntado desde hace años, ¿por qué no factura?
+
+1:01:00 Speaker 1
+En su momento no, no se podía con-conectar la, la impresora a la fe-fiscal.
+
+1:01:05 Speaker 3
+Pero ahora ya tiene factura.
+
+1:01:05 Speaker 1
+Ahora sí, ahora de-
+
+1:01:07 Speaker 4
+Ahora se podría ya. Después fue por una cuestión de comodidad.
+
+1:01:09 Speaker 1
+Sí, sí.
+
+1:01:10 Speaker 3
+Ah, por comodidad nomás, no.
+
+1:01:11 Speaker 1
+Yo cuando pongo acá-
+
+1:01:12 Speaker 4
+Era para que no, no tengan otra caja-
+
+1:01:15 Speaker 1
+Exacto.
+
+1:01:15 Speaker 4
+No manejen otra caja en el spa, digamos.
+
+1:01:17 Speaker 1
+No, no, pero yo ya le dije-
+
+1:01:18 Speaker 3
+Podés llegar a hacer-
+
+1:01:19 Speaker 1
+Sí, sí, sí
+
+1:01:20 Speaker 3
+Que directamente todo lo que sea tarjeta, mercado-
+
+1:01:25 Speaker 1
+Si ya no se usa el efectivo ahora.
+
+1:01:28 Speaker 3
+Yo no pido efectivo hace años.
+
+1:01:29 Speaker 1
+No, ya no se usa.
+
+1:01:30 Speaker 3
+Tengo que ir al banco para dar cheque. ¿Dónde están las tarjetas de sacar plata?
+
+1:01:33 Speaker 1
+Tal cual. No, no, no. Cuando es pack un turno a la habitación...
+
+1:01:43 Speaker 3
+Eso también estaba la-
+
+1:01:45 Speaker 1
+Ya derecho se abre.
+
+1:01:46 Speaker 3
+Mhm.
+
+1:01:47 Speaker 1
+En la... Acá si lo hacemos, imprime al toque.
+
+1:01:50 Speaker 3
+Sí, pero en eso-
+
+1:01:51 Speaker 1
+No va a tener-
+
+1:01:51 Speaker 3
+Impresora.
+
+1:01:53 Speaker 1
+Claro.
+
+1:01:53 Speaker 3
+Acordate que tenés un papelito de-
+
+1:01:55 Speaker 1
+La, la comandera, exactamente
+
+1:01:56 Speaker 3
+...la comandera es ahí.
+
+1:01:57 Speaker 1
+Exactamente. Es que esto es así, se, se genera esto y se, y se-
+
+1:02:02 Speaker 3
+Sí, generas el PDF y después lo mandás a imprimir-
+
+1:02:04 Speaker 1
+Claro, exactamente
+
+1:02:05 Speaker 3
+...a una impresora predeterminada que tenga, eh... El problema de, del restaurante es que vos vas a tener-
+
+1:02:11 Speaker 1
+Exactamente
+
+1:02:11 Speaker 3
+...el problema del restaurante es que vos vas a tener... Acá esto disparas a una impresora predeterminada. Es decir, el PDF dispara a la impresora predeterminada. Listo. ¿Qué hace el restaurante que tenés?
+
+1:02:22 Speaker 1
+Claro, tal cual, tal cual. Sí, sí.
+
+1:02:24 Speaker 3
+Y eso es, es la complicación que tienen todos estos sistemas.
+
+1:02:28 Speaker 1
+Igual no lo, no lo, no, no entré a investigarlo, pero de-debe haber una forma.
+
+1:02:33 Speaker 3
+¿Sí? Hay formas.
+
+1:02:33 Speaker 4
+No, seguro.
+
+1:02:34 Speaker 3
+Hay una cinta-
+
+1:02:35 Speaker 4
+El ancho del papel de la comandera.
+
+1:02:36 Speaker 3
+No, no, es, es... El ancho de papel de la comandera no es, no es problema. Parale. Los, eh, los RDLC de que tiene visual, no sé cómo que está hecho esto, pero lo que tiene visual studio es que no es, no es como este, que, eh, es flexible, es decir, eh-
+
+1:02:50 Speaker 1
+Moldeable
+
+1:02:51 Speaker 3
+...moldeable a la cantidad de artículos. Los RDLC que tenés en el sistema de sist-- de sistema web son fijos. Vos vas a ocupar esto.
+
+1:02:59 Speaker 1
+Exacto.
+
+1:03:00 Speaker 3
+Siempre. Un artículo o a la cantidad que, que entra ahí. Si no sigue, te hace otro-
+
+1:03:07 Speaker 1
+Otro, claro
+
+1:03:08 Speaker 3
+...y otro más... El Fox no, el Fox era muy... Necesit-- sistema antiguo, sistema viejo, sistema pensado para-
+
+1:03:17 Speaker 1
+Exacto
+
+1:03:17 Speaker 3
+...las impresoras de, de, de matriciales que eran así, estaba pensado, pero esto ya no.
+
+1:03:23 Speaker 1
+Sí, no.
+
+1:03:24 Speaker 3
+Entonces-
+
+1:03:24 Speaker 1
+Otra cosa que yo le comentaba a Papo, que, que es otra cosa... Es otra instalación y, y que, que, que se acostumbren. Viste en los McDonald's que yo qué... que, que, que ya no usan más la, la comanda, que va al, al monitor.
+
+1:03:39 Speaker 3
+Va al monitor.
+
+1:03:40 Speaker 1
+Y te toca, te, te-
+
+1:03:42 Speaker 3
+Sí, eh...
+
+1:03:43 Speaker 1
+Eso es más de operativo y que ellos quieran y se acostumbren.
+
+1:03:48 Speaker 3
+Lo van a visualizar. Para mí es, es mejor que estar imprimiendo papel.
+
+1:03:54 Speaker 1
+Eh, en un futuro va a terminar, eh...
+
+1:03:57 Speaker 3
+Sí, necesitas tener. Nosotros tenemos, se desarrolló, nunca se implementó, nunca se... Es decir, el sistema web lo tiene.
+
+1:04:04 Speaker 1
+Mhm.
+
+1:04:04 Speaker 3
+No es cierto. No se implementa porque no, no hay restaurante en este momento-
+
+1:04:08 Speaker 1
+Claro
+
+1:04:08 Speaker 3
+...que, que tengan esa tecnología, que vos le digas: «Tengo un monitor de cuarenta y tres pulgadas, un televisor de cuarenta y tres pulgadas táctil».
+
+1:04:16 Speaker 1
+Exacto.
+
+1:04:17 Speaker 3
+Tac, tac, tac. O terminás así y viene así.
+
+1:04:20 Speaker 1
+Tal cual.
+
+1:04:21 Speaker 3
+Pero no necesitás eso.
+
+1:04:23 Speaker 1
+Sí, sí, sí.
+
+1:04:23 Speaker 3
+Y las comandas no se hacen en papel, ya no...
+
+1:04:28 Speaker 1
+Sí, sí. Te ahorrás-
+
+1:04:29 Speaker 3
+Te ahorrás papel, te ahorrás impresora, te ahorrás cable, te ahorrás dolores de cabeza.
+
+1:04:32 Speaker 1
+No, aparte supuestamente está... De-debería verse mejor.
+
+1:04:35 Speaker 3
+Y aparte con una, una pequeña alarmita que te decir pin, pin, pin. Esa tanto se sale... Nos estamos viendo.
+
+1:04:43 Speaker 1
+Sí, sí, sí. Está bien.
+
+1:04:44 Speaker 3
+Va a costar, sí.
+
+1:04:45 Speaker 4
+Sí, va a costar. Acá está acostumbrado a ir tildando...
+
+1:04:48 Speaker 1
+No, el tema, lo, lo más difícil que hablábamos es conseguir una buen-- una pantalla táctil y que no se rompa tan fácil.
+
+1:04:56 Speaker 4
+Sí.
+
+1:04:56 Speaker 1
+Con lo que le pegan.
+
+1:04:57 Speaker 4
+Que esté ahí en un ambiente de calor.
+
+1:04:58 Speaker 3
+Exacto.
+
+1:04:59 Speaker 1
+Por eso, por eso, por eso.
+
+1:04:59 Speaker 4
+Con los dedos lo tocan manchado.
+
+1:05:02 Speaker 1
+Por eso.
+
+1:05:02 Speaker 4
+Son cosas que van a pasar en la realidad.
+
+1:05:03 Speaker 3
+En su momento, en su momento, no es cierto, a los táctiles se le... los viejos monitores se le ponía una pantalla así arriba.
+
+1:05:13 Speaker 1
+Ajá.
+
+1:05:14 Speaker 3
+Y que eso era el táctil.
+
+1:05:15 Speaker 1
+Claro. Tal cual. Sí, sí.
+
+1:05:18 Speaker 3
+¿Te acordás?
+
+1:05:18 Speaker 1
+Sí, sí.
+
+1:05:19 Speaker 3
+Los primeros monitores se le ponía así.
+
+1:05:21 Speaker 1
+De acuerdo.
+
+1:05:21 Speaker 3
+Te digo que no está mal para un...
+
+1:05:24 Speaker 1
+Para un tele así.
+
+1:05:25 Speaker 3
+Para un tele así.
+
+1:05:26 Speaker 1
+Mhm.
+
+1:05:27 Speaker 3
+Porque sí es, eh, un tele o un dispositivo que...
+
+1:05:31 Speaker 1
+Sí, po-porque a mí me da miedo todo eso, el, el toqueteo, el calor, que se moje, que es como un...
+
+1:05:38 Speaker 3
+Tendrías que tener... Ahí tendría que haber como dos.
+
+1:05:41 Speaker 4
+Sí, ver también eso.
+
+1:05:42 Speaker 3
+Uno grande que solamente sea de visualización, que yo no, no, no conozco de cocina.
+
+1:05:49 Speaker 1
+Ah, está bien. Y uno chico que se toque.
+
+1:05:50 Speaker 3
+Y uno chico que sí, una, una pantallita, un monitor táctil, sí, grande, un televisorcito que... O con mouse, no tiene que ser táctil, con mouse mismo. Así que eso... Entonces los que preparan, calculo yo, yo vie-- me, ahí me baso en las películas.
+
+1:06:06 Speaker 1
+Sí, sí.
+
+1:06:06 Speaker 3
+El que prepara, mira. Vos viste las películas de los chefs, ellos tienen así, miran tanto así y ya saben. Pero hay alguien que le está tirando esa información.
+
+1:06:15 Speaker 1
+Sí, sí, sí.
+
+1:06:18 Speaker 3
+Entonces, bueno, te sale más barato y, y el televisor es grande.
+
+1:06:22 Speaker 1
+Sí.
+
+1:06:22 Speaker 4
+No vas a poder implementarlo. Te digo.
+
+1:06:26 Speaker 1
+No, no, ah, ahí hay que-
+
+1:06:28 Speaker 4
+No, hay que pensar también... Primero va a haber una persona que esté en cocina como dirigiendo la parte. Tiene que ser el mismo que está emplatando o Diego.
+
+1:06:35 Speaker 1
+No, pero, pero que ya lo hacen a eso. Si el que saca una comanda es el que lee. O sea-
+
+1:06:40 Speaker 4
+Ah, sí, sí
+
+1:06:40 Speaker 1
+...la comanda vos la leés igual.
+
+1:06:42 Speaker 4
+Ahora es lo que hacen. Cortan, eh... Cantan, digamos, la, la comanda y, y cantan los cursos.
+
+1:06:48 Speaker 1
+Y ahí lo mismo. Pincha arriba.
+
+1:06:50 Speaker 3
+Lo ves arriba.
+
+1:06:52 Speaker 1
+Sí, lo mismo. O sea, eso es lo mismo.
+
+1:06:54 Speaker 3
+Sí, no, el problema es-
+
+1:06:54 Speaker 1
+Que sea una comanda y la cantás acá o la cantás si la ves, eso es...
+
+1:06:59 Speaker 4
+No, digo, en los, en los sales también ahora se manejan pinchando y te sale el sale, lo ponen en la misma, en, en la misma comanda que ya salió.
+
+1:07:05 Speaker 3
+Sí, hace veinte años, veinti... ¿Cuánto tiene el hotel? Veinti...
+
+1:07:08 Speaker 1
+Veinte.
+
+1:07:09 Speaker 3
+Veinte años que están haciendo lo mismo.
+
+1:07:11 Speaker 1
+Sí, sí.
+
+1:07:11 Speaker 4
+Hermano, obviamente es costumbre y lo que hay que buscar es que sea practicial.
+
+1:07:16 Speaker 1
+Claro, exactamente.
+
+1:07:16 Speaker 4
+O sea, que no demore más o que estén... Porque si no después-
+
+1:07:19 Speaker 3
+El problema también del papel de la impresora es lo que pasa actualmente. Se queda sin papel, se traba el papel, eh, se traba la impresora, los puertos se traban, no salen ¿Por qué? Porque es Windows.
+
+1:07:32 Speaker 1
+Sí, sí.
+
+1:07:32 Speaker 3
+Es más que-- ese, ese... No, no, no le echemos la culpa a Windows. Es computación.
+
+1:07:36 Speaker 1
+Sí, es computación. No, lo, lo ideal en eso, eh, no tiene nada que ver Pablo, eh, es que ellos puedan hablar con alguien que lo haya hecho así. Y que te diga: "No, sale la, la entrada pre-pre-primero ese mismo ticket, después pasa a segundo plato y después pasa acá a postre y después se va". No sé, que te digan cómo es. Yo, yo la verdad que no, eh, no, no sé bien eso.
+
+1:08:02 Speaker 3
+Y en Victoria, ¿cómo lo tiene? Que vos...
+
+1:08:04 Speaker 1
+No, eso lo hacen todo así, o peor, o sin sistema. Porque allá en Victoria ma-ma-manejan un restaurante muy chiquito.
+
+1:08:13 Speaker 3
+No, tendrías que...
+
+1:08:15 Speaker 1
+No sé en Pullman. Porque allá va apretado.
+
+1:08:19 Speaker 3
+¿Y en Java?
+
+1:08:20 Speaker 1
+No, no, no. Comanda, comanda.
+
+1:08:22 Speaker 3
+Una vez, una vez entregué yo.
+
+1:08:23 Speaker 1
+Sí.
+
+1:08:24 Speaker 3
+Nunca más.
+
+1:08:24 Speaker 1
+Comanda. Puede-- puedo consultarle a Pullman.
+
+1:08:28 Speaker 3
+Porque... Sí, alguien tiene que-- el que recibe, el que hoy corta el papel, lo único que tiene que hacer es tac, esto y ya.
+
+1:08:37 Speaker 1
+Sí, yo me imagino lo que, que vos decís que, que, que diga cuatro empanadas pone y sale en entrada. Y después pasa sola al otro paso y después pasa al otro paso.
+
+1:08:48 Speaker 3
+Sí. Hay que buscar siempre el práctico y...
+
+1:08:51 Speaker 1
+No, eh, estaría bueno saber cómo es. Por ahí Gonza conoce a alguien que, que, que sabe cómo se maneja eso.
+
+1:09:00 Speaker 3
+Buscá en la web, ¿no? Hay muchos videos de sistemas.
+
+1:09:03 Speaker 1
+Sí, sí, tiene, tiene que haber. Sí, sí.
+
+1:09:05 Speaker 3
+Hay una barbaridad de, de videos de sistemas que van mostrando, pero sí, ahí ya necesitas alguien que sepa.
+
+1:09:13 Speaker 1
+Exacto. Es... Operativamente.
+
+1:09:17 Speaker 3
+Operativamente, sí. Yo te puedo dar una idea, pero para mí es un monitorcito que el que recibe los ped-- alguien, alguien, el que corta hoy el papel, digamos, lo siento-
+
+1:09:26 Speaker 1
+Tenés que tener la cocina fría, que está la comandera al lado.
+
+1:09:29 Speaker 3
+Sí.
+
+1:09:30 Speaker 1
+Agarra y ve lo que canta. Después pincha, se-
+
+1:09:31 Speaker 3
+Es lo mismo. Hoy cuando sale, tienen-- lo van a tener-- hacer un sonido, va a ser algo, ¿no es cierto? Que ellos tac, hacen así y eso cambia. Es decir, eso dispara otro programa.
+
+1:09:46 Speaker 1
+Sí.
+
+1:09:46 Speaker 3
+¿No es cierto? Y vos estás viendo en un monitor de cuarenta y tres pulgadas o veinti-- sí, cuarenta y tres sería lo más correcto, grandote, con letras así. Y eso es lo que yo tengo.
+
+1:09:55 Speaker 1
+Tenés que tener capacidad de poder tener treinta metros.
+
+1:09:59 Speaker 3
+Y esa es otra cosa, eh, que yo siempre le digo a todo el mundo, que no, muchos se ríen, pero no... Es: escriban en mayúscula.
+
+1:10:08 Speaker 1
+Sí.
+
+1:10:08 Speaker 3
+Esto no es una red social. Esto no es una red social.
+
+1:10:12 Speaker 1
+No son gritos.
+
+1:10:12 Speaker 3
+No son gritos. Esto es, vos leés imprenta mayúscula mucho mejor que minúscula. Mayúscula y minúscula. Porque vos tenés... Vos le vas a dar un golpe de vista y ¿cuánto tardás en leer? Ni llegás al segundo. En cambio, si vos tenés que-- tu cerebro tiene que estar viendo que si tiene el acento, no tiene el acento, lamentablemente en el español es así, tardás más tiempo.
+
+1:10:36 Speaker 1
+Sí.
+
+1:10:37 Speaker 3
+Hasta si vos le podés acá todo mayúscula, mejor. Porque te acordás que mayúscula, minúscula, mayúscula, minúscula.
+
+1:10:44 Speaker 1
+Está igual.
+
+1:10:44 Speaker 3
+Así. Hasta para una presentación, un reporte, cuando mandás así, que mayúscula, minúscula, que le falta el acento. Esto no es, no es... Esto no es...
+
+1:10:54 Speaker 1
+Sí, sí.
+
+1:10:55 Speaker 3
+Esto es un sistema que tiene que ser fácil de leer. Y la gente no lee. Imaginate.
+
+1:11:03 Speaker 1
+No, no, sí.
+
+1:11:03 Speaker 3
+No lee, no interpreta. Y además tiene que ponerse a interpretar lo que está en mayúscula y minúscula, y tiene que escribir mayúscula y minúscula. Mandale todo mayúscula.
+
+1:11:12 Speaker 1
+Sí, está bien.
+
+1:11:14 Speaker 3
+Que no sé cómo se, se podrá hacer o no, pero, eh, para mí es lo mejor.
+
+1:11:19 Speaker 1
+En las comandas. Te referís en todo.
+
+1:11:22 Speaker 3
+En todos lados. Porque el apellido y nombre que va... Si vos ponés minúscula.
+
+1:11:27 Speaker 1
+Sí, a lo-
+
+1:11:28 Speaker 3
+González lleva su acento, pero con imprenta no.
+
+1:11:32 Speaker 1
+Sí.
+
+1:11:33 Speaker 3
+Sí, lleva acento. Mi hija que me cagaría a pedo porque estoy diciendo letras.
+
+1:11:36 Speaker 1
+Sí, lleva.
+
+1:11:37 Speaker 3
+Bueno, eh, nadie escribe con mayúscula. Acento con mayúscula. Si vos mandás todo en mayúscula, hasta lo podés leer mejor.
+
+1:11:44 Speaker 1
+Mhm.
+
+1:11:45 Speaker 3
+Si vos leés acá esto, vos decís que queda muy lindo, pero cuando vos leés una, un informe, le mandás una, una confirmación de reserva, es tu apellido, está en mayúscula, sos importante. Digamos, queda muy lindo, pero sos importante. Vos le-- cuando a vos te llega un informe, el del banco, ¿cómo está escrito?
+
+1:12:10 Speaker 1
+Sí, sí es mayúscula.
+
+1:12:10 Speaker 3
+Todo mayúscula. Eso es importante. Boludeces, pero...
+
+1:12:16 Speaker 1
+No, no, sí, sí.
+
+1:12:18 Speaker 3
+No sé.
+
+1:12:18 Speaker 1
+Última cosa que se me ocurre ahora ha-ha-hablando. ¿Qué pasa si decimos lo de contabilidad lo, lo voy haciendo aparte, lo arrancamos sin eso?
+
+1:12:32 Speaker 3
+Sí. Siempre eso, eso depende de vos. El problema es que lo podés arrancar tranquilamente, vos podés estar tiempo. Hay que ver lo contador si te quiere asesinar o no.
+
+1:12:42 Speaker 1
+Exacto. No, no, no, po-po-- yo estoy pensando-
+
+1:12:46 Speaker 3
+Porque lo que tenés hoy de sistema de contabilidad es dos consultas que me pidió Carlos hace millones de años atrás, que es de compra.
+
+1:12:55 Speaker 1
+Sí, sí, es todo compra. Lo que querés hasta ahora es todo compra. Sacando las consultas. O sea, suponete que haga los reportes de ventas que van a ser sobre, como hablábamos hoy, sobre los conceptos, no sobre cuenta contable.
+
+1:13:11 Speaker 3
+Sí, sí, sí. Concepto y que el concepto vaya a la contabilidad.
+
+1:13:13 Speaker 1
+Sí. Y por ahí metemos lo, lo contable específicamente cuando esté listo, hecho.
+
+1:13:19 Speaker 3
+Lo podés llegar a hacer en cualquier momento.
+
+1:13:21 Speaker 1
+Está bien.
+
+1:13:21 Speaker 3
+Y eso. Porque es un módulo que, como va a ser transparente, lo tenés que tener previsto.
+
+1:13:27 Speaker 1
+Exacto, está bien.
+
+1:13:29 Speaker 3
+Lo tenés que tener previsto, tener una VM, pero lo podés Hasta el año que viene, cuando comenzás el nuevo periodo contable.
+
+1:13:38 Speaker 1
+Tal cual.
+
+1:13:38 Speaker 3
+Tenés un año para-
+
+1:13:39 Speaker 1
+Por eso, por eso, exactamente.
+
+1:13:41 Speaker 3
+Pero tenés que tener previsto y tenés un año para diseñar tooodo tranquilo.
+
+1:13:46 Speaker 1
+Exacto.
+
+1:13:47 Speaker 3
+Lo así, total-
+
+1:13:48 Speaker 1
+Porque a mí me parece mejor eso, porque ahora-
+
+1:13:51 Speaker 3
+Te digo, eh... Bueno, no sé cuándo vas a dejar de utilizar el otro, pero, eh, el problema es los informes que pide-
+
+1:14:00 Speaker 1
+Exactamente.
+
+1:14:00 Speaker 3
+Tu contadora, que eso no lo vas a tener-
+
+1:14:03 Speaker 1
+De la venta seguramente.
+
+1:14:04 Speaker 3
+De la... No sé cómo-- qué es lo que pedía. Yo me acuerdo que era de compra, no de venta.
+
+1:14:08 Speaker 1
+No, no, por eso, po-porque las, las compras, Aylin ya me pasó y estamos viendo qué es lo que vos ya viste, que ella saca ese informe.
+
+1:14:16 Speaker 3
+Ese informe.
+
+1:14:16 Speaker 1
+Incluso hoy ya se lo mandó a la contadora lo que hay hoy, a ver qué le falta, qué es lo que no tiene.
+
+1:14:23 Speaker 3
+Sí, podés llegar.
+
+1:14:24 Speaker 1
+Lo que me preocupa sí por ahí son los reportes o informes que podemos llegar a sacar de las ventas que sean, que nos sirvan, digamos.
+
+1:14:31 Speaker 3
+Sí, eso, eso, eso.
+
+1:14:32 Speaker 1
+Pero con los conceptos más o menos va a salir.
+
+1:14:34 Speaker 3
+Sí, para la parte de contabilidad no es necesario.
+
+1:14:37 Speaker 1
+Bien.
+
+1:14:39 Speaker 3
+El noventa y nueve por ciento de los sistemas se trabajan sin contabilidad, le entregan todas las facturas al contador y que Dios lo ayude.
+
+1:14:45 Speaker 1
+Sí, porque sí, no, no... Porque sí lo quiero hacer, pero al mismo tiempo, como estamos con todas las áreas, porque ya abrimos el juego a todas las áreas que se fijen y, y chequeen operativamente, por ahí con lo contable va a ser más. Por ahí arrancarlo bien, ir haciéndolo contable aparte, porque sí lo quiero hacer.
+
+1:15:04 Speaker 3
+Sí, no, por eso te digo, vos podés trabajar, podés hacer, si lo planificás y decís: bueno, esto va a ser así y esto va a tener un menú que va a disparar, si ya lo tenés pensado y así lo único que tenés que hacer es poner ta, ta, ta, ta y hacer las cosas para allá y después se hace solo. Vos podés trabajar sin contabilidad. Casi el noventa y nueve por ciento.
+
+1:15:24 Speaker 1
+Sí, sí, muchos no.
+
+1:15:26 Speaker 3
+De los sistemas que yo instalé, yo he instalado más de doscientos sistemas de, de hotelería.
+
+1:15:31 Speaker 1
+Mhm.
+
+1:15:35 Speaker 3
+Uno solo lo lleva al día, uno solo es la vida.
+
+1:15:38 Speaker 1
+Tal cual.
+
+1:15:39 Speaker 3
+Otro lleva más o menos y acá...
+
+1:15:42 Speaker 1
+Sí.
+
+1:15:42 Speaker 3
+Nada de bueno.
+
+1:15:44 Speaker 1
+Exactamente, sí, sí.
+
+1:15:45 Speaker 3
+Así que de todos los sistemas comerciales, de todos los sistemas de hotelería, nadie trabaja con hotelería. ¿Qué hacen? Le entregan todo un listado de libro y venta.
+
+1:15:54 Speaker 1
+Exactamente.
+
+1:15:56 Speaker 3
+Contador, que Dios te ayude.
+
+1:15:58 Speaker 1
+Tal cual.
+
+1:15:59 Speaker 3
+Esa es otra, por eso, eh, tener o no tener es... Sí, algunos dicen: "No, yo no puedo vivir sin contabilidad". ¿Por qué? Porque yo me manejo, yo quiero saber qué manejo, así entonces tir las cuentas contables acá, acá, acá, acá, yo ya sé qué movimiento tuve y ya me doy un panorama. Bárbaro. Otro no.
+
+1:16:20 Speaker 1
+Bien, buenísimo. Bien.
+
+1:16:22 Speaker 3
+Todo depende cómo se organiza.
+
+1:16:24 Speaker 1
+Vamos a analizarlo bien y vemos...
+
+1:16:25 Speaker 3
+Eso analizalo, porque te digo, no, no todo el mundo trabaja en contabilidad, todo depende de la planificación y quién está detrás de la parte gerencial, que ve los números, que si, si es un contador o una, un licenciado así y ellos sí-
+
+1:16:39 Speaker 1
+Sí, sí, sí.
+
+1:16:39 Speaker 3
+Contable, no, no, no, no lo saqués de ahí, porque si no lo tenés y le entregás todo así, ellos le entrega toda la facturación, ellos lo cargan en su sistema y hará los análisis correspondiente y verá. Pero sí, vos podés la plata tranquilamente, sin donde... Planifícalo.
+
+1:16:58 Speaker 1
+Sí, sí.
+
+1:16:59 Speaker 3
+Dejalo y ese, y terminá todo esto y tenés un año.
+
+1:17:03 Speaker 1
+Exactamente, buenísimo. Bien, bien, bien. Vamos a verlo bien.
+
+1:17:07 Speaker 3
+Ta.
+
+1:17:07 Speaker 1
+Buenísimo, buenísimo.
+
+1:17:09 Speaker 3
+Sirvió.
+
+1:17:09 Speaker 1
+Muchas gracias. Che, eh...
+
+1:17:12 Speaker 3
+Ah. Dime media luna que me... Yo tomo café nomás.
+
+1:17:16 Speaker 1
+La semana que viene tenemos eso, lo adernés. Así te avisamos y... ¿Necesitás hacer factura? Hablando de factura.
+
+1:17:25 Speaker 3
+No, por eso.
+
+1:17:26 Speaker 1
+Qué equiparado le pidió. Buenísimo.
+
+1:17:28 Speaker 3
+Pobre, pagué el auto porque no podía ni vivir ya. Ay, ay, ay. Bueno, eh, yo sigo... Bueno, cuando vos terminés la parte de... Y yo te digo, lo que faltaba de acá del restaurante era sacar eso así y yo cuando lo vea lo chequeo y yo sigo con las cosas del hotel.
+
+1:17:48 Speaker 1
+Perfecto. De diez, de diez.
+
+1:17:50 Speaker 3
+Bueno.
+
+1:17:51 Speaker 1
+Está bien.
+
+1:17:51 Speaker 3
+Uh, cómo está frío afuera.
+
+1:17:53 Speaker 1
+Sí, sí, sí. Dice que mañana va a ser menos un grado.
+
+1:17:56 Speaker 3
+Ah, sí. Altas cumbres está nevando en Córdoba, Salta, Catamarca, está nevando como... ¿Pero dónde está que nevó?
+
+1:18:04 Speaker 1
+No sé, vos.
+
+1:18:05 Speaker 3
+Debe ser hace como treinta años que no nevaba.
+
+1:18:09 Speaker 1
+Que no nevaba. Muchísimas gracias.
+
+1:18:11 Speaker 3
+Bueno.
+
+1:18:21 Speaker 1
+Muchas gracias.
+
+1:18:21 Speaker 3
+Vamos viendo.
+
+1:18:24 Speaker 1
+Hasta luego. Visitas. Sí.
