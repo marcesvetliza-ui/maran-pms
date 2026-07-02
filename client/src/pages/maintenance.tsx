@@ -34,11 +34,14 @@ import {
   ChevronRight,
   Lock,
   CalendarRange,
+  Calendar,
+  RefreshCw,
+  CheckCheck,
+  ShieldCheck,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/App";
-import type { SystemIncident } from "@shared/schema";
 
 type Room = {
   id: string;
@@ -183,23 +186,37 @@ const INC_MODULES = [
   "inventario", "cajas", "reportes", "administracion", "otro",
 ];
 
-function IncidenciasTab() {
-  const { user } = useAuth();
+const FREQ_OPTIONS = [
+  { value: "daily",     label: "Diario",       days: 1   },
+  { value: "weekly",    label: "Semanal",      days: 7   },
+  { value: "biweekly",  label: "Quincenal",    days: 14  },
+  { value: "monthly",   label: "Mensual",      days: 30  },
+  { value: "quarterly", label: "Trimestral",   days: 90  },
+  { value: "biannual",  label: "Semestral",    days: 180 },
+  { value: "annual",    label: "Anual",        days: 365 },
+  { value: "custom",    label: "Personalizado",days: 0   },
+];
+
+function freqLabel(freq: string, days: number) {
+  const opt = FREQ_OPTIONS.find(o => o.value === freq);
+  if (!opt) return `${days} días`;
+  if (freq === "custom") return `Cada ${days} días`;
+  return opt.label;
+}
+
+function PreventiveTab() {
   const { toast } = useToast();
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterSeverity, setFilterSeverity] = useState("all");
-  const [filterModule, setFilterModule] = useState("all");
-  const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
-  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
-  const [selectedIncident, setSelectedIncident] = useState<SystemIncident | null>(null);
-  const [newTitle, setNewTitle] = useState("");
-  const [newDesc, setNewDesc] = useState("");
-  const [newModule, setNewModule] = useState("otro");
-  const [newSeverity, setNewSeverity] = useState("media");
-  const [updateStatus, setUpdateStatus] = useState("");
-  const [updateAssigned, setUpdateAssigned] = useState("");
-  const [updateResolution, setUpdateResolution] = useState("");
-  const [updateResolvedBy, setUpdateResolvedBy] = useState("");
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<any | null>(null);
+  const [doneTask, setDoneTask] = useState<any | null>(null);
+  const [doneNotes, setDoneNotes] = useState("");
+  const [formName, setFormName] = useState("");
+  const [formDesc, setFormDesc] = useState("");
+  const [formFreq, setFormFreq] = useState("monthly");
+  const [formFreqDays, setFormFreqDays] = useState(30);
+  const [formNextDueAt, setFormNextDueAt] = useState("");
+  const [formAssignedTo, setFormAssignedTo] = useState("");
+  const [formNotes, setFormNotes] = useState("");
 
   const queryParams = new URLSearchParams();
   if (filterStatus !== "all") queryParams.set("status", filterStatus);

@@ -1,6 +1,8 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
 
 export function registerMaintenanceRoutes(app: Express) {
   // Maintenance Staff
@@ -245,6 +247,90 @@ export function registerMaintenanceRoutes(app: Express) {
       });
     } catch (error) {
       res.status(500).json({ error: "Error fetching maintenance dashboard" });
+    }
+  });
+
+  // ── Preventive Maintenance Tasks ──────────────────────────────────────────
+  app.get("/api/maintenance/preventive", requireAuth, async (_req, res) => {
+    try {
+      const result = await db.execute(sql`SELECT * FROM preventive_tasks WHERE active = true ORDER BY next_due_at ASC`);
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/maintenance/preventive", requireAuth, async (req, res) => {
+    try {
+      const { name, description, frequency, frequencyDays, nextDueAt, assignedTo, notes } = req.body;
+      if (!name?.trim() || !nextDueAt) return res.status(400).json({ error: "name y nextDueAt son requeridos" });
+      const result = await db.execute(sql`
+        INSERT INTO preventive_tasks (name, description, frequency, frequency_days, next_due_at, assigned_to, notes)
+        VALUES (${name.trim()}, ${description || null}, ${frequency || "monthly"}, ${frequencyDays || 30}, ${nextDueAt}, ${assignedTo || null}, ${notes || null})
+        RETURNING *
+      `);
+      res.status(201).json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/maintenance/preventive/:id", requireAuth, async (req, res) => {
+    try {
+      const { name, description, frequency, frequencyDays, nextDueAt, assignedTo, notes, active } = req.body;
+      const result = await db.execute(sql`
+        UPDATE preventive_tasks SET
+          name = COALESCE(${name ?? null}, name),
+          description = ${description ?? null},
+          frequency = COALESCE(${frequency ?? null}, frequency),
+          frequency_days = COALESCE(${frequencyDays ?? null}, frequency_days),
+          next_due_at = COALESCE(${nextDueAt ?? null}, next_due_at),
+          assigned_to = ${assignedTo ?? null},
+          notes = ${notes ?? null},
+          active = COALESCE(${active ?? null}, active),
+          updated_at = now()
+        WHERE id = ${req.params.id}
+        RETURNING *
+      `);
+      if (!result.rows.length) return res.status(404).json({ error: "Tarea no encontrada" });
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/maintenance/preventive/:id", requireAuth, async (req, res) => {
+    try {
+      await db.execute(sql`DELETE FROM preventive_tasks WHERE id = ${req.params.id}`);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Marcar como hecha → auto-programa la siguiente ocurrencia
+  app.post("/api/maintenance/preventive/:id/done", requireAuth, async (req, res) => {
+    try {
+      const { doneNotes } = req.body;
+      const existing = await db.execute(sql`SELECT * FROM preventive_tasks WHERE id = ${req.params.id}`);
+      if (!existing.rows.length) return res.status(404).json({ error: "Tarea no encontrada" });
+      const task = existing.rows[0] as any;
+      const today = new Date().toISOString().split("T")[0];
+      const freqDays = parseInt(String(task.frequency_days || 30));
+      const nextMs = Date.now() + freqDays * 86400000;
+      const nextDate = new Date(nextMs).toISOString().split("T")[0];
+      const result = await db.execute(sql`
+        UPDATE preventive_tasks SET
+          last_done_at = ${today},
+          next_due_at = ${nextDate},
+          notes = CASE WHEN ${doneNotes || null} IS NOT NULL THEN ${doneNotes || null} ELSE notes END,
+          updated_at = now()
+        WHERE id = ${req.params.id}
+        RETURNING *
+      `);
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 }

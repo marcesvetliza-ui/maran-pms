@@ -2344,6 +2344,30 @@ export const insertSystemIncidentSchema = createInsertSchema(systemIncidents).om
 export type InsertSystemIncident = z.infer<typeof insertSystemIncidentSchema>;
 export type SystemIncident = typeof systemIncidents.$inferSelect;
 
+// ==================== MANTENIMIENTO PREVENTIVO ====================
+export type PreventiveFrequency = "daily" | "weekly" | "biweekly" | "monthly" | "quarterly" | "biannual" | "annual" | "custom";
+
+export const preventiveTasks = pgTable("preventive_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  frequency: text("frequency").$type<PreventiveFrequency>().notNull().default("monthly"),
+  frequencyDays: integer("frequency_days").notNull().default(30),
+  lastDoneAt: date("last_done_at"),
+  nextDueAt: date("next_due_at").notNull(),
+  assignedTo: varchar("assigned_to", { length: 255 }),
+  notes: text("notes"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertPreventiveTaskSchema = createInsertSchema(preventiveTasks).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertPreventiveTask = z.infer<typeof insertPreventiveTaskSchema>;
+export type PreventiveTask = typeof preventiveTasks.$inferSelect;
+
 // ==================== MOTOR FINANCIERO — FOLIOS ====================
 export type FolioEntityType =
   | "reservation" | "restaurant_order" | "spa_account"
