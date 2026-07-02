@@ -42,6 +42,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/App";
+// useAuth kept for MaintenancePage (staff form uses user role check)
 
 type Room = {
   id: string;
@@ -168,23 +169,6 @@ const staffFormSchema = z.object({
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
 
-const SEVERITY_CONFIG: Record<string, { label: string; color: string }> = {
-  baja:    { label: "Baja",    color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
-  media:   { label: "Media",   color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" },
-  alta:    { label: "Alta",    color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
-  critica: { label: "Crítica", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-};
-const STATUS_CONFIG_INC: Record<string, { label: string; color: string }> = {
-  pendiente:   { label: "Pendiente",   color: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
-  en_revision: { label: "En revisión", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
-  resuelto:    { label: "Resuelto",    color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
-  descartado:  { label: "Descartado",  color: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500" },
-};
-const INC_MODULES = [
-  "planning", "reservas", "check-in", "check-out", "grupos",
-  "restaurant", "spa", "eventos", "housekeeping", "hospitalidad",
-  "inventario", "cajas", "reportes", "administracion", "otro",
-];
 
 const FREQ_OPTIONS = [
   { value: "daily",     label: "Diario",       days: 1   },
@@ -218,247 +202,256 @@ function PreventiveTab() {
   const [formAssignedTo, setFormAssignedTo] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
-  const queryParams = new URLSearchParams();
-  if (filterStatus !== "all") queryParams.set("status", filterStatus);
-  if (filterSeverity !== "all") queryParams.set("severity", filterSeverity);
-  if (filterModule !== "all") queryParams.set("module", filterModule);
+  const today = new Date().toISOString().split("T")[0];
 
-  const { data: incidents = [], isLoading } = useQuery<SystemIncident[]>({
-    queryKey: ["/api/incidents", filterStatus, filterSeverity, filterModule],
-    queryFn: async () => {
-      const res = await fetch(`/api/incidents?${queryParams.toString()}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Error cargando incidentes");
-      return res.json();
-    },
-  });
-
-  const { data: stats } = useQuery<any>({
-    queryKey: ["/api/incidents/stats"],
-    queryFn: async () => {
-      const res = await fetch("/api/incidents/stats", { credentials: "include" });
-      if (!res.ok) return {};
-      return res.json();
-    },
+  const { data: tasks = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/maintenance/preventive"],
+    queryFn: async () => { const r = await apiRequest("GET", "/api/maintenance/preventive"); return r.json(); },
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const res = await fetch("/api/incidents", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(data) });
-      if (!res.ok) throw new Error("Error al crear incidente");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/incidents/stats"] });
-      setIsNewDialogOpen(false);
-      setNewTitle(""); setNewDesc(""); setNewModule("otro"); setNewSeverity("media");
-      toast({ title: "Incidencia registrada" });
-    },
-    onError: () => toast({ title: "Error", description: "No se pudo registrar la incidencia", variant: "destructive" }),
+    mutationFn: async (body: any) => { const r = await apiRequest("POST", "/api/maintenance/preventive", body); if (!r.ok) { const e = await r.json(); throw new Error(e.error); } return r.json(); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] }); setIsFormOpen(false); resetForm(); toast({ title: "Tarea creada" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const res = await fetch(`/api/incidents/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(data) });
-      if (!res.ok) throw new Error("Error al actualizar");
-      return res.json();
+    mutationFn: async ({ id, body }: { id: string; body: any }) => { const r = await apiRequest("PATCH", `/api/maintenance/preventive/${id}`, body); if (!r.ok) { const e = await r.json(); throw new Error(e.error); } return r.json(); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] }); setIsFormOpen(false); setEditingTask(null); resetForm(); toast({ title: "Tarea actualizada" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const doneMutation = useMutation({
+    mutationFn: async ({ id, notes }: { id: string; notes: string }) => { const r = await apiRequest("POST", `/api/maintenance/preventive/${id}/done`, { doneNotes: notes }); if (!r.ok) { const e = await r.json(); throw new Error(e.error); } return r.json(); },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] });
+      setDoneTask(null); setDoneNotes("");
+      const next = data.next_due_at;
+      toast({ title: "✓ Tarea completada", description: `Próxima: ${next ? new Date(next + "T00:00:00").toLocaleDateString("es-AR") : "—"}` });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/incidents/stats"] });
-      setIsDetailDialogOpen(false);
-      toast({ title: "Incidencia actualizada" });
-    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/incidents/${id}`, { method: "DELETE", credentials: "include" });
-      if (!res.ok) throw new Error("Error al eliminar");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/incidents/stats"] });
-      setIsDetailDialogOpen(false);
-      toast({ title: "Incidencia eliminada" });
-    },
+    mutationFn: async (id: string) => { const r = await apiRequest("DELETE", `/api/maintenance/preventive/${id}`); if (!r.ok) throw new Error("Error"); return r.json(); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] }); setEditingTask(null); setIsFormOpen(false); toast({ title: "Tarea eliminada" }); },
   });
 
-  const openDetail = (incident: SystemIncident) => {
-    setSelectedIncident(incident);
-    setUpdateStatus(incident.status);
-    setUpdateAssigned(incident.assignedTo || "");
-    setUpdateResolution(incident.resolutionNotes || "");
-    setUpdateResolvedBy(incident.resolvedBy || "");
-    setIsDetailDialogOpen(true);
-  };
+  function resetForm() { setFormName(""); setFormDesc(""); setFormFreq("monthly"); setFormFreqDays(30); setFormNextDueAt(""); setFormAssignedTo(""); setFormNotes(""); }
+
+  function openEdit(task: any) {
+    setEditingTask(task);
+    setFormName(task.name || "");
+    setFormDesc(task.description || "");
+    setFormFreq(task.frequency || "monthly");
+    setFormFreqDays(parseInt(task.frequency_days) || 30);
+    setFormNextDueAt(task.next_due_at || "");
+    setFormAssignedTo(task.assigned_to || "");
+    setFormNotes(task.notes || "");
+    setIsFormOpen(true);
+  }
+
+  function handleFreqChange(val: string) {
+    setFormFreq(val);
+    const opt = FREQ_OPTIONS.find(o => o.value === val);
+    if (opt && opt.days > 0) setFormFreqDays(opt.days);
+  }
+
+  function handleSubmit() {
+    if (!formName.trim() || !formNextDueAt) return toast({ title: "Nombre y fecha de próximo vencimiento son requeridos", variant: "destructive" });
+    const body = { name: formName, description: formDesc || null, frequency: formFreq, frequencyDays: formFreqDays, nextDueAt: formNextDueAt, assignedTo: formAssignedTo || null, notes: formNotes || null };
+    if (editingTask) updateMutation.mutate({ id: editingTask.id, body });
+    else createMutation.mutate(body);
+  }
+
+  const overdue = tasks.filter(t => t.next_due_at < today);
+  const dueThisWeek = tasks.filter(t => t.next_due_at >= today && t.next_due_at <= new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]);
+  const upcoming = tasks.filter(t => t.next_due_at > new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]);
+
+  function urgencyStyle(task: any): string {
+    if (task.next_due_at < today) return "border-l-4 border-l-red-500";
+    if (task.next_due_at <= new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]) return "border-l-4 border-l-yellow-500";
+    return "border-l-4 border-l-green-500";
+  }
+
+  function urgencyBadge(task: any) {
+    if (task.next_due_at < today) return <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 text-xs">Vencida</Badge>;
+    if (task.next_due_at <= new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]) return <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 text-xs">Esta semana</Badge>;
+    return <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs">Al día</Badge>;
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Card className="border-l-4 border-l-gray-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.pendiente ?? 0}</p><p className="text-xs text-muted-foreground">Pendientes</p></CardContent></Card>
-        <Card className="border-l-4 border-l-blue-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.en_revision ?? 0}</p><p className="text-xs text-muted-foreground">En revisión</p></CardContent></Card>
-        <Card className="border-l-4 border-l-red-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.criticos ?? 0}</p><p className="text-xs text-muted-foreground">Críticos abiertos</p></CardContent></Card>
-        <Card className="border-l-4 border-l-green-400"><CardContent className="p-4"><p className="text-2xl font-bold">{stats?.resuelto ?? 0}</p><p className="text-xs text-muted-foreground">Resueltos</p></CardContent></Card>
+    <div className="space-y-5">
+      {/* Resumen */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="border-l-4 border-l-red-500">
+          <CardContent className="p-4 flex items-center gap-3">
+            <AlertTriangle className="h-8 w-8 text-red-500 shrink-0" />
+            <div><p className="text-2xl font-bold">{overdue.length}</p><p className="text-xs text-muted-foreground">Vencidas</p></div>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-yellow-500">
+          <CardContent className="p-4 flex items-center gap-3">
+            <Clock className="h-8 w-8 text-yellow-500 shrink-0" />
+            <div><p className="text-2xl font-bold">{dueThisWeek.length}</p><p className="text-xs text-muted-foreground">Esta semana</p></div>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-green-500">
+          <CardContent className="p-4 flex items-center gap-3">
+            <ShieldCheck className="h-8 w-8 text-green-500 shrink-0" />
+            <div><p className="text-2xl font-bold">{upcoming.length}</p><p className="text-xs text-muted-foreground">Próximas</p></div>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="pendiente">Pendiente</SelectItem>
-            <SelectItem value="en_revision">En revisión</SelectItem>
-            <SelectItem value="resuelto">Resuelto</SelectItem>
-            <SelectItem value="descartado">Descartado</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filterSeverity} onValueChange={setFilterSeverity}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="Gravedad" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
-            <SelectItem value="critica">Crítica</SelectItem>
-            <SelectItem value="alta">Alta</SelectItem>
-            <SelectItem value="media">Media</SelectItem>
-            <SelectItem value="baja">Baja</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filterModule} onValueChange={setFilterModule}>
-          <SelectTrigger className="w-40"><SelectValue placeholder="Módulo" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los módulos</SelectItem>
-            {INC_MODULES.map(m => (
-              <SelectItem key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="ml-auto">
-          <Button onClick={() => setIsNewDialogOpen(true)} data-testid="btn-new-incident">
-            <Plus className="h-4 w-4 mr-2" />Reportar incidencia
-          </Button>
+      <div className="flex justify-end">
+        <Button onClick={() => { setEditingTask(null); resetForm(); setIsFormOpen(true); }} data-testid="btn-new-preventive">
+          <Plus className="h-4 w-4 mr-2" /> Nueva tarea preventiva
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center p-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : tasks.length === 0 ? (
+        <Card>
+          <CardContent className="p-12 text-center text-muted-foreground">
+            <ShieldCheck className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">No hay tareas preventivas registradas</p>
+            <p className="text-sm mt-1">Creá la primera con el botón de arriba</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {tasks.map(task => (
+            <Card key={task.id} className={urgencyStyle(task)} data-testid={`preventive-task-${task.id}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold truncate">{task.name}</p>
+                      {urgencyBadge(task)}
+                      <Badge variant="outline" className="text-xs flex items-center gap-1">
+                        <RefreshCw className="h-2.5 w-2.5" />{freqLabel(task.frequency, parseInt(task.frequency_days))}
+                      </Badge>
+                    </div>
+                    {task.description && <p className="text-sm text-muted-foreground line-clamp-1">{task.description}</p>}
+                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mt-1">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        Próxima: <strong className={task.next_due_at < today ? "text-red-600 dark:text-red-400" : "text-foreground"}>
+                          {new Date(task.next_due_at + "T00:00:00").toLocaleDateString("es-AR")}
+                        </strong>
+                      </span>
+                      {task.last_done_at && (
+                        <span className="flex items-center gap-1">
+                          <CheckCheck className="h-3 w-3 text-green-600" />
+                          Última vez: {new Date(task.last_done_at + "T00:00:00").toLocaleDateString("es-AR")}
+                        </span>
+                      )}
+                      {task.assigned_to && (
+                        <span className="flex items-center gap-1">
+                          <User className="h-3 w-3" />{task.assigned_to}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button size="sm" variant="outline" onClick={() => openEdit(task)} data-testid={`btn-edit-preventive-${task.id}`}>
+                      <Edit className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700 text-white" onClick={() => { setDoneTask(task); setDoneNotes(""); }} data-testid={`btn-done-preventive-${task.id}`}>
+                      <CheckCircle className="h-3.5 w-3.5" /> Realizada
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
-      </div>
+      )}
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-8 text-center text-muted-foreground">Cargando...</div>
-          ) : incidents.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">No hay incidencias con los filtros actuales</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Título</TableHead>
-                  <TableHead>Módulo</TableHead>
-                  <TableHead>Gravedad</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Reportado por</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead className="w-10"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {incidents.map((incident) => (
-                  <TableRow key={incident.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openDetail(incident)} data-testid={`incident-row-${incident.id}`}>
-                    <TableCell className="font-medium max-w-[200px] truncate">{incident.title}</TableCell>
-                    <TableCell className="capitalize text-sm">{incident.module}</TableCell>
-                    <TableCell><Badge className={`text-xs ${SEVERITY_CONFIG[incident.severity]?.color}`}>{SEVERITY_CONFIG[incident.severity]?.label ?? incident.severity}</Badge></TableCell>
-                    <TableCell><Badge className={`text-xs ${STATUS_CONFIG_INC[incident.status]?.color}`}>{STATUS_CONFIG_INC[incident.status]?.label ?? incident.status}</Badge></TableCell>
-                    <TableCell className="text-sm">{incident.reportedBy}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{new Date(incident.reportedAt).toLocaleDateString("es-AR")}</TableCell>
-                    <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Dialog open={isNewDialogOpen} onOpenChange={setIsNewDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Reportar incidencia</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div><Label>Título *</Label><Input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Descripción breve del problema" data-testid="input-incident-title" /></div>
-            <div><Label>Descripción detallada *</Label><Textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="¿Qué pasó? ¿Cómo reproducirlo?" rows={4} data-testid="input-incident-desc" /></div>
+      {/* Dialog Nueva/Editar tarea */}
+      <Dialog open={isFormOpen} onOpenChange={o => { if (!o) { setIsFormOpen(false); setEditingTask(null); resetForm(); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5" />
+              {editingTask ? "Editar tarea preventiva" : "Nueva tarea preventiva"}
+            </DialogTitle>
+            <DialogDescription>Definí la tarea y su frecuencia. El sistema la reprogramará automáticamente cada vez que la marques como realizada.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1">
+              <Label>Nombre de la tarea *</Label>
+              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: Chequeo de ascensores" data-testid="input-preventive-name" />
+            </div>
+            <div className="space-y-1">
+              <Label>Descripción / detalle</Label>
+              <Textarea value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="Procedimiento o notas adicionales..." rows={2} />
+            </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Módulo</Label>
-                <Select value={newModule} onValueChange={setNewModule}>
-                  <SelectTrigger data-testid="select-incident-module"><SelectValue /></SelectTrigger>
-                  <SelectContent>{INC_MODULES.map(m => <SelectItem key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Gravedad</Label>
-                <Select value={newSeverity} onValueChange={setNewSeverity}>
-                  <SelectTrigger data-testid="select-incident-severity"><SelectValue /></SelectTrigger>
+              <div className="space-y-1">
+                <Label>Frecuencia</Label>
+                <Select value={formFreq} onValueChange={handleFreqChange}>
+                  <SelectTrigger data-testid="select-preventive-freq"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="baja">Baja — no bloquea</SelectItem>
-                    <SelectItem value="media">Media — dificulta</SelectItem>
-                    <SelectItem value="alta">Alta — bloquea parcial</SelectItem>
-                    <SelectItem value="critica">Crítica — sistema caído</SelectItem>
+                    {FREQ_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1">
+                <Label>Cada (días)</Label>
+                <Input type="number" min="1" value={formFreqDays} onChange={e => setFormFreqDays(parseInt(e.target.value) || 1)} data-testid="input-preventive-days" />
+              </div>
             </div>
-            <div><Label>Reportado por</Label><Input value={user?.fullName || user?.username || ""} readOnly className="bg-muted" data-testid="input-incident-reporter" /></div>
+            <div className="space-y-1">
+              <Label>Próxima fecha de vencimiento *</Label>
+              <Input type="date" value={formNextDueAt} onChange={e => setFormNextDueAt(e.target.value)} data-testid="input-preventive-next-due" />
+            </div>
+            <div className="space-y-1">
+              <Label>Responsable (opcional)</Label>
+              <Input value={formAssignedTo} onChange={e => setFormAssignedTo(e.target.value)} placeholder="Nombre del técnico o área" />
+            </div>
+            <div className="space-y-1">
+              <Label>Notas</Label>
+              <Textarea value={formNotes} onChange={e => setFormNotes(e.target.value)} placeholder="Notas adicionales..." rows={2} />
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsNewDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={() => createMutation.mutate({ title: newTitle, description: newDesc, module: newModule, severity: newSeverity, reportedBy: user?.fullName || user?.username || "Usuario" })} disabled={!newTitle.trim() || !newDesc.trim() || createMutation.isPending} data-testid="btn-submit-incident">
-              {createMutation.isPending ? "Guardando..." : "Reportar"}
+          <DialogFooter className="flex-wrap gap-2">
+            {editingTask && (
+              <Button variant="destructive" size="sm" className="mr-auto" onClick={() => deleteMutation.mutate(editingTask.id)} disabled={deleteMutation.isPending}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" /> Eliminar
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => { setIsFormOpen(false); setEditingTask(null); resetForm(); }}>Cancelar</Button>
+            <Button onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending} data-testid="btn-save-preventive">
+              {(createMutation.isPending || updateMutation.isPending) ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Guardando...</> : editingTask ? "Guardar cambios" : "Crear tarea"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5" />{selectedIncident?.title}</DialogTitle></DialogHeader>
-          {selectedIncident && (
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <Badge className={SEVERITY_CONFIG[selectedIncident.severity]?.color}>{SEVERITY_CONFIG[selectedIncident.severity]?.label}</Badge>
-                <Badge variant="outline" className="capitalize">{selectedIncident.module}</Badge>
-                <Badge className={STATUS_CONFIG_INC[selectedIncident.status]?.color}>{STATUS_CONFIG_INC[selectedIncident.status]?.label}</Badge>
-              </div>
-              <div className="text-sm text-muted-foreground border rounded-lg p-3 bg-muted/20 whitespace-pre-wrap">{selectedIncident.description}</div>
-              <div className="text-xs text-muted-foreground">Reportado por <strong>{selectedIncident.reportedBy}</strong> el {new Date(selectedIncident.reportedAt).toLocaleString("es-AR")}</div>
-              {selectedIncident.resolvedAt && <div className="text-xs text-muted-foreground">Resuelto por <strong>{selectedIncident.resolvedBy}</strong> el {new Date(selectedIncident.resolvedAt).toLocaleString("es-AR")}</div>}
-              <div className="border-t pt-4 space-y-3">
-                <p className="text-sm font-medium">Actualizar estado</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Estado</Label>
-                    <Select value={updateStatus} onValueChange={setUpdateStatus}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pendiente">Pendiente</SelectItem>
-                        <SelectItem value="en_revision">En revisión</SelectItem>
-                        <SelectItem value="resuelto">Resuelto</SelectItem>
-                        <SelectItem value="descartado">Descartado</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div><Label className="text-xs">Asignado a</Label><Input value={updateAssigned} onChange={e => setUpdateAssigned(e.target.value)} placeholder="Responsable" /></div>
-                </div>
-                {(updateStatus === "resuelto" || updateStatus === "descartado") && (
-                  <div><Label className="text-xs">Resuelto por</Label><Input value={updateResolvedBy} onChange={e => setUpdateResolvedBy(e.target.value)} placeholder="Quien resolvió" /></div>
-                )}
-                <div><Label className="text-xs">Notas de resolución</Label><Textarea value={updateResolution} onChange={e => setUpdateResolution(e.target.value)} placeholder="¿Cómo se resolvió?" rows={3} /></div>
-              </div>
+      {/* Dialog Marcar como hecha */}
+      <Dialog open={!!doneTask} onOpenChange={o => { if (!o) { setDoneTask(null); setDoneNotes(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-700 dark:text-green-400">
+              <CheckCircle className="h-5 w-5" /> Marcar como realizada
+            </DialogTitle>
+            <DialogDescription>
+              <strong>{doneTask?.name}</strong> — La tarea se reprogramará automáticamente en {doneTask?.frequency_days} día{parseInt(doneTask?.frequency_days) !== 1 ? "s" : ""}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="space-y-1">
+              <Label className="text-sm">Observaciones (opcional)</Label>
+              <Textarea value={doneNotes} onChange={e => setDoneNotes(e.target.value)} placeholder="Ej: Todo en orden, sin novedades" rows={3} data-testid="input-done-notes" />
             </div>
-          )}
-          <DialogFooter className="flex-wrap gap-2">
-            {user?.role === "admin" && selectedIncident && (
-              <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(selectedIncident.id)} disabled={deleteMutation.isPending} className="mr-auto">Eliminar</Button>
-            )}
-            <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>Cerrar</Button>
-            <Button onClick={() => selectedIncident && updateMutation.mutate({ id: selectedIncident.id, data: { status: updateStatus, assignedTo: updateAssigned || null, resolvedBy: updateResolvedBy || null, resolutionNotes: updateResolution || null } })} disabled={updateMutation.isPending}>
-              {updateMutation.isPending ? "Guardando..." : "Guardar cambios"}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDoneTask(null); setDoneNotes(""); }}>Cancelar</Button>
+            <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={() => doneTask && doneMutation.mutate({ id: doneTask.id, notes: doneNotes })} disabled={doneMutation.isPending} data-testid="btn-confirm-done">
+              {doneMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Guardando...</> : "Confirmar realizada"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -874,8 +867,8 @@ export default function MaintenancePage() {
           </TabsTrigger>
           <TabsTrigger value="staff" data-testid="tab-staff">Personal</TabsTrigger>
           <TabsTrigger value="bitacora" data-testid="tab-bitacora">
-            <AlertTriangle className="h-4 w-4 mr-1" />
-            Bitácora
+            <ShieldCheck className="h-4 w-4 mr-1" />
+            Preventivo
           </TabsTrigger>
         </TabsList>
 
@@ -1067,7 +1060,7 @@ export default function MaintenancePage() {
         </TabsContent>
 
         <TabsContent value="bitacora" className="space-y-4">
-          <IncidenciasTab />
+          <PreventiveTab />
         </TabsContent>
 
         <TabsContent value="staff" className="space-y-4">
