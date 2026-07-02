@@ -27,6 +27,7 @@ import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { VAT_CONDITION_LABELS } from "@/pages/guests";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Separator } from "@/components/ui/separator";
 import {
   Plus,
   UtensilsCrossed,
