@@ -1165,10 +1165,28 @@ function PaymentOrderDialog({
   const totalSelected = selectedFacturas.reduce((s, inv) => s + $n(inv.montoTotal), 0);
   const baseNetosIibb = selectedFacturas.reduce((s, inv) => s + $n(inv.montoNeto), 0);
 
-  // Initialize alicuotaIibbForm from supplier when dialog opens
+  // Al abrir el diálogo (para cualquier proveedor), resetear todo el estado.
+  // Sin esto, `selectedInvoices` y `createdOpId` quedaban de la OP anterior
+  // (el diálogo no se desmonta entre aperturas), y al emitir una segunda OP
+  // se reenviaba el ID de la factura ya pagada, causando el error
+  // "Facturas no pendientes: #N (pagado)" hasta reiniciar sesión.
   useEffect(() => {
     if (supplier && open) {
       setAlicuotaIibbForm(String(supplier.alicuotaIibb ?? ""));
+      setSelectedInvoices([]);
+      setCreatedOpId(null);
+      setAutoCalcActive(true);
+      setForm({
+        fecha: getLocalToday(),
+        formaPago: "transferencia",
+        depBancario: "",
+        efectivo: "",
+        retencionIibb: "",
+        retencionGanancias: "",
+        retencionIva: "",
+        compensacion: "",
+        observaciones: "",
+      });
     }
   }, [supplier?.id, open]);
 
@@ -1199,7 +1217,10 @@ function PaymentOrderDialog({
     $n(form.compensacion);
 
   const createMut = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/payment-orders", data),
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/payment-orders", data);
+      return res.json();
+    },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
