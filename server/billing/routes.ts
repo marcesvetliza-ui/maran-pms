@@ -334,9 +334,17 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "La factura ya tiene una nota de crédito emitida" });
       }
 
-      const { motivo, items } = req.body;
+      const { motivo, items, monto } = req.body;
       const tipoNC = original.tipo_comprobante === "FA" ? "NCA" : original.tipo_comprobante === "FC" ? "NCC" : "NCB";
       const user = (req as any).user;
+
+      const montoParcial = monto !== undefined && monto !== null ? parseFloat(monto) : undefined;
+      const esParcial = montoParcial !== undefined && !isNaN(montoParcial) && montoParcial > 0
+        && montoParcial < parseFloat(original.monto_total);
+
+      const ncItems = esParcial
+        ? [{ descripcion: `Anulación parcial de comprobante ${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}${motivo ? ` — ${motivo}` : ""}`, cantidad: 1, precioUnitario: montoParcial }]
+        : (items ?? original.items ?? []);
 
       const nc = await emitirFactura({
         tipoComprobante: tipoNC as any,
@@ -347,17 +355,25 @@ export function registerBillingRoutes(app: Express) {
           condicionIva: original.cliente_condicion_iva,
           domicilio: original.cliente_domicilio,
         },
-        items: items ?? original.items ?? [],
+        items: ncItems,
         facturaOriginalId: original.id,
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
       } as NewInvoiceData);
 
-      // Mark original as anulada
-      await db.execute(sql`
-        UPDATE sales_invoices SET estado = 'anulada', nota_credito_id = ${nc.id}
-        WHERE id = ${id}
-      `);
+      // Nota de crédito total: anula la factura original. Parcial: la original sigue vigente,
+      // solo se deja registrado el vínculo con la NC para trazabilidad.
+      if (esParcial) {
+        await db.execute(sql`
+          UPDATE sales_invoices SET nota_credito_id = ${nc.id}
+          WHERE id = ${id}
+        `);
+      } else {
+        await db.execute(sql`
+          UPDATE sales_invoices SET estado = 'anulada', nota_credito_id = ${nc.id}
+          WHERE id = ${id}
+        `);
+      }
 
       // Register cash movement (egreso) in the corresponding area
       try {

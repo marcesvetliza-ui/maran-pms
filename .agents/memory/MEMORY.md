@@ -5,6 +5,8 @@
 - [Puntos de Venta (POS) system](pos-configs.md) — pos_configs table, ABM at /pos-configs, puntoVentaOverride in NewInvoiceData; selector appears in billing EmitirFacturaDialog and restaurant close dialog (factura_a/b/c only); seeded 4 default PVs.
 - [Presupuestos multi-área](presupuestos-multiarea.md) — 5 areas: grupos/recepcion (Hockey PDF + line items), eventos/spa/restaurant (catalog PDF, no line items). quoteCatalogItems + quoteConditions tables. Config at /config/presupuestos.
 - [Roadmap Multihotel](multihotel-roadmap.md) — Plan para convertir el sistema a multi-tenant SaaS: hotelId en tablas, auth multihotel, módulos por hotel, superadmin. ~4–6 semanas. Prerrequisito: estabilizar Maran primero.
+- [Receipt type unification](receipt-unification.md) — universal shared `shared/receiptTypes.ts` drives sale receipt selectors across Restaurant/SPA/Grupos/Recepción; Factura C sale-side removed, kept only in Compras.
+- [AFIP ficticio testing](afip-ficticio-testing.md) — e2e testing invoice/NC emission needs `billing_config.arca_ambiente = "ficticio"` or it 500s trying to reach real AFIP; always restore original value after.
 - [Factura C / IVA preview totals](factura-c-iva-preview.md) — IVA preview reduce must use mutually-exclusive alicuota buckets; tipo-switch must reset alicuota forced by Factura C or totals break.
 - [Payment order (OP) dialog session bug](payment-order-dialog-reset.md) — non-unmounted dialogs need explicit state reset on reopen; apiRequest returns raw Response, always call res.json() in mutationFn.
 - [Restaurant menu/category CRUD location](restaurant-menu-crud-location.md) — plato/category CRUD lives only in recetas-costos.tsx, not restaurant.tsx; "Agregar Plato" is a 2-step wizard (basics → auto-open recipe).

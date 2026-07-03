@@ -18,6 +18,7 @@ import { format, addDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks
 import { es } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
+import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
 import { 
   Plus, 
   ChevronLeft, 
@@ -527,7 +528,7 @@ export default function SpaPage() {
       if (variables.method === "room_charge" && selectedAccount) {
         closeAccountMutation.mutate({
           accountId: selectedAccount.id,
-          receiptType: "voucher",
+          receiptType: "cierre_spa",
         });
       }
     },
@@ -1052,6 +1053,8 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             <Settings className="h-4 w-4 mr-1" /> Configuración
           </Button>
         </div>
+
+        <EmitirComprobanteButton area="spa" />
       </div>
 
       {activeTab === "agenda" && (
@@ -1948,12 +1951,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             <SelectValue placeholder="Seleccionar comprobante" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="ticket">Ticket</SelectItem>
+                            <SelectItem value="cierre_spa">Cierre de SPA</SelectItem>
                             <SelectItem value="factura_a">Factura A</SelectItem>
                             <SelectItem value="factura_b">Factura B</SelectItem>
-                            <SelectItem value="factura_c">Factura C</SelectItem>
-                            <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
-                            <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1963,7 +1963,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       disabled={accountBalance > 0 || (!receiptType && !selectedAccount.payments.some(p => p.method === "room_charge")) || closeAccountMutation.isPending}
                       onClick={() => closeAccountMutation.mutate({
                         accountId: selectedAccount.id,
-                        receiptType: selectedAccount.payments.some(p => p.method === "room_charge") ? "voucher" : receiptType,
+                        receiptType: selectedAccount.payments.some(p => p.method === "room_charge") ? "cierre_spa" : receiptType,
                       })}
                       data-testid="button-close-folio"
                     >

@@ -254,15 +254,19 @@ export type EmitirFacturaInitialValues = {
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea }: {
   open: boolean;
   onClose: () => void;
   config: any;
   initialValues?: EmitirFacturaInitialValues;
   onSuccess?: () => void;
+  allowedTipos?: Array<"FA" | "FB" | "FC">;
+  cashArea?: string;
 }) {
   const { toast } = useToast();
-  const [tipo, setTipo] = useState<string>("FB");
+  const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB", "FC"];
+  const [tipo, setTipo] = useState<string>(tipos.includes("FB") ? "FB" : tipos[0]);
+  const [cashFormaPago, setCashFormaPago] = useState("efectivo");
   const [razonSocial, setRazonSocial] = useState("");
   const [cuit, setCuit] = useState("");
   const [dni, setDni] = useState("");
@@ -282,11 +286,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       // Auto-select comprobante type based on cuit + condición IVA
       if (initialValues.cuit) {
         const iva = initialValues.condicionIva || "";
-        if (iva === "Responsable Inscripto" || iva === "Exento") setTipo("FA");
-        else if (iva === "Monotributista" || iva === "No Responsable" || iva === "No Categorizado (Extranjero)") setTipo("FC");
-        else setTipo("FA"); // default for CUIT holders
+        let preferido: "FA" | "FB" | "FC" = "FA";
+        if (iva === "Responsable Inscripto" || iva === "Exento") preferido = "FA";
+        else if (iva === "Monotributista" || iva === "No Responsable" || iva === "No Categorizado (Extranjero)") preferido = "FC";
+        setTipo(tipos.includes(preferido) ? preferido : tipos.includes("FA") ? "FA" : tipos[0]);
       } else {
-        setTipo("FB");
+        setTipo(tipos.includes("FB") ? "FB" : tipos[0]);
       }
       if (initialValues.items && initialValues.items.length > 0) {
         setItems(initialValues.items.map(it => {
@@ -388,7 +393,13 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     if (!razonSocial.trim()) return toast({ title: "Ingrese Razón Social / Nombre", variant: "destructive" });
     if (isFA && !cuit.trim()) return toast({ title: "CUIT es requerido para Factura A", variant: "destructive" });
     if (items.some(it => !it.descripcion.trim())) return toast({ title: "Todos los ítems deben tener descripción", variant: "destructive" });
-    mutation.mutate({ tipoComprobante: tipo, cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined }, items, puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined });
+    mutation.mutate({
+      tipoComprobante: tipo,
+      cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
+      items,
+      puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined,
+      ...(cashArea ? { cashArea, cashFormaPago, cashLabel: `${tipo} — ${razonSocial}` } : {}),
+    });
   }
 
   return (
@@ -401,9 +412,9 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           <Select value={tipo} onValueChange={v => { const prevTipo = tipo; setTipo(v); setCondicionIva(v === "FA" ? "Responsable Inscripto" : v === "FC" ? "Monotributista" : "Consumidor Final"); recalcForTipo(v, prevTipo); }}>
             <SelectTrigger data-testid="select-tipo-factura"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>
-              <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>
-              <SelectItem value="FC">Factura C — Monotributista</SelectItem>
+              {tipos.includes("FA") && <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>}
+              {tipos.includes("FB") && <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>}
+              {tipos.includes("FC") && <SelectItem value="FC">Factura C — Monotributista</SelectItem>}
             </SelectContent>
           </Select>
           {ambiente === "ficticio" && (
@@ -419,6 +430,22 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             </p>
           )}
         </div>
+
+        {cashArea && (
+          <div className="space-y-1">
+            <Label>Forma de pago</Label>
+            <Select value={cashFormaPago} onValueChange={setCashFormaPago}>
+              <SelectTrigger data-testid="select-cash-forma-pago"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="efectivo">Efectivo</SelectItem>
+                <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                <SelectItem value="transferencia">Transferencia</SelectItem>
+                <SelectItem value="mercadopago">MercadoPago</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").length > 0 && (
           <div className="space-y-1">
@@ -539,7 +566,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
 // ─── Nota de Crédito Dialog ────────────────────────────────────────────────────
 
-function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; onClose: () => void }) {
+export function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; onClose: () => void }) {
   const { toast } = useToast();
   const { data: invoice } = useQuery<any>({
     queryKey: ["/api/billing/invoices", invoiceId],
@@ -547,6 +574,8 @@ function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; onClose:
     enabled: !!invoiceId,
   });
   const [motivo, setMotivo] = useState("");
+  const [modoParcial, setModoParcial] = useState(false);
+  const [montoParcial, setMontoParcial] = useState("");
 
   const mutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, body),
@@ -562,6 +591,14 @@ function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; onClose:
 
   if (!invoice) return null;
   const tipoNC = invoice.tipo_comprobante === "FA" ? "Nota de Crédito A" : "Nota de Crédito B";
+  const totalOriginal = parseFloat(invoice.monto_total) || 0;
+  const montoNC = modoParcial ? parseFloat(montoParcial) || 0 : totalOriginal;
+  const montoInvalido = modoParcial && (!montoParcial || montoNC <= 0 || montoNC > totalOriginal);
+
+  function handleSubmit() {
+    if (montoInvalido) return;
+    mutation.mutate({ motivo, monto: modoParcial ? montoNC : undefined });
+  }
 
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
@@ -573,14 +610,27 @@ function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; onClose:
             <div className="text-muted-foreground text-xs">{invoice.tipo_comprobante} {padNum(invoice.punto_venta, 4)}-{padNum(invoice.numero, 8)} — {invoice.cliente_razon_social}</div>
             <div className="text-muted-foreground text-xs">Total: ${fPeso(invoice.monto_total)}</div>
           </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="nc-parcial" checked={modoParcial} onChange={e => { setModoParcial(e.target.checked); if (!e.target.checked) setMontoParcial(""); }} data-testid="checkbox-nc-parcial" />
+            <Label htmlFor="nc-parcial" className="cursor-pointer">Nota de crédito parcial</Label>
+          </div>
+          {modoParcial ? (
+            <div className="space-y-1">
+              <Label className="text-xs">Monto a acreditar *</Label>
+              <Input type="number" min="0" max={totalOriginal} step="0.01" value={montoParcial} onChange={e => setMontoParcial(e.target.value)} placeholder="0.00" data-testid="input-monto-parcial" />
+              {montoInvalido && <p className="text-xs text-red-600">Ingrese un monto válido entre $0 y ${fPeso(totalOriginal)}</p>}
+            </div>
+          ) : null}
           <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 dark:text-yellow-200">
-            Se emitirá una {tipoNC} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.
+            {modoParcial
+              ? `Se emitirá una ${tipoNC} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`
+              : `Se emitirá una ${tipoNC} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.`}
           </div>
           <div className="space-y-1"><Label>Motivo (opcional)</Label><Textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Error en facturación, devolución de servicio..." rows={2} /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => mutation.mutate({ motivo })} disabled={mutation.isPending} className="bg-orange-600 hover:bg-orange-700" data-testid="btn-nc-confirmar">
+          <Button onClick={handleSubmit} disabled={mutation.isPending || montoInvalido} className="bg-orange-600 hover:bg-orange-700" data-testid="btn-nc-confirmar">
             {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNC}`}
           </Button>
         </DialogFooter>

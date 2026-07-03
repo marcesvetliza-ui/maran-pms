@@ -41,6 +41,7 @@ import {
   Clock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { EmitirFacturaDialog } from "./billing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -661,6 +662,7 @@ export default function GroupDetailPage() {
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
+  const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [showCancelledRes, setShowCancelledRes] = useState(false);
 
   // Cambiar habitación
@@ -715,6 +717,10 @@ export default function GroupDetailPage() {
 
   const { data: bedTypesList } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/bed-types"],
+  });
+
+  const { data: billingConfig } = useQuery<any>({
+    queryKey: ["/api/billing/config"],
   });
 
   const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
@@ -2582,10 +2588,13 @@ export default function GroupDetailPage() {
                   <SelectItem value="ticket">Ticket</SelectItem>
                   <SelectItem value="factura_a">Factura A</SelectItem>
                   <SelectItem value="factura_b">Factura B</SelectItem>
-                  <SelectItem value="factura_c">Factura C</SelectItem>
-                  <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
                 </SelectContent>
               </Select>
+              {(groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b") && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Al registrar el pago se abrirá el formulario de emisión con CAE real de ARCA.
+                </p>
+              )}
             </div>
 
             <div>
@@ -2641,7 +2650,13 @@ export default function GroupDetailPage() {
               Cancelar
             </Button>
             <Button
-              onClick={() => groupPaymentMutation.mutate()}
+              onClick={() => {
+                if (groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b") {
+                  setShowGroupFacturaDialog(true);
+                } else {
+                  groupPaymentMutation.mutate();
+                }
+              }}
               disabled={!groupPaymentAmount || !groupPaymentMethod || groupPaymentMutation.isPending}
               data-testid="button-confirm-group-payment"
             >
@@ -2651,6 +2666,22 @@ export default function GroupDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {showGroupFacturaDialog && (
+        <EmitirFacturaDialog
+          open={showGroupFacturaDialog}
+          onClose={() => setShowGroupFacturaDialog(false)}
+          config={billingConfig}
+          allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : ["FB"]}
+          initialValues={{
+            items: [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }],
+          }}
+          onSuccess={() => {
+            setShowGroupFacturaDialog(false);
+            groupPaymentMutation.mutate();
+          }}
+        />
+      )}
 
       {/* ─── Dialog: Pago al Folio Maestro ─── */}
       <Dialog open={showMasterPaymentDialog} onOpenChange={(open) => {

@@ -265,15 +265,12 @@ const tableStatusLabels: Record<string, string> = {
   blocked: "Bloqueada",
 };
 
-const SHOW_FACTURA_C = false;
-
 const receiptTypeLabels: Record<string, string> = {
-  cierre_mesa: "Ticket / Cierre",
+  ticket: "Ticket",
   factura_a: "Factura A",
   factura_b: "Factura B",
-  voucher: "Voucher Justo Resto",
+  voucher: "Voucher Justo",
   voucher_pedidos_ya: "Voucher Pedidos Ya",
-  ...(SHOW_FACTURA_C ? { factura_c: "Factura C" } : {}),
 };
 
 const paymentMethodLabels: Record<string, string> = {
@@ -286,9 +283,8 @@ const paymentMethodLabels: Record<string, string> = {
   cuenta_habitacion: "Cargo a Habitación",
 };
 
-function deriveReceiptFromVat(vatCondition: string | null | undefined): "factura_a" | "factura_b" | "factura_c" {
+function deriveReceiptFromVat(vatCondition: string | null | undefined): "factura_a" | "factura_b" {
   if (vatCondition === "responsable_inscripto") return "factura_a";
-  if (vatCondition === "monotributista" || vatCondition === "monotributo") return "factura_c";
   return "factura_b";
 }
 function vatConditionShortLabel(vc: string | null | undefined): string {
@@ -692,7 +688,7 @@ export default function RestaurantPage() {
   const [reservationSearch, setReservationSearch] = useState("");
   const [reservationAreaFilter, setReservationAreaFilter] = useState<string>("all");
   const pendingCheckInReservationRef = useRef<TableReservation | null>(null);
-  const [closeReceiptType, setCloseReceiptType] = useState("cierre_mesa");
+  const [closeReceiptType, setCloseReceiptType] = useState("ticket");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
   const [closeSalesCondition, setCloseSalesCondition] = useState<"contado" | "cuenta_corriente">("contado");
   const [closeDiscount, setCloseDiscount] = useState("");
@@ -766,6 +762,8 @@ export default function RestaurantPage() {
   const [closeCcEntityId, setCloseCcEntityId] = useState("");
   const [invoiceForNC, setInvoiceForNC] = useState<any | null>(null);
   const [ncMotivo, setNcMotivo] = useState("");
+  const [ncParcial, setNcParcial] = useState(false);
+  const [ncMontoParcial, setNcMontoParcial] = useState("");
   const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0]);
   const [ncTipo, setNcTipo] = useState("todos");
   const [ncCliente, setNcCliente] = useState("");
@@ -801,7 +799,7 @@ export default function RestaurantPage() {
   // Cobrar ítems mode (in split dialog)
   const [payItemSelectedIds, setPayItemSelectedIds] = useState<Set<string>>(new Set());
   const [payItemMethod, setPayItemMethod] = useState("efectivo");
-  const [payItemReceipt, setPayItemReceipt] = useState("cierre_mesa");
+  const [payItemReceipt, setPayItemReceipt] = useState("ticket");
   const [payItemRoomId, setPayItemRoomId] = useState("");
   const [payItemRoomSearch, setPayItemRoomSearch] = useState("");
   const [payItemCcEntityType, setPayItemCcEntityType] = useState<"company" | "agency">("company");
@@ -835,7 +833,7 @@ export default function RestaurantPage() {
   const [closeBillingClientSearch, setCloseBillingClientSearch] = useState("");
   const [closeBillingClientSearchOpen, setCloseBillingClientSearchOpen] = useState(false);
   const [showAlternateClientSearch, setShowAlternateClientSearch] = useState(false);
-  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "cierre_mesa" | "voucher">("__default__");
+  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "ticket" | "voucher">("__default__");
   const [closePaymentSplits, setClosePaymentSplits] = useState<{id: string; method: string; amount: string; roomId?: string; roomSearch?: string}[]>([{id: "1", method: "efectivo", amount: ""}]);
 
   // Clientes tab state
@@ -1651,16 +1649,21 @@ export default function RestaurantPage() {
   });
 
   const emitirNCMutation = useMutation({
-    mutationFn: async ({ invoiceId, motivo }: { invoiceId: number; motivo: string }) => {
-      const res = await apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, { motivo });
+    mutationFn: async ({ invoiceId, motivo, monto }: { invoiceId: number; motivo: string; monto?: number }) => {
+      const res = await apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, { motivo, monto });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Error al emitir NC"); }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       setInvoiceForNC(null);
       setNcMotivo("");
+      setNcParcial(false);
+      setNcMontoParcial("");
       refetchInvoices();
-      toast({ title: "Nota de Crédito emitida", description: "La factura original quedó anulada." });
+      toast({
+        title: "Nota de Crédito emitida",
+        description: variables?.monto ? "NC parcial emitida. La factura original permanece vigente." : "La factura original quedó anulada.",
+      });
     },
     onError: (e: any) => {
       toast({ title: "Error al emitir NC", description: e.message, variant: "destructive" });
@@ -2590,7 +2593,7 @@ export default function RestaurantPage() {
                           const _tableRes = reservations.find(r => r.tableId === order.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISO);
                           const _resClient = (_tableRes as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableRes as any).clientId) : null;
                           const _needsFactura = _resClient && _resClient.vatCondition && !["consumidor_final", ""].includes(_resClient.vatCondition || "");
-                          setCloseReceiptType(_needsFactura ? "factura_a" : "cierre_mesa");
+                          setCloseReceiptType(_needsFactura ? "factura_a" : "ticket");
                           setCloseBillingName(_needsFactura ? `${_resClient!.firstName} ${_resClient!.lastName}`.toUpperCase() : (_tableRes ? _tableRes.guestName : ""));
                           setCloseBillingCuit(_needsFactura ? (_resClient!.cuilCuit || "") : "");
                           setCloseBillingCompanyId("");
@@ -3584,7 +3587,7 @@ export default function RestaurantPage() {
           setPendingItem(null);
           setItemNotes("");
           setSelectedCategory(null);
-          setCloseReceiptType("cierre_mesa");
+          setCloseReceiptType("ticket");
           setClosePaymentMethod("efectivo");
           setCloseDiscount("");
           setCloseDiscountType("percent");
@@ -4311,7 +4314,7 @@ export default function RestaurantPage() {
                   if (currentOrder) {
                     closeOrderMutation.mutate({
                       orderId: currentOrder.id,
-                      receiptType: "cierre_mesa",
+                      receiptType: "ticket",
                       paymentMethod: "efectivo",
                     });
                     setIsOrderDialogOpen(false);
@@ -4382,7 +4385,7 @@ export default function RestaurantPage() {
                   const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISOc) : null;
                   const _resClientc = (_tableResc as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableResc as any).clientId) : null;
                   const _needsFacturac = _resClientc && _resClientc.vatCondition && !["consumidor_final", ""].includes(_resClientc.vatCondition || "");
-                  setCloseReceiptType(_needsFacturac ? "factura_a" : "cierre_mesa");
+                  setCloseReceiptType(_needsFacturac ? "factura_a" : "ticket");
                   setCloseBillingName(_needsFacturac ? `${_resClientc!.firstName} ${_resClientc!.lastName}`.toUpperCase() : (_tableResc ? _tableResc.guestName : ""));
                   setCloseBillingCuit(_needsFacturac ? (_resClientc!.cuilCuit || "") : "");
                   setCloseBillingCompanyId("");
@@ -4732,7 +4735,7 @@ export default function RestaurantPage() {
                             )}
                           </div>
                           <Select value={closeNonFiscalOverride} onValueChange={v => {
-                            setCloseNonFiscalOverride(v as "" | "cierre_mesa" | "voucher");
+                            setCloseNonFiscalOverride(v as "" | "ticket" | "voucher");
                             if (v) setCloseSalesCondition("contado");
                           }}>
                             <SelectTrigger className="w-36 h-9 text-xs" data-testid="select-non-fiscal-override">
@@ -4740,7 +4743,7 @@ export default function RestaurantPage() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__default__">Según cliente</SelectItem>
-                              <SelectItem value="cierre_mesa">Ticket / Cierre</SelectItem>
+                              <SelectItem value="ticket">Ticket</SelectItem>
                               <SelectItem value="voucher">Voucher</SelectItem>
                             </SelectContent>
                           </Select>
@@ -5062,7 +5065,7 @@ export default function RestaurantPage() {
                                   </Select>
                                 </div>
                                 <div className="flex-1">
-                                  <Select value={splitReceiptTypes[split.id] || "cierre_mesa"} onValueChange={(v) => setSplitReceiptTypes(prev => ({ ...prev, [split.id]: v }))}>
+                                  <Select value={splitReceiptTypes[split.id] || "ticket"} onValueChange={(v) => setSplitReceiptTypes(prev => ({ ...prev, [split.id]: v }))}>
                                     <SelectTrigger className="h-8" data-testid={`select-split-receipt-${split.splitNumber}`}>
                                       <SelectValue />
                                     </SelectTrigger>
@@ -5082,7 +5085,7 @@ export default function RestaurantPage() {
                                         toast({ title: "Seleccioná una habitación", variant: "destructive" });
                                         return;
                                       }
-                                      const sReceipt = splitReceiptTypes[split.id] || "cierre_mesa";
+                                      const sReceipt = splitReceiptTypes[split.id] || "ticket";
                                       const sIsFactura = ["factura_a","factura_b","factura_c"].includes(sReceipt);
                                       const sVatCond = sReceipt === "factura_a"
                                         ? "responsable_inscripto"
@@ -5169,7 +5172,7 @@ export default function RestaurantPage() {
                                 </div>
                               )}
                               {(() => {
-                                const sRec = splitReceiptTypes[split.id] || "cierre_mesa";
+                                const sRec = splitReceiptTypes[split.id] || "ticket";
                                 const isFactA = sRec === "factura_a";
                                 const isFactB = sRec === "factura_b";
                                 if (!isFactA && !isFactB) return null;
@@ -5711,7 +5714,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Nota de Crédito Confirmation Dialog */}
-      <Dialog open={!!invoiceForNC} onOpenChange={(open) => { if (!open) { setInvoiceForNC(null); setNcMotivo(""); } }}>
+      <Dialog open={!!invoiceForNC} onOpenChange={(open) => { if (!open) { setInvoiceForNC(null); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
@@ -5719,10 +5722,40 @@ export default function RestaurantPage() {
               Emitir Nota de Crédito
             </DialogTitle>
             <DialogDescription>
-              Se emitirá una NC sobre la factura <strong>{invoiceForNC?.numero_completo || invoiceForNC?.tipo_comprobante}</strong> por <strong>${parseFloat(invoiceForNC?.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>. La factura original quedará <strong>anulada</strong>.
+              Factura <strong>{invoiceForNC?.numero_completo || invoiceForNC?.tipo_comprobante}</strong> — Total: <strong>${parseFloat(invoiceForNC?.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="rest-nc-parcial"
+                checked={ncParcial}
+                onChange={(e) => { setNcParcial(e.target.checked); if (!e.target.checked) setNcMontoParcial(""); }}
+                data-testid="checkbox-nc-parcial"
+              />
+              <label htmlFor="rest-nc-parcial" className="text-sm font-medium cursor-pointer">Nota de crédito parcial</label>
+            </div>
+            {ncParcial && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Monto a acreditar *</label>
+                <Input
+                  type="number"
+                  min="0"
+                  max={parseFloat(invoiceForNC?.monto_total || "0")}
+                  step="0.01"
+                  value={ncMontoParcial}
+                  onChange={(e) => setNcMontoParcial(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="input-nc-monto-parcial"
+                />
+              </div>
+            )}
+            <div className="text-xs text-muted-foreground">
+              {ncParcial
+                ? "La factura original permanece vigente (no se anula)."
+                : "La factura original quedará anulada."}
+            </div>
             <label className="text-sm font-medium">Motivo <span className="text-muted-foreground text-xs">(requerido)</span></label>
             <Textarea
               placeholder="Ej: Error en facturación, devolución de consumo..."
@@ -5733,11 +5766,22 @@ export default function RestaurantPage() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setInvoiceForNC(null); setNcMotivo(""); }}>Cancelar</Button>
+            <Button variant="outline" onClick={() => { setInvoiceForNC(null); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); }}>Cancelar</Button>
             <Button
               variant="destructive"
-              disabled={!ncMotivo.trim() || emitirNCMutation.isPending}
-              onClick={() => { if (invoiceForNC) emitirNCMutation.mutate({ invoiceId: invoiceForNC.id, motivo: ncMotivo }); }}
+              disabled={
+                !ncMotivo.trim() ||
+                emitirNCMutation.isPending ||
+                (ncParcial && (!ncMontoParcial || parseFloat(ncMontoParcial) <= 0 || parseFloat(ncMontoParcial) > parseFloat(invoiceForNC?.monto_total || "0")))
+              }
+              onClick={() => {
+                if (!invoiceForNC) return;
+                emitirNCMutation.mutate({
+                  invoiceId: invoiceForNC.id,
+                  motivo: ncMotivo,
+                  monto: ncParcial ? parseFloat(ncMontoParcial) : undefined,
+                });
+              }}
               data-testid="button-confirm-nc"
             >
               {emitirNCMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo...</> : "Confirmar NC"}
@@ -5759,12 +5803,11 @@ export default function RestaurantPage() {
 
           <div className="space-y-1">
             <Label>Tipo de comprobante</Label>
-            <Select value={compTipo} onValueChange={v => { const prevTipo = compTipo; setCompTipo(v); setCompCondicionIva(v === "FA" ? "Responsable Inscripto" : v === "FC" ? "Monotributista" : "Consumidor Final"); recalcCompItemsForTipo(v, prevTipo); }}>
+            <Select value={compTipo} onValueChange={v => { const prevTipo = compTipo; setCompTipo(v); setCompCondicionIva(v === "FA" ? "Responsable Inscripto" : "Consumidor Final"); recalcCompItemsForTipo(v, prevTipo); }}>
               <SelectTrigger data-testid="select-comp-tipo"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>
                 <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>
-                <SelectItem value="FC">Factura C — Monotributista</SelectItem>
               </SelectContent>
             </Select>
             {compAmbiente === "ficticio" && (
