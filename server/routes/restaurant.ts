@@ -152,7 +152,13 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.delete("/api/restaurant/menu/items/:id", async (req, res) => {
     try {
-      await storage.deleteMenuItem(req.params.id);
+      const result = await storage.deleteMenuItem(req.params.id);
+      if (!result.deleted && !result.deactivated) {
+        return res.status(404).json({ error: "Item not found" });
+      }
+      if (result.deactivated) {
+        return res.status(200).json({ deleted: false, deactivated: true, message: "El plato tiene ventas registradas, no se puede eliminar. Se desactivó en su lugar." });
+      }
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting menu item" });

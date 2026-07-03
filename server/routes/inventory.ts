@@ -98,6 +98,10 @@ export function registerInventoryRoutes(app: Express) {
           return false;
         });
       }
+      const itemKind = req.query.itemKind as string | undefined;
+      if (itemKind) {
+        items = items.filter((item: any) => item.itemKind === itemKind);
+      }
       res.json(items);
     } catch (error) {
       res.status(500).json({ error: "Error fetching inventory items" });
@@ -168,7 +172,13 @@ export function registerInventoryRoutes(app: Express) {
 
   app.delete("/api/inventory/items/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
-      await storage.deleteInventoryItem(req.params.id);
+      const result = await storage.deleteInventoryItem(req.params.id);
+      if (!result.deleted && !result.deactivated) {
+        return res.status(404).json({ error: "Item not found" });
+      }
+      if (result.deactivated) {
+        return res.status(200).json({ deleted: false, deactivated: true, message: "El artículo tiene movimientos registrados, no se puede eliminar. Se desactivó en su lugar." });
+      }
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting inventory item" });

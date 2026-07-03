@@ -994,6 +994,9 @@ export const menuItems = pgTable("menu_items", {
   allergens: text("allergens").array(),
   displayOrder: integer("display_order").default(0),
   defaultCourse: integer("default_course"),
+  // Espejo automático en Inventario (inventory_items.item_kind = "plato"). Se crea y
+  // sincroniza solo, el usuario no lo edita directamente.
+  inventoryItemId: varchar("inventory_item_id"),
 });
 
 export const insertMenuItemSchema = createInsertSchema(menuItems).omit({ id: true });
@@ -1176,6 +1179,11 @@ export type Supplier = typeof suppliers.$inferSelect;
 // Inventory Items (Articulos)
 export type UnitType = "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena";
 
+// Clasificación del artículo: materia prima (se usa como ingrediente de recetas),
+// venta directa (se vende tal cual, ej. agua embotellada) o plato (espejo de un
+// menu_item del restaurante, generado y mantenido automáticamente por el sistema).
+export type ItemKind = "materia_prima" | "venta_directa" | "plato";
+
 export const inventoryItems = pgTable("inventory_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sku: text("sku").unique(),
@@ -1190,6 +1198,7 @@ export const inventoryItems = pgTable("inventory_items", {
   currentStock: decimal("current_stock", { precision: 10, scale: 3 }).default("0"),
   location: text("location"),
   isActive: text("is_active").default("true"),
+  itemKind: text("item_kind").$type<ItemKind>().notNull().default("venta_directa"),
 });
 
 export const insertInventoryItemSchema = createInsertSchema(inventoryItems).omit({ id: true });

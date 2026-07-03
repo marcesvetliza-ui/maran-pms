@@ -144,7 +144,7 @@ export default function RecetasCostosPage() {
   });
 
   const { data: inventoryItems = [] } = useQuery<any[]>({
-    queryKey: ["/api/inventory/items"],
+    queryKey: ["/api/inventory/items?itemKind=materia_prima"],
     enabled: isRecipeDialogOpen,
   });
 
@@ -234,11 +234,18 @@ export default function RecetasCostosPage() {
 
   const deleteMenuItemMutation = useMutation({
     mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/restaurant/menu/items/${id}`);
+      const res = await apiRequest("DELETE", `/api/restaurant/menu/items/${id}`);
+      if (res.status === 204) return { deactivated: false };
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (result: { deactivated?: boolean; message?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/menu/items"] });
-      toast({ title: "Plato eliminado" });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      if (result?.deactivated) {
+        toast({ title: "No se pudo eliminar", description: result.message || "El plato tiene ventas registradas, se desactivó en su lugar." });
+      } else {
+        toast({ title: "Plato eliminado" });
+      }
     },
   });
 

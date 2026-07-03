@@ -738,5 +738,42 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // ── Unificación platos/inventario ────────────────────────────────────────
+  await withTimeout("inventory_items.item_kind", T, () =>
+    db.execute(sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS item_kind text NOT NULL DEFAULT 'venta_directa'`)
+  );
+  await withTimeout("menu_items.inventory_item_id", T, () =>
+    db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS inventory_item_id varchar`)
+  );
+  await withTimeout("item_categories.platos (ensure)", T, async () => {
+    const res = await db.execute(sql`
+      INSERT INTO item_categories (id, name, description, area, is_active)
+      SELECT gen_random_uuid(), 'Platos', 'Platos del restaurante (generado automáticamente)', 'restaurant', 'true'
+      WHERE NOT EXISTS (SELECT 1 FROM item_categories WHERE area = 'restaurant' AND name = 'Platos')
+      RETURNING id
+    `);
+    return res;
+  });
+  await withTimeout("menu_items.backfill_inventory_mirror", T, async () => {
+    const catRes = await db.execute(sql`SELECT id FROM item_categories WHERE area = 'restaurant' AND name = 'Platos' LIMIT 1`);
+    const categoryId = (catRes.rows[0] as any)?.id;
+    if (!categoryId) return;
+    const missing = await db.execute(sql`SELECT id, name, is_active FROM menu_items WHERE inventory_item_id IS NULL`);
+    for (const row of missing.rows as any[]) {
+      const inserted = await db.execute(sql`
+        INSERT INTO inventory_items (id, name, category_id, unit, item_kind, is_active, cost_price, min_stock, current_stock)
+        VALUES (gen_random_uuid(), ${row.name}, ${categoryId}, 'unidad', 'plato', ${row.is_active ?? 'true'}, '0.00', '0.000', '0.000')
+        RETURNING id
+      `);
+      const mirrorId = (inserted.rows[0] as any)?.id;
+      if (mirrorId) {
+        await db.execute(sql`UPDATE menu_items SET inventory_item_id = ${mirrorId} WHERE id = ${row.id}`);
+      }
+    }
+    if (missing.rows.length > 0) {
+      logger.info(`Backfill: ${missing.rows.length} platos vinculados a inventario.`);
+    }
+  });
+
   logger.info("Migraciones incrementales completadas.");
 }

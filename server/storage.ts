@@ -451,7 +451,7 @@ export interface IStorage {
   getMenuItemsByCategory(categoryId: string): Promise<MenuItem[]>;
   createMenuItem(item: InsertMenuItem): Promise<MenuItem>;
   updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined>;
-  deleteMenuItem(id: string): Promise<boolean>;
+  deleteMenuItem(id: string): Promise<{ deleted: boolean; deactivated: boolean }>;
 
   // Restaurant Orders
   closeStaleOrders(): Promise<number>;
@@ -532,7 +532,7 @@ export interface IStorage {
   getInventoryItemsBelowMinStock(): Promise<InventoryItem[]>;
   createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem>;
   updateInventoryItem(id: string, item: Partial<InsertInventoryItem>): Promise<InventoryItem | undefined>;
-  deleteInventoryItem(id: string): Promise<boolean>;
+  deleteInventoryItem(id: string): Promise<{ deleted: boolean; deactivated: boolean }>;
 
   // Stock Movements
   getStockMovements(itemId?: string): Promise<StockMovementWithItem[]>;

@@ -101,7 +101,7 @@ import {
   restaurantReservationAdvances,
   type RestaurantReservationAdvance, type InsertRestaurantReservationAdvance,
   orderSplits, recipes, recipeIngredients,
-  itemCategories, suppliers, inventoryItems, stockMovements,
+  itemCategories, suppliers, inventoryItems, stockMovements, warehouseStock,
   spaCabins, spaTreatmentCategories, spaTreatments, spaAppointments,
   spaAccounts, spaAccountItems, spaPayments, treatmentSupplies,
   eventRooms, events, eventChargeTypes, eventCharges, eventPayments,
@@ -1882,19 +1882,78 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(menuItems).where(eq(menuItems.categoryId, categoryId));
   }
 
+  // Platos e Inventario están unificados: todo plato tiene un artículo espejo en
+  // inventory_items (item_kind = "plato", area Restaurant) para que sea visible desde
+  // Inventario, aunque solo se pueda vender desde el módulo Restaurant.
+  private async ensurePlatoCategory(): Promise<string> {
+    const [existing] = await db.select().from(itemCategories).where(
+      and(eq(itemCategories.area, "restaurant" as any), eq(itemCategories.name, "Platos"))
+    );
+    if (existing) return existing.id;
+    const [created] = await db.insert(itemCategories).values({
+      name: "Platos",
+      description: "Platos del restaurante (generado automáticamente)",
+      area: "restaurant" as any,
+      isActive: "true",
+    } as any).returning();
+    return created.id;
+  }
+
+  private async syncMenuItemInventoryMirror(item: MenuItem): Promise<MenuItem> {
+    if (item.inventoryItemId) {
+      await db.update(inventoryItems).set({
+        name: item.name,
+        isActive: item.isActive,
+      } as any).where(eq(inventoryItems.id, item.inventoryItemId));
+      return item;
+    }
+    const categoryId = await this.ensurePlatoCategory();
+    const [mirror] = await db.insert(inventoryItems).values({
+      name: item.name,
+      categoryId,
+      unit: "unidad",
+      itemKind: "plato",
+      isActive: item.isActive ?? "true",
+    } as any).returning();
+    const [updated] = await db.update(menuItems).set({ inventoryItemId: mirror.id } as any)
+      .where(eq(menuItems.id, item.id)).returning();
+    return updated;
+  }
+
   async createMenuItem(item: InsertMenuItem): Promise<MenuItem> {
     const [created] = await db.insert(menuItems).values(item as any).returning();
-    return created;
+    return this.syncMenuItemInventoryMirror(created);
   }
 
   async updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined> {
     const [updated] = await db.update(menuItems).set(item as any).where(eq(menuItems.id, id)).returning();
-    return updated;
+    if (!updated) return undefined;
+    return this.syncMenuItemInventoryMirror(updated);
   }
 
-  async deleteMenuItem(id: string): Promise<boolean> {
+  async menuItemHasMovement(id: string): Promise<boolean> {
+    const [row] = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.menuItemId, id)).limit(1);
+    return !!row;
+  }
+
+  async deleteMenuItem(id: string): Promise<{ deleted: boolean; deactivated: boolean }> {
+    const [item] = await db.select().from(menuItems).where(eq(menuItems.id, id));
+    if (!item) return { deleted: false, deactivated: false };
+
+    const hasMovement = await this.menuItemHasMovement(id);
+    if (hasMovement) {
+      await db.update(menuItems).set({ isActive: "false", isAvailable: "false" } as any).where(eq(menuItems.id, id));
+      if (item.inventoryItemId) {
+        await db.update(inventoryItems).set({ isActive: "false" } as any).where(eq(inventoryItems.id, item.inventoryItemId));
+      }
+      return { deleted: false, deactivated: true };
+    }
+
+    if (item.inventoryItemId) {
+      await db.delete(inventoryItems).where(eq(inventoryItems.id, item.inventoryItemId));
+    }
     const result = await db.delete(menuItems).where(eq(menuItems.id, id));
-    return (result.rowCount ?? 0) > 0;
+    return { deleted: (result.rowCount ?? 0) > 0, deactivated: false };
   }
 
   async closeStaleOrders(): Promise<number> {
@@ -2373,9 +2432,31 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async deleteInventoryItem(id: string): Promise<boolean> {
+  async inventoryItemHasMovement(id: string): Promise<boolean> {
+    const [mv] = await db.select({ id: stockMovements.id }).from(stockMovements).where(eq(stockMovements.itemId, id)).limit(1);
+    if (mv) return true;
+    const [ing] = await db.select({ id: recipeIngredients.id }).from(recipeIngredients).where(eq(recipeIngredients.inventoryItemId, id)).limit(1);
+    if (ing) return true;
+    const [ws] = await db.select({ id: warehouseStock.id }).from(warehouseStock).where(
+      and(eq(warehouseStock.itemId, id), sql`${warehouseStock.currentStock} <> 0`)
+    ).limit(1);
+    if (ws) return true;
+    const [item] = await db.select({ currentStock: inventoryItems.currentStock }).from(inventoryItems).where(eq(inventoryItems.id, id));
+    return !!item && parseFloat(item.currentStock ?? "0") !== 0;
+  }
+
+  async deleteInventoryItem(id: string): Promise<{ deleted: boolean; deactivated: boolean }> {
+    const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, id));
+    if (!item) return { deleted: false, deactivated: false };
+
+    const hasMovement = await this.inventoryItemHasMovement(id);
+    if (hasMovement) {
+      await db.update(inventoryItems).set({ isActive: "false" } as any).where(eq(inventoryItems.id, id));
+      return { deleted: false, deactivated: true };
+    }
+
     const result = await db.delete(inventoryItems).where(eq(inventoryItems.id, id));
-    return (result.rowCount ?? 0) > 0;
+    return { deleted: (result.rowCount ?? 0) > 0, deactivated: false };
   }
 
   async getStockMovements(itemId?: string): Promise<StockMovementWithItem[]> {

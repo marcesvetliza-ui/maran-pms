@@ -78,6 +78,7 @@ type InventoryItem = {
   currentStock: number;
   location: string | null;
   isActive: string | null;
+  itemKind?: "materia_prima" | "venta_directa" | "plato" | null;
   category?: ItemCategory;
   supplier?: Supplier;
 };
@@ -171,6 +172,7 @@ export default function InventoryPage() {
   const [movementType, setMovementType] = useState<"entrada" | "salida">("entrada");
   const [areaFilter, setAreaFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [kindFilter, setKindFilter] = useState("all");
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ItemCategory | null>(null);
   const [catName, setCatName] = useState("");
@@ -392,7 +394,8 @@ export default function InventoryPage() {
         item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesArea = areaFilter === "all" || (item.category as any)?.area === areaFilter;
       const matchesCategory = categoryFilter === "all" || String((item.category as any)?.id || item.categoryId || "") === categoryFilter;
-      return matchesSearch && matchesArea && matchesCategory;
+      const matchesKind = kindFilter === "all" || (item as any).itemKind === kindFilter;
+      return matchesSearch && matchesArea && matchesCategory && matchesKind;
     })
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
@@ -553,6 +556,17 @@ export default function InventoryPage() {
                 <SelectItem value="marketing">Marketing</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={kindFilter} onValueChange={setKindFilter}>
+              <SelectTrigger className="w-[160px]" data-testid="select-kind-filter">
+                <SelectValue placeholder="Todos los tipos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los tipos</SelectItem>
+                <SelectItem value="materia_prima">Materia Prima</SelectItem>
+                <SelectItem value="venta_directa">Venta Directa</SelectItem>
+                <SelectItem value="plato">Plato</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {filteredItems.length === 0 ? (
@@ -591,9 +605,23 @@ export default function InventoryPage() {
                       </td>
                       <td className="p-3">
                         <div>{item.category?.name || "-"}</div>
-                        {item.category?.area && item.category.area !== "general" && (
-                          <Badge variant="secondary" className="text-[10px] mt-0.5">{(item.category as any).area.toUpperCase()}</Badge>
-                        )}
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {item.category?.area && item.category.area !== "general" && (
+                            <Badge variant="secondary" className="text-[10px]">{(item.category as any).area.toUpperCase()}</Badge>
+                          )}
+                          {(item as any).itemKind && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px]"
+                              data-testid={`badge-kind-${item.id}`}
+                            >
+                              {(item as any).itemKind === "materia_prima" ? "Materia Prima" : (item as any).itemKind === "plato" ? "Plato" : "Venta Directa"}
+                            </Badge>
+                          )}
+                          {(item as any).isActive === "false" && (
+                            <Badge variant="destructive" className="text-[10px]">Inactivo</Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3 text-right">
                         <span className={item.currentStock < item.minStock ? "text-red-600 font-semibold" : ""}>
@@ -1386,6 +1414,7 @@ function NewItemForm({
   const [costPrice, setCostPrice] = useState("0");
   const [minStock, setMinStock] = useState(0);
   const [currentStock, setCurrentStock] = useState(0);
+  const [itemKind, setItemKind] = useState<string>("venta_directa");
 
   return (
     <div className="space-y-4">
@@ -1431,6 +1460,18 @@ function NewItemForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Tipo de artículo</Label>
+        <Select value={itemKind} onValueChange={setItemKind}>
+          <SelectTrigger data-testid="select-item-kind">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="materia_prima">Materia Prima (insumo para recetas)</SelectItem>
+            <SelectItem value="venta_directa">Venta Directa (se vende tal cual)</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-2">
@@ -1494,6 +1535,7 @@ function NewItemForm({
               costPrice,
               minStock,
               currentStock,
+              itemKind: itemKind as any,
             });
           }}
           disabled={isPending || !name}
