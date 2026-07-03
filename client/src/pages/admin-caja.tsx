@@ -476,6 +476,8 @@ function NuevoMovimientoDialog({ open, onClose }: { open: boolean; onClose: () =
                     <SelectItem value="spa">Spa</SelectItem>
                     <SelectItem value="administracion">Administración</SelectItem>
                     <SelectItem value="mantenimiento">Mantenimiento</SelectItem>
+                    <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                    <SelectItem value="marketing">Marketing</SelectItem>
                     <SelectItem value="general">General</SelectItem>
                   </SelectContent>
                 </Select>
@@ -521,6 +523,8 @@ function NuevoMovimientoDialog({ open, onClose }: { open: boolean; onClose: () =
                     <SelectItem value="spa">Spa</SelectItem>
                     <SelectItem value="administracion">Administración</SelectItem>
                     <SelectItem value="mantenimiento">Mantenimiento</SelectItem>
+                    <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                    <SelectItem value="marketing">Marketing</SelectItem>
                     <SelectItem value="general">General</SelectItem>
                   </SelectContent>
                 </Select>

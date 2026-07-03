@@ -126,6 +126,7 @@ export function registerInventoryRoutes(app: Express) {
           maintenance: "MNT",
           admin: "ADM",
           general: "GEN",
+          marketing: "MKT",
         };
         // Prefer category area over item area for SKU prefix
         let area = body.area ?? "general";

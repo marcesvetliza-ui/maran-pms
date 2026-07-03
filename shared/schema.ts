@@ -1140,7 +1140,7 @@ export type RecipeWithIngredients = Recipe & {
 // ==================== INVENTORY MODULE ====================
 
 // Item Categories (for inventory)
-export type InventoryArea = "general" | "spa" | "restaurant" | "housekeeping" | "maintenance" | "admin";
+export type InventoryArea = "general" | "spa" | "restaurant" | "housekeeping" | "maintenance" | "admin" | "marketing";
 
 export const itemCategories = pgTable("item_categories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
