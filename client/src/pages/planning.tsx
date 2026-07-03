@@ -208,6 +208,11 @@ export default function PlanningPage() {
     return next;
   });
 
+  const dateHeaderRowRef = useRef<HTMLTableRowElement>(null);
+  const notesHeaderRowRef = useRef<HTMLTableRowElement>(null);
+  const [dateRowHeight, setDateRowHeight] = useState(0);
+  const [notesRowHeight, setNotesRowHeight] = useState(0);
+
   const [filters, setFilters] = useState<PlanningFilter>(DEFAULT_PLANNING_FILTER);
 
   const updateBedConfigMutation = useMutation({
@@ -401,6 +406,16 @@ export default function PlanningPage() {
     },
     refetchInterval: 30000,
   });
+
+  useEffect(() => {
+    const measure = () => {
+      if (dateHeaderRowRef.current) setDateRowHeight(dateHeaderRowRef.current.getBoundingClientRect().height);
+      if (notesHeaderRowRef.current) setNotesRowHeight(notesHeaderRowRef.current.getBoundingClientRect().height);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [data, showRevenue]);
 
   // Pre-compute day index map for fast lookup
   const dayIndexMap = useMemo(() => {
@@ -877,9 +892,9 @@ export default function PlanningPage() {
               <div className={`overflow-auto ${isFullscreen ? "max-h-[calc(100vh-80px)]" : "flex-1 min-h-0"}`}>
               <div className="min-w-max">
                 <table className="w-full border-collapse">
-                  <thead className="sticky top-0 z-20 bg-background">
-                    <tr>
-                      <th className="sticky left-0 z-30 bg-muted px-3 py-2 text-left text-sm font-medium w-24 border-b border-r">
+                  <thead>
+                    <tr ref={dateHeaderRowRef}>
+                      <th className="sticky left-0 top-0 z-30 bg-muted px-3 py-2 text-left text-sm font-medium w-24 border-b border-r">
                         Hab.
                       </th>
                       {data.days.map((day) => {
@@ -887,8 +902,8 @@ export default function PlanningPage() {
                         return (
                           <th
                             key={day}
-                            className={`px-1 py-2 text-center text-xs font-medium border-b min-w-[60px] ${
-                              info.isToday ? "bg-primary/10" : info.isWeekend ? "bg-muted/50" : ""
+                            className={`sticky top-0 z-20 px-1 py-2 text-center text-xs font-medium border-b min-w-[60px] ${
+                              info.isToday ? "bg-primary/10" : info.isWeekend ? "bg-muted/50" : "bg-background"
                             }`}
                           >
                             <div className="flex flex-col items-center gap-0.5">
@@ -903,8 +918,11 @@ export default function PlanningPage() {
                       })}
                     </tr>
                     {/* ── FILA DE NOTAS DEL DÍA ─────────────────────── */}
-                    <tr className="border-b bg-amber-50/60 dark:bg-amber-950/20">
-                      <td className="sticky left-0 z-30 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 border-r whitespace-nowrap w-24">
+                    <tr ref={notesHeaderRowRef} className="border-b">
+                      <td
+                        className="sticky left-0 z-30 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 border-r whitespace-nowrap w-24"
+                        style={{ top: dateRowHeight }}
+                      >
                         Notas
                       </td>
                       {data.days.map((day) => {
@@ -914,9 +932,10 @@ export default function PlanningPage() {
                         return (
                           <td
                             key={day}
-                            className={`px-0.5 py-0.5 min-w-[60px] align-middle ${
-                              info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : ""
+                            className={`sticky z-20 px-0.5 py-0.5 min-w-[60px] align-middle ${
+                              info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : "bg-amber-50/60 dark:bg-amber-950/20"
                             }`}
+                            style={{ top: dateRowHeight }}
                           >
                             {isEditing ? (
                               <input
@@ -947,8 +966,11 @@ export default function PlanningPage() {
                     </tr>
                     {/* ── FILA DE REVENUE ──────────────────────────── */}
                     {showRevenue && (
-                      <tr className="border-b bg-emerald-50/50 dark:bg-emerald-950/20">
-                        <td className="sticky left-0 z-30 bg-emerald-50/90 dark:bg-emerald-950/40 px-3 py-1.5 border-r w-24">
+                      <tr className="border-b">
+                        <td
+                          className="sticky left-0 z-30 bg-emerald-50/90 dark:bg-emerald-950/40 px-3 py-1.5 border-r w-24"
+                          style={{ top: dateRowHeight + notesRowHeight }}
+                        >
                           <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                             <TrendingUp className="h-3 w-3" />
                             Revenue
@@ -988,9 +1010,10 @@ export default function PlanningPage() {
                           return (
                             <td
                               key={day}
-                              className={`px-1 py-1 min-w-[60px] align-middle ${
-                                info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : ""
+                              className={`sticky z-20 px-1 py-1 min-w-[60px] align-middle ${
+                                info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : "bg-emerald-50/50 dark:bg-emerald-950/20"
                               }`}
+                              style={{ top: dateRowHeight + notesRowHeight }}
                             >
                               <Tooltip>
                                 <TooltipTrigger asChild>
