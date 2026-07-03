@@ -1505,7 +1505,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
       {/* New / Edit Appointment Dialog */}
       <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditMode ? "Editar Turno" : "Nuevo Turno SPA"}</DialogTitle>
           </DialogHeader>
