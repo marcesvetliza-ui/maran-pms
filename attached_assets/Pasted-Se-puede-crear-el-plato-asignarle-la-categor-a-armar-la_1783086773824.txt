@@ -1,0 +1,24 @@
+Se puede crear el plato, asignarle la categoría, armar la receta con todos los artículos que lo conforman con lo cual se obtiene el costo, ingresar el margen de ganancia se obtiene el precio de venta, ingresar el tiempo de preparación, el curso, si está fuera de menú o no y si esta activo o no, todo en un mismo lugar con solo combinar Nuevo Plato y editar Receta.
+Es importante destacar que una vez creado un plato o un artículo, cualquiera sea, sí éste tuvo movimiento no se puede eliminar, solo desactivar, hoy se puede eliminar un producto que fue facturado. Eso es una infracción grave a la integridad estructural del sistema.
+
+ 
+
+
+Los platos son artículos del stock pero que solo se pueden seleccionar desde el restaurante, no desde el spa, desde la habitación como cargo, housekeeping, etc., pero sí se pueden visualizar desde Inventario por lo cual se debe de tener algo que los identifique.
+ 
+
+Ingredientes
+
+Cuando se arma un plato los ingredientes que se pueden seleccionar son artículos específicos del stock, materia prima, los cuales fueron cargados desde inventario, que se fraccionan en cocina al armar una receta/plato y que estos van a restar del stock de cada uno de estos del depósito cocina al momento de ser facturados 
+
+Porque lo carga inventario, porque desde cocina, o sector que no sea housekeeping, solicitan la compra de x producto, este cuando llega desde el inventario se da de alta el producto, si no existe, y se hace el envío de mercadería a uno de los depósitos, en este caso del ejemplo cocina.
+
+Pero los artículos de materia prima deben de ser identificados de alguna forma porque cuando se arma un plato no puede aparecer cápsulas de café, licuado de banana ni ningún otro plato porque la descarga de los productos de cada plato programarla al momento de facturar se que es complicado 
+
+Productos específicos y comunes
+
+Inventario da de alta todos los artículos que pasan por él, menos las recetas que las arma cocina. Debe de identificar si es materia prima, si es un artìculo de venta de todas las áreas o de un área específica. Hoy como funciona el sistema restaurante puede dar de alta un artículo y este no aparece en inventario, cosa que no puede suceder, este es un ejemplo
+
+
+
+Los artículos no se borran, salvo que jamás hayan tenido movimiento. Si se tuvo movimiento no se pueden borrar solo se deshabilita como también tener la oportunidad de habilitarlos nuevamente. Todo artículo deshabilitado no puede aparecer en ningún lugar donde se busque un artículo para su venta.
