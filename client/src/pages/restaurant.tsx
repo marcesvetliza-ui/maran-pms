@@ -1977,7 +1977,12 @@ export default function RestaurantPage() {
       const item = { ...updated[idx], [field]: value };
       const base = item.cantidad * item.precioUnitario;
       const isFA = compTipo === "FA";
-      if (!isFA) {
+      const isFC = compTipo === "FC";
+      if (isFC) {
+        // Factura C no discrimina IVA: el importe ingresado es el total final.
+        item.alicuotaIva = "no_gravado";
+        item.subtotalNeto = base; item.subtotal = base;
+      } else if (!isFA) {
         if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat((base / 1.21).toFixed(2)); item.subtotal = base; }
         else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
         else { item.subtotalNeto = base; item.subtotal = base; }
@@ -1991,12 +1996,32 @@ export default function RestaurantPage() {
     });
   }
 
+  function recalcCompItemsForTipo(nextTipo: string, prevTipo?: string) {
+    setCompItems(prev => prev.map(item => {
+      // Si el ítem venía de Factura C, la alícuota fue forzada a "no_gravado" automáticamente;
+      // al salir de FC hay que restaurar una alícuota real (21%) para que no quede "huérfano".
+      const alicuota = prevTipo === "FC" && nextTipo !== "FC" && item.alicuotaIva === "no_gravado" ? "21" : item.alicuotaIva;
+      const base = item.cantidad * item.precioUnitario;
+      if (nextTipo === "FC") {
+        return { ...item, alicuotaIva: "no_gravado", subtotalNeto: base, subtotal: base };
+      }
+      if (nextTipo === "FA") {
+        if (alicuota === "21" || alicuota === "10.5") {
+          return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: parseFloat((base * (1 + (alicuota === "21" ? 0.21 : 0.105))).toFixed(2)) };
+        }
+        return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
+      }
+      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.21).toFixed(2)), subtotal: base };
+      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.105).toFixed(2)), subtotal: base };
+      return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
+    }));
+  }
+
   const compPreview = compItems.reduce((acc, it) => {
-    acc.neto += it.subtotalNeto;
-    if (it.alicuotaIva === "21") acc.iva21 += it.subtotalNeto * 0.21;
-    if (it.alicuotaIva === "10.5") acc.iva105 += it.subtotalNeto * 0.105;
-    if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
-    if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
+    if (it.alicuotaIva === "21") { acc.neto += it.subtotalNeto; acc.iva21 += it.subtotalNeto * 0.21; }
+    else if (it.alicuotaIva === "10.5") { acc.neto += it.subtotalNeto; acc.iva105 += it.subtotalNeto * 0.105; }
+    else if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
+    else if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
     return acc;
   }, { neto: 0, iva21: 0, iva105: 0, exento: 0, ng: 0 });
   const compTotal = compPreview.neto + compPreview.iva21 + compPreview.iva105 + compPreview.exento + compPreview.ng;
@@ -5734,7 +5759,7 @@ export default function RestaurantPage() {
 
           <div className="space-y-1">
             <Label>Tipo de comprobante</Label>
-            <Select value={compTipo} onValueChange={v => { setCompTipo(v); setCompCondicionIva(v === "FA" ? "Responsable Inscripto" : "Consumidor Final"); }}>
+            <Select value={compTipo} onValueChange={v => { const prevTipo = compTipo; setCompTipo(v); setCompCondicionIva(v === "FA" ? "Responsable Inscripto" : v === "FC" ? "Monotributista" : "Consumidor Final"); recalcCompItemsForTipo(v, prevTipo); }}>
               <SelectTrigger data-testid="select-comp-tipo"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>
@@ -5815,11 +5840,11 @@ export default function RestaurantPage() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-sm font-semibold">Ítems</Label>
-              <Button variant="outline" size="sm" onClick={() => setCompItems(p => [...p, { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 }])} data-testid="btn-comp-add-item">
+              <Button variant="outline" size="sm" onClick={() => setCompItems(p => [...p, { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: compTipo === "FC" ? "no_gravado" : "21", subtotalNeto: 0, subtotal: 0 }])} data-testid="btn-comp-add-item">
                 <Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">{compTipo === "FA" ? "Ingrese precios sin IVA (neto)" : "Ingrese precios con IVA incluido"}</p>
+            <p className="text-xs text-muted-foreground">{compTipo === "FA" ? "Ingrese precios sin IVA (neto)" : compTipo === "FC" ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</p>
             <div className="space-y-2">
               {compItems.map((item, idx) => (
                 <div key={idx} className="border rounded-lg p-3 space-y-2" data-testid={`comp-item-row-${idx}`}>
@@ -5838,21 +5863,27 @@ export default function RestaurantPage() {
                     </div>
                     <div className="col-span-2 space-y-1">
                       <Label className="text-xs">IVA</Label>
-                      <Select value={item.alicuotaIva} onValueChange={v => updateCompItem(idx, "alicuotaIva", v)}>
-                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="21">21%</SelectItem>
-                          <SelectItem value="10.5">10.5%</SelectItem>
-                          <SelectItem value="exento">Exento</SelectItem>
-                          <SelectItem value="no_gravado">No Grav.</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      {compTipo === "FC" ? (
+                        <div className="h-9 flex items-center text-xs text-muted-foreground border rounded-md px-2 bg-muted/30">Sin IVA</div>
+                      ) : (
+                        <Select value={item.alicuotaIva} onValueChange={v => updateCompItem(idx, "alicuotaIva", v)}>
+                          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="21">21%</SelectItem>
+                            <SelectItem value="10.5">10.5%</SelectItem>
+                            <SelectItem value="exento">Exento</SelectItem>
+                            <SelectItem value="no_gravado">No Grav.</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
                       {compTipo === "FA"
                         ? `Neto: $${item.subtotalNeto.toLocaleString("es-AR", { minimumFractionDigits: 2 })} → Total: $${item.subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+                        : compTipo === "FC"
+                        ? `Total (sin IVA): $${item.subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
                         : `Total c/IVA: $${item.subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })} (neto: $${item.subtotalNeto.toLocaleString("es-AR", { minimumFractionDigits: 2 })})`}
                     </span>
                     {compItems.length > 1 && (
@@ -5865,10 +5896,16 @@ export default function RestaurantPage() {
           </div>
 
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
-            <div className="flex justify-between text-muted-foreground text-xs"><span>Importe Neto:</span><span>${compPreview.neto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
-            {compPreview.iva21 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 21%:</span><span>${compPreview.iva21.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
-            {compPreview.iva105 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 10.5%:</span><span>${compPreview.iva105.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
-            {compPreview.exento > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>Exento:</span><span>${compPreview.exento.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+            {compTipo === "FC" ? (
+              <div className="text-muted-foreground text-xs">Factura C — no discrimina IVA</div>
+            ) : (
+              <>
+                <div className="flex justify-between text-muted-foreground text-xs"><span>Importe Neto:</span><span>${compPreview.neto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+                {compPreview.iva21 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 21%:</span><span>${compPreview.iva21.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+                {compPreview.iva105 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 10.5%:</span><span>${compPreview.iva105.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+                {compPreview.exento > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>Exento:</span><span>${compPreview.exento.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+              </>
+            )}
             <div className="flex justify-between font-bold border-t pt-1 mt-1"><span>TOTAL:</span><span>${compTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
           </div>
 

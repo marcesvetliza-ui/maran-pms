@@ -41,6 +41,22 @@ function calcularMontos(items: InvoiceItem[], tipo: string) {
   let montoExento = 0;
   let montoNoGravado = 0;
 
+  // Factura C (monotributista) no discrimina IVA: todo el importe se
+  // considera "no gravado" a los fines de ARCA, sin importar la alícuota
+  // que haya llegado del cliente (defensa por si el front no la fuerza).
+  if (tipo === "FC") {
+    for (const item of items) montoNoGravado += item.subtotal;
+    const montoTotal = round2(montoNoGravado);
+    return {
+      montoNeto: 0,
+      montoIva21: 0,
+      montoIva105: 0,
+      montoExento: 0,
+      montoNoGravado: montoTotal,
+      montoTotal,
+    };
+  }
+
   for (const item of items) {
     switch (item.alicuotaIva) {
       case "21":

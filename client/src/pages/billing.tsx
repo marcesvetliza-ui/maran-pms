@@ -300,7 +300,29 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }, [open]);
 
   function newItem(): Item {
-    return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 };
+    return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: tipo === "FC" ? "no_gravado" : "21", subtotalNeto: 0, subtotal: 0 };
+  }
+
+  function recalcForTipo(nextTipo: string, prevTipo?: string) {
+    setItems(prev => prev.map(item => {
+      // Si el ítem venía de Factura C, la alícuota fue forzada a "no_gravado" automáticamente;
+      // al salir de FC hay que restaurar una alícuota real (21%) para que no quede "huérfano".
+      const alicuota = prevTipo === "FC" && nextTipo !== "FC" && item.alicuotaIva === "no_gravado" ? "21" : item.alicuotaIva;
+      const base = item.cantidad * item.precioUnitario;
+      if (nextTipo === "FC") {
+        return { ...item, alicuotaIva: "no_gravado" as const, subtotalNeto: base, subtotal: base };
+      }
+      if (nextTipo === "FA") {
+        if (alicuota === "21" || alicuota === "10.5") {
+          return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base * (1 + (alicuota === "21" ? 0.21 : 0.105)) };
+        }
+        return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
+      }
+      // FB
+      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.21).toFixed(2)), subtotal: base };
+      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.105).toFixed(2)), subtotal: base };
+      return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
+    }));
   }
 
   function updateItem(idx: number, field: keyof Item, value: any) {
@@ -309,7 +331,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       const item = { ...updated[idx], [field]: value };
       const base = item.cantidad * item.precioUnitario;
       const fa = tipo === "FA";
-      if (!fa) {
+      const fc = tipo === "FC";
+      if (fc) {
+        // Factura C no discrimina IVA: el importe ingresado es el total final.
+        item.alicuotaIva = "no_gravado";
+        item.subtotalNeto = base; item.subtotal = base;
+      } else if (!fa) {
         if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat((base / 1.21).toFixed(2)); item.subtotal = base; }
         else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
         else { item.subtotalNeto = base; item.subtotal = base; }
@@ -326,11 +353,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   function removeItem(idx: number) { setItems(prev => prev.filter((_, i) => i !== idx)); }
 
   const preview = items.reduce((acc, it) => {
-    acc.neto += it.subtotalNeto;
-    if (it.alicuotaIva === "21") acc.iva21 += it.subtotalNeto * 0.21;
-    if (it.alicuotaIva === "10.5") acc.iva105 += it.subtotalNeto * 0.105;
-    if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
-    if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
+    if (it.alicuotaIva === "21") { acc.neto += it.subtotalNeto; acc.iva21 += it.subtotalNeto * 0.21; }
+    else if (it.alicuotaIva === "10.5") { acc.neto += it.subtotalNeto; acc.iva105 += it.subtotalNeto * 0.105; }
+    else if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
+    else if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
     return acc;
   }, { neto: 0, iva21: 0, iva105: 0, exento: 0, ng: 0 });
   const totalPreview = preview.neto + preview.iva21 + preview.iva105 + preview.exento + preview.ng;
@@ -355,6 +381,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }
 
   const isFA = tipo === "FA";
+  const isFC = tipo === "FC";
   const ambiente: AmbienteMode = config?.arcaAmbiente ?? "ficticio";
 
   function handleSubmit() {
@@ -371,7 +398,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
         <div className="space-y-1">
           <Label>Tipo de comprobante</Label>
-          <Select value={tipo} onValueChange={v => { setTipo(v); setCondicionIva(v === "FA" ? "Responsable Inscripto" : "Consumidor Final"); }}>
+          <Select value={tipo} onValueChange={v => { const prevTipo = tipo; setTipo(v); setCondicionIva(v === "FA" ? "Responsable Inscripto" : v === "FC" ? "Monotributista" : "Consumidor Final"); recalcForTipo(v, prevTipo); }}>
             <SelectTrigger data-testid="select-tipo-factura"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>
@@ -445,7 +472,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             <Label className="text-sm font-semibold">Ítems</Label>
             <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>
           </div>
-          <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : "Ingrese precios con IVA incluido"}</div>
+          <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
           <div className="space-y-2">
             {items.map((item, idx) => (
               <div key={idx} className="border rounded-lg p-3 space-y-2" data-testid={`item-row-${idx}`}>
@@ -455,21 +482,27 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                   <div className="col-span-2 space-y-1"><Label className="text-xs">P. Unit.</Label><Input type="number" min="0" step="0.01" value={item.precioUnitario || ""} onChange={e => updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0)} placeholder="0.00" /></div>
                   <div className="col-span-2 space-y-1">
                     <Label className="text-xs">Alíc. IVA</Label>
-                    <Select value={item.alicuotaIva} onValueChange={v => updateItem(idx, "alicuotaIva", v)}>
-                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="21">21%</SelectItem>
-                        <SelectItem value="10.5">10.5%</SelectItem>
-                        <SelectItem value="exento">Exento</SelectItem>
-                        <SelectItem value="no_gravado">No Grav.</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {isFC ? (
+                      <div className="h-9 flex items-center text-xs text-muted-foreground border rounded-md px-2 bg-muted/30">Sin IVA</div>
+                    ) : (
+                      <Select value={item.alicuotaIva} onValueChange={v => updateItem(idx, "alicuotaIva", v)}>
+                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="21">21%</SelectItem>
+                          <SelectItem value="10.5">10.5%</SelectItem>
+                          <SelectItem value="exento">Exento</SelectItem>
+                          <SelectItem value="no_gravado">No Grav.</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
                     {isFA
                       ? `Neto: $${fPeso(item.subtotalNeto)} + IVA ${item.alicuotaIva === "21" ? "21%" : item.alicuotaIva === "10.5" ? "10.5%" : ""} = Total: $${fPeso(item.subtotal)}`
+                      : isFC
+                      ? `Total (sin IVA): $${fPeso(item.subtotal)}`
                       : `Total con IVA: $${fPeso(item.subtotal)} (neto: $${fPeso(item.subtotalNeto)})`}
                   </span>
                   {items.length > 1 && <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>}
@@ -480,10 +513,16 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         </div>
 
         <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
-          <div className="flex justify-between text-muted-foreground text-xs"><span>Importe Neto:</span><span>${fPeso(preview.neto)}</span></div>
-          {preview.iva21 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 21%:</span><span>${fPeso(preview.iva21)}</span></div>}
-          {preview.iva105 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 10.5%:</span><span>${fPeso(preview.iva105)}</span></div>}
-          {preview.exento > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>Exento:</span><span>${fPeso(preview.exento)}</span></div>}
+          {isFC ? (
+            <div className="text-muted-foreground text-xs">Factura C — no discrimina IVA</div>
+          ) : (
+            <>
+              <div className="flex justify-between text-muted-foreground text-xs"><span>Importe Neto:</span><span>${fPeso(preview.neto)}</span></div>
+              {preview.iva21 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 21%:</span><span>${fPeso(preview.iva21)}</span></div>}
+              {preview.iva105 > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>IVA 10.5%:</span><span>${fPeso(preview.iva105)}</span></div>}
+              {preview.exento > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>Exento:</span><span>${fPeso(preview.exento)}</span></div>}
+            </>
+          )}
           <div className="flex justify-between font-bold"><span>TOTAL:</span><span>${fPeso(totalPreview)}</span></div>
         </div>
 
