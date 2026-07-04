@@ -111,6 +111,7 @@ export default function RecetasCostosPage() {
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<MenuCategory | null>(null);
+  const [isEditingBasicData, setIsEditingBasicData] = useState(false);
 
   const menuItemForm = useForm<MenuItemFormValues>({
     resolver: zodResolver(menuItemFormSchema),
@@ -188,6 +189,17 @@ export default function RecetasCostosPage() {
 
   const openRecipeDialog = async (item: MenuItem) => {
     setSelectedRecipeItem(item);
+    setEditingMenuItem(item);
+    menuItemForm.reset({
+      name: item.name,
+      categoryId: item.categoryId,
+      description: item.description || "",
+      price: parseFloat(item.price),
+      preparationTime: item.preparationTime || 0,
+      isAvailable: item.isAvailable || "true",
+      isEditable: (item as any).isEditable || "false",
+      defaultCourse: (item as any).defaultCourse ?? undefined,
+    });
     const existing = recipes.find(r => r.menuItemId === item.id);
     if (!existing) {
       await createRecipeMutation.mutateAsync(item.id);
@@ -225,9 +237,6 @@ export default function RecetasCostosPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/menu/items"] });
-      setIsMenuItemDialogOpen(false);
-      setEditingMenuItem(null);
-      menuItemForm.reset();
       toast({ title: "Plato actualizado" });
     },
   });
@@ -479,14 +488,6 @@ export default function RecetasCostosPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => openMenuItemDialog(item)}
-                            data-testid={`button-edit-item-${item.id}`}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
                             onClick={() => deleteMenuItemMutation.mutate(item.id)}
                             data-testid={`button-delete-item-${item.id}`}
                           >
@@ -511,7 +512,16 @@ export default function RecetasCostosPage() {
       )}
 
       {/* Recipe Dialog */}
-      <Dialog open={isRecipeDialogOpen} onOpenChange={setIsRecipeDialogOpen}>
+      <Dialog
+        open={isRecipeDialogOpen}
+        onOpenChange={(open) => {
+          setIsRecipeDialogOpen(open);
+          if (!open) {
+            setIsEditingBasicData(false);
+            setEditingMenuItem(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl flex flex-col max-h-[90vh]">
           <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
@@ -528,6 +538,146 @@ export default function RecetasCostosPage() {
           </DialogHeader>
 
           <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+            <div className="border rounded-md">
+              <button
+                type="button"
+                className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
+                onClick={() => setIsEditingBasicData((v) => !v)}
+                data-testid="button-toggle-basic-data"
+              >
+                <span>Datos del plato (nombre, categoría, precio...)</span>
+                <Edit className="h-4 w-4 text-muted-foreground" />
+              </button>
+              {isEditingBasicData && (
+                <div className="border-t p-3">
+                  <Form {...menuItemForm}>
+                    <form
+                      onSubmit={menuItemForm.handleSubmit((data) => {
+                        if (!selectedRecipeItem) return;
+                        updateMenuItemMutation.mutate(
+                          { id: selectedRecipeItem.id, data },
+                          {
+                            onSuccess: (updated: MenuItem) => {
+                              setSelectedRecipeItem(updated);
+                              setIsEditingBasicData(false);
+                            },
+                          }
+                        );
+                      })}
+                      className="space-y-3"
+                    >
+                      <FormField
+                        control={menuItemForm.control}
+                        name="name"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Nombre *</FormLabel>
+                            <FormControl>
+                              <Input {...field} placeholder="Nombre del plato" data-testid="input-recipe-item-name" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={menuItemForm.control}
+                        name="categoryId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Categoria *</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-recipe-item-category">
+                                  <SelectValue placeholder="Seleccionar categoria" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {menuCategories.map((cat) => (
+                                  <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <FormField
+                          control={menuItemForm.control}
+                          name="price"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Precio <span className="text-xs font-normal text-muted-foreground">(con IVA incluido)</span></FormLabel>
+                              <FormControl>
+                                <Input {...field} type="number" step="0.01" min={0} data-testid="input-recipe-item-price" />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={menuItemForm.control}
+                          name="preparationTime"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Tiempo prep. (min)</FormLabel>
+                              <FormControl>
+                                <Input {...field} type="number" min={0} data-testid="input-recipe-item-prep-time" />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <div className="flex gap-3">
+                        <FormField
+                          control={menuItemForm.control}
+                          name="isAvailable"
+                          render={({ field }) => (
+                            <FormItem className="flex items-center gap-3 p-3 border rounded-md flex-1">
+                              <FormControl>
+                                <Switch
+                                  checked={field.value === "true"}
+                                  onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
+                                  data-testid="switch-recipe-item-available"
+                                />
+                              </FormControl>
+                              <FormLabel className="cursor-pointer !mt-0">Disponible</FormLabel>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={menuItemForm.control}
+                          name="isEditable"
+                          render={({ field }) => (
+                            <FormItem className="flex items-center gap-3 p-3 border rounded-md flex-1">
+                              <FormControl>
+                                <Switch
+                                  checked={field.value === "true"}
+                                  onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
+                                  data-testid="switch-recipe-item-editable"
+                                />
+                              </FormControl>
+                              <FormLabel className="cursor-pointer !mt-0">Fuera de menú</FormLabel>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingBasicData(false)}>
+                          Cancelar
+                        </Button>
+                        <Button type="submit" size="sm" disabled={updateMenuItemMutation.isPending} data-testid="button-save-recipe-item-basic-data">
+                          {updateMenuItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Guardar datos
+                        </Button>
+                      </div>
+                    </form>
+                  </Form>
+                </div>
+              )}
+            </div>
+
             {currentRecipe && currentRecipe.ingredients.length > 0 && (
               <Table>
                 <TableHeader>
@@ -676,10 +826,9 @@ export default function RecetasCostosPage() {
                                 {item.sku ? <span className="text-muted-foreground font-normal"> [{item.sku}]</span> : ""}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                Stock: {parseFloat(item.currentStock || "0").toLocaleString("es-AR")} {item.unit}
                                 {parseFloat(item.costPrice || "0") > 0
-                                  ? ` — Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}`
-                                  : " — Sin precio cargado"}
+                                  ? `Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}`
+                                  : "Sin precio cargado"}
                               </span>
                             </button>
                           ));
@@ -771,7 +920,16 @@ export default function RecetasCostosPage() {
             <form
               onSubmit={menuItemForm.handleSubmit((data) => {
                 if (editingMenuItem) {
-                  updateMenuItemMutation.mutate({ id: editingMenuItem.id, data });
+                  updateMenuItemMutation.mutate(
+                    { id: editingMenuItem.id, data },
+                    {
+                      onSuccess: () => {
+                        setIsMenuItemDialogOpen(false);
+                        setEditingMenuItem(null);
+                        menuItemForm.reset();
+                      },
+                    }
+                  );
                 } else {
                   createMenuItemMutation.mutate(data);
                 }
