@@ -779,6 +779,8 @@ export default function RestaurantPage() {
   );
   const [compPv, setCompPv] = useState("");
   const [compFormaPago, setCompFormaPago] = useState("efectivo");
+  const [compCcEntityType, setCompCcEntityType] = useState<"company" | "agency">("company");
+  const [compCcEntityId, setCompCcEntityId] = useState("");
   const [ncDateTo, setNcDateTo] = useState(new Date().toISOString().split("T")[0]);
   const [billingSearch, setBillingSearch] = useState("");
   const [billingSearchOpen, setBillingSearchOpen] = useState(false);
@@ -1642,6 +1644,7 @@ export default function RestaurantPage() {
       setIsEmitirComprobanteOpen(false);
       setCompTipo("FB"); setCompRazonSocial("CONSUMIDOR FINAL"); setCompCuit(""); setCompDni("");
       setCompCondicionIva("Consumidor Final"); setCompDomicilio(""); setCompFormaPago("efectivo"); setCompPv("");
+      setCompCcEntityType("company"); setCompCcEntityId("");
       setCompItems([{ descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 }]);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
     },
@@ -2036,7 +2039,11 @@ export default function RestaurantPage() {
     if (!compRazonSocial.trim()) return toast({ title: "Ingrese Razón Social / Nombre", variant: "destructive" });
     if (compTipo === "FA" && !compCuit.trim()) return toast({ title: "CUIT es requerido para Factura A", variant: "destructive" });
     if (compItems.some(it => !it.descripcion.trim())) return toast({ title: "Todos los ítems deben tener descripción", variant: "destructive" });
+    if (compFormaPago === "cuenta_corriente" && !compCcEntityId) {
+      return toast({ title: `Seleccione ${compCcEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
+    }
     const pvNum = compPv || (restaurantPVs.length > 0 ? String(restaurantPVs[0].numero) : undefined);
+    const compTipoLabel = compTipo === "voucher_justo" ? "Voucher Justo" : compTipo === "voucher_pedidos_ya" ? "Voucher PedidosYa" : compTipo;
     emitirComprobanteMutation.mutate({
       tipoComprobante: compTipo,
       cliente: { razonSocial: compRazonSocial, cuit: compCuit || undefined, dni: compDni || undefined, condicionIva: compCondicionIva, domicilio: compDomicilio || undefined },
@@ -2044,7 +2051,8 @@ export default function RestaurantPage() {
       puntoVenta: pvNum ? parseInt(pvNum) : undefined,
       cashArea: "restaurant",
       cashFormaPago: compFormaPago,
-      cashLabel: `${compTipo} — ${compRazonSocial}`,
+      cashLabel: `${compTipoLabel} — ${compRazonSocial}`,
+      ...(compFormaPago === "cuenta_corriente" ? { ccEntityType: compCcEntityType, ccEntityId: compCcEntityId } : {}),
     });
   }
 
@@ -5808,15 +5816,23 @@ export default function RestaurantPage() {
               <SelectContent>
                 <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>
                 <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>
+                <SelectItem value="voucher_justo">Voucher Justo</SelectItem>
+                <SelectItem value="voucher_pedidos_ya">Voucher PedidosYa</SelectItem>
               </SelectContent>
             </Select>
-            {compAmbiente === "ficticio" && (
+            {(compTipo === "voucher_justo" || compTipo === "voucher_pedidos_ya") && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                <AlertTriangle className="w-3 h-3" />
+                Comprobante interno — no es una factura fiscal (sin CAE)
+              </p>
+            )}
+            {compTipo !== "voucher_justo" && compTipo !== "voucher_pedidos_ya" && compAmbiente === "ficticio" && (
               <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Modo ficticio — CAE simulado, no válido fiscalmente
               </p>
             )}
-            {compAmbiente === "homologacion" && (
+            {compTipo !== "voucher_justo" && compTipo !== "voucher_pedidos_ya" && compAmbiente === "homologacion" && (
               <p className="text-xs text-blue-700 dark:text-blue-400 flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Homologación — CAE real de ARCA, ambiente de pruebas
@@ -5956,7 +5972,7 @@ export default function RestaurantPage() {
 
           <div className="space-y-1">
             <Label className="text-sm font-semibold">Forma de cobro</Label>
-            <Select value={compFormaPago} onValueChange={setCompFormaPago}>
+            <Select value={compFormaPago} onValueChange={v => { setCompFormaPago(v); if (v !== "cuenta_corriente") setCompCcEntityId(""); }}>
               <SelectTrigger data-testid="select-comp-forma-pago"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="efectivo">Efectivo</SelectItem>
@@ -5965,8 +5981,28 @@ export default function RestaurantPage() {
                 <SelectItem value="transferencia">Transferencia</SelectItem>
                 <SelectItem value="mercado_pago">Mercado Pago</SelectItem>
                 <SelectItem value="cuenta_habitacion">Cuenta Habitación</SelectItem>
+                <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
               </SelectContent>
             </Select>
+            {compFormaPago === "cuenta_corriente" && (
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <Select value={compCcEntityType} onValueChange={v => { setCompCcEntityType(v as "company" | "agency"); setCompCcEntityId(""); }}>
+                  <SelectTrigger data-testid="select-comp-cc-entity-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="company">Empresa</SelectItem>
+                    <SelectItem value="agency">Agencia</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={compCcEntityId} onValueChange={setCompCcEntityId}>
+                  <SelectTrigger data-testid="select-comp-cc-entity-id"><SelectValue placeholder={compCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} /></SelectTrigger>
+                  <SelectContent>
+                    {(compCcEntityType === "company" ? companies : agencies).map((e: any) => (
+                      <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

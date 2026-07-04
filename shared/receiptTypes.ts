@@ -28,9 +28,14 @@ export const RECEIPT_TYPE_LABELS: Record<ReceiptType, string> = {
   nota_credito: "Nota de Crédito",
   voucher_justo: "Voucher Justo",
   voucher_pedidos_ya: "Voucher Pedidos Ya",
-  cierre_habitacion: "Cierre de Habitación",
-  cierre_spa: "Cierre de SPA",
+  cierre_habitacion: "Voucher Habitaciones",
+  cierre_spa: "Voucher SPA",
 };
+
+// Tipos no-fiscales (no emiten CAE real, solo numeración local interna).
+export const NON_FISCAL_RECEIPT_TYPES: ReceiptType[] = [
+  "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa",
+];
 
 // Comprobantes universales: disponibles en Recepción, Restaurant, SPA y en la emisión final de Grupos.
 export const UNIVERSAL_RECEIPT_TYPES: ReceiptType[] = ["factura_a", "factura_b"];

@@ -7,11 +7,17 @@ import { Input } from "@/components/ui/input";
 import { Receipt } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog } from "@/pages/billing";
 
+const AREA_EXTRA_TIPOS: Record<string, { value: string; label: string }[]> = {
+  recepcion: [{ value: "cierre_habitacion", label: "Voucher Habitaciones" }],
+  spa: [{ value: "cierre_spa", label: "Voucher SPA" }],
+};
+
 export function EmitirComprobanteButton({ area, variant = "outline", size = "sm" }: {
   area: string;
   variant?: "outline" | "default" | "secondary" | "ghost";
   size?: "sm" | "default";
 }) {
+  const extraTipos = AREA_EXTRA_TIPOS[area] || [];
   const [open, setOpen] = useState(false);
   const [showFactura, setShowFactura] = useState(false);
   const [ncSearch, setNcSearch] = useState("");
@@ -38,11 +44,13 @@ export function EmitirComprobanteButton({ area, variant = "outline", size = "sm"
           <DialogHeader><DialogTitle>Emitir Comprobante</DialogTitle></DialogHeader>
           <Tabs defaultValue="factura">
             <TabsList className="grid grid-cols-2 w-full">
-              <TabsTrigger value="factura" data-testid="tab-nueva-factura">Nueva Factura</TabsTrigger>
+              <TabsTrigger value="factura" data-testid="tab-nueva-factura">Nuevo Comprobante</TabsTrigger>
               <TabsTrigger value="nc" data-testid="tab-nota-credito">Nota de Crédito</TabsTrigger>
             </TabsList>
             <TabsContent value="factura" className="pt-3 space-y-3">
-              <p className="text-sm text-muted-foreground">Emitir Factura A o Factura B con CAE real de ARCA.</p>
+              <p className="text-sm text-muted-foreground">
+                Factura A/B con CAE real de ARCA, Cuenta Corriente{extraTipos.length > 0 ? `, o ${extraTipos.map(t => t.label).join(" / ")}` : ""}.
+              </p>
               <Button className="w-full" onClick={() => { setOpen(false); setShowFactura(true); }} data-testid="button-continuar-factura">
                 Continuar
               </Button>
@@ -84,7 +92,7 @@ export function EmitirComprobanteButton({ area, variant = "outline", size = "sm"
           open={showFactura}
           onClose={() => setShowFactura(false)}
           config={config}
-          allowedTipos={["FA", "FB"]}
+          allowedTipos={["FA", "FB", ...extraTipos.map(t => t.value)]}
           cashArea={area}
         />
       )}

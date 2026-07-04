@@ -521,9 +521,13 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Group not found" });
       }
 
-      const { amount, method, reference, receiptType, distribution, closeAllRooms } = req.body;
+      const { amount, method, reference, receiptType, distribution, closeAllRooms, ccEntityType, ccEntityId } = req.body;
       if (!amount || !method) {
         return res.status(400).json({ error: "amount and method are required" });
+      }
+
+      if (method === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
+        return res.status(400).json({ error: "ccEntityType and ccEntityId are required for cuenta_corriente" });
       }
 
       const totalAmount = parseFloat(amount);
@@ -541,6 +545,29 @@ export function registerGroupsRoutes(app: Express) {
 
       const today = getArgentinaToday();
       const refText = reference || `Pago grupal${closeAllRooms ? " (cierre total)" : ""} - ${group.name}`;
+
+      const registerCcMovement = async (reservation: any, paymentAmt: number) => {
+        if (method !== "cuenta_corriente" || paymentAmt <= 0.001) return;
+        const guest = reservation.guest;
+        const guestName = guest ? `${guest.firstName} ${guest.lastName}` : "Huésped";
+        const roomNum = reservation.room?.roomNumber || reservation.roomId;
+        try {
+          await storage.createAccountMovement({
+            entityType: ccEntityType,
+            entityId: ccEntityId,
+            date: today,
+            type: "cargo",
+            description: `Pago grupal ${group.name} — Hab. ${roomNum}`,
+            amount: paymentAmt.toFixed(2),
+            reservationId: reservation.id,
+            reservationCode: reservation.reservationCode,
+            guestName,
+            reference: refText,
+          });
+        } catch (e) {
+          console.error("Error creating group CC account movement:", e);
+        }
+      };
 
       let balanceDiff = 0;
       if (closeAllRooms) {
@@ -581,7 +608,10 @@ export function registerGroupsRoutes(app: Express) {
               method,
               reference: refText,
               date: today,
+              ...(method === "cuenta_corriente" ? { billingTarget: ccEntityType } : {}),
             });
+            const reservation = activeReservations.find((r: any) => r.id === item.id);
+            if (reservation) await registerCcMovement(reservation, paymentAmt);
           }
         }
       } else {
@@ -593,7 +623,9 @@ export function registerGroupsRoutes(app: Express) {
             method,
             reference: refText,
             date: today,
+            ...(method === "cuenta_corriente" ? { billingTarget: ccEntityType } : {}),
           });
+          await registerCcMovement(reservation, perRoom);
         }
       }
 

@@ -662,6 +662,8 @@ export default function GroupDetailPage() {
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
+  const [groupPaymentCcEntityType, setGroupPaymentCcEntityType] = useState<"company" | "agency">("company");
+  const [groupPaymentCcEntityId, setGroupPaymentCcEntityId] = useState("");
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [showCancelledRes, setShowCancelledRes] = useState(false);
 
@@ -721,6 +723,14 @@ export default function GroupDetailPage() {
 
   const { data: billingConfig } = useQuery<any>({
     queryKey: ["/api/billing/config"],
+  });
+
+  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/companies"],
+  });
+
+  const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/agencies"],
   });
 
   const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
@@ -923,6 +933,9 @@ export default function GroupDetailPage() {
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
         closeAllRooms: groupPaymentCloseAll,
+        ...(groupPaymentMethod === "cuenta_corriente"
+          ? { ccEntityType: groupPaymentCcEntityType, ccEntityId: groupPaymentCcEntityId }
+          : {}),
       });
     },
     onSuccess: async (res) => {
@@ -955,6 +968,8 @@ export default function GroupDetailPage() {
       setGroupPaymentReceiptType("");
       setGroupPaymentDistribution("equal");
       setGroupPaymentCloseAll(false);
+      setGroupPaymentCcEntityType("company");
+      setGroupPaymentCcEntityId("");
       if (showInvoiceDialog) {
         loadInvoice();
       }
@@ -2576,6 +2591,25 @@ export default function GroupDetailPage() {
                   <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
                 </SelectContent>
               </Select>
+              {groupPaymentMethod === "cuenta_corriente" && (
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  <Select value={groupPaymentCcEntityType} onValueChange={v => { setGroupPaymentCcEntityType(v as "company" | "agency"); setGroupPaymentCcEntityId(""); }}>
+                    <SelectTrigger data-testid="select-group-cc-entity-type"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="company">Empresa</SelectItem>
+                      <SelectItem value="agency">Agencia</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={groupPaymentCcEntityId} onValueChange={setGroupPaymentCcEntityId}>
+                    <SelectTrigger data-testid="select-group-cc-entity-id"><SelectValue placeholder={groupPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} /></SelectTrigger>
+                    <SelectContent>
+                      {(groupPaymentCcEntityType === "company" ? companies : agencies).map((e: any) => (
+                        <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
             <div>
@@ -2588,6 +2622,7 @@ export default function GroupDetailPage() {
                   <SelectItem value="ticket">Ticket</SelectItem>
                   <SelectItem value="factura_a">Factura A</SelectItem>
                   <SelectItem value="factura_b">Factura B</SelectItem>
+                  <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
                 </SelectContent>
               </Select>
               {(groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b") && (
@@ -2651,7 +2686,11 @@ export default function GroupDetailPage() {
             </Button>
             <Button
               onClick={() => {
-                if (groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b") {
+                if (groupPaymentMethod === "cuenta_corriente" && !groupPaymentCcEntityId) {
+                  toast({ title: `Seleccione ${groupPaymentCcEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
+                  return;
+                }
+                if (groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b" || groupPaymentReceiptType === "cierre_habitacion") {
                   setShowGroupFacturaDialog(true);
                 } else {
                   groupPaymentMutation.mutate();
@@ -2672,8 +2711,13 @@ export default function GroupDetailPage() {
           open={showGroupFacturaDialog}
           onClose={() => setShowGroupFacturaDialog(false)}
           config={billingConfig}
-          allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : ["FB"]}
+          allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] : ["FB"]}
           initialValues={{
+            razonSocial: groupPaymentMethod === "cuenta_corriente" && groupPaymentCcEntityId
+              ? ((groupPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === groupPaymentCcEntityId) as any)?.razonSocial
+                ?? ((groupPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === groupPaymentCcEntityId) as any)?.nombreFantasia
+                ?? group?.name ?? ""
+              : group?.name ?? "",
             items: [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }],
           }}
           onSuccess={() => {

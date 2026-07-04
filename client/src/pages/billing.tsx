@@ -45,6 +45,21 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
   FC:  { nombre: "Factura C",    color: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300" },
   NCA: { nombre: "Nota Créd. A", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
   NCB: { nombre: "Nota Créd. B", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
+  ticket: { nombre: "Ticket", color: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300" },
+  voucher_justo: { nombre: "Voucher Justo", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
+  voucher_pedidos_ya: { nombre: "Voucher PedidosYa", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
+  cierre_habitacion: { nombre: "Voucher Habitaciones", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
+  cierre_spa: { nombre: "Voucher SPA", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
+};
+
+// Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
+const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa"]);
+const NON_FISCAL_LABELS: Record<string, string> = {
+  ticket: "Ticket — Comprobante interno",
+  voucher_justo: "Voucher Justo — Comprobante interno",
+  voucher_pedidos_ya: "Voucher PedidosYa — Comprobante interno",
+  cierre_habitacion: "Voucher Habitaciones — Comprobante interno",
+  cierre_spa: "Voucher SPA — Comprobante interno",
 };
 
 type AmbienteMode = "ficticio" | "homologacion" | "produccion";
@@ -260,13 +275,15 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   config: any;
   initialValues?: EmitirFacturaInitialValues;
   onSuccess?: () => void;
-  allowedTipos?: Array<"FA" | "FB" | "FC">;
+  allowedTipos?: Array<string>;
   cashArea?: string;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB", "FC"];
   const [tipo, setTipo] = useState<string>(tipos.includes("FB") ? "FB" : tipos[0]);
   const [cashFormaPago, setCashFormaPago] = useState("efectivo");
+  const [ccEntityType, setCcEntityType] = useState<"company" | "agency">("company");
+  const [ccEntityId, setCcEntityId] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
   const [cuit, setCuit] = useState("");
   const [dni, setDni] = useState("");
@@ -275,6 +292,14 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [puntoVentaNum, setPuntoVentaNum] = useState("");
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
+  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/companies"],
+    enabled: !!cashArea,
+  });
+  const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/agencies"],
+    enabled: !!cashArea,
+  });
 
   useEffect(() => {
     if (open && initialValues) {
@@ -371,7 +396,14 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     onSuccess: async (res: any) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
-      toast({ title: "Factura emitida", description: `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}` });
+      queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
+      const esNoFiscal = NON_FISCAL_TIPOS_SET.has(data.tipo_comprobante);
+      toast({
+        title: esNoFiscal ? "Comprobante emitido" : "Factura emitida",
+        description: esNoFiscal
+          ? `${TIPO_LABELS[data.tipo_comprobante]?.nombre ?? data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}`
+          : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}`,
+      });
       onSuccess?.();
       onClose(); resetForm();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
@@ -382,23 +414,34 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   function resetForm() {
     setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
-    setPuntoVentaNum("");
+    setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
   }
 
   const isFA = tipo === "FA";
   const isFC = tipo === "FC";
+  const isNonFiscal = NON_FISCAL_TIPOS_SET.has(tipo);
   const ambiente: AmbienteMode = config?.arcaAmbiente ?? "ficticio";
 
   function handleSubmit() {
     if (!razonSocial.trim()) return toast({ title: "Ingrese Razón Social / Nombre", variant: "destructive" });
     if (isFA && !cuit.trim()) return toast({ title: "CUIT es requerido para Factura A", variant: "destructive" });
     if (items.some(it => !it.descripcion.trim())) return toast({ title: "Todos los ítems deben tener descripción", variant: "destructive" });
+    if (cashArea && cashFormaPago === "cuenta_corriente" && !ccEntityId) {
+      return toast({ title: `Seleccione ${ccEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
+    }
     mutation.mutate({
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
       items,
       puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined,
-      ...(cashArea ? { cashArea, cashFormaPago, cashLabel: `${tipo} — ${razonSocial}` } : {}),
+      ...(cashArea
+        ? {
+            cashArea,
+            cashFormaPago,
+            cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}`,
+            ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+          }
+        : {}),
     });
   }
 
@@ -415,15 +458,24 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
               {tipos.includes("FA") && <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>}
               {tipos.includes("FB") && <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>}
               {tipos.includes("FC") && <SelectItem value="FC">Factura C — Monotributista</SelectItem>}
+              {tipos.filter(t => NON_FISCAL_TIPOS_SET.has(t)).map(t => (
+                <SelectItem key={t} value={t}>{NON_FISCAL_LABELS[t] ?? t}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
-          {ambiente === "ficticio" && (
+          {isNonFiscal && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+              <AlertTriangle className="w-3 h-3" />
+              Comprobante interno — no es una factura fiscal (sin CAE)
+            </p>
+          )}
+          {!isNonFiscal && ambiente === "ficticio" && (
             <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-center gap-1 mt-1">
               <AlertTriangle className="w-3 h-3" />
               Modo ficticio — se generará un CAE simulado (no válido fiscalmente)
             </p>
           )}
-          {ambiente === "homologacion" && (
+          {!isNonFiscal && ambiente === "homologacion" && (
             <p className="text-xs text-blue-700 dark:text-blue-400 flex items-center gap-1 mt-1">
               <FlaskConical className="w-3 h-3" />
               Homologación — CAE real de ARCA pero sin efecto fiscal (ambiente de pruebas)
@@ -434,7 +486,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         {cashArea && (
           <div className="space-y-1">
             <Label>Forma de pago</Label>
-            <Select value={cashFormaPago} onValueChange={setCashFormaPago}>
+            <Select value={cashFormaPago} onValueChange={v => { setCashFormaPago(v); if (v !== "cuenta_corriente") setCcEntityId(""); }}>
               <SelectTrigger data-testid="select-cash-forma-pago"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="efectivo">Efectivo</SelectItem>
@@ -442,8 +494,28 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                 <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
                 <SelectItem value="transferencia">Transferencia</SelectItem>
                 <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
               </SelectContent>
             </Select>
+            {cashFormaPago === "cuenta_corriente" && (
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <Select value={ccEntityType} onValueChange={v => { setCcEntityType(v as "company" | "agency"); setCcEntityId(""); }}>
+                  <SelectTrigger data-testid="select-cc-entity-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="company">Empresa</SelectItem>
+                    <SelectItem value="agency">Agencia</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={ccEntityId} onValueChange={setCcEntityId}>
+                  <SelectTrigger data-testid="select-cc-entity-id"><SelectValue placeholder={ccEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} /></SelectTrigger>
+                  <SelectContent>
+                    {(ccEntityType === "company" ? companies : agencies).map((e: any) => (
+                      <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
         )}
 

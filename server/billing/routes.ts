@@ -227,9 +227,12 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, cashArea, cashFormaPago, cashLabel: cashLabelBody } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
+      }
+      if (cashFormaPago === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
+        return res.status(400).json({ error: "Seleccione una empresa o agencia para cargar a Cuenta Corriente" });
       }
       const user = (req as any).user;
       const factura = await emitirFactura({
@@ -242,8 +245,28 @@ export function registerBillingRoutes(app: Express) {
         puntoVentaOverride: pvBody ? parseInt(pvBody) : undefined,
       } as NewInvoiceData);
 
-      // Registrar movimiento de caja si se especificó un área
-      if (cashArea && cashFormaPago) {
+      // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
+      if (cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
+        try {
+          const total = parseFloat(String((factura as any).montoTotal || "0"));
+          if (total > 0) {
+            const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
+            await storage.createAccountMovement({
+              entityType: ccEntityType,
+              entityId: ccEntityId,
+              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+              type: "cargo",
+              description: cashLabelBody || nroFac,
+              amount: String(total.toFixed(2)),
+              reference: nroFac,
+              createdBy: user?.id || null,
+            } as any);
+          }
+        } catch (ccErr) {
+          console.error("[Billing] Error registrando movimiento de Cuenta Corriente:", ccErr);
+        }
+      } else if (cashArea && cashFormaPago) {
+        // Registrar movimiento de caja si se especificó un área
         try {
           const total = parseFloat(String((factura as any).montoTotal || "0"));
           if (total > 0) {

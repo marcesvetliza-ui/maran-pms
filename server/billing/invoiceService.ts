@@ -15,8 +15,14 @@ export interface InvoiceItem {
   subtotal: number;
 }
 
+export type NonFiscalTipo = "ticket" | "voucher_justo" | "voucher_pedidos_ya" | "cierre_habitacion" | "cierre_spa";
+
+export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
+  "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa",
+];
+
 export interface NewInvoiceData {
-  tipoComprobante: "FA" | "FB" | "FC" | "NCA" | "NCB";
+  tipoComprobante: "FA" | "FB" | "FC" | "NCA" | "NCB" | NonFiscalTipo;
   cliente: {
     razonSocial: string;
     cuit?: string;
@@ -156,6 +162,7 @@ async function getNextInvoiceNumberFromAfip(
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
   const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
+  const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
 
   const puntoVenta =
     data.puntoVentaOverride ??
@@ -165,12 +172,19 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
 
   const montos = calcularMontos(data.items, data.tipoComprobante);
 
-  let cae: string;
-  let caeFechaVto: Date;
+  let cae: string | null;
+  let caeFechaVto: Date | null;
   let modoFicticio: boolean;
   let numero: number;
 
-  if (ambiente === "homologacion" || ambiente === "produccion") {
+  if (esNoFiscal) {
+    // Comprobantes no fiscales (Ticket, Vouchers, Cierres): nunca llaman a ARCA,
+    // solo llevan una numeración local propia por tipo + punto de venta.
+    numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
+    cae = null;
+    caeFechaVto = null;
+    modoFicticio = false;
+  } else if (ambiente === "homologacion" || ambiente === "produccion") {
     // En producción/homologación: obtener token primero para poder
     // consultar el último número directamente de AFIP
     const { getTokenAuth } = await import("./wsaaClient");
@@ -241,7 +255,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       Object.entries(montos).map(([k, v]) => [k, String(v)])
     ),
     cae,
-    caeFechaVto: caeFechaVto.toISOString().split("T")[0],
+    caeFechaVto: caeFechaVto ? caeFechaVto.toISOString().split("T")[0] : null,
     modoFicticio,
     estado: "emitida",
     reservaId: data.reservaId || null,

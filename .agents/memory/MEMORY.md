@@ -11,3 +11,4 @@
 - [Payment order (OP) dialog session bug](payment-order-dialog-reset.md) — non-unmounted dialogs need explicit state reset on reopen; apiRequest returns raw Response, always call res.json() in mutationFn.
 - [Restaurant menu/category CRUD location](restaurant-menu-crud-location.md) — plato/category CRUD lives only in recetas-costos.tsx, not restaurant.tsx; "Agregar Plato" is a 2-step wizard (basics → auto-open recipe).
 - [Inventory itemKind classification scoping](inventory-itemkind-scoping.md) — itemKind (materia_prima/venta_directa/plato) is orthogonal to category area; don't filter ingredient pickers by area, raw materials live in general categories.
+- [Entity selector field names](entity-selector-field-names.md) — companies/agencies have no `.name`, only razonSocial/nombreFantasia; also covers pre-filling razonSocial in two-step voucher+payment dialogs to avoid silent submit-block.
