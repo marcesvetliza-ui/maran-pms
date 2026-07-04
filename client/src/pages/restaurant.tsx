@@ -74,6 +74,7 @@ import {
   Monitor,
   RotateCcw,
   Download,
+  CalendarClock,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -2535,7 +2536,15 @@ export default function RestaurantPage() {
             </Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {activeOrders.map((order) => (
+              {activeOrders.map((order) => {
+                const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                const orderTableReservation = order.tableId
+                  ? reservations
+                      .filter(r => r.tableId === order.tableId && r.reservationDate === todayISO &&
+                        ["confirmed", "check_in", "seated"].includes(r.status))
+                      .sort((a, b) => a.reservationTime.localeCompare(b.reservationTime))[0]
+                  : undefined;
+                return (
                 <Card key={order.id} data-testid={`order-card-${order.orderNumber}`}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between gap-2">
@@ -2556,6 +2565,12 @@ export default function RestaurantPage() {
                       <div className="flex items-center gap-2 text-sm">
                         <MapPin className="h-4 w-4 text-muted-foreground" />
                         {areas.find(a => a.id === order.areaId)?.name}
+                      </div>
+                    )}
+                    {orderTableReservation && (
+                      <div className="flex items-center gap-2 text-sm" data-testid={`text-reservation-guest-${order.orderNumber}`}>
+                        <CalendarClock className="h-4 w-4 text-violet-600" />
+                        Reserva: <span className="font-medium">{orderTableReservation.guestName}</span>
                       </div>
                     )}
                     {order.waiterName && (
@@ -2632,7 +2647,8 @@ export default function RestaurantPage() {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+                );
+              })}
             </div>
           )}
         </TabsContent>
