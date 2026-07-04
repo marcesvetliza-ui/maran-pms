@@ -878,6 +878,124 @@ export function registerReportsRoutes(app: Express) {
     }
   });
 
+  // ── Reporte de Mantenimiento ──────────────────────────────────────────────
+  app.get("/api/reports/maintenance", requireRole(FINANCE_ROLES.concat(["maintenance"]) as [string, ...string[]]), async (req, res) => {
+    try {
+      const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
+      const { desde, hasta } = periodoToRange(periodo);
+
+      const [porEstado, porCategoria, porPrioridad, costos, tiempoResolucion, ubicacionesRecurrentes, porTecnico] = await Promise.all([
+        db.execute(sql`SELECT status, COUNT(*) AS cantidad FROM work_orders WHERE reported_at::date BETWEEN ${desde} AND ${hasta} GROUP BY status`),
+        db.execute(sql`SELECT category, COUNT(*) AS cantidad FROM work_orders WHERE reported_at::date BETWEEN ${desde} AND ${hasta} GROUP BY category ORDER BY cantidad DESC`),
+        db.execute(sql`SELECT priority, COUNT(*) AS cantidad FROM work_orders WHERE reported_at::date BETWEEN ${desde} AND ${hasta} GROUP BY priority`),
+        db.execute(sql`SELECT COALESCE(SUM(actual_cost::numeric), 0) AS total, COALESCE(SUM(estimated_cost::numeric), 0) AS estimado FROM work_orders WHERE reported_at::date BETWEEN ${desde} AND ${hasta}`),
+        db.execute(sql`
+          SELECT AVG(EXTRACT(EPOCH FROM (completed_at - reported_at)) / 3600) AS horas_promedio
+          FROM work_orders
+          WHERE status = 'completed' AND completed_at IS NOT NULL AND reported_at::date BETWEEN ${desde} AND ${hasta}
+        `),
+        db.execute(sql`
+          SELECT COALESCE(r.room_number, wo.location, 'Sin ubicación') AS ubicacion, COUNT(*) AS cantidad
+          FROM work_orders wo
+          LEFT JOIN rooms r ON r.id = wo.room_id
+          WHERE wo.reported_at::date BETWEEN ${desde} AND ${hasta}
+          GROUP BY ubicacion
+          ORDER BY cantidad DESC
+          LIMIT 10
+        `),
+        db.execute(sql`
+          SELECT COALESCE(u.full_name, 'Sin asignar') AS tecnico,
+                 COUNT(wo.id) AS asignadas,
+                 COUNT(wo.id) FILTER (WHERE wo.status = 'completed') AS completadas
+          FROM work_orders wo
+          LEFT JOIN system_users u ON u.id = wo.assigned_to_id
+          WHERE wo.reported_at::date BETWEEN ${desde} AND ${hasta}
+          GROUP BY tecnico
+          ORDER BY asignadas DESC
+        `),
+      ]);
+
+      const estadoRows = porEstado.rows as any[];
+      const totalOrdenes = estadoRows.reduce((s, r) => s + $n(r.cantidad), 0);
+
+      res.json({
+        periodo,
+        totalOrdenes,
+        costoTotal: $n((costos.rows[0] as any)?.total),
+        costoEstimado: $n((costos.rows[0] as any)?.estimado),
+        horasPromedioResolucion: Math.round(($n((tiempoResolucion.rows[0] as any)?.horas_promedio) || 0) * 10) / 10,
+        porEstado: estadoRows.map(r => ({ estado: r.status, cantidad: $n(r.cantidad) })),
+        porCategoria: (porCategoria.rows as any[]).map(r => ({ categoria: r.category, cantidad: $n(r.cantidad) })),
+        porPrioridad: (porPrioridad.rows as any[]).map(r => ({ prioridad: r.priority, cantidad: $n(r.cantidad) })),
+        ubicacionesRecurrentes: (ubicacionesRecurrentes.rows as any[]).map(r => ({ ubicacion: r.ubicacion, cantidad: $n(r.cantidad) })),
+        porTecnico: (porTecnico.rows as any[]).map(r => ({ tecnico: r.tecnico, asignadas: $n(r.asignadas), completadas: $n(r.completadas) })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Reporte de Inventario General ─────────────────────────────────────────
+  app.get("/api/reports/inventory", requireRole(FINANCE_ROLES.concat(["resp_deposito"]) as [string, ...string[]]), async (req, res) => {
+    try {
+      const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
+      const { desde, hasta } = periodoToRange(periodo);
+
+      const [valorizacion, bajoMinimo, porTipoMovimiento, sinMovimiento, topValor] = await Promise.all([
+        db.execute(sql`SELECT COALESCE(SUM(current_stock::numeric * cost_price::numeric), 0) AS total FROM inventory_items WHERE is_active = 'true'`),
+        db.execute(sql`
+          SELECT id, sku, name, current_stock, min_stock, unit
+          FROM inventory_items
+          WHERE is_active = 'true' AND current_stock::numeric <= min_stock::numeric
+          ORDER BY (current_stock::numeric - min_stock::numeric) ASC
+          LIMIT 20
+        `),
+        db.execute(sql`
+          SELECT movement_type, COUNT(*) AS cantidad, COALESCE(SUM(quantity::numeric), 0) AS cantidad_total
+          FROM stock_movements
+          WHERE created_at::date BETWEEN ${desde} AND ${hasta}
+          GROUP BY movement_type
+        `),
+        db.execute(sql`
+          SELECT i.id, i.sku, i.name, i.current_stock, i.unit
+          FROM inventory_items i
+          WHERE i.is_active = 'true'
+            AND NOT EXISTS (
+              SELECT 1 FROM stock_movements sm WHERE sm.item_id = i.id AND sm.created_at::date BETWEEN ${desde} AND ${hasta}
+            )
+          ORDER BY i.current_stock::numeric * i.cost_price::numeric DESC
+          LIMIT 20
+        `),
+        db.execute(sql`
+          SELECT sku, name, current_stock, cost_price, (current_stock::numeric * cost_price::numeric) AS valor_total
+          FROM inventory_items
+          WHERE is_active = 'true'
+          ORDER BY valor_total DESC
+          LIMIT 10
+        `),
+      ]);
+
+      res.json({
+        periodo,
+        valorTotalStock: $n((valorizacion.rows[0] as any)?.total),
+        itemsBajoMinimo: (bajoMinimo.rows as any[]).map(r => ({
+          id: r.id, sku: r.sku, nombre: r.name, stockActual: $n(r.current_stock), stockMinimo: $n(r.min_stock), unidad: r.unit,
+        })),
+        porTipoMovimiento: (porTipoMovimiento.rows as any[]).map(r => ({
+          tipo: r.movement_type, cantidad: $n(r.cantidad), cantidadTotal: $n(r.cantidad_total),
+        })),
+        itemsSinMovimiento: (sinMovimiento.rows as any[]).map(r => ({
+          id: r.id, sku: r.sku, nombre: r.name, stockActual: $n(r.current_stock), unidad: r.unit,
+        })),
+        topValorStock: (topValor.rows as any[]).map(r => ({
+          sku: r.sku, nombre: r.name, stockActual: $n(r.current_stock), costoUnitario: $n(r.cost_price), valorTotal: $n(r.valor_total),
+        })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── PDF Export (generic) ──────────────────────────────────────────────────
   app.get("/api/reports/export-pdf/:tipo", requireRole(FINANCE_ROLES), async (req, res) => {
     try {

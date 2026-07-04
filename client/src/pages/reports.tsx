@@ -52,6 +52,8 @@ import {
   AlertCircle,
   Sparkles,
   PartyPopper,
+  Wrench,
+  Package,
 } from "lucide-react";
 
 const COLORS = [
@@ -271,12 +273,39 @@ export default function ReportsPage() {
     enabled: activeTab === "events",
   });
 
+  type MaintenanceReportData = {
+    totalOrdenes: number; costoTotal: number; costoEstimado: number; horasPromedioResolucion: number;
+    porEstado: { estado: string; cantidad: number }[];
+    porCategoria: { categoria: string; cantidad: number }[];
+    porPrioridad: { prioridad: string; cantidad: number }[];
+    ubicacionesRecurrentes: { ubicacion: string; cantidad: number }[];
+    porTecnico: { tecnico: string; asignadas: number; completadas: number }[];
+  };
+  const maintenanceReport = useQuery<MaintenanceReportData>({
+    queryKey: ["/api/reports/maintenance", periodo],
+    queryFn: () => fetchReport(`/api/reports/maintenance?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "maintenance",
+  });
+
+  type InventoryReportData = {
+    valorTotalStock: number;
+    itemsBajoMinimo: { id: string; sku: string; nombre: string; stockActual: number; stockMinimo: number; unidad: string }[];
+    porTipoMovimiento: { tipo: string; cantidad: number; cantidadTotal: number }[];
+    itemsSinMovimiento: { id: string; sku: string; nombre: string; stockActual: number; unidad: string }[];
+    topValorStock: { sku: string; nombre: string; stockActual: number; costoUnitario: number; valorTotal: number }[];
+  };
+  const inventoryReport = useQuery<InventoryReportData>({
+    queryKey: ["/api/reports/inventory", periodo],
+    queryFn: () => fetchReport(`/api/reports/inventory?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "inventory",
+  });
+
   const AREA_TABS: Record<string, { label: string; tabs: string[] }> = {
     hoteleria: { label: "Hotelería", tabs: ["occupancy", "revenue-type", "channel", "reservations", "arrivals-departures", "pending-balances", "top-guests"] },
     restaurant: { label: "Restaurant", tabs: ["restaurant"] },
     spa: { label: "Spa", tabs: ["spa"] },
     eventos: { label: "Eventos", tabs: ["events"] },
-    operaciones: { label: "Operaciones", tabs: ["housekeeping"] },
+    operaciones: { label: "Operaciones", tabs: ["housekeeping", "maintenance", "inventory"] },
     administracion: { label: "Administración", tabs: ["payments", "billing"] },
   };
   const TAB_TO_AREA: Record<string, string> = Object.fromEntries(
@@ -537,6 +566,14 @@ export default function ReportsPage() {
             <TabsTrigger value="housekeeping" data-testid="tab-housekeeping">
               <Brush className="h-4 w-4 mr-1" />
               Housekeeping
+            </TabsTrigger>
+            <TabsTrigger value="maintenance" data-testid="tab-maintenance">
+              <Wrench className="h-4 w-4 mr-1" />
+              Mantenimiento
+            </TabsTrigger>
+            <TabsTrigger value="inventory" data-testid="tab-inventory">
+              <Package className="h-4 w-4 mr-1" />
+              Inventario
             </TabsTrigger>
           </TabsList>
         )}
@@ -1448,6 +1485,172 @@ export default function ReportsPage() {
                         <TableRow key={i}><TableCell>{r.tipo}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell><TableCell className="text-right">{formatARS(r.total)}</TableCell></TableRow>
                       ))}
                       {eventsReport.data.porTipo.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="maintenance" className="space-y-4 mt-4">
+          {maintenanceReport.isLoading ? (
+            <LoadingSkeleton />
+          ) : maintenanceReport.data ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Órdenes del período</p><p className="text-xl font-bold" data-testid="text-maintenance-total">{maintenanceReport.data.totalOrdenes}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Costo total</p><p className="text-xl font-bold">{formatARS(maintenanceReport.data.costoTotal)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Costo estimado</p><p className="text-xl font-bold">{formatARS(maintenanceReport.data.costoEstimado)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Horas promedio resolución</p><p className="text-xl font-bold">{maintenanceReport.data.horasPromedioResolucion} hs</p></CardContent></Card>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card>
+                  <CardHeader><CardTitle>Por Estado</CardTitle></CardHeader>
+                  <CardContent>
+                    <Table data-testid="table-maintenance-estado">
+                      <TableHeader><TableRow><TableHead>Estado</TableHead><TableHead className="text-right">Cantidad</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {maintenanceReport.data.porEstado.map((r, i) => (
+                          <TableRow key={i}><TableCell><Badge variant="outline" className="text-xs">{r.estado}</Badge></TableCell><TableCell className="text-right">{r.cantidad}</TableCell></TableRow>
+                        ))}
+                        {maintenanceReport.data.porEstado.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground py-6">Sin datos</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>Por Categoría</CardTitle></CardHeader>
+                  <CardContent>
+                    <Table data-testid="table-maintenance-categoria">
+                      <TableHeader><TableRow><TableHead>Categoría</TableHead><TableHead className="text-right">Cantidad</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {maintenanceReport.data.porCategoria.map((r, i) => (
+                          <TableRow key={i}><TableCell>{r.categoria}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell></TableRow>
+                        ))}
+                        {maintenanceReport.data.porCategoria.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground py-6">Sin datos</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>Por Prioridad</CardTitle></CardHeader>
+                  <CardContent>
+                    <Table data-testid="table-maintenance-prioridad">
+                      <TableHeader><TableRow><TableHead>Prioridad</TableHead><TableHead className="text-right">Cantidad</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {maintenanceReport.data.porPrioridad.map((r, i) => (
+                          <TableRow key={i}><TableCell>{r.prioridad}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell></TableRow>
+                        ))}
+                        {maintenanceReport.data.porPrioridad.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground py-6">Sin datos</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Ubicaciones Recurrentes</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-maintenance-ubicaciones">
+                    <TableHeader><TableRow><TableHead>Ubicación</TableHead><TableHead className="text-right">Órdenes</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {maintenanceReport.data.ubicacionesRecurrentes.map((r, i) => (
+                        <TableRow key={i}><TableCell>{r.ubicacion}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell></TableRow>
+                      ))}
+                      {maintenanceReport.data.ubicacionesRecurrentes.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Producción por Técnico</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-maintenance-tecnico">
+                    <TableHeader><TableRow><TableHead>Técnico</TableHead><TableHead className="text-right">Asignadas</TableHead><TableHead className="text-right">Completadas</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {maintenanceReport.data.porTecnico.map((r, i) => (
+                        <TableRow key={i}><TableCell>{r.tecnico}</TableCell><TableCell className="text-right">{r.asignadas}</TableCell><TableCell className="text-right">{r.completadas}</TableCell></TableRow>
+                      ))}
+                      {maintenanceReport.data.porTecnico.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="inventory" className="space-y-4 mt-4">
+          {inventoryReport.isLoading ? (
+            <LoadingSkeleton />
+          ) : inventoryReport.data ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Valor total del stock</p><p className="text-xl font-bold" data-testid="text-inventory-valor">{formatARS(inventoryReport.data.valorTotalStock)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Ítems bajo stock mínimo</p><p className="text-xl font-bold text-destructive">{inventoryReport.data.itemsBajoMinimo.length}</p></CardContent></Card>
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Ítems Bajo Stock Mínimo</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="overflow-auto">
+                    <Table data-testid="table-inventory-bajo-minimo">
+                      <TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>Nombre</TableHead><TableHead className="text-right">Stock Actual</TableHead><TableHead className="text-right">Stock Mínimo</TableHead><TableHead>Unidad</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {inventoryReport.data.itemsBajoMinimo.map((r) => (
+                          <TableRow key={r.id} data-testid={`row-inventory-low-${r.id}`}>
+                            <TableCell className="font-mono text-xs">{r.sku}</TableCell>
+                            <TableCell>{r.nombre}</TableCell>
+                            <TableCell className="text-right text-destructive font-bold">{r.stockActual}</TableCell>
+                            <TableCell className="text-right">{r.stockMinimo}</TableCell>
+                            <TableCell>{r.unidad}</TableCell>
+                          </TableRow>
+                        ))}
+                        {inventoryReport.data.itemsBajoMinimo.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">Ningún ítem bajo el mínimo</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader><CardTitle>Movimientos por Tipo (período)</CardTitle></CardHeader>
+                  <CardContent>
+                    <Table data-testid="table-inventory-movimientos">
+                      <TableHeader><TableRow><TableHead>Tipo</TableHead><TableHead className="text-right">Movimientos</TableHead><TableHead className="text-right">Cantidad Total</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {inventoryReport.data.porTipoMovimiento.map((r, i) => (
+                          <TableRow key={i}><TableCell>{r.tipo}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell><TableCell className="text-right">{r.cantidadTotal}</TableCell></TableRow>
+                        ))}
+                        {inventoryReport.data.porTipoMovimiento.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>Top 10 Valor en Stock</CardTitle></CardHeader>
+                  <CardContent>
+                    <Table data-testid="table-inventory-top-valor">
+                      <TableHeader><TableRow><TableHead>Nombre</TableHead><TableHead className="text-right">Stock</TableHead><TableHead className="text-right">Valor</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {inventoryReport.data.topValorStock.map((r, i) => (
+                          <TableRow key={i}><TableCell>{r.nombre}</TableCell><TableCell className="text-right">{r.stockActual}</TableCell><TableCell className="text-right">{formatARS(r.valorTotal)}</TableCell></TableRow>
+                        ))}
+                        {inventoryReport.data.topValorStock.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sin datos</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Ítems Sin Movimiento en el Período</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-inventory-sin-movimiento">
+                    <TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>Nombre</TableHead><TableHead className="text-right">Stock Actual</TableHead><TableHead>Unidad</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {inventoryReport.data.itemsSinMovimiento.map((r) => (
+                        <TableRow key={r.id}><TableCell className="font-mono text-xs">{r.sku}</TableCell><TableCell>{r.nombre}</TableCell><TableCell className="text-right">{r.stockActual}</TableCell><TableCell>{r.unidad}</TableCell></TableRow>
+                      ))}
+                      {inventoryReport.data.itemsSinMovimiento.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6">Todos los ítems tuvieron movimiento</TableCell></TableRow>}
                     </TableBody>
                   </Table>
                 </CardContent>
