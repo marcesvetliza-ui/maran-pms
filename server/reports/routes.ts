@@ -996,6 +996,168 @@ export function registerReportsRoutes(app: Express) {
     }
   });
 
+  // ── Reporte de Costo de Comida (CMV) - Restaurant ─────────────────────────
+  app.get("/api/reports/restaurant-cmv", requireRole(FINANCE_ROLES.concat(["restaurant"]) as [string, ...string[]]), async (req, res) => {
+    try {
+      const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
+      const { desde, hasta } = periodoToRange(periodo);
+
+      const [totales, porPlato] = await Promise.all([
+        db.execute(sql`
+          SELECT
+            COALESCE(SUM(oi.subtotal::numeric), 0) AS ingresos,
+            COALESCE(SUM(oi.quantity * COALESCE(ric.costo_receta, 0)), 0) AS costo
+          FROM order_items oi
+          JOIN restaurant_orders ro ON ro.id = oi.order_id
+          LEFT JOIN (
+            SELECT r.menu_item_id, SUM(ri.quantity::numeric * ri.unit_cost::numeric) AS costo_receta
+            FROM recipes r
+            JOIN recipe_ingredients ri ON ri.recipe_id = r.id
+            GROUP BY r.menu_item_id
+          ) ric ON ric.menu_item_id = oi.menu_item_id
+          WHERE ro.closed_at::date BETWEEN ${desde} AND ${hasta} AND ro.status != 'cancelled'
+        `),
+        db.execute(sql`
+          SELECT
+            mi.name AS plato,
+            SUM(oi.quantity) AS cantidad_vendida,
+            COALESCE(SUM(oi.subtotal::numeric), 0) AS ingresos,
+            COALESCE(SUM(oi.quantity * ric.costo_receta), 0) AS costo
+          FROM order_items oi
+          JOIN restaurant_orders ro ON ro.id = oi.order_id
+          JOIN menu_items mi ON mi.id = oi.menu_item_id
+          LEFT JOIN (
+            SELECT r.menu_item_id, SUM(ri.quantity::numeric * ri.unit_cost::numeric) AS costo_receta
+            FROM recipes r
+            JOIN recipe_ingredients ri ON ri.recipe_id = r.id
+            GROUP BY r.menu_item_id
+          ) ric ON ric.menu_item_id = oi.menu_item_id
+          WHERE ro.closed_at::date BETWEEN ${desde} AND ${hasta} AND ro.status != 'cancelled'
+          GROUP BY mi.id, mi.name
+          ORDER BY ingresos DESC
+          LIMIT 20
+        `),
+      ]);
+
+      const ingresos = $n((totales.rows[0] as any)?.ingresos);
+      const costo = $n((totales.rows[0] as any)?.costo);
+      const cmvPct = ingresos > 0 ? Math.round((costo / ingresos) * 1000) / 10 : 0;
+
+      res.json({
+        periodo,
+        ingresos,
+        costo,
+        margen: ingresos - costo,
+        cmvPorcentaje: cmvPct,
+        porPlato: (porPlato.rows as any[]).map(r => {
+          const ing = $n(r.ingresos);
+          const cst = $n(r.costo);
+          return {
+            plato: r.plato,
+            cantidadVendida: $n(r.cantidad_vendida),
+            ingresos: ing,
+            costo: cst,
+            cmvPorcentaje: ing > 0 ? Math.round((cst / ing) * 1000) / 10 : 0,
+          };
+        }),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Reporte de Productividad de Camareras - Housekeeping ──────────────────
+  app.get("/api/reports/housekeeping-productivity", requireRole(FINANCE_ROLES.concat(["housekeeping"]) as [string, ...string[]]), async (req, res) => {
+    try {
+      const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
+      const { desde, hasta } = periodoToRange(periodo);
+
+      const [porCamarera, porTipo] = await Promise.all([
+        db.execute(sql`
+          SELECT
+            COALESCE(u.full_name, 'Sin asignar') AS camarera,
+            COUNT(ht.id) AS total_tareas,
+            COUNT(ht.id) FILTER (WHERE ht.status IN ('completed', 'inspected')) AS completadas,
+            AVG(EXTRACT(EPOCH FROM (ht.completed_at - ht.started_at)) / 60) FILTER (WHERE ht.completed_at IS NOT NULL AND ht.started_at IS NOT NULL) AS minutos_promedio
+          FROM housekeeping_tasks ht
+          LEFT JOIN system_users u ON u.id = ht.assigned_to
+          WHERE ht.scheduled_date BETWEEN ${desde} AND ${hasta}
+          GROUP BY camarera
+          ORDER BY completadas DESC
+        `),
+        db.execute(sql`
+          SELECT task_type, COUNT(*) AS cantidad
+          FROM housekeeping_tasks
+          WHERE scheduled_date BETWEEN ${desde} AND ${hasta}
+          GROUP BY task_type
+          ORDER BY cantidad DESC
+        `),
+      ]);
+
+      res.json({
+        periodo,
+        porCamarera: (porCamarera.rows as any[]).map(r => ({
+          camarera: r.camarera,
+          totalTareas: $n(r.total_tareas),
+          completadas: $n(r.completadas),
+          minutosPromedio: Math.round(($n(r.minutos_promedio) || 0) * 10) / 10,
+        })),
+        porTipoTarea: (porTipo.rows as any[]).map(r => ({ tipo: r.task_type, cantidad: $n(r.cantidad) })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Reporte de Pronóstico / Pickup y Cancelaciones - Hotelería ────────────
+  app.get("/api/reports/forecast", requireRole(FINANCE_ROLES), async (req, res) => {
+    try {
+      const dias = parseInt((req.query.dias as string) || "30");
+      const hoy = new Date().toISOString().slice(0, 10);
+      const limite = new Date(Date.now() + dias * 86400000).toISOString().slice(0, 10);
+
+      const [porDia, cancelaciones] = await Promise.all([
+        db.execute(sql`
+          SELECT
+            r.check_in_date AS fecha,
+            COUNT(*) AS reservas,
+            COALESCE(SUM(r.total_room_amount::numeric), 0) AS ingresos_previstos
+          FROM reservations r
+          WHERE r.check_in_date BETWEEN ${hoy} AND ${limite}
+            AND r.status NOT IN ('cancelled')
+          GROUP BY r.check_in_date
+          ORDER BY r.check_in_date ASC
+        `),
+        db.execute(sql`
+          SELECT COUNT(*) AS cantidad, COALESCE(SUM(total_amount::numeric), 0) AS monto_total
+          FROM cancelled_reservation_logs
+          WHERE cancellation_date::date BETWEEN ${hoy} AND ${limite}
+        `),
+      ]);
+
+      const rows = porDia.rows as any[];
+      const totalReservas = rows.reduce((s, r) => s + $n(r.reservas), 0);
+      const totalIngresos = rows.reduce((s, r) => s + $n(r.ingresos_previstos), 0);
+
+      res.json({
+        dias,
+        desde: hoy,
+        hasta: limite,
+        totalReservasPrevistas: totalReservas,
+        ingresosPrevistos: totalIngresos,
+        cancelacionesRecientes: $n((cancelaciones.rows[0] as any)?.cantidad),
+        montoCancelacionesRecientes: $n((cancelaciones.rows[0] as any)?.monto_total),
+        porDia: rows.map(r => ({
+          fecha: r.fecha,
+          reservas: $n(r.reservas),
+          ingresosPrevistos: $n(r.ingresos_previstos),
+        })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── PDF Export (generic) ──────────────────────────────────────────────────
   app.get("/api/reports/export-pdf/:tipo", requireRole(FINANCE_ROLES), async (req, res) => {
     try {

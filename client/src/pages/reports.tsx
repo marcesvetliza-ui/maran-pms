@@ -300,12 +300,43 @@ export default function ReportsPage() {
     enabled: activeTab === "inventory",
   });
 
+  type RestaurantCmvData = {
+    ingresos: number; costo: number; margen: number; cmvPorcentaje: number;
+    porPlato: { plato: string; cantidadVendida: number; ingresos: number; costo: number; cmvPorcentaje: number }[];
+  };
+  const restaurantCmvReport = useQuery<RestaurantCmvData>({
+    queryKey: ["/api/reports/restaurant-cmv", periodo],
+    queryFn: () => fetchReport(`/api/reports/restaurant-cmv?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "restaurant-cmv",
+  });
+
+  type HousekeepingProductivityData = {
+    porCamarera: { camarera: string; totalTareas: number; completadas: number; minutosPromedio: number }[];
+    porTipoTarea: { tipo: string; cantidad: number }[];
+  };
+  const hkProductivityReport = useQuery<HousekeepingProductivityData>({
+    queryKey: ["/api/reports/housekeeping-productivity", periodo],
+    queryFn: () => fetchReport(`/api/reports/housekeeping-productivity?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "housekeeping-productivity",
+  });
+
+  type ForecastData = {
+    dias: number; desde: string; hasta: string; totalReservasPrevistas: number; ingresosPrevistos: number;
+    cancelacionesRecientes: number; montoCancelacionesRecientes: number;
+    porDia: { fecha: string; reservas: number; ingresosPrevistos: number }[];
+  };
+  const forecastReport = useQuery<ForecastData>({
+    queryKey: ["/api/reports/forecast"],
+    queryFn: () => fetchReport(`/api/reports/forecast?dias=30`),
+    enabled: activeTab === "forecast",
+  });
+
   const AREA_TABS: Record<string, { label: string; tabs: string[] }> = {
-    hoteleria: { label: "Hotelería", tabs: ["occupancy", "revenue-type", "channel", "reservations", "arrivals-departures", "pending-balances", "top-guests"] },
-    restaurant: { label: "Restaurant", tabs: ["restaurant"] },
+    hoteleria: { label: "Hotelería", tabs: ["occupancy", "revenue-type", "channel", "reservations", "arrivals-departures", "pending-balances", "top-guests", "forecast"] },
+    restaurant: { label: "Restaurant", tabs: ["restaurant", "restaurant-cmv"] },
     spa: { label: "Spa", tabs: ["spa"] },
     eventos: { label: "Eventos", tabs: ["events"] },
-    operaciones: { label: "Operaciones", tabs: ["housekeeping", "maintenance", "inventory"] },
+    operaciones: { label: "Operaciones", tabs: ["housekeeping", "housekeeping-productivity", "maintenance", "inventory"] },
     administracion: { label: "Administración", tabs: ["payments", "billing"] },
   };
   const TAB_TO_AREA: Record<string, string> = Object.fromEntries(
@@ -535,6 +566,10 @@ export default function ReportsPage() {
               <Users className="h-4 w-4 mr-1" />
               Huéspedes Frecuentes
             </TabsTrigger>
+            <TabsTrigger value="forecast" data-testid="tab-forecast">
+              <TrendingUp className="h-4 w-4 mr-1" />
+              Pronóstico / Pickup
+            </TabsTrigger>
           </TabsList>
         )}
         {activeArea === "restaurant" && (
@@ -542,6 +577,10 @@ export default function ReportsPage() {
             <TabsTrigger value="restaurant" data-testid="tab-restaurant">
               <UtensilsCrossed className="h-4 w-4 mr-1" />
               Restaurante
+            </TabsTrigger>
+            <TabsTrigger value="restaurant-cmv" data-testid="tab-restaurant-cmv">
+              <UtensilsCrossed className="h-4 w-4 mr-1" />
+              Costo de Comida (CMV)
             </TabsTrigger>
           </TabsList>
         )}
@@ -566,6 +605,10 @@ export default function ReportsPage() {
             <TabsTrigger value="housekeeping" data-testid="tab-housekeeping">
               <Brush className="h-4 w-4 mr-1" />
               Housekeeping
+            </TabsTrigger>
+            <TabsTrigger value="housekeeping-productivity" data-testid="tab-housekeeping-productivity">
+              <Users className="h-4 w-4 mr-1" />
+              Productividad Camareras
             </TabsTrigger>
             <TabsTrigger value="maintenance" data-testid="tab-maintenance">
               <Wrench className="h-4 w-4 mr-1" />
@@ -950,6 +993,41 @@ export default function ReportsPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="forecast" className="space-y-4 mt-4">
+          {forecastReport.isLoading ? (
+            <LoadingSkeleton />
+          ) : forecastReport.data ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Reservas previstas ({forecastReport.data.dias} días)</p><p className="text-xl font-bold" data-testid="text-forecast-reservas">{forecastReport.data.totalReservasPrevistas}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Ingresos previstos</p><p className="text-xl font-bold">{formatARS(forecastReport.data.ingresosPrevistos)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Cancelaciones recientes</p><p className="text-xl font-bold text-destructive">{forecastReport.data.cancelacionesRecientes}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Monto cancelado</p><p className="text-xl font-bold text-destructive">{formatARS(forecastReport.data.montoCancelacionesRecientes)}</p></CardContent></Card>
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Pickup Diario ({forecastReport.data.desde} a {forecastReport.data.hasta})</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="overflow-auto">
+                    <Table data-testid="table-forecast">
+                      <TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead className="text-right">Reservas</TableHead><TableHead className="text-right">Ingresos Previstos</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {forecastReport.data.porDia.map((r, i) => (
+                          <TableRow key={i} data-testid={`row-forecast-${i}`}>
+                            <TableCell>{new Date(r.fecha + "T12:00:00").toLocaleDateString("es-AR")}</TableCell>
+                            <TableCell className="text-right">{r.reservas}</TableCell>
+                            <TableCell className="text-right">{formatARS(r.ingresosPrevistos)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {forecastReport.data.porDia.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sin reservas previstas en el rango</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </TabsContent>
+
         <TabsContent value="housekeeping" className="space-y-4 mt-4">
           <Card>
             <CardHeader>
@@ -1000,6 +1078,48 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="housekeeping-productivity" className="space-y-4 mt-4">
+          {hkProductivityReport.isLoading ? (
+            <LoadingSkeleton />
+          ) : hkProductivityReport.data ? (
+            <>
+              <Card>
+                <CardHeader><CardTitle>Productividad por Camarera</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-hk-productividad">
+                    <TableHeader><TableRow><TableHead>Camarera</TableHead><TableHead className="text-right">Tareas Asignadas</TableHead><TableHead className="text-right">Completadas</TableHead><TableHead className="text-right">Minutos Promedio</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {hkProductivityReport.data.porCamarera.map((r, i) => (
+                        <TableRow key={i} data-testid={`row-hk-camarera-${i}`}>
+                          <TableCell>{r.camarera}</TableCell>
+                          <TableCell className="text-right">{r.totalTareas}</TableCell>
+                          <TableCell className="text-right">{r.completadas}</TableCell>
+                          <TableCell className="text-right">{r.minutosPromedio || "-"}</TableCell>
+                        </TableRow>
+                      ))}
+                      {hkProductivityReport.data.porCamarera.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Tareas por Tipo</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-hk-por-tipo">
+                    <TableHeader><TableRow><TableHead>Tipo</TableHead><TableHead className="text-right">Cantidad</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {hkProductivityReport.data.porTipoTarea.map((r, i) => (
+                        <TableRow key={i}><TableCell>{r.tipo}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell></TableRow>
+                      ))}
+                      {hkProductivityReport.data.porTipoTarea.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="restaurant" className="space-y-4 mt-4">
@@ -1098,6 +1218,43 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="restaurant-cmv" className="space-y-4 mt-4">
+          {restaurantCmvReport.isLoading ? (
+            <LoadingSkeleton />
+          ) : restaurantCmvReport.data ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Ingresos del período</p><p className="text-xl font-bold" data-testid="text-cmv-ingresos">{formatARS(restaurantCmvReport.data.ingresos)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Costo de mercadería</p><p className="text-xl font-bold">{formatARS(restaurantCmvReport.data.costo)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Margen</p><p className="text-xl font-bold text-green-600">{formatARS(restaurantCmvReport.data.margen)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">CMV %</p><p className="text-xl font-bold" data-testid="text-cmv-porcentaje">{restaurantCmvReport.data.cmvPorcentaje}%</p></CardContent></Card>
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Costo de Comida por Plato</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="overflow-auto">
+                    <Table data-testid="table-cmv-por-plato">
+                      <TableHeader><TableRow><TableHead>Plato</TableHead><TableHead className="text-right">Cant. Vendida</TableHead><TableHead className="text-right">Ingresos</TableHead><TableHead className="text-right">Costo</TableHead><TableHead className="text-right">CMV %</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {restaurantCmvReport.data.porPlato.map((r, i) => (
+                          <TableRow key={i} data-testid={`row-cmv-plato-${i}`}>
+                            <TableCell>{r.plato}</TableCell>
+                            <TableCell className="text-right">{r.cantidadVendida}</TableCell>
+                            <TableCell className="text-right">{formatARS(r.ingresos)}</TableCell>
+                            <TableCell className="text-right">{formatARS(r.costo)}</TableCell>
+                            <TableCell className="text-right">{r.cmvPorcentaje}%</TableCell>
+                          </TableRow>
+                        ))}
+                        {restaurantCmvReport.data.porPlato.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">Sin datos en el período (requiere recetas cargadas con costo por ingrediente)</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="billing" className="space-y-4 mt-4">
