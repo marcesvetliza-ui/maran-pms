@@ -304,6 +304,19 @@ export default function CheckOutPage() {
     setWizardStep(1);
     setCheckoutComplete(false);
     setFinalSummary(null);
+    if (reservation.companyId) {
+      setPaymentBillingTarget("company");
+      setCcCompanyId(reservation.companyId);
+      setCcAgencyId("");
+    } else if (reservation.agencyId) {
+      setPaymentBillingTarget("agency");
+      setCcAgencyId(reservation.agencyId);
+      setCcCompanyId("");
+    } else {
+      setPaymentBillingTarget("guest");
+      setCcCompanyId("");
+      setCcAgencyId("");
+    }
   };
 
   const cancelWizard = () => {
@@ -721,12 +734,12 @@ export default function CheckOutPage() {
                       </div>
                     </div>
 
-                    {/* Selector de entidad cuando el método es Cuenta Corriente */}
-                    {paymentMethod === "cuenta_corriente" && paymentBillingTarget === "company" && (
+                    {/* Selector de empresa a facturar, visible siempre que "Facturar a" sea Empresa, sin importar el medio de pago */}
+                    {paymentBillingTarget === "company" && (
                       <div className="rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800 p-3">
                         <div className="flex items-center gap-2 mb-2">
                           <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                          <Label className="text-sm font-medium text-blue-800 dark:text-blue-300">Empresa — Cuenta Corriente</Label>
+                          <Label className="text-sm font-medium text-blue-800 dark:text-blue-300">Empresa a facturar</Label>
                         </div>
                         <Select value={ccCompanyId} onValueChange={setCcCompanyId}>
                           <SelectTrigger data-testid="select-cc-company">
@@ -743,14 +756,18 @@ export default function CheckOutPage() {
                             )}
                           </SelectContent>
                         </Select>
-                        {!ccCompanyId && <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">Seleccioná la empresa para cargar a su cuenta corriente.</p>}
+                        {!ccCompanyId && (
+                          <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                            {paymentMethod === "cuenta_corriente" ? "Seleccioná la empresa para cargar a su cuenta corriente." : "Seleccioná la empresa a la que se le facturará este pago."}
+                          </p>
+                        )}
                       </div>
                     )}
-                    {paymentMethod === "cuenta_corriente" && paymentBillingTarget === "agency" && (
+                    {paymentBillingTarget === "agency" && (
                       <div className="rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800 p-3">
                         <div className="flex items-center gap-2 mb-2">
                           <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                          <Label className="text-sm font-medium text-blue-800 dark:text-blue-300">Agencia — Cuenta Corriente</Label>
+                          <Label className="text-sm font-medium text-blue-800 dark:text-blue-300">Agencia a facturar</Label>
                         </div>
                         <Select value={ccAgencyId} onValueChange={setCcAgencyId}>
                           <SelectTrigger data-testid="select-cc-agency">
@@ -767,7 +784,11 @@ export default function CheckOutPage() {
                             )}
                           </SelectContent>
                         </Select>
-                        {!ccAgencyId && <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">Seleccioná la agencia para cargar a su cuenta corriente.</p>}
+                        {!ccAgencyId && (
+                          <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                            {paymentMethod === "cuenta_corriente" ? "Seleccioná la agencia para cargar a su cuenta corriente." : "Seleccioná la agencia a la que se le facturará este pago."}
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -789,12 +810,12 @@ export default function CheckOutPage() {
                           toast({ title: "Ingresá un monto válido", variant: "destructive" });
                           return;
                         }
-                        if (paymentMethod === "cuenta_corriente" && paymentBillingTarget === "company" && !ccCompanyId) {
-                          toast({ title: "Seleccioná una empresa", description: "Elegí a qué empresa cargar la cuenta corriente.", variant: "destructive" });
+                        if (paymentBillingTarget === "company" && !ccCompanyId) {
+                          toast({ title: "Seleccioná una empresa", description: "Elegí a qué empresa facturarle este pago.", variant: "destructive" });
                           return;
                         }
-                        if (paymentMethod === "cuenta_corriente" && paymentBillingTarget === "agency" && !ccAgencyId) {
-                          toast({ title: "Seleccioná una agencia", description: "Elegí a qué agencia cargar la cuenta corriente.", variant: "destructive" });
+                        if (paymentBillingTarget === "agency" && !ccAgencyId) {
+                          toast({ title: "Seleccioná una agencia", description: "Elegí a qué agencia facturarle este pago.", variant: "destructive" });
                           return;
                         }
                         addPaymentMutation.mutate({
