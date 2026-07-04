@@ -2997,7 +2997,7 @@ export class MemStorage implements IStorage {
       areaId: table.areaId,
       capacity: table.capacity ?? 4,
       shape: (table.shape ?? "square") as "square" | "round" | "rectangular",
-      status: (table.status ?? "available") as "available" | "occupied" | "reserved" | "cleaning" | "blocked",
+      status: (table.status ?? "available") as "available" | "occupied" | "reserved",
       positionX: table.positionX ?? 0,
       positionY: table.positionY ?? 0,
       isActive: table.isActive ?? "true",
@@ -3012,7 +3012,7 @@ export class MemStorage implements IStorage {
     const updated: RestaurantTable = { 
       ...existing, 
       ...table,
-      status: (table.status ?? existing.status) as "available" | "occupied" | "reserved" | "cleaning" | "blocked",
+      status: (table.status ?? existing.status) as "available" | "occupied" | "reserved",
       shape: (table.shape ?? existing.shape) as "square" | "round" | "rectangular",
     };
     this.restaurantTables.set(id, updated);

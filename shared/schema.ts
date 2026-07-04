@@ -893,7 +893,7 @@ export type InsertRestaurantArea = z.infer<typeof insertRestaurantAreaSchema>;
 export type RestaurantArea = typeof restaurantAreas.$inferSelect;
 
 // Restaurant Tables
-export type TableStatus = "available" | "occupied" | "reserved" | "cleaning" | "blocked";
+export type TableStatus = "available" | "occupied" | "reserved";
 export type TableShape = "square" | "round" | "rectangular";
 
 export const restaurantTables = pgTable("restaurant_tables", {

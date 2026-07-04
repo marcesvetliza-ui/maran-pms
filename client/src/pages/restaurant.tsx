@@ -94,7 +94,7 @@ type RestaurantTable = {
   areaId: string;
   capacity: number;
   shape: "square" | "round" | "rectangular";
-  status: "available" | "occupied" | "reserved" | "cleaning" | "blocked";
+  status: "available" | "occupied" | "reserved";
   positionX: number;
   positionY: number;
   hasWindow: string | null;
@@ -254,16 +254,12 @@ const tableStatusColors: Record<string, string> = {
   available: "bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/40",
   occupied: "bg-red-500/20 text-red-700 dark:text-red-400 border-red-500/40",
   reserved: "bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/40",
-  cleaning: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/40",
-  blocked: "bg-gray-500/20 text-gray-700 dark:text-gray-400 border-gray-500/40",
 };
 
 const tableStatusLabels: Record<string, string> = {
   available: "Disponible",
   occupied: "Ocupada",
   reserved: "Reservada",
-  cleaning: "Limpieza",
-  blocked: "Bloqueada",
 };
 
 const receiptTypeLabels: Record<string, string> = {
