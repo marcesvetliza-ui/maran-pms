@@ -771,9 +771,10 @@ export default function RestaurantPage() {
   const [ncMotivo, setNcMotivo] = useState("");
   const [ncParcial, setNcParcial] = useState(false);
   const [ncMontoParcial, setNcMontoParcial] = useState("");
-  const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0]);
+  const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]);
   const [ncTipo, setNcTipo] = useState("todos");
   const [ncCliente, setNcCliente] = useState("");
+  const [ncPuntoVenta, setNcPuntoVenta] = useState("todos");
   const [isEmitirComprobanteOpen, setIsEmitirComprobanteOpen] = useState(false);
   const [compTipo, setCompTipo] = useState("FB");
   const [compRazonSocial, setCompRazonSocial] = useState("CONSUMIDOR FINAL");
@@ -3035,6 +3036,22 @@ export default function RestaurantPage() {
                   </Select>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Label className="text-sm whitespace-nowrap">PV:</Label>
+                  <Select value={ncPuntoVenta} onValueChange={setNcPuntoVenta}>
+                    <SelectTrigger className="w-40 h-8" data-testid="select-nc-pv">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos los PV</SelectItem>
+                      {restaurantPVs.map((pv: any) => (
+                        <SelectItem key={pv.numero} value={String(pv.numero)}>
+                          PV {String(pv.numero).padStart(4, "0")} — {pv.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
                   <Label className="text-sm whitespace-nowrap">Cliente:</Label>
                   <Input placeholder="Buscar..." value={ncCliente} onChange={e => setNcCliente(e.target.value)} className="w-40 h-8" data-testid="input-nc-cliente" />
                 </div>
@@ -3047,8 +3064,15 @@ export default function RestaurantPage() {
                 <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
               ) : (() => {
                 const searchLower = ncCliente.toLowerCase();
+                const ncById = new Map<number, any>(
+                  billingInvoices
+                    .filter((inv: any) => ["NCA", "NCB", "NCC"].includes(inv.tipo_comprobante))
+                    .map((inv: any) => [inv.id, inv])
+                );
+                const formatNro = (inv: any) => `${String(inv.punto_venta || 1).padStart(4, "0")}-${String(inv.numero).padStart(8, "0")}`;
                 const allFiltered = billingInvoices.filter((inv: any) => {
                   if (ncTipo && ncTipo !== "todos" && inv.tipo_comprobante !== ncTipo) return false;
+                  if (ncPuntoVenta && ncPuntoVenta !== "todos" && String(inv.punto_venta) !== ncPuntoVenta) return false;
                   if (searchLower && !((inv.cliente_razon_social || "").toLowerCase().includes(searchLower))) return false;
                   return true;
                 });
@@ -3079,16 +3103,27 @@ export default function RestaurantPage() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {facturas.map((inv: any) => (
+                              {facturas.map((inv: any) => {
+                                const linkedNc = inv.estado === "anulada" && inv.nota_credito_id ? ncById.get(inv.nota_credito_id) : null;
+                                return (
                                 <TableRow key={inv.id}>
-                                  <TableCell className="font-mono text-sm">{inv.numero_completo || `${inv.tipo_comprobante}-${String(inv.numero).padStart(8,"0")}`}</TableCell>
+                                  <TableCell className="font-mono text-sm">{formatNro(inv)}</TableCell>
                                   <TableCell><Badge variant="outline">{inv.tipo_comprobante}</Badge></TableCell>
                                   <TableCell className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</TableCell>
                                   <TableCell className="text-sm max-w-[160px] truncate">{inv.cliente_razon_social || "Consumidor Final"}</TableCell>
                                   <TableCell className="text-right font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
                                   <TableCell>
                                     {inv.estado === "anulada"
-                                      ? <Badge variant="destructive">Anulada</Badge>
+                                      ? (
+                                        <div className="flex flex-col gap-0.5">
+                                          <Badge variant="destructive">Anulada</Badge>
+                                          {linkedNc && (
+                                            <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap">
+                                              {linkedNc.tipo_comprobante} {formatNro(linkedNc)}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )
                                       : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
                                     }
                                   </TableCell>
@@ -3101,7 +3136,8 @@ export default function RestaurantPage() {
                                     )}
                                   </TableCell>
                                 </TableRow>
-                              ))}
+                                );
+                              })}
                             </TableBody>
                           </Table>
                         )}
@@ -3131,7 +3167,7 @@ export default function RestaurantPage() {
                             <TableBody>
                               {notasCredito.map((inv: any) => (
                                 <TableRow key={inv.id}>
-                                  <TableCell className="font-mono text-sm">{inv.numero_completo || `${inv.tipo_comprobante}-${String(inv.numero).padStart(8,"0")}`}</TableCell>
+                                  <TableCell className="font-mono text-sm">{formatNro(inv)}</TableCell>
                                   <TableCell><Badge variant="secondary">{inv.tipo_comprobante}</Badge></TableCell>
                                   <TableCell className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</TableCell>
                                   <TableCell className="text-sm max-w-[160px] truncate">{inv.cliente_razon_social || "Consumidor Final"}</TableCell>
