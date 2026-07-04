@@ -377,11 +377,18 @@ function AdvanceDialog({
     : "consumidor_final";
 
   // Compute which receipt types are valid for this reservation
-  const riOrMono = ["responsable_inscripto", "monotributista", "monotributo"].includes(clientVat);
   const availableReceiptTypes: { value: string; label: string }[] = [
     { value: "voucher", label: "Voucher (no fiscal)" },
-    { value: "factura_b", label: "Factura B" },
-    ...(hasClient && riOrMono ? [{ value: "factura_a", label: "Factura A" }] : []),
+    ...(hasClient
+      ? [
+          ...(["consumidor_final", "exento", ""].includes(clientVat)
+            ? [{ value: "factura_b", label: "Factura B" }]
+            : []),
+          ...(["responsable_inscripto", "monotributista", "monotributo"].includes(clientVat)
+            ? [{ value: "factura_a", label: "Factura A" }]
+            : []),
+        ]
+      : [{ value: "factura_b", label: "Factura B" }]),
   ];
 
   useEffect(() => {
