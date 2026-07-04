@@ -50,6 +50,8 @@ import {
   LogIn,
   LogOut,
   AlertCircle,
+  Sparkles,
+  PartyPopper,
 } from "lucide-react";
 
 const COLORS = [
@@ -237,6 +239,56 @@ export default function ReportsPage() {
     enabled: activeTab === "pending-balances",
   });
 
+  const periodoFromDate = (dateStr: string) => {
+    const d = new Date(dateStr + "T12:00:00");
+    return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+  };
+  const periodo = periodoFromDate(to);
+
+  type SpaReportData = {
+    ingresosTotales: number; cantidadPagos: number; totalTurnos: number; turnosCompletados: number;
+    turnosCancelados: number; turnosNoShow: number; tasaAsistencia: number;
+    porEstado: { estado: string; cantidad: number }[];
+    porProfesional: { profesional: string; turnos: number; completados: number; cancelados: number }[];
+    tratamientosMasSolicitados: { tratamiento: string; cantidad: number; ingresoEstimado: number }[];
+    ocupacionPorCabina: { cabina: string; turnos: number }[];
+  };
+  const spaReport = useQuery<SpaReportData>({
+    queryKey: ["/api/reports/spa", periodo],
+    queryFn: () => fetchReport(`/api/reports/spa?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "spa",
+  });
+
+  type EventsReportData = {
+    cantidadEventos: number; totalFacturado: number; totalCobrado: number; saldoPendiente: number; cobrosDelPeriodo: number;
+    porEstado: { estado: string; cantidad: number }[];
+    porTipo: { tipo: string; cantidad: number; total: number }[];
+    eventos: { id: string; codigo: string; nombre: string; tipo: string; estado: string; fechaInicio: string; fechaFin: string; asistentes: number; totalFacturado: number; totalCobrado: number; saldo: number }[];
+  };
+  const eventsReport = useQuery<EventsReportData>({
+    queryKey: ["/api/reports/events", periodo],
+    queryFn: () => fetchReport(`/api/reports/events?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "events",
+  });
+
+  const AREA_TABS: Record<string, { label: string; tabs: string[] }> = {
+    hoteleria: { label: "Hotelería", tabs: ["occupancy", "revenue-type", "channel", "reservations", "arrivals-departures", "pending-balances", "top-guests"] },
+    restaurant: { label: "Restaurant", tabs: ["restaurant"] },
+    spa: { label: "Spa", tabs: ["spa"] },
+    eventos: { label: "Eventos", tabs: ["events"] },
+    operaciones: { label: "Operaciones", tabs: ["housekeeping"] },
+    administracion: { label: "Administración", tabs: ["payments", "billing"] },
+  };
+  const TAB_TO_AREA: Record<string, string> = Object.fromEntries(
+    Object.entries(AREA_TABS).flatMap(([area, v]) => v.tabs.map((t) => [t, area]))
+  );
+  const [activeArea, setActiveArea] = useState(TAB_TO_AREA[activeTab] || "hoteleria");
+
+  function selectArea(area: string) {
+    setActiveArea(area);
+    setActiveTab(AREA_TABS[area].tabs[0]);
+  }
+
   const handleExportCSV = () => {
     switch (activeTab) {
       case "occupancy":
@@ -409,53 +461,97 @@ export default function ReportsPage() {
         </CardContent>
       </Card>
 
+      <div className="flex flex-wrap gap-1" data-testid="area-selector">
+        {Object.entries(AREA_TABS).map(([area, cfg]) => (
+          <Button
+            key={area}
+            size="sm"
+            variant={activeArea === area ? "default" : "outline"}
+            onClick={() => selectArea(area)}
+            data-testid={`button-area-${area}`}
+          >
+            {cfg.label}
+          </Button>
+        ))}
+      </div>
+
       <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-reports">
-        <TabsList className="flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="occupancy" data-testid="tab-occupancy">
-            <Hotel className="h-4 w-4 mr-1" />
-            Ocupación
-          </TabsTrigger>
-          <TabsTrigger value="revenue-type" data-testid="tab-revenue-type">
-            <TrendingUp className="h-4 w-4 mr-1" />
-            Revenue por Tipo
-          </TabsTrigger>
-          <TabsTrigger value="channel" data-testid="tab-channel">
-            <Globe className="h-4 w-4 mr-1" />
-            Por Canal
-          </TabsTrigger>
-          <TabsTrigger value="reservations" data-testid="tab-reservations">
-            <BarChart3 className="h-4 w-4 mr-1" />
-            Reservas
-          </TabsTrigger>
-          <TabsTrigger value="payments" data-testid="tab-payments">
-            <CreditCard className="h-4 w-4 mr-1" />
-            Pagos
-          </TabsTrigger>
-          <TabsTrigger value="top-guests" data-testid="tab-top-guests">
-            <Users className="h-4 w-4 mr-1" />
-            Huéspedes Frecuentes
-          </TabsTrigger>
-          <TabsTrigger value="housekeeping" data-testid="tab-housekeeping">
-            <Brush className="h-4 w-4 mr-1" />
-            Housekeeping
-          </TabsTrigger>
-          <TabsTrigger value="restaurant" data-testid="tab-restaurant">
-            <UtensilsCrossed className="h-4 w-4 mr-1" />
-            Restaurante
-          </TabsTrigger>
-          <TabsTrigger value="billing" data-testid="tab-billing">
-            <CreditCard className="h-4 w-4 mr-1" />
-            Facturación
-          </TabsTrigger>
-          <TabsTrigger value="arrivals-departures" data-testid="tab-arrivals-departures">
-            <LogIn className="h-4 w-4 mr-1" />
-            Llegadas / Salidas
-          </TabsTrigger>
-          <TabsTrigger value="pending-balances" data-testid="tab-pending-balances">
-            <AlertCircle className="h-4 w-4 mr-1" />
-            Saldos Pendientes
-          </TabsTrigger>
-        </TabsList>
+        {activeArea === "hoteleria" && (
+          <TabsList className="flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="occupancy" data-testid="tab-occupancy">
+              <Hotel className="h-4 w-4 mr-1" />
+              Ocupación
+            </TabsTrigger>
+            <TabsTrigger value="revenue-type" data-testid="tab-revenue-type">
+              <TrendingUp className="h-4 w-4 mr-1" />
+              Revenue por Tipo
+            </TabsTrigger>
+            <TabsTrigger value="channel" data-testid="tab-channel">
+              <Globe className="h-4 w-4 mr-1" />
+              Por Canal
+            </TabsTrigger>
+            <TabsTrigger value="reservations" data-testid="tab-reservations">
+              <BarChart3 className="h-4 w-4 mr-1" />
+              Reservas
+            </TabsTrigger>
+            <TabsTrigger value="arrivals-departures" data-testid="tab-arrivals-departures">
+              <LogIn className="h-4 w-4 mr-1" />
+              Llegadas / Salidas
+            </TabsTrigger>
+            <TabsTrigger value="pending-balances" data-testid="tab-pending-balances">
+              <AlertCircle className="h-4 w-4 mr-1" />
+              Saldos Pendientes
+            </TabsTrigger>
+            <TabsTrigger value="top-guests" data-testid="tab-top-guests">
+              <Users className="h-4 w-4 mr-1" />
+              Huéspedes Frecuentes
+            </TabsTrigger>
+          </TabsList>
+        )}
+        {activeArea === "restaurant" && (
+          <TabsList className="flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="restaurant" data-testid="tab-restaurant">
+              <UtensilsCrossed className="h-4 w-4 mr-1" />
+              Restaurante
+            </TabsTrigger>
+          </TabsList>
+        )}
+        {activeArea === "spa" && (
+          <TabsList className="flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="spa" data-testid="tab-spa">
+              <Sparkles className="h-4 w-4 mr-1" />
+              Spa
+            </TabsTrigger>
+          </TabsList>
+        )}
+        {activeArea === "eventos" && (
+          <TabsList className="flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="events" data-testid="tab-events">
+              <PartyPopper className="h-4 w-4 mr-1" />
+              Eventos
+            </TabsTrigger>
+          </TabsList>
+        )}
+        {activeArea === "operaciones" && (
+          <TabsList className="flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="housekeeping" data-testid="tab-housekeeping">
+              <Brush className="h-4 w-4 mr-1" />
+              Housekeeping
+            </TabsTrigger>
+          </TabsList>
+        )}
+        {activeArea === "administracion" && (
+          <TabsList className="flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="payments" data-testid="tab-payments">
+              <CreditCard className="h-4 w-4 mr-1" />
+              Pagos
+            </TabsTrigger>
+            <TabsTrigger value="billing" data-testid="tab-billing">
+              <CreditCard className="h-4 w-4 mr-1" />
+              Facturación
+            </TabsTrigger>
+          </TabsList>
+        )}
 
         <TabsContent value="occupancy" className="space-y-4 mt-4">
           <Card>
@@ -1246,6 +1342,118 @@ export default function ReportsPage() {
               ) : null}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="spa" className="space-y-4 mt-4">
+          {spaReport.isLoading ? (
+            <LoadingSkeleton />
+          ) : spaReport.data ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Ingresos del período</p><p className="text-xl font-bold" data-testid="text-spa-ingresos">{formatARS(spaReport.data.ingresosTotales)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Turnos totales</p><p className="text-xl font-bold">{spaReport.data.totalTurnos}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Tasa de asistencia</p><p className="text-xl font-bold">{spaReport.data.tasaAsistencia}%</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">No-shows / Cancelados</p><p className="text-xl font-bold text-destructive">{spaReport.data.turnosNoShow} / {spaReport.data.turnosCancelados}</p></CardContent></Card>
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Producción por Profesional</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-spa-profesionales">
+                    <TableHeader><TableRow><TableHead>Profesional</TableHead><TableHead className="text-right">Turnos</TableHead><TableHead className="text-right">Completados</TableHead><TableHead className="text-right">Cancelados</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {spaReport.data.porProfesional.map((r, i) => (
+                        <TableRow key={i}><TableCell>{r.profesional}</TableCell><TableCell className="text-right">{r.turnos}</TableCell><TableCell className="text-right">{r.completados}</TableCell><TableCell className="text-right">{r.cancelados}</TableCell></TableRow>
+                      ))}
+                      {spaReport.data.porProfesional.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Tratamientos más solicitados</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-spa-tratamientos">
+                    <TableHeader><TableRow><TableHead>Tratamiento</TableHead><TableHead className="text-right">Cantidad</TableHead><TableHead className="text-right">Ingreso estimado</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {spaReport.data.tratamientosMasSolicitados.map((r, i) => (
+                        <TableRow key={i}><TableCell>{r.tratamiento}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell><TableCell className="text-right">{formatARS(r.ingresoEstimado)}</TableCell></TableRow>
+                      ))}
+                      {spaReport.data.tratamientosMasSolicitados.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Ocupación por Cabina</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-spa-cabinas">
+                    <TableHeader><TableRow><TableHead>Cabina</TableHead><TableHead className="text-right">Turnos</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {spaReport.data.ocupacionPorCabina.map((r, i) => (
+                        <TableRow key={i}><TableCell>{r.cabina}</TableCell><TableCell className="text-right">{r.turnos}</TableCell></TableRow>
+                      ))}
+                      {spaReport.data.ocupacionPorCabina.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="events" className="space-y-4 mt-4">
+          {eventsReport.isLoading ? (
+            <LoadingSkeleton />
+          ) : eventsReport.data ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Eventos del período</p><p className="text-xl font-bold" data-testid="text-events-cantidad">{eventsReport.data.cantidadEventos}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total facturado</p><p className="text-xl font-bold">{formatARS(eventsReport.data.totalFacturado)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total cobrado</p><p className="text-xl font-bold text-green-600">{formatARS(eventsReport.data.totalCobrado)}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Saldo pendiente</p><p className="text-xl font-bold text-destructive">{formatARS(eventsReport.data.saldoPendiente)}</p></CardContent></Card>
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Eventos del Período</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="overflow-auto">
+                    <Table data-testid="table-events">
+                      <TableHeader><TableRow><TableHead>Código</TableHead><TableHead>Nombre</TableHead><TableHead>Tipo</TableHead><TableHead>Estado</TableHead><TableHead>Fecha</TableHead><TableHead className="text-center">Asistentes</TableHead><TableHead className="text-right">Facturado</TableHead><TableHead className="text-right">Cobrado</TableHead><TableHead className="text-right">Saldo</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {eventsReport.data.eventos.map((r) => (
+                          <TableRow key={r.id} data-testid={`row-event-${r.id}`}>
+                            <TableCell className="font-mono text-xs">{r.codigo}</TableCell>
+                            <TableCell>{r.nombre}</TableCell>
+                            <TableCell><Badge variant="outline" className="text-xs">{r.tipo}</Badge></TableCell>
+                            <TableCell><Badge variant="outline" className="text-xs">{r.estado}</Badge></TableCell>
+                            <TableCell className="text-sm">{r.fechaInicio}</TableCell>
+                            <TableCell className="text-center">{r.asistentes}</TableCell>
+                            <TableCell className="text-right">{formatARS(r.totalFacturado)}</TableCell>
+                            <TableCell className="text-right text-green-600">{formatARS(r.totalCobrado)}</TableCell>
+                            <TableCell className="text-right font-bold text-destructive">{formatARS(r.saldo)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {eventsReport.data.eventos.length === 0 && <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-6">Sin eventos en el período</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Por Tipo de Evento</CardTitle></CardHeader>
+                <CardContent>
+                  <Table data-testid="table-events-por-tipo">
+                    <TableHeader><TableRow><TableHead>Tipo</TableHead><TableHead className="text-right">Cantidad</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {eventsReport.data.porTipo.map((r, i) => (
+                        <TableRow key={i}><TableCell>{r.tipo}</TableCell><TableCell className="text-right">{r.cantidad}</TableCell><TableCell className="text-right">{formatARS(r.total)}</TableCell></TableRow>
+                      ))}
+                      {eventsReport.data.porTipo.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sin datos en el período</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
         </TabsContent>
       </Tabs>
     </div>

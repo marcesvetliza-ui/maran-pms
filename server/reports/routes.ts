@@ -6,6 +6,8 @@ import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 
 const FINANCE_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
+const SPA_REPORT_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion", "spa"] as [string, ...string[]];
+const EVENTS_REPORT_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion", "events"] as [string, ...string[]];
 
 const TOTAL_ROOMS = 66;
 
@@ -714,6 +716,163 @@ export function registerReportsRoutes(app: Express) {
       };
 
       res.json({ año, meses, acumulado });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Reporte de Spa ────────────────────────────────────────────────────────
+  app.get("/api/reports/spa", requireRole(SPA_REPORT_ROLES), async (req, res) => {
+    try {
+      const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
+      const { desde, hasta } = periodoToRange(periodo);
+
+      const [ingresos, porEstado, porProfesional, porTratamiento, porCabina] = await Promise.all([
+        db.execute(sql`
+          SELECT COALESCE(SUM(amount::numeric), 0) AS total, COUNT(*) AS cantidad
+          FROM spa_payments
+          WHERE status = 'active' AND DATE(created_at) BETWEEN ${desde} AND ${hasta}
+        `),
+        db.execute(sql`
+          SELECT status, COUNT(*) AS cantidad
+          FROM spa_appointments
+          WHERE appointment_date BETWEEN ${desde} AND ${hasta}
+          GROUP BY status
+        `),
+        db.execute(sql`
+          SELECT COALESCE(p.name || ' ' || COALESCE(p.last_name, ''), 'Sin asignar') AS profesional,
+                 COUNT(a.id) AS turnos,
+                 COUNT(a.id) FILTER (WHERE a.status = 'completed') AS completados,
+                 COUNT(a.id) FILTER (WHERE a.status IN ('cancelled','no_show')) AS cancelados
+          FROM spa_appointments a
+          LEFT JOIN spa_professionals p ON p.id = a.professional_id
+          WHERE a.appointment_date BETWEEN ${desde} AND ${hasta}
+          GROUP BY profesional
+          ORDER BY turnos DESC
+        `),
+        db.execute(sql`
+          SELECT t.name AS tratamiento, COUNT(a.id) AS cantidad,
+                 COALESCE(SUM(t.price::numeric), 0) AS ingresoEstimado
+          FROM spa_appointments a
+          JOIN spa_treatments t ON t.id = a.treatment_id
+          WHERE a.appointment_date BETWEEN ${desde} AND ${hasta}
+            AND a.status IN ('completed','confirmed','in_progress')
+          GROUP BY t.name
+          ORDER BY cantidad DESC
+          LIMIT 10
+        `),
+        db.execute(sql`
+          SELECT cabin_id, COUNT(*) AS turnos
+          FROM spa_appointments
+          WHERE appointment_date BETWEEN ${desde} AND ${hasta}
+          GROUP BY cabin_id
+          ORDER BY turnos DESC
+        `),
+      ]);
+
+      const estadoRow = (porEstado.rows as any[]);
+      const totalTurnos = estadoRow.reduce((s, r) => s + $n(r.cantidad), 0);
+      const noShows = estadoRow.find(r => r.status === 'no_show');
+      const cancelados = estadoRow.find(r => r.status === 'cancelled');
+      const completados = estadoRow.find(r => r.status === 'completed');
+
+      res.json({
+        periodo,
+        ingresosTotales: $n((ingresos.rows[0] as any)?.total),
+        cantidadPagos: $n((ingresos.rows[0] as any)?.cantidad),
+        totalTurnos,
+        turnosCompletados: $n(completados?.cantidad),
+        turnosCancelados: $n(cancelados?.cantidad),
+        turnosNoShow: $n(noShows?.cantidad),
+        tasaAsistencia: pct($n(completados?.cantidad), totalTurnos),
+        porEstado: estadoRow.map(r => ({ estado: r.status, cantidad: $n(r.cantidad) })),
+        porProfesional: (porProfesional.rows as any[]).map(r => ({
+          profesional: r.profesional,
+          turnos: $n(r.turnos),
+          completados: $n(r.completados),
+          cancelados: $n(r.cancelados),
+        })),
+        tratamientosMasSolicitados: (porTratamiento.rows as any[]).map(r => ({
+          tratamiento: r.tratamiento,
+          cantidad: $n(r.cantidad),
+          ingresoEstimado: $n(r.ingresoestimado ?? r.ingresoEstimado),
+        })),
+        ocupacionPorCabina: (porCabina.rows as any[]).map(r => ({
+          cabina: r.cabin_id,
+          turnos: $n(r.turnos),
+        })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Reporte de Eventos ────────────────────────────────────────────────────
+  app.get("/api/reports/events", requireRole(EVENTS_REPORT_ROLES), async (req, res) => {
+    try {
+      const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
+      const { desde, hasta } = periodoToRange(periodo);
+
+      const [eventos, porEstado, porTipo, pagos] = await Promise.all([
+        db.execute(sql`
+          SELECT id, event_code, name, event_type, status, start_date, end_date,
+                 attendees, total_amount, total_paid
+          FROM events
+          WHERE start_date BETWEEN ${desde} AND ${hasta}
+          ORDER BY start_date
+        `),
+        db.execute(sql`
+          SELECT status, COUNT(*) AS cantidad
+          FROM events
+          WHERE start_date BETWEEN ${desde} AND ${hasta}
+          GROUP BY status
+        `),
+        db.execute(sql`
+          SELECT event_type, COUNT(*) AS cantidad,
+                 COALESCE(SUM(total_amount::numeric), 0) AS total
+          FROM events
+          WHERE start_date BETWEEN ${desde} AND ${hasta}
+          GROUP BY event_type
+          ORDER BY total DESC
+        `),
+        db.execute(sql`
+          SELECT COALESCE(SUM(amount::numeric), 0) AS total
+          FROM event_payments
+          WHERE DATE(created_at) BETWEEN ${desde} AND ${hasta}
+        `),
+      ]);
+
+      const eventosRows = eventos.rows as any[];
+      const totalFacturado = eventosRows.reduce((s, r) => s + $n(r.total_amount), 0);
+      const totalCobrado = eventosRows.reduce((s, r) => s + $n(r.total_paid), 0);
+
+      res.json({
+        periodo,
+        cantidadEventos: eventosRows.length,
+        totalFacturado,
+        totalCobrado,
+        saldoPendiente: totalFacturado - totalCobrado,
+        cobrosDelPeriodo: $n((pagos.rows[0] as any)?.total),
+        porEstado: (porEstado.rows as any[]).map(r => ({ estado: r.status, cantidad: $n(r.cantidad) })),
+        porTipo: (porTipo.rows as any[]).map(r => ({
+          tipo: r.event_type,
+          cantidad: $n(r.cantidad),
+          total: $n(r.total),
+        })),
+        eventos: eventosRows.map(r => ({
+          id: r.id,
+          codigo: r.event_code,
+          nombre: r.name,
+          tipo: r.event_type,
+          estado: r.status,
+          fechaInicio: r.start_date,
+          fechaFin: r.end_date,
+          asistentes: $n(r.attendees),
+          totalFacturado: $n(r.total_amount),
+          totalCobrado: $n(r.total_paid),
+          saldo: $n(r.total_amount) - $n(r.total_paid),
+        })),
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

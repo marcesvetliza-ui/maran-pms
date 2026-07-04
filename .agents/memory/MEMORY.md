@@ -12,3 +12,4 @@
 - [Restaurant menu/category CRUD location](restaurant-menu-crud-location.md) — plato/category CRUD lives only in recetas-costos.tsx, not restaurant.tsx; "Agregar Plato" is a 2-step wizard (basics → auto-open recipe).
 - [Inventory itemKind classification scoping](inventory-itemkind-scoping.md) — itemKind (materia_prima/venta_directa/plato) is orthogonal to category area; don't filter ingredient pickers by area, raw materials live in general categories.
 - [Entity selector field names](entity-selector-field-names.md) — companies/agencies have no `.name`, only razonSocial/nombreFantasia; also covers pre-filling razonSocial in two-step voucher+payment dialogs to avoid silent submit-block.
+- [Reports module area-based navigation](reports-area-navigation.md) — Reportes page grouped by business area via an area selector over existing tabs; pattern for adding new area reports (Spa/Eventos done, gaps remaining for Mantenimiento/Inventario/etc).
