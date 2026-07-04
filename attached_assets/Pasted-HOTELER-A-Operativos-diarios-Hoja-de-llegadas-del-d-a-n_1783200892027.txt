@@ -1,0 +1,210 @@
+HOTELERÍA
+
+Operativos diarios
+
+	•	Hoja de llegadas del día — nombre, habitación, noches, tarifa, empresa, si tiene prepago
+	•	Hoja de salidas del día — nombre, habitación, saldo pendiente, método de pago esperado
+	•	Ocupación del día — habitaciones ocupadas / libres / bloqueadas / mantenimiento, porcentaje de ocupación
+	•	In-house list — todos los huéspedes actuales con habitación, fecha de salida y saldo
+	•	No shows del día — reservas que no se presentaron
+	•	Reservas sin garantía — confirmadas sin pago ni tarjeta registrada
+
+Operativos semanales/mensuales
+
+	•	Ocupación por período — diaria, semanal, mensual, comparativa año anterior
+	•	RevPAR y ADR — ingreso por habitación disponible y tarifa promedio diaria
+	•	Pick-up report — reservas nuevas vs cancelaciones por período
+	•	Origen de reservas — qué porcentaje viene de cada OTA, directo, agencias, grupos
+	•	Estadía promedio — noches promedio por tipo de huésped o segmento
+	•	Forecast de ocupación — próximos 30/60/90 días
+
+Financieros
+
+	•	Cierre diario de recepción — ingresos del día por tipo (alojamiento, extras), cobros por método de pago
+	•	Folios abiertos — reservas in-house con saldo pendiente discriminado
+	•	Cuentas corrientes — saldo por empresa y agencia, vencimientos
+	•	Producción por segmento — leisure, corporativo, grupos, eventos, sport
+	•	Comisiones de agencias — lo que se debe por período
+	•	Anulaciones y cortesías — qué se anuló, quién lo autorizó, motivo
+
+Contables
+
+	•	Ingresos por categoría — alojamiento, desayuno, extras, penalidades
+	•	IVA de ventas hoteleras — discriminado por alícuota
+	•	Facturación emitida — FA, FB, FC del período con CAE
+	•	Deuda de cuentas corrientes — empresas y agencias con saldo vencido
+
+RESTAURANT
+
+Operativos diarios
+
+	•	Ventas del día — total facturado, cubiertos atendidos, ticket promedio
+	•	Ventas por categoría de menú — entradas, principales, postres, bebidas, cafetería
+	•	Comandas anuladas — qué se anuló, quién, a qué hora y motivo
+	•	Descuentos y cortesías — total descontado por tipo y por empleado que lo autorizó
+	•	Mesas con mayor consumo — ranking del día
+	•	Tiempo promedio de mesa — desde apertura hasta cierre de comanda
+
+Semanales/mensuales
+
+	•	Ranking de platos más vendidos — top 10 por cantidad y por ingreso
+	•	Platos menos vendidos — candidatos a sacar de la carta
+	•	Ventas por turno — almuerzo vs cena vs desayuno
+	•	Ticket promedio por día de semana — para entender patrones
+	•	Comparativo mensual — ventas vs mismo mes año anterior
+
+Costos e inventario
+
+	•	Costo de mercadería vendida (CMV) — cruzando ventas con recetas e inventario
+	•	Food cost por plato — costo real vs precio de venta, margen por ítem
+	•	Consumo de insumos por período — qué bajó de inventario y cuánto
+	•	Diferencias de inventario — lo que debería haber consumido vs lo que realmente bajó del stock
+	•	Compras del período — ingresos de mercadería por proveedor
+
+Financieros/contables
+
+	•	Cierre diario de restaurant — ventas, cobros, métodos de pago, propinas si aplica
+	•	Cargos a habitación — consumos transferidos a folios hoteleros
+	•	Anticipos registrados — reservas de mesa con seña
+	•	IVA de ventas gastronómicas
+	•	Facturación emitida por restaurant
+
+SPA
+
+Operativos
+
+	•	Agenda del día — turnos confirmados por cabina y profesional, nombre del cliente, servicio
+	•	Ocupación de cabinas — porcentaje de uso por cabina y por hora
+	•	Servicios realizados por profesional — producción individual del equipo
+	•	Clientes nuevos vs recurrentes — fidelización
+	•	Cancelaciones y no-shows — con motivo si se registró
+	•	Servicios más solicitados — ranking por cantidad e ingreso
+
+Costos e inventario
+
+	•	Consumo de productos por tratamiento — insumos usados cruzados con servicios realizados
+	•	Costo por servicio — producto consumido vs precio cobrado
+	•	Stock de productos de spa — nivel actual vs mínimo
+
+Financieros/contables
+
+	•	Cierre diario de spa — servicios facturados, cobros por método
+	•	Cargos a habitación — servicios transferidos al folio del huésped
+	•	Ingresos por categoría — masajes, faciales, corporales, uñas, etc.
+	•	Producción por profesional — útil para comisiones si aplica
+	•	IVA de servicios de spa
+
+EVENTOS
+
+Operativos
+
+	•	Agenda de eventos — próximos 30/60/90 días con salón, capacidad, cliente, estado
+	•	Hoja de función — detalle operativo por evento: horarios, menú, montaje, requerimientos técnicos, contacto del cliente
+	•	Eventos del día — brief para el equipo de operaciones
+	•	Estado de confirmaciones — presupuestos enviados vs confirmados vs cancelados
+
+Financieros
+
+	•	Producción mensual de eventos — ingresos por tipo (corporativo, social, catering)
+	•	Anticipos cobrados — señas recibidas vs saldo pendiente por evento
+	•	Costo de eventos — catering, personal, insumos vs precio cobrado
+	•	Pipeline de ventas — eventos en negociación con probabilidad de cierre
+	•	Comparativo de ocupación de salones — horas vendidas vs disponibles
+
+Contables
+
+	•	Facturación de eventos — por cliente y período
+	•	Cuentas corrientes de eventos — saldos pendientes post-evento
+	•	IVA de servicios de eventos
+
+HOUSEKEEPING
+
+Operativos diarios
+
+	•	Reporte de estado de habitaciones — limpia / sucia / en proceso / inspección / mantenimiento
+	•	Asignación de camareras — qué habitaciones le tocan a cada una
+	•	Prioridades del día — salidas primero, luego continuaciones, luego llegadas
+	•	Habitaciones bloqueadas — por mantenimiento o fuera de servicio con motivo
+	•	Objetos perdidos — log de lost & found del día
+
+Semanales/mensuales
+
+	•	Productividad por camarera — habitaciones limpias por turno, tiempo promedio
+	•	Habitaciones con incidencias — donde se reportaron problemas recurrentes
+	•	Consumo de amenities y productos de limpieza — por habitación y por período
+	•	Historial de estado por habitación — útil para detectar habitaciones problemáticas
+
+Contables/inventario
+
+	•	Consumo de insumos de limpieza por período — cruzado con inventario
+	•	Costo de amenities por habitación — costo real por noche de estadía
+	•	Diferencias de inventario de housekeeping — lo consumido vs lo que bajó del stock
+
+MANTENIMIENTO
+
+Operativos
+
+	•	Órdenes de trabajo abiertas — por prioridad, área y responsable
+	•	Órdenes del día — qué tiene que resolver el equipo hoy
+	•	Habitaciones fuera de servicio — con motivo y fecha estimada de resolución
+	•	Tiempo de resolución promedio — por tipo de trabajo y por técnico
+	•	Incidencias recurrentes — habitaciones o equipos que fallan seguido
+
+Semanales/mensuales
+
+	•	Mantenimiento preventivo vs correctivo — proporción ideal es más preventivo
+	•	Costo de materiales por período — insumos usados en reparaciones
+	•	Trabajos tercerizados — proveedores externos, costos y frecuencia
+	•	Historial por habitación — todas las órdenes de trabajo de cada habitación
+
+Contables/inventario
+
+	•	Consumo de materiales de mantenimiento — cruzado con inventario
+	•	Costo de mantenimiento por habitación — útil para calcular costo real de la habitación
+	•	Presupuestos de trabajos mayores — seguimiento de obras o reparaciones grandes
+
+INVENTARIO GENERAL
+
+Operativos
+
+	•	Stock actual por área — restaurant, spa, housekeeping, mantenimiento, administración
+	•	Artículos bajo mínimo — alerta de reposición necesaria
+	•	Movimientos del día — entradas, salidas, consumos, ajustes
+	•	Artículos sin movimiento — stock inmovilizado hace más de X días
+
+Semanales/mensuales
+
+	•	Consumo por área y período — cuánto bajó de cada área
+	•	Rotación de inventario — velocidad de consumo por artículo
+	•	Diferencias de inventario — físico vs sistema después de cada recuento
+	•	Compras del período por proveedor — volumen y costo
+	•	Artículos más consumidos — para optimizar stock mínimo
+
+Contables
+
+	•	Valorización del stock — costo total del inventario actual
+	•	Costo de mercadería consumida por área — para el estado de resultados
+	•	IVA de compras de insumos
+
+REPORTES GERENCIALES CONSOLIDADOS
+
+Estos son los que miraría todos los días como gerente general:
+
+Diarios:
+
+	•	Dashboard operativo del día — ocupación, llegadas, salidas, saldo de cajas, incidencias
+	•	Cierre consolidado de cajas — todas las áreas juntas
+	•	Folios con saldo pendiente
+
+Semanales:
+
+	•	Resumen de ingresos por área — hotel, restaurant, spa, eventos
+	•	Ocupación vs semana anterior y vs año anterior
+	•	Estado de cuentas corrientes
+
+Mensuales:
+
+	•	Estado de resultados por área — ingresos, costos, margen
+	•	Comparativo mensual vs presupuesto (si existe)
+	•	Top 10 clientes por facturación
+	•	Análisis de canales de venta
