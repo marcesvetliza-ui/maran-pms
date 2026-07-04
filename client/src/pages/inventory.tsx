@@ -1302,6 +1302,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           <NewItemForm
             categories={categories}
             suppliers={suppliers}
+            existingItems={items}
             onSubmit={(data) => createItemMutation.mutate(data)}
             isPending={createItemMutation.isPending}
             onCancel={() => setIsNewItemDialogOpen(false)}
@@ -1397,12 +1398,14 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
 function NewItemForm({
   categories,
   suppliers,
+  existingItems,
   onSubmit,
   isPending,
   onCancel,
 }: {
   categories: ItemCategory[];
   suppliers: Supplier[];
+  existingItems: InventoryItem[];
   onSubmit: (data: Partial<InventoryItem>) => void;
   isPending: boolean;
   onCancel: () => void;
@@ -1416,6 +1419,12 @@ function NewItemForm({
   const [currentStock, setCurrentStock] = useState(0);
   const [itemKind, setItemKind] = useState<string>("venta_directa");
 
+  const duplicateMatches = name.trim().length > 1
+    ? existingItems.filter(
+        (i) => i.isActive !== "false" && i.name.trim().toLowerCase() === name.trim().toLowerCase()
+      )
+    : [];
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -1428,6 +1437,15 @@ function NewItemForm({
           data-testid="input-item-name"
         />
         <p className="text-xs text-muted-foreground">El SKU se asignará automáticamente según el área de la categoría (ej: SPA-0001, RST-0042).</p>
+        {duplicateMatches.length > 0 && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-2 text-xs text-amber-800 dark:text-amber-400" data-testid="warning-duplicate-item-name">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>
+              Ya existe {duplicateMatches.length === 1 ? "un artículo" : `${duplicateMatches.length} artículos`} con este nombre: {duplicateMatches.map((i) => `${i.name} [${i.sku}]`).join(", ")}.
+              {" "}Revisá si conviene usar ese artículo en vez de crear uno nuevo.
+            </span>
+          </div>
+        )}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
