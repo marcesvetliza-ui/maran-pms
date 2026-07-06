@@ -202,6 +202,8 @@ import {
   type AccountMovement,
   type InsertAccountMovement,
   type AccountEntityType,
+  type AccountRetention,
+  type AccountMovementAllocation,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -785,6 +787,14 @@ export interface IStorage {
     companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
     agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
   }>;
+  getPendingCharges(entityType: AccountEntityType, entityId: string): Promise<(AccountMovement & { saldoPendiente: number })[]>;
+  createPaymentWithAllocations(
+    entityType: AccountEntityType,
+    entityId: string,
+    data: { date: string; description: string; amount: string; reference: string | null; retentions: AccountRetention[] | null; createdBy: string | null; guestName?: string | null },
+    allocations: { cargoId: string; amount: string }[]
+  ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }>;
+  getAccountMovementAllocations(pagoId: string): Promise<AccountMovementAllocation[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -5175,6 +5185,16 @@ export class MemStorage implements IStorage {
   async getAccountBalance(_entityType: AccountEntityType, _entityId: string): Promise<number> { return 0; }
   async createAccountMovement(_data: InsertAccountMovement): Promise<AccountMovement> { return {} as AccountMovement; }
   async getAccountSummary(): Promise<{ companies: any[]; agencies: any[] }> { return { companies: [], agencies: [] }; }
+  async getPendingCharges(_entityType: AccountEntityType, _entityId: string): Promise<(AccountMovement & { saldoPendiente: number })[]> { return []; }
+  async createPaymentWithAllocations(
+    _entityType: AccountEntityType,
+    _entityId: string,
+    _data: { date: string; description: string; amount: string; reference: string | null; retentions: AccountRetention[] | null; createdBy: string | null; guestName?: string | null },
+    _allocations: { cargoId: string; amount: string }[]
+  ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }> {
+    return { movement: {} as AccountMovement, allocations: [] };
+  }
+  async getAccountMovementAllocations(_pagoId: string): Promise<AccountMovementAllocation[]> { return []; }
   async getReservationCompanions(_reservationId: string): Promise<ReservationCompanion[]> { return []; }
   async addReservationCompanion(_data: InsertReservationCompanion): Promise<ReservationCompanion> { return {} as ReservationCompanion; }
   async updateReservationCompanion(_id: string, _data: Partial<InsertReservationCompanion>): Promise<ReservationCompanion> { return {} as ReservationCompanion; }

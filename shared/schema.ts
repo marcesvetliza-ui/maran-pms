@@ -1942,6 +1942,8 @@ export type CashClosingSummary = typeof cashClosingSummaries.$inferSelect;
 export type AccountMovementType = "cargo" | "pago" | "nota_credito" | "ajuste";
 export type AccountEntityType = "company" | "agency" | "guest";
 
+export type AccountRetention = { concepto: string; monto: number };
+
 export const accountMovements = pgTable("account_movements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   entityType: text("entity_type").$type<AccountEntityType>().notNull(),
@@ -1954,6 +1956,7 @@ export const accountMovements = pgTable("account_movements", {
   reservationCode: text("reservation_code"),
   guestName: text("guest_name"),
   reference: text("reference"),
+  retentions: jsonb("retentions").$type<AccountRetention[]>(),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -1961,6 +1964,18 @@ export const accountMovements = pgTable("account_movements", {
 export const insertAccountMovementSchema = createInsertSchema(accountMovements).omit({ id: true, createdAt: true });
 export type InsertAccountMovement = z.infer<typeof insertAccountMovementSchema>;
 export type AccountMovement = typeof accountMovements.$inferSelect;
+
+export const accountMovementAllocations = pgTable("account_movement_allocations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  pagoId: varchar("pago_id").notNull().references(() => accountMovements.id),
+  cargoId: varchar("cargo_id").notNull().references(() => accountMovements.id),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAccountMovementAllocationSchema = createInsertSchema(accountMovementAllocations).omit({ id: true, createdAt: true });
+export type InsertAccountMovementAllocation = z.infer<typeof insertAccountMovementAllocationSchema>;
+export type AccountMovementAllocation = typeof accountMovementAllocations.$inferSelect;
 
 // ============================================================
 // MÓDULO CONTABLE / ADMINISTRATIVO

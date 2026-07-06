@@ -113,7 +113,8 @@ import {
   systemNotifications, webCheckins,
   guestPreferences, stayNotes, hospitalityAlerts,
   cashRegisterConfigs, cashShifts, cashMovements, cashClosingSummaries,
-  accountMovements,
+  accountMovements, accountMovementAllocations,
+  type AccountRetention, type AccountMovementAllocation, type InsertAccountMovementAllocation,
   folios, folioMovements,
   reservationCompanions,
   type ReservationCompanion, type InsertReservationCompanion,
@@ -4475,6 +4476,81 @@ export class DatabaseStorage implements IStorage {
   async createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement> {
     const [created] = await db.insert(accountMovements).values(data as any).returning();
     return created;
+  }
+
+  async getPendingCharges(entityType: AccountEntityType, entityId: string): Promise<(AccountMovement & { saldoPendiente: number })[]> {
+    const movements = await db.select()
+      .from(accountMovements)
+      .where(
+        and(
+          eq(accountMovements.entityType, entityType),
+          eq(accountMovements.entityId, entityId),
+          eq(accountMovements.type, "cargo")
+        )
+      )
+      .orderBy(asc(accountMovements.date), asc(accountMovements.createdAt));
+
+    if (movements.length === 0) return [];
+
+    const cargoIds = movements.map(m => m.id);
+    const allocations = await db.select()
+      .from(accountMovementAllocations)
+      .where(inArray(accountMovementAllocations.cargoId, cargoIds));
+
+    const allocatedByCargo = new Map<string, number>();
+    for (const a of allocations) {
+      allocatedByCargo.set(a.cargoId, (allocatedByCargo.get(a.cargoId) || 0) + parseFloat(a.amount));
+    }
+
+    return movements
+      .map(m => {
+        const cargoAmount = parseFloat(m.amount);
+        const allocated = allocatedByCargo.get(m.id) || 0;
+        const saldoPendiente = Math.round((cargoAmount - allocated) * 100) / 100;
+        return { ...m, saldoPendiente };
+      })
+      .filter(m => m.saldoPendiente > 0.009);
+  }
+
+  async createPaymentWithAllocations(
+    entityType: AccountEntityType,
+    entityId: string,
+    data: { date: string; description: string; amount: string; reference: string | null; retentions: AccountRetention[] | null; createdBy: string | null; guestName?: string | null },
+    allocations: { cargoId: string; amount: string }[]
+  ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }> {
+    return await db.transaction(async (tx) => {
+      const [movement] = await tx.insert(accountMovements).values({
+        entityType,
+        entityId,
+        date: data.date,
+        type: "pago",
+        description: data.description,
+        amount: data.amount,
+        reference: data.reference,
+        retentions: data.retentions,
+        createdBy: data.createdBy,
+        guestName: data.guestName ?? null,
+      } as any).returning();
+
+      const createdAllocations: AccountMovementAllocation[] = [];
+      for (const alloc of allocations) {
+        if (!alloc.cargoId || parseFloat(alloc.amount) <= 0) continue;
+        const [created] = await tx.insert(accountMovementAllocations).values({
+          pagoId: movement.id,
+          cargoId: alloc.cargoId,
+          amount: alloc.amount,
+        } as any).returning();
+        createdAllocations.push(created);
+      }
+
+      return { movement, allocations: createdAllocations };
+    });
+  }
+
+  async getAccountMovementAllocations(pagoId: string): Promise<AccountMovementAllocation[]> {
+    return await db.select()
+      .from(accountMovementAllocations)
+      .where(eq(accountMovementAllocations.pagoId, pagoId));
   }
 
   async getAccountSummary(): Promise<{

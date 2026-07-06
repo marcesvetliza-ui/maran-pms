@@ -1019,6 +1019,18 @@ export function registerExportRoutes(app: Express) {
       const pageW = 595;
       const x0 = 50;
 
+      const retentions: { concepto: string; monto: number | string }[] = Array.isArray(mov.retentions) ? mov.retentions : [];
+      const retentionsTotal = retentions.reduce((sum, r) => sum + $n(r.monto), 0);
+
+      const allocResult = await db.execute(sql`
+        SELECT a.amount AS applied_amount, c.date AS cargo_date, c.description AS cargo_description, c.amount AS cargo_amount
+        FROM account_movement_allocations a
+        JOIN account_movements c ON c.id = a.cargo_id
+        WHERE a.pago_id = ${id}
+        ORDER BY c.date ASC
+      `);
+      const allocations = allocResult.rows as any[];
+
       const pdfBuf = await genPDF((doc) => {
         // ─── Header azul ───────────────────────────────────────────────────
         doc.rect(0, 0, pageW, 108).fill("#1a3a5c");
@@ -1062,8 +1074,52 @@ export function registerExportRoutes(app: Express) {
             .text(`Referencia: ${mov.reference}`, x0 + 10, y + 38);
         }
 
-        // ─── Fecha ────────────────────────────────────────────────────────
         y += 67;
+
+        // ─── Bloque: Comprobantes cancelados ───────────────────────────────
+        if (allocations.length > 0) {
+          const rowH = 16;
+          const tableH = 22 + allocations.length * rowH + 8;
+          doc.rect(x0, y, pageW - 100, tableH).strokeColor("#cccccc").lineWidth(0.5).stroke();
+          doc.font("Helvetica").fontSize(7.5).fill("#888").text("Comprobantes cancelados:", x0 + 10, y + 8);
+          let ty = y + 22;
+          doc.font("Helvetica-Bold").fontSize(8).fill("#555")
+            .text("Fecha", x0 + 10, ty, { width: 60 })
+            .text("Concepto", x0 + 75, ty, { width: pageW - 100 - 210 })
+            .text("Cargo", x0 + pageW - 100 - 130 + 10, ty, { width: 65, align: "right" })
+            .text("Aplicado", x0 + pageW - 100 - 60 + 5, ty, { width: 65, align: "right" });
+          ty += 13;
+          doc.font("Helvetica").fontSize(8).fill("#222");
+          for (const a of allocations) {
+            doc.text(fDate(a.cargo_date), x0 + 10, ty, { width: 60 })
+              .text(String(a.cargo_description || ""), x0 + 75, ty, { width: pageW - 100 - 210 })
+              .text(`$${fPeso(Math.abs($n(a.cargo_amount)))}`, x0 + pageW - 100 - 130 + 10, ty, { width: 65, align: "right" })
+              .text(`$${fPeso(Math.abs($n(a.applied_amount)))}`, x0 + pageW - 100 - 60 + 5, ty, { width: 65, align: "right" });
+            ty += rowH;
+          }
+          y += tableH + 15;
+        }
+
+        // ─── Bloque: Retenciones ────────────────────────────────────────────
+        if (retentions.length > 0) {
+          const rowH = 14;
+          const tableH = 22 + retentions.length * rowH + 12;
+          doc.rect(x0, y, pageW - 100, tableH).strokeColor("#cccccc").lineWidth(0.5).stroke();
+          doc.font("Helvetica").fontSize(7.5).fill("#888").text("Retenciones practicadas:", x0 + 10, y + 8);
+          let ty = y + 22;
+          doc.font("Helvetica").fontSize(8.5).fill("#222");
+          for (const r of retentions) {
+            doc.text(String(r.concepto || ""), x0 + 10, ty, { width: 300 })
+              .text(`$${fPeso($n(r.monto))}`, x0 + pageW - 100 - 90, ty, { width: 80, align: "right" });
+            ty += rowH;
+          }
+          doc.font("Helvetica-Bold").fontSize(8.5).fill("#1a3a5c")
+            .text("Total retenido:", x0 + 10, ty + 2, { width: 300 })
+            .text(`$${fPeso(retentionsTotal)}`, x0 + pageW - 100 - 90, ty + 2, { width: 80, align: "right" });
+          y += tableH + 15;
+        }
+
+        // ─── Fecha ────────────────────────────────────────────────────────
         doc.font("Helvetica").fontSize(9).fill("#333")
           .text(`Fecha de pago: ${fDate(mov.date || mov.created_at)}`, x0, y)
           .text(`Registrado: ${fDate(mov.created_at)}`, x0, y + 14);

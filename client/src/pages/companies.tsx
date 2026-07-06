@@ -19,6 +19,7 @@ import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { insertCompanySchema, type Company, type AccountMovement, type Guest, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
+import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 
 const companyFormSchema = insertCompanySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -148,10 +149,6 @@ export default function CompaniesPage() {
   const [viewingAccountCompany, setViewingAccountCompany] = useState<Company | null>(null);
   const [viewingCompanyDetail, setViewingCompanyDetail] = useState<Company | null>(null);
   const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [paymentDescription, setPaymentDescription] = useState("Pago recibido");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
 
   const { data: companies = [], isLoading } = useQuery<Company[]>({
     queryKey: ["/api/companies"],
@@ -255,28 +252,6 @@ export default function CompaniesPage() {
     },
     onError: () => {
       toast({ title: "Error al eliminar empresa", variant: "destructive" });
-    },
-  });
-
-  const registerPaymentMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/companies/${viewingAccountCompany!.id}/account/payment`, {
-        amount: paymentAmount,
-        description: paymentDescription,
-        reference: paymentReference || null,
-        date: paymentDate,
-      });
-    },
-    onSuccess: () => {
-      refetchAccount();
-      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
-      setRegisterPaymentOpen(false);
-      setPaymentAmount("");
-      setPaymentReference("");
-      toast({ title: "Pago registrado en cuenta corriente" });
-    },
-    onError: () => {
-      toast({ title: "Error al registrar pago", variant: "destructive" });
     },
   });
 
@@ -736,67 +711,18 @@ export default function CompaniesPage() {
             </div>
           )}
 
-          <Dialog open={registerPaymentOpen} onOpenChange={setRegisterPaymentOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Registrar pago recibido</DialogTitle>
-                <DialogDescription>
-                  {viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial} — Saldo actual: ${(accountData?.balance || 0).toFixed(2)}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div>
-                  <Label>Monto recibido</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    placeholder="0.00"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                    data-testid="input-cc-payment-amount"
-                  />
-                </div>
-                <div>
-                  <Label>Fecha</Label>
-                  <Input
-                    type="date"
-                    value={paymentDate}
-                    onChange={(e) => setPaymentDate(e.target.value)}
-                    data-testid="input-cc-payment-date"
-                  />
-                </div>
-                <div>
-                  <Label>Descripción</Label>
-                  <Input
-                    value={paymentDescription}
-                    onChange={(e) => setPaymentDescription(e.target.value)}
-                    placeholder="Ej: Pago por transferencia"
-                    data-testid="input-cc-payment-description"
-                  />
-                </div>
-                <div>
-                  <Label>Referencia (opcional)</Label>
-                  <Input
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                    placeholder="Nro. transferencia, cheque, etc."
-                    data-testid="input-cc-payment-reference"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setRegisterPaymentOpen(false)}>Cancelar</Button>
-                <Button
-                  onClick={() => registerPaymentMutation.mutate()}
-                  disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || registerPaymentMutation.isPending}
-                  data-testid="button-confirm-cc-payment"
-                >
-                  {registerPaymentMutation.isPending ? "Guardando..." : "Confirmar pago"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <CCPaymentDialog
+            open={registerPaymentOpen}
+            onOpenChange={setRegisterPaymentOpen}
+            entityType="company"
+            entityId={viewingAccountCompany?.id}
+            entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""}
+            balance={accountData?.balance || 0}
+            onSuccess={() => {
+              refetchAccount();
+              toast({ title: "Pago registrado en cuenta corriente" });
+            }}
+          />
         </SheetContent>
       </Sheet>
 

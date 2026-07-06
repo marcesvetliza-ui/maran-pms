@@ -204,27 +204,40 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
+  app.get("/api/guests/:id/account/pending-charges", async (req, res) => {
+    try {
+      const pending = await storage.getPendingCharges("guest", req.params.id);
+      res.json(pending);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching pending charges" });
+    }
+  });
+
   app.post("/api/guests/:id/account/payment", async (req, res) => {
     try {
       const guest = await storage.getGuest(req.params.id);
       if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
-      const { amount, description, reference, date } = req.body;
+      const { amount, description, reference, date, retentions, allocations } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ error: "Monto inválido" });
       }
-      const movement = await storage.createAccountMovement({
-        entityType: "guest",
-        entityId: req.params.id,
-        date: date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
-        type: "pago",
-        description: description || "Pago recibido",
-        amount: (-parseFloat(amount)).toFixed(2),
-        reference: reference || null,
-        guestName: (guest as any).tipoPersona === "juridica" ? guest.firstName : `${guest.firstName} ${guest.lastName}`,
-        createdBy: req.body.createdBy || null,
-      });
-      res.json(movement);
+      const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
+        "guest",
+        req.params.id,
+        {
+          date: date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+          description: description || "Pago recibido",
+          amount: (-parseFloat(amount)).toFixed(2),
+          reference: reference || null,
+          retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
+          createdBy: req.body.createdBy || null,
+          guestName: (guest as any).tipoPersona === "juridica" ? guest.firstName : `${guest.firstName} ${guest.lastName}`,
+        },
+        Array.isArray(allocations) ? allocations : []
+      );
+      res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
+      console.error("Error registering guest payment:", error);
       res.status(500).json({ error: "Error registering payment" });
     }
   });
@@ -249,28 +262,50 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
+  app.get("/api/companies/:id/account/pending-charges", async (req, res) => {
+    try {
+      const pending = await storage.getPendingCharges("company", req.params.id);
+      res.json(pending);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching pending charges" });
+    }
+  });
+
+  app.get("/api/agencies/:id/account/pending-charges", async (req, res) => {
+    try {
+      const pending = await storage.getPendingCharges("agency", req.params.id);
+      res.json(pending);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching pending charges" });
+    }
+  });
+
   app.post("/api/companies/:id/account/payment", async (req, res) => {
     try {
       const company = await storage.getCompany(req.params.id);
       if (!company) {
         return res.status(404).json({ error: "Empresa no encontrada" });
       }
-      const { amount, description, reference, date } = req.body;
+      const { amount, description, reference, date, retentions, allocations } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ error: "Monto inválido" });
       }
-      const movement = await storage.createAccountMovement({
-        entityType: "company",
-        entityId: req.params.id,
-        date: date || new Date().toISOString().split("T")[0],
-        type: "pago",
-        description: description || "Pago recibido",
-        amount: (-parseFloat(amount)).toFixed(2),
-        reference: reference || null,
-        createdBy: req.body.createdBy || null,
-      });
-      res.json(movement);
+      const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
+        "company",
+        req.params.id,
+        {
+          date: date || new Date().toISOString().split("T")[0],
+          description: description || "Pago recibido",
+          amount: (-parseFloat(amount)).toFixed(2),
+          reference: reference || null,
+          retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
+          createdBy: req.body.createdBy || null,
+        },
+        Array.isArray(allocations) ? allocations : []
+      );
+      res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
+      console.error("Error registering company payment:", error);
       res.status(500).json({ error: "Error registering payment" });
     }
   });
@@ -281,22 +316,26 @@ export function registerGuestsRoutes(app: Express) {
       if (!agency) {
         return res.status(404).json({ error: "Agencia no encontrada" });
       }
-      const { amount, description, reference, date } = req.body;
+      const { amount, description, reference, date, retentions, allocations } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ error: "Monto inválido" });
       }
-      const movement = await storage.createAccountMovement({
-        entityType: "agency",
-        entityId: req.params.id,
-        date: date || new Date().toISOString().split("T")[0],
-        type: "pago",
-        description: description || "Pago recibido",
-        amount: (-parseFloat(amount)).toFixed(2),
-        reference: reference || null,
-        createdBy: req.body.createdBy || null,
-      });
-      res.json(movement);
+      const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
+        "agency",
+        req.params.id,
+        {
+          date: date || new Date().toISOString().split("T")[0],
+          description: description || "Pago recibido",
+          amount: (-parseFloat(amount)).toFixed(2),
+          reference: reference || null,
+          retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
+          createdBy: req.body.createdBy || null,
+        },
+        Array.isArray(allocations) ? allocations : []
+      );
+      res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
+      console.error("Error registering agency payment:", error);
       res.status(500).json({ error: "Error registering payment" });
     }
   });
@@ -310,7 +349,7 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
-  app.get("/api/account-movements/:entityType/:entityId", async (req, res) => {
+  app.get("/api/account-movements/:entityType(company|agency|guest)/:entityId", async (req, res) => {
     try {
       const { entityType, entityId } = req.params as { entityType: string; entityId: string };
       const movements = await storage.getAccountMovements(entityType as any, entityId);

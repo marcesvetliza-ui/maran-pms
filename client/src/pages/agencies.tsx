@@ -19,6 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText } from "lucide-react";
 import { insertAgencySchema, type Agency, type AccountMovement, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
+import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 
 const agencyFormSchema = insertAgencySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -168,10 +169,6 @@ export default function AgenciesPage() {
   const [viewingAccountAgency, setViewingAccountAgency] = useState<Agency | null>(null);
   const [viewingAgencyDetail, setViewingAgencyDetail] = useState<Agency | null>(null);
   const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [paymentDescription, setPaymentDescription] = useState("Pago recibido");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
 
   const { data: agencies = [], isLoading } = useQuery<Agency[]>({
     queryKey: ["/api/agencies"],
@@ -221,28 +218,6 @@ export default function AgenciesPage() {
   const agencyReservationsForDetail = viewingAgencyDetail
     ? allAgencyReservations.filter(r => r.agencyId === viewingAgencyDetail.id)
     : [];
-
-  const registerPaymentMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/agencies/${viewingAccountAgency!.id}/account/payment`, {
-        amount: paymentAmount,
-        description: paymentDescription,
-        reference: paymentReference || null,
-        date: paymentDate,
-      });
-    },
-    onSuccess: () => {
-      refetchAccount();
-      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
-      setRegisterPaymentOpen(false);
-      setPaymentAmount("");
-      setPaymentReference("");
-      toast({ title: "Pago registrado en cuenta corriente" });
-    },
-    onError: () => {
-      toast({ title: "Error al registrar pago", variant: "destructive" });
-    },
-  });
 
   const form = useForm<AgencyFormData>({
     resolver: zodResolver(agencyFormSchema),
@@ -791,67 +766,18 @@ export default function AgenciesPage() {
             </div>
           )}
 
-          <Dialog open={registerPaymentOpen} onOpenChange={setRegisterPaymentOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Registrar pago recibido</DialogTitle>
-                <DialogDescription>
-                  {viewingAccountAgency?.nombreFantasia || viewingAccountAgency?.razonSocial} — Saldo actual: ${(accountData?.balance || 0).toFixed(2)}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div>
-                  <Label>Monto recibido</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    placeholder="0.00"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                    data-testid="input-cc-payment-amount"
-                  />
-                </div>
-                <div>
-                  <Label>Fecha</Label>
-                  <Input
-                    type="date"
-                    value={paymentDate}
-                    onChange={(e) => setPaymentDate(e.target.value)}
-                    data-testid="input-cc-payment-date"
-                  />
-                </div>
-                <div>
-                  <Label>Descripción</Label>
-                  <Input
-                    value={paymentDescription}
-                    onChange={(e) => setPaymentDescription(e.target.value)}
-                    placeholder="Ej: Pago por transferencia"
-                    data-testid="input-cc-payment-description"
-                  />
-                </div>
-                <div>
-                  <Label>Referencia (opcional)</Label>
-                  <Input
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                    placeholder="Nro. transferencia, cheque, etc."
-                    data-testid="input-cc-payment-reference"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setRegisterPaymentOpen(false)}>Cancelar</Button>
-                <Button
-                  onClick={() => registerPaymentMutation.mutate()}
-                  disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || registerPaymentMutation.isPending}
-                  data-testid="button-confirm-cc-payment"
-                >
-                  {registerPaymentMutation.isPending ? "Guardando..." : "Confirmar pago"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <CCPaymentDialog
+            open={registerPaymentOpen}
+            onOpenChange={setRegisterPaymentOpen}
+            entityType="agency"
+            entityId={viewingAccountAgency?.id}
+            entityLabel={viewingAccountAgency?.nombreFantasia || viewingAccountAgency?.razonSocial || ""}
+            balance={accountData?.balance || 0}
+            onSuccess={() => {
+              refetchAccount();
+              toast({ title: "Pago registrado en cuenta corriente" });
+            }}
+          />
         </SheetContent>
       </Sheet>
 

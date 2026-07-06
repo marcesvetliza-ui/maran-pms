@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   User,
   ArrowLeft,
@@ -8,7 +8,6 @@ import {
   TrendingUp,
   TrendingDown,
   Search,
-  Loader2,
   CreditCard,
   FileText,
 } from "lucide-react";
@@ -16,7 +15,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -27,13 +25,6 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
   Table,
   TableBody,
   TableCell,
@@ -42,8 +33,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 import type { AccountMovement } from "@shared/schema";
+import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 
 type GuestSummary = {
   id: string;
@@ -64,10 +56,6 @@ export default function CcHuespedesPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [viewingGuest, setViewingGuest] = useState<GuestSummary | null>(null);
   const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentDescription, setPaymentDescription] = useState("Pago recibido");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
 
   const { data: summary, isLoading } = useQuery<{
     guests: GuestSummary[];
@@ -82,29 +70,6 @@ export default function CcHuespedesPage() {
       return res.json();
     },
     enabled: !!viewingGuest,
-  });
-
-  const registerPaymentMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/guests/${viewingGuest!.id}/account/payment`, {
-        amount: paymentAmount,
-        description: paymentDescription,
-        reference: paymentReference || null,
-        date: paymentDate,
-      });
-    },
-    onSuccess: () => {
-      toast({ title: "Pago registrado correctamente" });
-      setRegisterPaymentOpen(false);
-      setPaymentAmount("");
-      setPaymentDescription("Pago recibido");
-      setPaymentReference("");
-      refetchAccount();
-      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
-    },
-    onError: () => {
-      toast({ title: "Error al registrar pago", variant: "destructive" });
-    },
   });
 
   const guests = summary?.guests ?? [];
@@ -318,66 +283,19 @@ export default function CcHuespedesPage() {
       </Sheet>
 
       {/* Dialog para registrar pago */}
-      <Dialog open={registerPaymentOpen} onOpenChange={setRegisterPaymentOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Registrar pago — {viewingGuest?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid gap-1.5">
-              <Label>Monto</Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                data-testid="input-guest-payment-amount"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Descripción</Label>
-              <Input
-                value={paymentDescription}
-                onChange={(e) => setPaymentDescription(e.target.value)}
-                data-testid="input-guest-payment-description"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Referencia (opcional)</Label>
-              <Input
-                value={paymentReference}
-                onChange={(e) => setPaymentReference(e.target.value)}
-                placeholder="Nº recibo, transferencia..."
-                data-testid="input-guest-payment-reference"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Fecha</Label>
-              <Input
-                type="date"
-                value={paymentDate}
-                onChange={(e) => setPaymentDate(e.target.value)}
-                data-testid="input-guest-payment-date"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRegisterPaymentOpen(false)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => registerPaymentMutation.mutate()}
-              disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || registerPaymentMutation.isPending}
-              data-testid="button-confirm-guest-payment"
-            >
-              {registerPaymentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Confirmar pago
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CCPaymentDialog
+        open={registerPaymentOpen}
+        onOpenChange={setRegisterPaymentOpen}
+        entityType="guest"
+        entityId={viewingGuest?.id}
+        entityLabel={viewingGuest?.name || ""}
+        balance={accountData?.balance || 0}
+        onSuccess={() => {
+          refetchAccount();
+          queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
+          toast({ title: "Pago registrado correctamente" });
+        }}
+      />
     </div>
   );
 }
