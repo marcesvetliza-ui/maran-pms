@@ -2038,6 +2038,22 @@ function ReservationDetailDialog({
   const handleAddMultiPayment = async () => {
     const validRows = paymentRows.filter(r => r.amount && parseFloat(r.amount) > 0);
     if (validRows.length === 0) return;
+
+    const missingCompany = validRows.find(
+      r => r.method === "cuenta_corriente" && r.billingTarget === "company" && !reservation.companyId && !r.companyId
+    );
+    if (missingCompany) {
+      toast({ title: "Seleccioná una empresa", description: "Elegí a qué empresa se le cargará este pago a cuenta corriente.", variant: "destructive" });
+      return;
+    }
+    const missingAgency = validRows.find(
+      r => r.method === "cuenta_corriente" && r.billingTarget === "agency" && !reservation.agencyId && !r.agencyId
+    );
+    if (missingAgency) {
+      toast({ title: "Seleccioná una agencia", description: "Elegí a qué agencia se le cargará este pago a cuenta corriente.", variant: "destructive" });
+      return;
+    }
+
     let successCount = 0;
     for (const row of validRows) {
       try {

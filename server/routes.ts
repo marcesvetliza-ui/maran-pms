@@ -698,68 +698,88 @@ export async function registerRoutes(
 
       let created = 0;
       let skipped = 0;
+      let failed = 0;
+
+      const normalizeDate = (value: any): string => {
+        if (!value) return today;
+        if (value instanceof Date) return value.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        return String(value).slice(0, 10);
+      };
 
       for (const pay of (allPayments.rows as any[])) {
-        const billingTarget = pay.billing_target || "guest";
+        try {
+          const billingTarget = pay.billing_target || "guest";
+          const parsedAmount = parseFloat(pay.amount);
+          if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) { skipped++; continue; }
 
-        // Verificar si ya existe un movimiento para esta reserva con este monto
-        const existing = await storage.getAccountMovementsByReservation(pay.reservation_id);
-        const amtStr = parseFloat(pay.amount).toFixed(2);
-        if (existing.some(m => parseFloat(m.amount).toFixed(2) === amtStr)) { skipped++; continue; }
+          // Verificar si ya existe un movimiento para esta reserva con este monto
+          const existing = await storage.getAccountMovementsByReservation(pay.reservation_id);
+          const amtStr = parsedAmount.toFixed(2);
+          if (existing.some(m => parseFloat(m.amount).toFixed(2) === amtStr)) { skipped++; continue; }
 
-        const guestName = pay.first_name ? `${pay.first_name} ${pay.last_name}` : "Huésped";
-        const roomNum = pay.room_number || pay.room_id || "N/A";
+          const guestName = pay.first_name ? `${pay.first_name} ${pay.last_name}` : "Huésped";
+          const roomNum = pay.room_number || pay.room_id || "N/A";
+          const paymentDate = normalizeDate(pay.date);
 
-        // Use payment's own company/agency if available, fall back to reservation's
-        const effectiveCompanyId = pay.company_id || pay.res_company_id || null;
-        const effectiveAgencyId = pay.agency_id || pay.res_agency_id || null;
-        const guestId = pay.guest_id || null;
+          // Use payment's own company/agency if available, fall back to reservation's
+          const effectiveCompanyId = pay.company_id || pay.res_company_id || null;
+          const effectiveAgencyId = pay.agency_id || pay.res_agency_id || null;
+          const guestId = pay.guest_id || null;
 
-        if (billingTarget === "company" && effectiveCompanyId) {
-          await storage.createAccountMovement({
-            entityType: "company",
-            entityId: effectiveCompanyId,
-            date: pay.date || today,
-            type: "cargo",
-            description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
-            amount: amtStr,
-            reservationId: pay.reservation_id,
-            reservationCode: pay.reservation_code,
-            guestName,
-          });
-          created++;
-        } else if (billingTarget === "agency" && effectiveAgencyId) {
-          await storage.createAccountMovement({
-            entityType: "agency",
-            entityId: effectiveAgencyId,
-            date: pay.date || today,
-            type: "cargo",
-            description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
-            amount: amtStr,
-            reservationId: pay.reservation_id,
-            reservationCode: pay.reservation_code,
-            guestName,
-          });
-          created++;
-        } else if (billingTarget === "guest" && guestId) {
-          await storage.createAccountMovement({
-            entityType: "guest",
-            entityId: guestId,
-            date: pay.date || today,
-            type: "cargo",
-            description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
-            amount: amtStr,
-            reservationId: pay.reservation_id,
-            reservationCode: pay.reservation_code,
-            guestName,
-          });
-          created++;
-        } else {
-          skipped++;
+          if (billingTarget === "company" && effectiveCompanyId) {
+            await storage.createAccountMovement({
+              entityType: "company",
+              entityId: effectiveCompanyId,
+              date: paymentDate,
+              type: "cargo",
+              description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
+              amount: amtStr,
+              reservationId: pay.reservation_id,
+              reservationCode: pay.reservation_code,
+              guestName,
+            });
+            created++;
+          } else if (billingTarget === "agency" && effectiveAgencyId) {
+            await storage.createAccountMovement({
+              entityType: "agency",
+              entityId: effectiveAgencyId,
+              date: paymentDate,
+              type: "cargo",
+              description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
+              amount: amtStr,
+              reservationId: pay.reservation_id,
+              reservationCode: pay.reservation_code,
+              guestName,
+            });
+            created++;
+          } else if (billingTarget === "guest" && guestId) {
+            await storage.createAccountMovement({
+              entityType: "guest",
+              entityId: guestId,
+              date: paymentDate,
+              type: "cargo",
+              description: `Estadía ${pay.reservation_code} — Hab. ${roomNum}`,
+              amount: amtStr,
+              reservationId: pay.reservation_id,
+              reservationCode: pay.reservation_code,
+              guestName,
+            });
+            created++;
+          } else {
+            skipped++;
+          }
+        } catch (rowError) {
+          failed++;
+          console.error(`[reconcile-cc] Error procesando pago ${pay?.id}:`, rowError);
         }
       }
 
-      res.json({ created, skipped, message: `Reconciliación completa: ${created} movimientos creados, ${skipped} omitidos` });
+      res.json({
+        created,
+        skipped,
+        failed,
+        message: `Reconciliación completa: ${created} movimientos creados, ${skipped} omitidos${failed > 0 ? `, ${failed} con error` : ""}`,
+      });
     } catch (error) {
       console.error("Error en reconciliación CC:", error);
       res.status(500).json({ error: "Error en reconciliación" });

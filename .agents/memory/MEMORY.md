@@ -16,3 +16,4 @@
 - [Express route param collisions](express-route-param-collision.md) — recurring bug class: generic `/:entityType/:id` routes silently shadow more specific same-depth routes registered later (folios, account-movements); always verify with real requests.
 - [Cuenta Corriente payment engine](cc-payment-engine.md) — shared CCPaymentDialog + account_movement_allocations table drives companies/agencies/guests payment-with-allocations + retentions + PDF receipt across all 3 entity types.
 - [Silent non-array query crash](silent-non-array-query-crash.md) — raw fetch() queryFn without res.ok check turns error responses into crashing non-array data; `= []` default only guards undefined, not this case.
+- [Auth testing quirks](auth-testing-quirks.md) — system_users table + bcryptjs (not bcrypt) hashes; generate test-login hashes via code_execution sandbox, not DB/testing-subagent.
