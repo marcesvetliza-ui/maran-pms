@@ -431,15 +431,16 @@ function AgingReportSection({ accountSummary }: {
   ];
 
   // Fetch all movements without date filter to calculate aging from oldest unpaid charge
-  const { data: allMovements = [], isLoading } = useQuery<AccountMovement[]>({
+  const { data: allMovementsRaw, isLoading } = useQuery<AccountMovement[]>({
     queryKey: ["/api/account-movements/report-aging"],
     queryFn: async () => {
       const from = "2000-01-01";
       const to = new Date().toISOString().split("T")[0];
-      const res = await fetch(`/api/account-movements/report?from=${from}&to=${to}`);
+      const res = await apiRequest("GET", `/api/account-movements/report?from=${from}&to=${to}`);
       return res.json();
     },
   });
+  const allMovements = Array.isArray(allMovementsRaw) ? allMovementsRaw : [];
 
   // For each debtor, find the oldest outstanding charge date
   function getOldestChargeAge(entityId: string): number {
@@ -584,13 +585,17 @@ export default function AdminCuentasPage() {
     queryKey: ["/api/account-summary"],
   });
 
-  const { data: reporteMovements = [], isFetching: isReporteFetching } = useQuery<Movement[]>({
+  const { data: reporteMovementsRaw, isFetching: isReporteFetching } = useQuery<Movement[]>({
     queryKey: ["/api/account-movements/report", reporteFrom, reporteTo],
     queryFn: async () => {
-      const res = await fetch(`/api/account-movements/report?from=${reporteFrom}&to=${reporteTo}`);
+      const res = await apiRequest(
+        "GET",
+        `/api/account-movements/report?from=${reporteFrom}&to=${reporteTo}`,
+      );
       return res.json();
     },
   });
+  const reporteMovements = Array.isArray(reporteMovementsRaw) ? reporteMovementsRaw : [];
 
   const totalCompaniesDebt = accountSummary?.companies.reduce((sum, c) => sum + c.balance, 0) || 0;
   const totalAgenciesDebt = accountSummary?.agencies.reduce((sum, a) => sum + a.balance, 0) || 0;
