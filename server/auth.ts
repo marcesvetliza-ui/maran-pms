@@ -3,9 +3,8 @@ import { Strategy as LocalStrategy } from "passport-local";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
-import pg from "pg";
 import { randomUUID } from "crypto";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { systemUsers, failedLoginAttempts } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { Express, Request, Response, NextFunction } from "express";
@@ -67,15 +66,10 @@ export function setupAuth(app: Express) {
   app.use(
     session({
       store: new PgSession({
-        conString: process.env.DATABASE_URL,
+        pool,
         tableName: "sessions",
         createTableIfMissing: false,
         ttl: 8 * 60 * 60, // 8 horas en el store (segundos)
-        pool: new pg.Pool({
-          connectionString: process.env.DATABASE_URL,
-          connectionTimeoutMillis: 5_000,
-          max: 3,
-        }),
       }),
       secret: (() => {
         if (!process.env.SESSION_SECRET) {

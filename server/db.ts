@@ -19,3 +19,4 @@ pool.on("error", (err) => {
   console.error("[db] Unexpected pool error (connection will be replaced):", err.message);
 });
 export const db = drizzle(pool, { schema });
+export { pool };
