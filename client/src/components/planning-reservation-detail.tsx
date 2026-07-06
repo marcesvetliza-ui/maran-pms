@@ -50,6 +50,7 @@ export function ReservationDetailModal({
   const [isEditing, setIsEditing] = useState(false);
   const [retroDialogOpen, setRetroDialogOpen] = useState(false);
   const [retroMotivo, setRetroMotivo] = useState("");
+  const [dirtyRoomDialogOpen, setDirtyRoomDialogOpen] = useState(false);
   const [editCheckIn, setEditCheckIn] = useState("");
   const [editCheckOut, setEditCheckOut] = useState("");
   const [editChannel, setEditChannel] = useState("");
@@ -550,7 +551,19 @@ export function ReservationDetailModal({
               )
             )}
             {canCheckIn && (
-              <Button onClick={() => checkInMutation.mutate({})} disabled={checkInMutation.isPending} className="w-full sm:w-auto" data-testid="button-checkin-quick">
+              <Button
+                onClick={() => {
+                  const roomStatus = reservation?.room?.status;
+                  if (roomStatus === "dirty" || roomStatus === "cleaning" || roomStatus === "maintenance") {
+                    setDirtyRoomDialogOpen(true);
+                    return;
+                  }
+                  checkInMutation.mutate({});
+                }}
+                disabled={checkInMutation.isPending}
+                className="w-full sm:w-auto"
+                data-testid="button-checkin-quick"
+              >
                 <LogIn className="h-4 w-4 mr-2" />{checkInMutation.isPending ? "Procesando..." : "Check-in"}
               </Button>
             )}
@@ -614,6 +627,42 @@ export function ReservationDetailModal({
               data-testid="button-confirm-retro-checkin-planning"
             >
               {checkInMutation.isPending ? "Procesando..." : "Confirmar Check-in"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Aviso: habitación sucia o en mantenimiento */}
+      <Dialog open={dirtyRoomDialogOpen} onOpenChange={setDirtyRoomDialogOpen}>
+        <DialogContent className="w-[95vw] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-400">
+              <AlertCircle className="h-5 w-5" />
+              Habitación no disponible
+            </DialogTitle>
+            <DialogDescription>
+              La habitación <strong>{reservation?.room?.roomNumber}</strong> figura como{" "}
+              <strong>
+                {reservation?.room?.status === "dirty"
+                  ? "sucia"
+                  : reservation?.room?.status === "maintenance"
+                  ? "en mantenimiento"
+                  : "en limpieza"}
+              </strong>{" "}
+              en el sistema. ¿Desea registrar el check-in de todas formas?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDirtyRoomDialogOpen(false)} data-testid="button-cancel-dirty-warning-planning">
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => { setDirtyRoomDialogOpen(false); checkInMutation.mutate({}); }}
+              disabled={checkInMutation.isPending}
+              data-testid="button-confirm-dirty-checkin-planning"
+            >
+              Confirmar de todas formas
             </Button>
           </DialogFooter>
         </DialogContent>

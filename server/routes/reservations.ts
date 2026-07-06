@@ -499,11 +499,10 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(400).json({ error: "Habitación no encontrada" });
       }
 
-      const blockedStatuses = ["occupied", "maintenance", "oos"];
+      const blockedStatuses = ["occupied", "oos"];
       if (blockedStatuses.includes(room.status)) {
         const statusMessages: Record<string, string> = {
           occupied: "La habitación está ocupada por otro huésped",
-          maintenance: "La habitación está en mantenimiento",
           oos: "La habitación está fuera de servicio",
         };
         const message = statusMessages[room.status] || `La habitación no está disponible (estado: ${room.status})`;

@@ -398,7 +398,7 @@ export default function CheckInPage() {
     }
 
     const roomStatus = selectedReservation.room?.status;
-    if (roomStatus === "dirty" || roomStatus === "cleaning") {
+    if (roomStatus === "dirty" || roomStatus === "cleaning" || roomStatus === "maintenance") {
       setDirtyRoomDialog(true);
       return;
     }
@@ -1408,7 +1408,11 @@ export default function CheckInPage() {
             <p>
               La habitación <strong>{selectedReservation?.room?.roomNumber}</strong> figura como{" "}
               <strong className="text-orange-700 dark:text-orange-400">
-                {selectedReservation?.room?.status === "dirty" ? "sucia" : "en limpieza"}
+                {selectedReservation?.room?.status === "dirty"
+                  ? "sucia"
+                  : selectedReservation?.room?.status === "maintenance"
+                  ? "en mantenimiento"
+                  : "en limpieza"}
               </strong>{" "}
               en el sistema.
             </p>
