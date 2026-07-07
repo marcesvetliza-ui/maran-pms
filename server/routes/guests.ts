@@ -3,7 +3,7 @@ import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { db, pool } from "../db";
 import { guests, reservations } from "../../shared/schema";
-import { eq, and, inArray, gte } from "drizzle-orm";
+import { eq, and, inArray, gte, sql } from "drizzle-orm";
 
 export function registerGuestsRoutes(app: Express) {
   // Companies
@@ -244,44 +244,39 @@ export function registerGuestsRoutes(app: Express) {
 
   app.get("/api/companies/:id/account", async (req, res) => {
     try {
-      const client = await pool.connect();
-      try {
-        const companyId = req.params.id;
+      const companyId = req.params.id;
 
-        // Real CC movements (pagos registered via CC panel)
-        const movements = await storage.getAccountMovements("company", companyId);
-        const ccMovementsBalance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
+      // Real CC movements (pagos registered via CC panel)
+      const movements = await storage.getAccountMovements("company", companyId);
+      const ccMovementsBalance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
 
-        // Reservation-based balance (sum of pending balances per company-linked reservation)
-        const resResult = await client.query<{ res_balance: string }>(`
-          SELECT COALESCE(SUM(
-            r.total_room_amount::numeric
-            + COALESCE(cs.tc, 0)
-            - COALESCE(ps.tp, 0)
-          ), 0) AS res_balance
-          FROM reservations r
-          LEFT JOIN (
-            SELECT reservation_id, SUM(amount::numeric) AS tc
-            FROM charges WHERE status = 'active' GROUP BY reservation_id
-          ) cs ON cs.reservation_id = r.id
-          LEFT JOIN (
-            SELECT reservation_id, SUM(amount::numeric) AS tp
-            FROM payments WHERE status != 'anulado' GROUP BY reservation_id
-          ) ps ON ps.reservation_id = r.id
-          WHERE r.company_id = $1
-            AND r.total_room_amount IS NOT NULL
-            AND r.total_room_amount::numeric > 0
-        `, [companyId]);
+      // Reservation-based balance using drizzle sql template (works in production)
+      const resResult = await db.execute(sql`
+        SELECT COALESCE(SUM(
+          r.total_room_amount::numeric
+          + COALESCE(cs.tc, 0)
+          - COALESCE(ps.tp, 0)
+        ), 0) AS res_balance
+        FROM reservations r
+        LEFT JOIN (
+          SELECT reservation_id, SUM(amount::numeric) AS tc
+          FROM charges WHERE status = 'active' GROUP BY reservation_id
+        ) cs ON cs.reservation_id = r.id
+        LEFT JOIN (
+          SELECT reservation_id, SUM(amount::numeric) AS tp
+          FROM payments WHERE status != 'anulado' GROUP BY reservation_id
+        ) ps ON ps.reservation_id = r.id
+        WHERE r.company_id = ${companyId}
+          AND r.total_room_amount IS NOT NULL
+          AND r.total_room_amount::numeric > 0
+      `);
 
-        const reservationBalance = parseFloat(resResult.rows[0]?.res_balance || "0");
-        const totalBalance = reservationBalance + ccMovementsBalance;
+      const reservationBalance = parseFloat((resResult.rows[0] as any)?.res_balance || "0");
+      const totalBalance = reservationBalance + ccMovementsBalance;
 
-        res.json({ movements, balance: totalBalance, reservationBalance });
-      } finally {
-        client.release();
-      }
+      res.json({ movements, balance: totalBalance, reservationBalance });
     } catch (error) {
-      console.error("Error fetching company account:", error);
+      console.error("[company-account] Error:", error);
       res.status(500).json({ error: "Error fetching account" });
     }
   });

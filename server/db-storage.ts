@@ -4558,84 +4558,79 @@ export class DatabaseStorage implements IStorage {
     agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
     guests: { id: string; name: string; balance: number; lastMovement: string | null }[];
   }> {
-    const client = await pool.connect();
-    try {
-      const companiesRes = await client.query<{ id: string; name: string; balance: string; last_movement: string | null }>(`
-        WITH company_balances AS (
-          SELECT c.id,
-                 COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social) AS name,
-                 (
-                   COALESCE((
-                     SELECT SUM(
-                       r.total_room_amount::numeric
-                       + COALESCE(cs.tc, 0)
-                       - COALESCE(ps.tp, 0)
-                     )
-                     FROM reservations r
-                     LEFT JOIN (
-                       SELECT reservation_id, SUM(amount::numeric) AS tc
-                       FROM charges WHERE status = 'active' GROUP BY reservation_id
-                     ) cs ON cs.reservation_id = r.id
-                     LEFT JOIN (
-                       SELECT reservation_id, SUM(amount::numeric) AS tp
-                       FROM payments WHERE status != 'anulado' GROUP BY reservation_id
-                     ) ps ON ps.reservation_id = r.id
-                     WHERE r.company_id = c.id
-                       AND r.total_room_amount IS NOT NULL
-                       AND r.total_room_amount::numeric > 0
-                   ), 0)
-                   + COALESCE((
-                     SELECT SUM(amount::numeric)
-                     FROM account_movements
-                     WHERE entity_id = c.id AND entity_type = 'company'
-                   ), 0)
-                 ) AS balance,
-                 GREATEST(
-                   (SELECT MAX(r.check_out_date::text) FROM reservations r WHERE r.company_id = c.id),
-                   (SELECT MAX(date::text) FROM account_movements WHERE entity_id = c.id AND entity_type = 'company')
-                 ) AS last_movement
-          FROM companies c
-          WHERE c.is_active = 'true'
-        )
-        SELECT * FROM company_balances
-        WHERE balance IS NOT NULL AND balance <> 0
-        ORDER BY balance DESC
-      `);
+    const companiesRes = await db.execute(sql`
+      WITH company_balances AS (
+        SELECT c.id,
+               COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social) AS name,
+               (
+                 COALESCE((
+                   SELECT SUM(
+                     r.total_room_amount::numeric
+                     + COALESCE(cs.tc, 0)
+                     - COALESCE(ps.tp, 0)
+                   )
+                   FROM reservations r
+                   LEFT JOIN (
+                     SELECT reservation_id, SUM(amount::numeric) AS tc
+                     FROM charges WHERE status = 'active' GROUP BY reservation_id
+                   ) cs ON cs.reservation_id = r.id
+                   LEFT JOIN (
+                     SELECT reservation_id, SUM(amount::numeric) AS tp
+                     FROM payments WHERE status != 'anulado' GROUP BY reservation_id
+                   ) ps ON ps.reservation_id = r.id
+                   WHERE r.company_id = c.id
+                     AND r.total_room_amount IS NOT NULL
+                     AND r.total_room_amount::numeric > 0
+                 ), 0)
+                 + COALESCE((
+                   SELECT SUM(amount::numeric)
+                   FROM account_movements
+                   WHERE entity_id = c.id AND entity_type = 'company'
+                 ), 0)
+               ) AS balance,
+               GREATEST(
+                 (SELECT MAX(r.check_out_date::text) FROM reservations r WHERE r.company_id = c.id),
+                 (SELECT MAX(date::text) FROM account_movements WHERE entity_id = c.id AND entity_type = 'company')
+               ) AS last_movement
+        FROM companies c
+        WHERE c.is_active = 'true'
+      )
+      SELECT * FROM company_balances
+      WHERE balance IS NOT NULL AND balance <> 0
+      ORDER BY balance DESC
+    `);
 
-      const agenciesRes = await client.query<{ id: string; name: string; balance: string; last_movement: string | null }>(`
-        SELECT a.id,
-               COALESCE(NULLIF(a.nombre_fantasia, ''), a.razon_social) AS name,
-               COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
-               MAX(m.date::text)                                        AS last_movement
-        FROM agencies a
-        LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency'
-        WHERE a.is_active = 'true'
-        GROUP BY a.id, a.nombre_fantasia, a.razon_social
-        HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
-        ORDER BY balance DESC
-      `);
+    const agenciesRes = await db.execute(sql`
+      SELECT a.id,
+             COALESCE(NULLIF(a.nombre_fantasia, ''), a.razon_social) AS name,
+             COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
+             MAX(m.date::text)                                        AS last_movement
+      FROM agencies a
+      LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency'
+      WHERE a.is_active = 'true'
+      GROUP BY a.id, a.nombre_fantasia, a.razon_social
+      HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
+      ORDER BY balance DESC
+    `);
 
-      const guestsRes = await client.query<{ id: string; name: string; balance: string; last_movement: string | null }>(`
-        SELECT g.id,
-               g.last_name || ' ' || g.first_name AS name,
-               SUM(m.amount::numeric)              AS balance,
-               MAX(m.date::text)                   AS last_movement
-        FROM account_movements m
-        JOIN guests g ON g.id = m.entity_id
-        WHERE m.entity_type = 'guest'
-        GROUP BY g.id, g.last_name, g.first_name
-        HAVING SUM(m.amount::numeric) <> 0
-        ORDER BY balance DESC
-      `);
+    const guestsRes = await db.execute(sql`
+      SELECT g.id,
+             g.last_name || ' ' || g.first_name AS name,
+             SUM(m.amount::numeric)              AS balance,
+             MAX(m.date::text)                   AS last_movement
+      FROM account_movements m
+      JOIN guests g ON g.id = m.entity_id
+      WHERE m.entity_type = 'guest'
+      GROUP BY g.id, g.last_name, g.first_name
+      HAVING SUM(m.amount::numeric) <> 0
+      ORDER BY balance DESC
+    `);
 
-      return {
-        companies: companiesRes.rows.map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
-        agencies:  agenciesRes.rows.map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
-        guests:    guestsRes.rows.map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
-      };
-    } finally {
-      client.release();
-    }
+    return {
+      companies: (companiesRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+      agencies:  (agenciesRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+      guests:    (guestsRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+    };
   }
 
   // ==================== MOTOR FINANCIERO — FOLIOS ====================
