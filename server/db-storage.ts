@@ -4,7 +4,7 @@ export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 }
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull } from "drizzle-orm";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { IStorage } from "./storage";
 import {
   type User, type InsertUser,
@@ -4558,57 +4558,55 @@ export class DatabaseStorage implements IStorage {
     agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
     guests: { id: string; name: string; balance: number; lastMovement: string | null }[];
   }> {
-    const allMovements = await db.select().from(accountMovements);
-    const allCompanies = await db.select().from(companies);
-    const allAgencies = await db.select().from(agencies);
+    const client = await pool.connect();
+    try {
+      const companiesRes = await client.query<{ id: string; name: string; balance: string; last_movement: string | null }>(`
+        SELECT c.id,
+               COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social) AS name,
+               COALESCE(SUM(m.amount::numeric), 0)                    AS balance,
+               MAX(m.date::text)                                       AS last_movement
+        FROM companies c
+        LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company'
+        WHERE c.is_active = 'true'
+        GROUP BY c.id, c.nombre_fantasia, c.razon_social
+        HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
+        ORDER BY balance DESC
+      `);
 
-    const calcBalance = (entityType: string, entityId: string) =>
-      allMovements
-        .filter(m => m.entityType === entityType && m.entityId === entityId)
-        .reduce((sum, m) => sum + parseFloat(m.amount), 0);
+      const agenciesRes = await client.query<{ id: string; name: string; balance: string; last_movement: string | null }>(`
+        SELECT a.id,
+               COALESCE(NULLIF(a.nombre_fantasia, ''), a.razon_social) AS name,
+               COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
+               MAX(m.date::text)                                        AS last_movement
+        FROM agencies a
+        LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency'
+        WHERE a.is_active = 'true'
+        GROUP BY a.id, a.nombre_fantasia, a.razon_social
+        HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
+        ORDER BY balance DESC
+      `);
 
-    const lastMovementDate = (entityType: string, entityId: string) => {
-      const movements = allMovements
-        .filter(m => m.entityType === entityType && m.entityId === entityId)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      return movements[0]?.date || null;
-    };
+      const guestsRes = await client.query<{ id: string; name: string; balance: string; last_movement: string | null }>(`
+        SELECT g.id,
+               g.last_name || ' ' || g.first_name AS name,
+               SUM(m.amount::numeric)              AS balance,
+               MAX(m.date::text)                   AS last_movement
+        FROM account_movements m
+        JOIN guests g ON g.id = m.entity_id
+        WHERE m.entity_type = 'guest'
+        GROUP BY g.id, g.last_name, g.first_name
+        HAVING SUM(m.amount::numeric) <> 0
+        ORDER BY balance DESC
+      `);
 
-    // Find all guest IDs that have CC movements
-    const guestMovements = allMovements.filter(m => m.entityType === "guest");
-    const guestIds = [...new Set(guestMovements.map(m => m.entityId))];
-    const guestRows = guestIds.length > 0
-      ? await db.select().from(guests).where(inArray(guests.id, guestIds))
-      : [];
-
-    return {
-      companies: allCompanies
-        .filter(c => c.isActive === "true")
-        .map(c => ({
-          id: c.id,
-          name: c.nombreFantasia || c.razonSocial,
-          balance: calcBalance("company", c.id),
-          lastMovement: lastMovementDate("company", c.id),
-        }))
-        .filter(c => c.balance !== 0),
-      agencies: allAgencies
-        .filter(a => a.isActive === "true")
-        .map(a => ({
-          id: a.id,
-          name: a.nombreFantasia || a.razonSocial,
-          balance: calcBalance("agency", a.id),
-          lastMovement: lastMovementDate("agency", a.id),
-        }))
-        .filter(a => a.balance !== 0),
-      guests: guestRows
-        .map(g => ({
-          id: g.id,
-          name: `${g.lastName} ${g.firstName}`,
-          balance: calcBalance("guest", g.id),
-          lastMovement: lastMovementDate("guest", g.id),
-        }))
-        .filter(g => g.balance !== 0),
-    };
+      return {
+        companies: companiesRes.rows.map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+        agencies:  agenciesRes.rows.map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+        guests:    guestsRes.rows.map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+      };
+    } finally {
+      client.release();
+    }
   }
 
   // ==================== MOTOR FINANCIERO — FOLIOS ====================

@@ -345,7 +345,8 @@ export function registerGuestsRoutes(app: Express) {
       const summary = await storage.getAccountSummary();
       res.json(summary);
     } catch (error) {
-      res.status(500).json({ error: "Error fetching summary" });
+      console.error("[account-summary] Error:", error);
+      res.status(500).json({ error: "Error fetching summary", detail: String(error) });
     }
   });
 
