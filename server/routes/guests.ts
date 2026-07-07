@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { guests, reservations } from "../../shared/schema";
 import { eq, and, inArray, gte } from "drizzle-orm";
 
@@ -244,7 +244,6 @@ export function registerGuestsRoutes(app: Express) {
 
   app.get("/api/companies/:id/account", async (req, res) => {
     try {
-      const { pool } = await import("../db");
       const client = await pool.connect();
       try {
         const companyId = req.params.id;
