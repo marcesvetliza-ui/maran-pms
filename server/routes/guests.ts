@@ -246,11 +246,10 @@ export function registerGuestsRoutes(app: Express) {
     try {
       const companyId = req.params.id;
 
-      // Real CC movements (pagos registered via CC panel)
+      // All CC movements (cargos + pagos) — used to display movement history
       const movements = await storage.getAccountMovements("company", companyId);
-      const ccMovementsBalance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
 
-      // Reservation-based balance using drizzle sql template (works in production)
+      // Reservation-based outstanding (total_room + charges - payments from reservations/payments tables)
       const resResult = await db.execute(sql`
         SELECT COALESCE(SUM(
           r.total_room_amount::numeric
@@ -270,9 +269,19 @@ export function registerGuestsRoutes(app: Express) {
           AND r.total_room_amount IS NOT NULL
           AND r.total_room_amount::numeric > 0
       `);
+      const reservationBalance = parseFloat((resResult.rows[0] as any)?.res_balance ?? "0");
 
-      const reservationBalance = parseFloat((resResult.rows[0] as any)?.res_balance || "0");
-      const totalBalance = reservationBalance + ccMovementsBalance;
+      // Only sum CC *payments* (type='pago', stored as negative numbers) — DO NOT add cargos
+      // because cargos are auto-derived from the same reservation data above (would double-count)
+      const ccPagosResult = await db.execute(sql`
+        SELECT COALESCE(SUM(amount::numeric), 0) AS pagos_sum
+        FROM account_movements
+        WHERE entity_type = 'company' AND entity_id = ${companyId} AND type = 'pago'
+      `);
+      const ccPagos = parseFloat((ccPagosResult.rows[0] as any)?.pagos_sum ?? "0");
+
+      // Total = what reservations say is owed + CC payments already received (negative)
+      const totalBalance = reservationBalance + ccPagos;
 
       res.json({ movements, balance: totalBalance, reservationBalance });
     } catch (error) {
@@ -293,9 +302,65 @@ export function registerGuestsRoutes(app: Express) {
 
   app.get("/api/companies/:id/account/pending-charges", async (req, res) => {
     try {
-      const pending = await storage.getPendingCharges("company", req.params.id);
+      const companyId = req.params.id;
+
+      // Find reservations with outstanding balances for this company
+      const pendingRes = await db.execute(sql`
+        SELECT r.id, r.reservation_code, r.check_in_date, r.check_out_date,
+               r.total_room_amount::numeric AS room_amount,
+               COALESCE(cs.tc, 0) AS extra_charges,
+               COALESCE(ps.tp, 0) AS total_paid,
+               g.first_name, g.last_name, ro.room_number
+        FROM reservations r
+        LEFT JOIN guests g ON g.id = r.guest_id
+        LEFT JOIN rooms ro ON ro.id = r.room_id
+        LEFT JOIN (
+          SELECT reservation_id, SUM(amount::numeric) AS tc
+          FROM charges WHERE status = 'active' GROUP BY reservation_id
+        ) cs ON cs.reservation_id = r.id
+        LEFT JOIN (
+          SELECT reservation_id, SUM(amount::numeric) AS tp
+          FROM payments WHERE status != 'anulado' GROUP BY reservation_id
+        ) ps ON ps.reservation_id = r.id
+        WHERE r.company_id = ${companyId}
+          AND r.total_room_amount IS NOT NULL
+          AND r.total_room_amount::numeric > 0
+          AND (r.total_room_amount::numeric + COALESCE(cs.tc, 0) - COALESCE(ps.tp, 0)) > 0.009
+        ORDER BY r.check_in_date
+      `);
+
+      // Auto-create cargo entries in account_movements for any reservation that doesn't have one yet
+      for (const row of pendingRes.rows as any[]) {
+        const outstanding = parseFloat(row.room_amount) + parseFloat(row.extra_charges) - parseFloat(row.total_paid);
+        const existing = await storage.getAccountMovementsByReservation(row.id);
+        const hasCompanyCargo = existing.some(
+          (m) => m.entityType === "company" && m.entityId === companyId && m.type === "cargo"
+        );
+        if (!hasCompanyCargo) {
+          const guestName = row.first_name ? `${row.first_name} ${row.last_name}` : "Huésped";
+          const roomNum = row.room_number || "N/A";
+          const checkInDate = row.check_in_date
+            ? new Date(row.check_in_date).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+            : new Date().toISOString().split("T")[0];
+          await storage.createAccountMovement({
+            entityType: "company",
+            entityId: companyId,
+            date: checkInDate,
+            type: "cargo",
+            description: `Estadía ${row.reservation_code} — Hab. ${roomNum} — ${guestName}`,
+            amount: outstanding.toFixed(2),
+            reservationId: row.id,
+            reservationCode: row.reservation_code,
+            guestName,
+          } as any);
+        }
+      }
+
+      // Return pending charges (now with auto-created cargo entries)
+      const pending = await storage.getPendingCharges("company", companyId);
       res.json(pending);
     } catch (error) {
+      console.error("[company-pending-charges] Error:", error);
       res.status(500).json({ error: "Error fetching pending charges" });
     }
   });
