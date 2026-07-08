@@ -458,6 +458,44 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
+  // Receipts list — only pago movements, with filters
+  app.get("/api/account-movements/receipts", async (req, res) => {
+    try {
+      const { from, to, entityType, search } = req.query as { from?: string; to?: string; entityType?: string; search?: string };
+      const summary = await storage.getAccountSummary();
+
+      const movements: any[] = [];
+
+      const pushEntity = async (entities: { id: string; name: string }[], typeName: string, typeKey: string) => {
+        for (const e of entities) {
+          if (entityType && entityType !== typeKey) continue;
+          if (search && !e.name.toLowerCase().includes(search.toLowerCase())) continue;
+          const ms = await storage.getAccountMovements(typeKey as any, e.id);
+          ms
+            .filter(m => m.type === "pago")
+            .forEach(m => movements.push({ ...m, entityName: e.name, entityTypeName: typeName }));
+        }
+      };
+
+      await pushEntity(summary.companies, "Empresa", "company");
+      await pushEntity(summary.agencies, "Agencia", "agency");
+      if (summary.guests) await pushEntity(summary.guests, "Huésped", "guest");
+
+      const filtered = movements
+        .filter(m => {
+          if (from && m.date < from) return false;
+          if (to && m.date > to) return false;
+          return true;
+        })
+        .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt).localeCompare(String(a.createdAt)));
+
+      res.json(filtered);
+    } catch (error) {
+      console.error("Error fetching receipts:", error);
+      res.status(500).json({ error: "Error fetching receipts" });
+    }
+  });
+
   app.get("/api/account-movements/report", async (req, res) => {
     try {
       const { from, to } = req.query as { from?: string; to?: string };

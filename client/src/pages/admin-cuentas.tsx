@@ -21,6 +21,9 @@ import {
   ChevronRight,
   Printer,
   Clock,
+  FileText,
+  Search,
+  Receipt,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -352,8 +355,9 @@ function EntityMovementsInline({
             <th className="text-left px-3 py-1.5 font-medium">Fecha</th>
             <th className="text-left px-3 py-1.5 font-medium">Tipo</th>
             <th className="text-left px-3 py-1.5 font-medium">Descripción</th>
-            <th className="text-left px-3 py-1.5 font-medium">Reserva</th>
+            <th className="text-left px-3 py-1.5 font-medium">Reserva / Ref.</th>
             <th className="text-right px-3 py-1.5 font-medium">Importe</th>
+            <th className="w-8"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -388,6 +392,21 @@ function EntityMovementsInline({
                 </td>
                 <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${isDebt ? "text-red-600" : "text-green-600"}`}>
                   {fmtMoney(m.amount)}
+                </td>
+                <td className="px-1 py-1">
+                  {m.type === "pago" && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="Ver recibo PDF"
+                      onClick={() => window.open(`/api/account-movements/${m.id}/receipt-pdf`, "_blank")}
+                      data-testid={`button-receipt-${m.id}`}
+                    >
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                    </Button>
+                  )}
                 </td>
               </tr>
             );
@@ -581,6 +600,16 @@ export default function AdminCuentasPage() {
   });
   const [reporteTo, setReporteTo] = useState(() => new Date().toISOString().split("T")[0]);
 
+  // Recibos emitidos filters
+  const [recibosFrom, setRecibosFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d.toISOString().split("T")[0];
+  });
+  const [recibosTo, setRecibosTo] = useState(() => new Date().toISOString().split("T")[0]);
+  const [recibosEntityType, setRecibosEntityType] = useState("");
+  const [recibosSearch, setRecibosSearch] = useState("");
+
   const { data: accountSummary, isLoading: summaryLoading } = useQuery<{
     companies: { id: string; name: string; balance: number }[];
     agencies: { id: string; name: string; balance: number }[];
@@ -588,6 +617,21 @@ export default function AdminCuentasPage() {
   }>({
     queryKey: ["/api/account-summary"],
   });
+
+  type ReceiptMovement = AccountMovement & { entityName: string; entityTypeName: string };
+
+  const { data: recibosRaw, isFetching: isRecibosFetching } = useQuery<ReceiptMovement[]>({
+    queryKey: ["/api/account-movements/receipts", recibosFrom, recibosTo, recibosEntityType, recibosSearch],
+    queryFn: async () => {
+      const params = new URLSearchParams({ from: recibosFrom, to: recibosTo });
+      if (recibosEntityType) params.set("entityType", recibosEntityType);
+      if (recibosSearch) params.set("search", recibosSearch);
+      const res = await fetch(`/api/account-movements/receipts?${params}`);
+      if (!res.ok) throw new Error("Error fetching receipts");
+      return res.json();
+    },
+  });
+  const recibos: ReceiptMovement[] = Array.isArray(recibosRaw) ? recibosRaw : [];
 
   const { data: reporteMovementsRaw, isFetching: isReporteFetching } = useQuery<Movement[]>({
     queryKey: ["/api/account-movements/report", reporteFrom, reporteTo],
@@ -1051,6 +1095,132 @@ export default function AdminCuentasPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Separator />
+
+      {/* Recibos Emitidos */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <Receipt className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Recibos Emitidos</h2>
+          {recibos.length > 0 && (
+            <Badge variant="secondary" className="text-xs">{recibos.length}</Badge>
+          )}
+        </div>
+
+        {/* Filtros */}
+        <div className="flex flex-wrap gap-3 mb-4 p-3 bg-muted/30 rounded-lg border">
+          <div className="grid gap-1">
+            <Label className="text-xs">Desde</Label>
+            <Input type="date" value={recibosFrom} onChange={(e) => setRecibosFrom(e.target.value)} className="h-8 text-sm w-36" data-testid="input-recibos-from" />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs">Hasta</Label>
+            <Input type="date" value={recibosTo} onChange={(e) => setRecibosTo(e.target.value)} className="h-8 text-sm w-36" data-testid="input-recibos-to" />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs">Tipo</Label>
+            <select
+              value={recibosEntityType}
+              onChange={(e) => setRecibosEntityType(e.target.value)}
+              className="h-8 text-sm rounded-md border bg-background px-2 pr-7 w-36"
+              data-testid="select-recibos-entity-type"
+            >
+              <option value="">Todos</option>
+              <option value="company">Empresas</option>
+              <option value="agency">Agencias</option>
+              <option value="guest">Clientes</option>
+            </select>
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs">Buscar</Label>
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Nombre..."
+                value={recibosSearch}
+                onChange={(e) => setRecibosSearch(e.target.value)}
+                className="h-8 text-sm pl-7 w-48"
+                data-testid="input-recibos-search"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Total cobrado en el período */}
+        {!isRecibosFetching && recibos.length > 0 && (
+          <div className="flex items-center gap-2 mb-3 px-1">
+            <span className="text-sm text-muted-foreground">Total cobrado en el período:</span>
+            <span className="font-bold text-green-600 tabular-nums text-sm">
+              ${Math.abs(recibos.reduce((s, r) => s + parseFloat(r.amount), 0)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        )}
+
+        {/* Tabla */}
+        {isRecibosFetching ? (
+          <div className="space-y-1.5">
+            {[1,2,3,4].map(i => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+          </div>
+        ) : recibos.length === 0 ? (
+          <div className="text-center py-14 text-muted-foreground border rounded-lg bg-muted/20">
+            <Receipt className="h-9 w-9 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">Sin recibos en el período seleccionado</p>
+          </div>
+        ) : (
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/60 text-muted-foreground text-xs">
+                  <th className="text-left px-3 py-2 font-medium">Fecha</th>
+                  <th className="text-left px-3 py-2 font-medium">Tipo</th>
+                  <th className="text-left px-3 py-2 font-medium">Razón social / Cliente</th>
+                  <th className="text-left px-3 py-2 font-medium">Concepto</th>
+                  <th className="text-left px-3 py-2 font-medium">Medio de pago</th>
+                  <th className="text-right px-3 py-2 font-medium">Importe</th>
+                  <th className="w-10"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {recibos.map((r) => {
+                  const methodLabels: Record<string, string> = {
+                    transferencia: "Transferencia", cheque: "Cheque", efectivo: "Efectivo",
+                    compensacion: "Compensación", tarjeta: "Tarjeta crédito",
+                  };
+                  const methodLabel = r.paymentMethod ? (methodLabels[r.paymentMethod] ?? r.paymentMethod) : "—";
+                  return (
+                    <tr key={r.id} className="hover:bg-muted/30" data-testid={`row-recibo-${r.id}`}>
+                      <td className="px-3 py-2 tabular-nums text-muted-foreground whitespace-nowrap">{r.date}</td>
+                      <td className="px-3 py-2">
+                        <Badge variant="outline" className="text-[10px] px-1.5">{r.entityTypeName}</Badge>
+                      </td>
+                      <td className="px-3 py-2 font-medium max-w-[180px] truncate">{r.entityName}</td>
+                      <td className="px-3 py-2 text-muted-foreground max-w-[180px] truncate">{r.description}</td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{methodLabel}</td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums text-green-600">
+                        ${Math.abs(parseFloat(r.amount)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-1 py-1 text-center">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Ver / reimprimir recibo"
+                          onClick={() => window.open(`/api/account-movements/${r.id}/receipt-pdf`, "_blank")}
+                          data-testid={`button-reprint-recibo-${r.id}`}
+                        >
+                          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <Separator />
 
