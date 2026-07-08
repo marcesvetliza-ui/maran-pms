@@ -1956,6 +1956,7 @@ export const accountMovements = pgTable("account_movements", {
   reservationCode: text("reservation_code"),
   guestName: text("guest_name"),
   reference: text("reference"),
+  paymentMethod: text("payment_method"),
   retentions: jsonb("retentions").$type<AccountRetention[]>(),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

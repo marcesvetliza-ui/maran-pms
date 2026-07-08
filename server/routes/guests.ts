@@ -217,7 +217,7 @@ export function registerGuestsRoutes(app: Express) {
     try {
       const guest = await storage.getGuest(req.params.id);
       if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
-      const { amount, description, reference, date, retentions, allocations } = req.body;
+      const { amount, description, reference, paymentMethod, date, retentions, allocations } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ error: "Monto inválido" });
       }
@@ -229,6 +229,7 @@ export function registerGuestsRoutes(app: Express) {
           description: description || "Pago recibido",
           amount: (-parseFloat(amount)).toFixed(2),
           reference: reference || null,
+          paymentMethod: paymentMethod || null,
           retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
           createdBy: req.body.createdBy || null,
           guestName: (guest as any).tipoPersona === "juridica" ? guest.firstName : `${guest.firstName} ${guest.lastName}`,
@@ -380,7 +381,7 @@ export function registerGuestsRoutes(app: Express) {
       if (!company) {
         return res.status(404).json({ error: "Empresa no encontrada" });
       }
-      const { amount, description, reference, date, retentions, allocations } = req.body;
+      const { amount, description, reference, paymentMethod, date, retentions, allocations } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ error: "Monto inválido" });
       }
@@ -392,6 +393,7 @@ export function registerGuestsRoutes(app: Express) {
           description: description || "Pago recibido",
           amount: (-parseFloat(amount)).toFixed(2),
           reference: reference || null,
+          paymentMethod: paymentMethod || null,
           retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
           createdBy: req.body.createdBy || null,
         },
@@ -410,7 +412,7 @@ export function registerGuestsRoutes(app: Express) {
       if (!agency) {
         return res.status(404).json({ error: "Agencia no encontrada" });
       }
-      const { amount, description, reference, date, retentions, allocations } = req.body;
+      const { amount, description, reference, paymentMethod, date, retentions, allocations } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ error: "Monto inválido" });
       }
@@ -422,6 +424,7 @@ export function registerGuestsRoutes(app: Express) {
           description: description || "Pago recibido",
           amount: (-parseFloat(amount)).toFixed(2),
           reference: reference || null,
+          paymentMethod: paymentMethod || null,
           retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
           createdBy: req.body.createdBy || null,
         },

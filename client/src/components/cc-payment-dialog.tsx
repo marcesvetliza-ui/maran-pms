@@ -12,6 +12,15 @@ import type { AccountMovement, AccountEntityType } from "@shared/schema";
 
 const RETENTION_CONCEPTS = ["IIBB", "Ganancias", "IVA", "SUSS", "TISHPYS", "Otras"];
 
+const PAYMENT_METHODS = [
+  { value: "transferencia", label: "Transferencia" },
+  { value: "cheque",        label: "Cheque" },
+  { value: "efectivo",      label: "Efectivo" },
+  { value: "compensacion",  label: "Compensación" },
+  { value: "tarjeta",       label: "Tarjeta de crédito" },
+  { value: "otro",          label: "Otro" },
+];
+
 type PendingCharge = AccountMovement & { saldoPendiente: number };
 
 interface RetentionRow {
@@ -39,6 +48,8 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
   const [paymentDescription, setPaymentDescription] = useState("Pago recibido");
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("transferencia");
+  const [paymentMethodOther, setPaymentMethodOther] = useState("");
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [manualAmount, setManualAmount] = useState("");
   const [retentions, setRetentions] = useState<RetentionRow[]>([]);
@@ -60,6 +71,8 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
       setPaymentDate(new Date().toISOString().split("T")[0]);
       setPaymentDescription("Pago recibido");
       setPaymentReference("");
+      setPaymentMethod("transferencia");
+      setPaymentMethodOther("");
       setSelected({});
       setManualAmount("");
       setRetentions([]);
@@ -71,6 +84,8 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
   const hasAllocations = allocationsTotal > 0;
   const totalAmount = hasAllocations ? allocationsTotal : parseFloat(manualAmount) || 0;
   const cashReceived = totalAmount - retentionsTotal;
+
+  const resolvedPaymentMethod = paymentMethod === "otro" ? (paymentMethodOther.trim() || "Otro") : paymentMethod;
 
   const toggleCharge = (charge: PendingCharge, checked: boolean) => {
     setSelected((prev) => {
@@ -114,6 +129,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
         amount: totalAmount.toFixed(2),
         description: paymentDescription,
         reference: paymentReference || null,
+        paymentMethod: resolvedPaymentMethod,
         date: paymentDate,
         allocations,
         retentions: validRetentions,
@@ -197,6 +213,34 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
               )}
             </div>
           )}
+
+          {/* Medio de pago */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Medio de pago</Label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger data-testid="select-payment-method">
+                  <SelectValue placeholder="Seleccionar..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_METHODS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {paymentMethod === "otro" && (
+              <div>
+                <Label>Especificar</Label>
+                <Input
+                  placeholder="Ej: débito, criptos..."
+                  value={paymentMethodOther}
+                  onChange={(e) => setPaymentMethodOther(e.target.value)}
+                  data-testid="input-payment-method-other"
+                />
+              </div>
+            )}
+          </div>
 
           <div>
             <div className="flex items-center justify-between">

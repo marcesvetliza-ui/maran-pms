@@ -1069,9 +1069,20 @@ export function registerExportRoutes(app: Express) {
         doc.font("Helvetica").fontSize(7.5).fill("#888").text("En concepto de:", x0 + 10, y + 9);
         doc.font("Helvetica").fontSize(9.5).fill("#111")
           .text(mov.description || "Cobro cuenta corriente", x0 + 10, y + 22, { width: pageW - 125 });
+        let refY = 38;
+        if (mov.payment_method) {
+          const methodLabels: Record<string, string> = {
+            transferencia: "Transferencia", cheque: "Cheque", efectivo: "Efectivo",
+            compensacion: "Compensación", tarjeta: "Tarjeta de crédito",
+          };
+          const label = methodLabels[mov.payment_method] ?? mov.payment_method;
+          doc.font("Helvetica").fontSize(8).fill("#444")
+            .text(`Medio de pago: ${label}`, x0 + 10, y + refY);
+          refY += 12;
+        }
         if (mov.reference) {
           doc.font("Helvetica").fontSize(8).fill("#777")
-            .text(`Referencia: ${mov.reference}`, x0 + 10, y + 38);
+            .text(`Referencia: ${mov.reference}`, x0 + 10, y + refY);
         }
 
         y += 67;

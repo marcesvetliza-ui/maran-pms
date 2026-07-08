@@ -819,6 +819,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("account_movement_allocations.idx_cargo", T, () =>
     db.execute(sql`CREATE INDEX IF NOT EXISTS idx_account_movement_allocations_cargo ON account_movement_allocations(cargo_id)`)
   );
+  await withTimeout("account_movements.payment_method", T, () =>
+    db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS payment_method text`)
+  );
 
   logger.info("Migraciones incrementales completadas.");
 }

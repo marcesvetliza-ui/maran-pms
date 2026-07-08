@@ -4515,7 +4515,7 @@ export class DatabaseStorage implements IStorage {
   async createPaymentWithAllocations(
     entityType: AccountEntityType,
     entityId: string,
-    data: { date: string; description: string; amount: string; reference: string | null; retentions: AccountRetention[] | null; createdBy: string | null; guestName?: string | null },
+    data: { date: string; description: string; amount: string; reference: string | null; paymentMethod?: string | null; retentions: AccountRetention[] | null; createdBy: string | null; guestName?: string | null },
     allocations: { cargoId: string; amount: string }[]
   ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }> {
     return await db.transaction(async (tx) => {
@@ -4527,6 +4527,7 @@ export class DatabaseStorage implements IStorage {
         description: data.description,
         amount: data.amount,
         reference: data.reference,
+        paymentMethod: data.paymentMethod ?? null,
         retentions: data.retentions,
         createdBy: data.createdBy,
         guestName: data.guestName ?? null,
