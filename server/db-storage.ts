@@ -4585,7 +4585,7 @@ export class DatabaseStorage implements IStorage {
                  + COALESCE((
                    SELECT SUM(amount::numeric)
                    FROM account_movements
-                   WHERE entity_id = c.id AND entity_type = 'company'
+                   WHERE entity_id = c.id AND entity_type = 'company' AND type = 'pago'
                  ), 0)
                ) AS balance,
                GREATEST(
