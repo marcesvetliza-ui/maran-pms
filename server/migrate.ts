@@ -775,5 +775,50 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  // account_movements / account_movement_allocations: nunca estaban en el bloque
+  // incremental (solo en el migrate() de baseline, que se omite en producción).
+  // Esto provocaba "relation does not exist" en Railway -> endpoints de saldo
+  // devolvían 500 -> frontend mostraba $0.00.
+  await withTimeout("account_movements (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS account_movements (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        entity_type text NOT NULL,
+        entity_id varchar NOT NULL,
+        date date NOT NULL,
+        type text NOT NULL,
+        description text NOT NULL,
+        amount numeric(12, 2) NOT NULL,
+        reservation_id varchar,
+        reservation_code text,
+        guest_name text,
+        reference text,
+        retentions jsonb,
+        created_by varchar,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)
+  );
+  await withTimeout("account_movements.retentions", T, () =>
+    db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS retentions jsonb`)
+  );
+  await withTimeout("account_movement_allocations (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS account_movement_allocations (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        pago_id varchar NOT NULL REFERENCES account_movements(id),
+        cargo_id varchar NOT NULL REFERENCES account_movements(id),
+        amount numeric(12, 2) NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)
+  );
+  await withTimeout("account_movements.idx_entity", T, () =>
+    db.execute(sql`CREATE INDEX IF NOT EXISTS idx_account_movements_entity ON account_movements(entity_type, entity_id)`)
+  );
+  await withTimeout("account_movement_allocations.idx_cargo", T, () =>
+    db.execute(sql`CREATE INDEX IF NOT EXISTS idx_account_movement_allocations_cargo ON account_movement_allocations(cargo_id)`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

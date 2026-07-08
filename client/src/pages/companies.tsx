@@ -154,13 +154,17 @@ export default function CompaniesPage() {
     queryKey: ["/api/companies"],
   });
 
-  const { data: accountData, refetch: refetchAccount } = useQuery<{
+  const { data: accountData, refetch: refetchAccount, isError: accountError, error: accountErrorObj } = useQuery<{
     movements: AccountMovement[];
     balance: number;
   }>({
     queryKey: ["/api/companies", viewingAccountCompany?.id, "account"],
     queryFn: async () => {
       const res = await fetch(`/api/companies/${viewingAccountCompany!.id}/account`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || `Error ${res.status} al obtener la cuenta corriente`);
+      }
       return res.json();
     },
     enabled: !!viewingAccountCompany,
@@ -629,6 +633,12 @@ export default function CompaniesPage() {
             </SheetTitle>
             <SheetDescription>Cuenta corriente — movimientos y saldo</SheetDescription>
           </SheetHeader>
+
+          {accountError && (
+            <div className="rounded-md p-4 mb-4 bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-800 text-red-700 dark:text-red-400 text-sm" data-testid="text-account-error">
+              No se pudo cargar la cuenta corriente: {accountErrorObj instanceof Error ? accountErrorObj.message : "Error desconocido"}
+            </div>
+          )}
 
           <div className={`rounded-md p-4 mb-4 flex items-center justify-between gap-4 ${
             (accountData?.balance || 0) > 0

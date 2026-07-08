@@ -17,3 +17,4 @@
 - [Cuenta Corriente payment engine](cc-payment-engine.md) — shared CCPaymentDialog + account_movement_allocations table drives companies/agencies/guests payment-with-allocations + retentions + PDF receipt across all 3 entity types.
 - [Silent non-array query crash](silent-non-array-query-crash.md) — raw fetch() queryFn without res.ok check turns error responses into crashing non-array data; `= []` default only guards undefined, not this case.
 - [Auth testing quirks](auth-testing-quirks.md) — system_users table + bcryptjs (not bcrypt) hashes; generate test-login hashes via code_execution sandbox, not DB/testing-subagent.
+- [Production migration gap](production-migration-gap.md) — Railway skips Drizzle's baseline migrate(); schema.ts/migrations-folder changes must ALSO be added as idempotent SQL in migrate.ts's incremental block or the table/column won't exist in prod.
