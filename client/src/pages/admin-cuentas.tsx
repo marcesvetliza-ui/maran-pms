@@ -291,10 +291,12 @@ function EntityMovementsInline({
   entityType,
   entityId,
   entityName,
+  summaryBalance,
 }: {
   entityType: string;
   entityId: string;
   entityName: string;
+  summaryBalance?: number;
 }) {
   const { data: movements = [], isLoading } = useQuery<AccountMovement[]>({
     queryKey: ["/api/account-movements", entityType, entityId],
@@ -321,7 +323,9 @@ function EntityMovementsInline({
     );
   }
 
-  const balance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
+  const balance = summaryBalance !== undefined
+    ? summaryBalance
+    : movements.reduce((s, m) => s + parseFloat(m.amount), 0);
 
   return (
     <div className="mt-1 mb-2 border rounded-md overflow-hidden bg-muted/20">
@@ -794,7 +798,7 @@ export default function AdminCuentasPage() {
                               </div>
                             </div>
                             {isExpanded && (
-                              <EntityMovementsInline entityType="company" entityId={c.id} entityName={c.name} />
+                              <EntityMovementsInline entityType="company" entityId={c.id} entityName={c.name} summaryBalance={c.balance} />
                             )}
                           </div>
                         );
@@ -864,7 +868,7 @@ export default function AdminCuentasPage() {
                               </div>
                             </div>
                             {isExpanded && (
-                              <EntityMovementsInline entityType="agency" entityId={a.id} entityName={a.name} />
+                              <EntityMovementsInline entityType="agency" entityId={a.id} entityName={a.name} summaryBalance={a.balance} />
                             )}
                           </div>
                         );
@@ -934,7 +938,7 @@ export default function AdminCuentasPage() {
                               </div>
                             </div>
                             {isExpanded && (
-                              <EntityMovementsInline entityType="guest" entityId={g.id} entityName={g.name} />
+                              <EntityMovementsInline entityType="guest" entityId={g.id} entityName={g.name} summaryBalance={g.balance} />
                             )}
                           </div>
                         );
