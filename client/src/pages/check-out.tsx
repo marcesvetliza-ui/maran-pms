@@ -309,14 +309,17 @@ export default function CheckOutPage() {
       setPaymentBillingTarget("company");
       setCcCompanyId(reservation.companyId);
       setCcAgencyId("");
+      setPaymentMethod("cuenta_corriente");
     } else if (reservation.agencyId) {
       setPaymentBillingTarget("agency");
       setCcAgencyId(reservation.agencyId);
       setCcCompanyId("");
+      setPaymentMethod("cuenta_corriente");
     } else {
       setPaymentBillingTarget("guest");
       setCcCompanyId("");
       setCcAgencyId("");
+      setPaymentMethod("efectivo");
     }
   };
 
@@ -511,6 +514,18 @@ export default function CheckOutPage() {
                 {balance <= 0.01 && <CircleCheck className="h-8 w-8 text-green-500" />}
               </CardContent>
             </Card>
+
+            {balance > 0.01 && (selectedReservation?.companyId || selectedReservation?.agencyId) && (
+              <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  {selectedReservation.companyId
+                    ? <>Empresa vinculada: <strong>{selectedReservation.company?.nombreFantasia || selectedReservation.company?.razonSocial || "—"}</strong>. En el siguiente paso el método de pago estará preseleccionado como <strong>Cuenta Corriente</strong>.</>
+                    : <>Agencia vinculada: <strong>{selectedReservation.agency?.nombreFantasia || selectedReservation.agency?.razonSocial || "—"}</strong>. En el siguiente paso el método de pago estará preseleccionado como <strong>Cuenta Corriente</strong>.</>
+                  }
+                </span>
+              </div>
+            )}
 
             <div className="flex justify-end">
               <Button onClick={() => setWizardStep(2)} data-testid="button-continue-to-payment">
