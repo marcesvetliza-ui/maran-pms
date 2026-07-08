@@ -61,6 +61,8 @@ type AccountMovement = {
   reservationCode?: string | null;
   guestName?: string | null;
   reference?: string | null;
+  paymentMethod?: string | null;
+  saldoPendiente?: number;
   createdAt: string;
 };
 
@@ -362,23 +364,53 @@ function EntityMovementsInline({
         </thead>
         <tbody className="divide-y divide-border">
           {movements.map((m) => {
-            const isDebt = parseFloat(m.amount) > 0;
+            const amount = parseFloat(m.amount);
+            const isDebt = amount > 0;
+
+            // Cargo payment status
+            let cargoStatus: "pendiente" | "parcial" | "cobrado" | null = null;
+            if (m.type === "cargo") {
+              if (m.saldoPendiente === undefined) cargoStatus = "pendiente";
+              else if (m.saldoPendiente <= 0.009) cargoStatus = "cobrado";
+              else if (m.saldoPendiente < amount - 0.009) cargoStatus = "parcial";
+              else cargoStatus = "pendiente";
+            }
+
+            const rowClass = cargoStatus === "cobrado"
+              ? "hover:bg-muted/30 opacity-60"
+              : "hover:bg-muted/30";
+
             return (
-              <tr key={m.id} className="hover:bg-muted/30">
+              <tr key={m.id} className={rowClass}>
                 <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{m.date}</td>
                 <td className="px-3 py-1.5">
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] px-1.5 py-0 ${
-                      m.type === "cargo"
-                        ? "text-red-600 border-red-300"
-                        : m.type === "pago"
-                        ? "text-green-600 border-green-300"
-                        : "text-blue-600 border-blue-300"
-                    }`}
-                  >
-                    {MOVEMENT_TYPE_LABELS[m.type] ?? m.type}
-                  </Badge>
+                  {m.type === "cargo" ? (
+                    <span className="flex items-center gap-1">
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] px-1.5 py-0 ${
+                          cargoStatus === "cobrado"
+                            ? "text-green-700 border-green-400 bg-green-50"
+                            : cargoStatus === "parcial"
+                            ? "text-amber-600 border-amber-400 bg-amber-50"
+                            : "text-red-600 border-red-300"
+                        }`}
+                      >
+                        {cargoStatus === "cobrado" ? "Cobrado" : cargoStatus === "parcial" ? "Parcial" : "Cargo"}
+                      </Badge>
+                    </span>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] px-1.5 py-0 ${
+                        m.type === "pago"
+                          ? "text-green-600 border-green-300"
+                          : "text-blue-600 border-blue-300"
+                      }`}
+                    >
+                      {MOVEMENT_TYPE_LABELS[m.type] ?? m.type}
+                    </Badge>
+                  )}
                 </td>
                 <td className="px-3 py-1.5 max-w-[200px] truncate">{m.description}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">
@@ -391,7 +423,12 @@ function EntityMovementsInline({
                   )}
                 </td>
                 <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${isDebt ? "text-red-600" : "text-green-600"}`}>
-                  {fmtMoney(m.amount)}
+                  <div>{fmtMoney(m.amount)}</div>
+                  {cargoStatus === "parcial" && m.saldoPendiente !== undefined && (
+                    <div className="text-[10px] text-amber-600 font-normal">
+                      Pdte: {fmtMoney(m.saldoPendiente)}
+                    </div>
+                  )}
                 </td>
                 <td className="px-1 py-1">
                   {m.type === "pago" && (

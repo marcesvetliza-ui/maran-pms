@@ -4449,8 +4449,8 @@ export class DatabaseStorage implements IStorage {
     }
     return results;
   }
-  async getAccountMovements(entityType: AccountEntityType, entityId: string): Promise<AccountMovement[]> {
-    return await db.select()
+  async getAccountMovements(entityType: AccountEntityType, entityId: string): Promise<(AccountMovement & { saldoPendiente?: number })[]> {
+    const rows = await db.select()
       .from(accountMovements)
       .where(
         and(
@@ -4459,6 +4459,26 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(desc(accountMovements.date), desc(accountMovements.createdAt));
+
+    // Enrich cargo rows with their pending balance (amount - allocated)
+    const cargoIds = rows.filter(r => r.type === "cargo").map(r => r.id);
+    if (cargoIds.length === 0) return rows;
+
+    const allocs = await db.select()
+      .from(accountMovementAllocations)
+      .where(inArray(accountMovementAllocations.cargoId, cargoIds));
+
+    const allocatedByCargo = new Map<string, number>();
+    for (const a of allocs) {
+      allocatedByCargo.set(a.cargoId, (allocatedByCargo.get(a.cargoId) || 0) + parseFloat(a.amount));
+    }
+
+    return rows.map(r => {
+      if (r.type !== "cargo") return r;
+      const allocated = allocatedByCargo.get(r.id) || 0;
+      const saldoPendiente = Math.round((parseFloat(r.amount) - allocated) * 100) / 100;
+      return { ...r, saldoPendiente };
+    });
   }
 
   async getAccountBalance(entityType: AccountEntityType, entityId: string): Promise<number> {
