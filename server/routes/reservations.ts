@@ -922,8 +922,9 @@ export function registerReservationsRoutes(app: Express) {
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       sendCheckoutEmail(req.params.id, baseUrl).catch(e => console.error("[email] checkout trigger error:", e));
       res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Error processing check-out" });
+    } catch (error: any) {
+      console.error("[check-out] error:", error?.message || error, error?.stack || "");
+      res.status(500).json({ error: "Error processing check-out", detail: error?.message || String(error) });
     }
   });
 
