@@ -105,6 +105,7 @@ export default function CheckOutPage() {
   const [ccCompanyId, setCcCompanyId] = useState("");
   const [ccAgencyId, setCcAgencyId] = useState("");
   const [earlyCheckoutDialog, setEarlyCheckoutDialog] = useState(false);
+  const [debtWarningDialog, setDebtWarningDialog] = useState(false);
   const [itemPayMode, setItemPayMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
 
@@ -685,29 +686,22 @@ export default function CheckOutPage() {
                       </div>
                       <div>
                         <Label>Método de pago</Label>
-                        {paymentReceiptType === "cierre_habitacion" ? (
-                          <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-input bg-muted text-sm text-muted-foreground" data-testid="select-payment-method-fixed">
-                            <span className="font-medium text-foreground">Efectivo</span>
-                            <span className="text-xs">(requerido para cierre de habitación)</span>
-                          </div>
-                        ) : (
-                          <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
-                            <SelectTrigger data-testid="select-payment-method">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(paymentMethodLabels).map(([value, label]) => (
-                                <SelectItem key={value} value={value}>{label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
+                        <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
+                          <SelectTrigger data-testid="select-payment-method">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(paymentMethodLabels).map(([value, label]) => (
+                              <SelectItem key={value} value={value}>{label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label>Tipo de comprobante</Label>
-                        <Select value={paymentReceiptType} onValueChange={(v) => { setPaymentReceiptType(v); if (v === "cierre_habitacion") setPaymentMethod("efectivo"); }}>
+                        <Select value={paymentReceiptType} onValueChange={(v) => setPaymentReceiptType(v)}>
                           <SelectTrigger data-testid="select-receipt-type">
                             <SelectValue />
                           </SelectTrigger>
@@ -882,6 +876,40 @@ export default function CheckOutPage() {
               </>
             )}
 
+            {/* Dialog advertencia deuda al cerrar histórico con saldo */}
+            <Dialog open={debtWarningDialog} onOpenChange={setDebtWarningDialog}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                    <AlertCircle className="h-5 w-5" /> Cierre con saldo pendiente
+                  </DialogTitle>
+                  <DialogDescription>
+                    Esta reserva tiene un saldo pendiente de{" "}
+                    <span className="font-bold text-red-600">${balance.toFixed(2)}</span>.
+                    {selectedReservation?.companyId
+                      ? " La deuda quedará registrada en la cuenta corriente de la empresa."
+                      : selectedReservation?.agencyId
+                      ? " La deuda quedará registrada en la cuenta corriente de la agencia."
+                      : " La deuda quedará registrada en la cuenta del huésped."}
+                    {" "}¿Confirmás el cierre de todas formas?
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDebtWarningDialog(false)}>Cancelar</Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      setDebtWarningDialog(false);
+                      selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+                    }}
+                    data-testid="button-confirm-checkout-with-debt"
+                  >
+                    Confirmar cierre con deuda
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setWizardStep(1)} data-testid="button-back-to-summary">
                 <ChevronLeft className="h-4 w-4 mr-1" /> Volver al resumen
@@ -889,6 +917,7 @@ export default function CheckOutPage() {
               <Button
                 onClick={() => {
                   if (isEarlyCheckout) { setEarlyCheckoutDialog(true); return; }
+                  if (isHistorical && balance > 0.01) { setDebtWarningDialog(true); return; }
                   selectedReservation && checkOutMutation.mutate(selectedReservation.id);
                 }}
                 disabled={(!isHistorical && balance > 0.01) || checkOutMutation.isPending}

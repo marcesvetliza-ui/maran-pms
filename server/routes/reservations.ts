@@ -848,21 +848,84 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const forceCheckout = req.body.forceCheckout === true || isHistorical;
-      if (!forceCheckout) {
-        const chargesTotal = await storage.getChargesTotal(req.params.id);
-        const paymentsTotal = await storage.getPaymentsTotal(req.params.id);
-        const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
-        const roomTotal = savedRoomTotal > 0
-          ? savedRoomTotal
-          : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
-        const balance = roomTotal + chargesTotal - paymentsTotal;
 
+      // Always compute balance (needed for both the block and the CC cargo creation)
+      const chargesTotal = await storage.getChargesTotal(req.params.id);
+      const paymentsTotal = await storage.getPaymentsTotal(req.params.id);
+      const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
+      const roomTotal = savedRoomTotal > 0
+        ? savedRoomTotal
+        : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
+      const balance = roomTotal + chargesTotal - paymentsTotal;
+
+      if (!forceCheckout) {
         if (balance > 0.01) {
           return res.status(400).json({
             error: "Saldo pendiente",
             message: `La reserva tiene un saldo pendiente de $${balance.toFixed(2)}. Liquide antes de hacer check-out.`,
             balance
           });
+        }
+      }
+
+      // Si se cierra con saldo pendiente y hay empresa/agencia/huésped vinculado, crear un cargo en CC
+      if (forceCheckout && balance > 0.01) {
+        const guestNameCC = reservation.guest
+          ? `${reservation.guest.firstName} ${reservation.guest.lastName}`
+          : "Huésped";
+        const roomNumCC = reservation.room?.roomNumber || reservation.roomId;
+        const dateCC = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const descCC = `Saldo por estadía ${reservation.reservationCode} — Hab. ${roomNumCC} (cierre con deuda)`;
+        const amtCC = balance.toFixed(2);
+
+        // Verificar si ya existe un cargo de deuda para esta reserva (evitar duplicados si se reintenta)
+        const existingMov = await storage.getAccountMovementsByReservation(reservation.id);
+        const alreadyHasDebtCargo = existingMov.some(
+          m => m.type === "cargo" && m.description?.includes("cierre con deuda")
+        );
+
+        if (!alreadyHasDebtCargo) {
+          try {
+            if (reservation.companyId) {
+              await storage.createAccountMovement({
+                entityType: "company",
+                entityId: reservation.companyId,
+                date: dateCC,
+                type: "cargo",
+                description: descCC,
+                amount: amtCC,
+                reservationId: reservation.id,
+                reservationCode: reservation.reservationCode,
+                guestName: guestNameCC,
+              });
+            } else if (reservation.agencyId) {
+              await storage.createAccountMovement({
+                entityType: "agency",
+                entityId: reservation.agencyId,
+                date: dateCC,
+                type: "cargo",
+                description: descCC,
+                amount: amtCC,
+                reservationId: reservation.id,
+                reservationCode: reservation.reservationCode,
+                guestName: guestNameCC,
+              });
+            } else if (reservation.guestId) {
+              await storage.createAccountMovement({
+                entityType: "guest",
+                entityId: reservation.guestId,
+                date: dateCC,
+                type: "cargo",
+                description: descCC,
+                amount: amtCC,
+                reservationId: reservation.id,
+                reservationCode: reservation.reservationCode,
+                guestName: guestNameCC,
+              });
+            }
+          } catch (e) {
+            console.error("[checkout] Error creando cargo CC por saldo pendiente:", e);
+          }
         }
       }
 
