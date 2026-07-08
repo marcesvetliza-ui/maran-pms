@@ -4502,11 +4502,42 @@ export class DatabaseStorage implements IStorage {
       allocatedByCargo.set(a.cargoId, (allocatedByCargo.get(a.cargoId) || 0) + parseFloat(a.amount));
     }
 
+    // For cargo entries linked to a reservation, compute the actual outstanding
+    // balance from the reservation directly (total_room_amount + charges - payments).
+    // This prevents showing a pending amount larger than what the reservation actually owes,
+    // which happens when reservation-level payments were recorded outside the CC system.
+    const reservationIds = movements
+      .map(m => m.reservationId)
+      .filter((id): id is string => !!id);
+
+    const reservationBalances = new Map<string, number>();
+    if (reservationIds.length > 0) {
+      const rows = await db.execute(sql`
+        SELECT r.id,
+               GREATEST(0,
+                 r.total_room_amount::numeric
+                 + COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'active'), 0)
+                 - COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND p.status != 'anulado'), 0)
+               ) AS outstanding
+        FROM reservations r
+        WHERE r.id = ANY(${reservationIds})
+      `);
+      for (const row of rows.rows as any[]) {
+        reservationBalances.set(row.id, parseFloat(row.outstanding));
+      }
+    }
+
     return movements
       .map(m => {
         const cargoAmount = parseFloat(m.amount);
         const allocated = allocatedByCargo.get(m.id) || 0;
-        const saldoPendiente = Math.round((cargoAmount - allocated) * 100) / 100;
+        const ccPending = cargoAmount - allocated;
+        // Cap by actual reservation outstanding (if linked), so reservation-level
+        // payments are reflected here even if not recorded as CC pagos.
+        const reservationOutstanding = m.reservationId !== undefined && m.reservationId !== null
+          ? (reservationBalances.get(m.reservationId) ?? ccPending)
+          : ccPending;
+        const saldoPendiente = Math.round(Math.min(ccPending, reservationOutstanding) * 100) / 100;
         return { ...m, saldoPendiente };
       })
       .filter(m => m.saldoPendiente > 0.009);
