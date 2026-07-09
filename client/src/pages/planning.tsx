@@ -408,13 +408,26 @@ export default function PlanningPage() {
   });
 
   useEffect(() => {
-    const measure = () => {
-      if (dateHeaderRowRef.current) setDateRowHeight(dateHeaderRowRef.current.getBoundingClientRect().height);
-      if (notesHeaderRowRef.current) setNotesRowHeight(notesHeaderRowRef.current.getBoundingClientRect().height);
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    const targets = [
+      { ref: dateHeaderRowRef, setter: setDateRowHeight },
+      { ref: notesHeaderRowRef, setter: setNotesRowHeight },
+    ];
+    const observers: ResizeObserver[] = [];
+    targets.forEach(({ ref, setter }) => {
+      if (!ref.current) return;
+      // Measure immediately
+      setter(ref.current.getBoundingClientRect().height);
+      // Keep measuring as content/layout changes
+      const ro = new ResizeObserver(([entry]) => {
+        setter(entry.contentRect.height + (entry.target instanceof HTMLElement
+          ? parseFloat(getComputedStyle(entry.target).borderTopWidth || "0") +
+            parseFloat(getComputedStyle(entry.target).borderBottomWidth || "0")
+          : 0));
+      });
+      ro.observe(ref.current);
+      observers.push(ro);
+    });
+    return () => observers.forEach(ro => ro.disconnect());
   }, [data, showRevenue]);
 
   // Pre-compute day index map for fast lookup
@@ -902,7 +915,7 @@ export default function PlanningPage() {
                         return (
                           <th
                             key={day}
-                            className={`sticky top-0 z-20 px-1 py-2 text-center text-xs font-medium border-b min-w-[60px] ${
+                            className={`sticky top-0 z-20 px-1 py-2 text-center text-xs font-medium border-b min-w-[60px] align-top ${
                               info.isToday ? "bg-primary/10" : info.isWeekend ? "bg-muted/50" : "bg-background"
                             }`}
                           >
