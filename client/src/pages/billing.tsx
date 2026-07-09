@@ -342,15 +342,14 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       if (nextTipo === "FC") {
         return { ...item, alicuotaIva: "no_gravado" as const, subtotalNeto: base, subtotal: base };
       }
-      if (nextTipo === "FA") {
-        if (alicuota === "21" || alicuota === "10.5") {
-          return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base * (1 + (alicuota === "21" ? 0.21 : 0.105)) };
-        }
-        return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
-      }
-      // FB
+      // FA y FB: el precio ingresado ya incluye IVA → extraer el neto dividiendo
       if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.21).toFixed(2)), subtotal: base };
       if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.105).toFixed(2)), subtotal: base };
+      if (nextTipo === "FA") {
+        // exento / no_gravado en FA: el monto ingresado es el total
+        return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
+      }
+      // FB: exento / no_gravado
       return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
     }));
   }
@@ -371,9 +370,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
         else { item.subtotalNeto = base; item.subtotal = base; }
       } else {
-        if (item.alicuotaIva === "21" || item.alicuotaIva === "10.5") {
-          item.subtotalNeto = base; item.subtotal = base * (1 + (item.alicuotaIva === "21" ? 0.21 : 0.105));
-        } else { item.subtotalNeto = base; item.subtotal = base; }
+        // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
+        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat((base / 1.21).toFixed(2)); item.subtotal = base; }
+        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
+        else { item.subtotalNeto = base; item.subtotal = base; }
       }
       updated[idx] = item;
       return updated;
