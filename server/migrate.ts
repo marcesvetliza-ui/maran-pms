@@ -279,6 +279,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // monto_acreditado en sales_invoices (para NC parciales múltiples y estado "parcial")
+  await withTimeout("sales_invoices.monto_acreditado", T, () =>
+    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS monto_acreditado numeric(14,2) DEFAULT 0`)
+  );
+
   // default_course en menu_items (agregado al schema pero faltaba la migración)
   await withTimeout("menu_items.default_course", T, () =>
     db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS default_course integer`)

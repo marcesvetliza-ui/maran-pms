@@ -3116,14 +3116,23 @@ export default function RestaurantPage() {
                             </TableHeader>
                             <TableBody>
                               {facturas.map((inv: any) => {
-                                const linkedNc = inv.estado === "anulada" && inv.nota_credito_id ? ncById.get(inv.nota_credito_id) : null;
+                                const linkedNc = inv.nota_credito_id ? ncById.get(inv.nota_credito_id) : null;
+                                const montoAcreditado = parseFloat(inv.monto_acreditado || "0");
+                                const saldoPendiente = parseFloat(inv.monto_total || "0") - montoAcreditado;
                                 return (
                                 <TableRow key={inv.id}>
                                   <TableCell className="font-mono text-sm">{formatNro(inv)}</TableCell>
                                   <TableCell><Badge variant="outline">{inv.tipo_comprobante}</Badge></TableCell>
                                   <TableCell className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</TableCell>
                                   <TableCell className="text-sm max-w-[160px] truncate">{inv.cliente_razon_social || "Consumidor Final"}</TableCell>
-                                  <TableCell className="text-right font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</div>
+                                    {inv.estado === "parcial" && (
+                                      <div className="text-[11px] text-amber-600 dark:text-amber-400">
+                                        NC: ${montoAcreditado.toLocaleString("es-AR", { minimumFractionDigits: 2 })} · Pend: ${saldoPendiente.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                      </div>
+                                    )}
+                                  </TableCell>
                                   <TableCell>
                                     {inv.estado === "anulada"
                                       ? (
@@ -3136,13 +3145,24 @@ export default function RestaurantPage() {
                                           )}
                                         </div>
                                       )
-                                      : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
+                                      : inv.estado === "parcial"
+                                        ? (
+                                          <div className="flex flex-col gap-0.5">
+                                            <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300">Parcial</Badge>
+                                            {linkedNc && (
+                                              <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap">
+                                                últ. NC: {linkedNc.tipo_comprobante} {formatNro(linkedNc)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )
+                                        : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
                                     }
                                   </TableCell>
                                   <TableCell>
                                     {inv.estado !== "anulada" && (
                                       <Button size="sm" variant="outline" className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                                        onClick={() => { setInvoiceForNC(inv); setNcMotivo(""); }} data-testid={`button-emitir-nc-${inv.id}`}>
+                                        onClick={() => { setInvoiceForNC(inv); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); }} data-testid={`button-emitir-nc-${inv.id}`}>
                                         <FileX className="h-3.5 w-3.5 mr-1" />Emitir NC
                                       </Button>
                                     )}
@@ -5786,57 +5806,72 @@ export default function RestaurantPage() {
             </DialogTitle>
             <DialogDescription>
               Factura <strong>{invoiceForNC?.numero_completo || invoiceForNC?.tipo_comprobante}</strong> — Total: <strong>${parseFloat(invoiceForNC?.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>
+              {invoiceForNC?.estado === "parcial" && (
+                <span className="block mt-1 text-amber-600 dark:text-amber-400 font-medium">
+                  Ya acreditado: ${parseFloat(invoiceForNC?.monto_acreditado || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })} — Saldo pendiente: ${(parseFloat(invoiceForNC?.monto_total || "0") - parseFloat(invoiceForNC?.monto_acreditado || "0")).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="rest-nc-parcial"
-                checked={ncParcial}
-                onChange={(e) => { setNcParcial(e.target.checked); if (!e.target.checked) setNcMontoParcial(""); }}
-                data-testid="checkbox-nc-parcial"
-              />
-              <label htmlFor="rest-nc-parcial" className="text-sm font-medium cursor-pointer">Nota de crédito parcial</label>
-            </div>
-            {ncParcial && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium">Monto a acreditar *</label>
-                <Input
-                  type="number"
-                  min="0"
-                  max={parseFloat(invoiceForNC?.monto_total || "0")}
-                  step="0.01"
-                  value={ncMontoParcial}
-                  onChange={(e) => setNcMontoParcial(e.target.value)}
-                  placeholder="0.00"
-                  data-testid="input-nc-monto-parcial"
-                />
-              </div>
-            )}
-            <div className="text-xs text-muted-foreground">
-              {ncParcial
-                ? "La factura original permanece vigente (no se anula)."
-                : "La factura original quedará anulada."}
-            </div>
-            <label className="text-sm font-medium">Motivo <span className="text-muted-foreground text-xs">(requerido)</span></label>
-            <Textarea
-              placeholder="Ej: Error en facturación, devolución de consumo..."
-              value={ncMotivo}
-              onChange={(e) => setNcMotivo(e.target.value)}
-              rows={3}
-              data-testid="input-nc-motivo"
-            />
+            {(() => {
+              const totalFact = parseFloat(invoiceForNC?.monto_total || "0");
+              const yaAcreditado = parseFloat(invoiceForNC?.monto_acreditado || "0");
+              const saldoPendiente = totalFact - yaAcreditado;
+              return (
+                <>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="rest-nc-parcial"
+                      checked={ncParcial}
+                      onChange={(e) => { setNcParcial(e.target.checked); if (!e.target.checked) setNcMontoParcial(""); }}
+                      data-testid="checkbox-nc-parcial"
+                    />
+                    <label htmlFor="rest-nc-parcial" className="text-sm font-medium cursor-pointer">Nota de crédito parcial</label>
+                  </div>
+                  {ncParcial && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Monto a acreditar * <span className="text-muted-foreground">(máx. ${saldoPendiente.toLocaleString("es-AR", { minimumFractionDigits: 2 })})</span></label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max={saldoPendiente}
+                        step="0.01"
+                        value={ncMontoParcial}
+                        onChange={(e) => setNcMontoParcial(e.target.value)}
+                        placeholder="0.00"
+                        data-testid="input-nc-monto-parcial"
+                      />
+                    </div>
+                  )}
+                  <div className="text-xs text-muted-foreground">
+                    {ncParcial
+                      ? "La factura original permanece vigente (no se anula)."
+                      : "La factura original quedará anulada."}
+                  </div>
+                  <label className="text-sm font-medium">Motivo <span className="text-muted-foreground text-xs">(requerido)</span></label>
+                  <Textarea
+                    placeholder="Ej: Error en facturación, devolución de consumo..."
+                    value={ncMotivo}
+                    onChange={(e) => setNcMotivo(e.target.value)}
+                    rows={3}
+                    data-testid="input-nc-motivo"
+                  />
+                </>
+              );
+            })()}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setInvoiceForNC(null); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); }}>Cancelar</Button>
             <Button
               variant="destructive"
-              disabled={
-                !ncMotivo.trim() ||
-                emitirNCMutation.isPending ||
-                (ncParcial && (!ncMontoParcial || parseFloat(ncMontoParcial) <= 0 || parseFloat(ncMontoParcial) > parseFloat(invoiceForNC?.monto_total || "0")))
-              }
+              disabled={(() => {
+                const saldo = parseFloat(invoiceForNC?.monto_total || "0") - parseFloat(invoiceForNC?.monto_acreditado || "0");
+                return !ncMotivo.trim() ||
+                  emitirNCMutation.isPending ||
+                  (ncParcial && (!ncMontoParcial || parseFloat(ncMontoParcial) <= 0 || parseFloat(ncMontoParcial) > saldo + 0.009));
+              })()}
               onClick={() => {
                 if (!invoiceForNC) return;
                 emitirNCMutation.mutate({

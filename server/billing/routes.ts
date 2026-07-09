@@ -354,16 +354,27 @@ export function registerBillingRoutes(app: Express) {
       const original = row.rows[0] as any;
 
       if (original.estado === "anulada") {
-        return res.status(400).json({ error: "La factura ya tiene una nota de crédito emitida" });
+        return res.status(400).json({ error: "La factura ya fue anulada completamente" });
       }
 
       const { motivo, items, monto } = req.body;
       const tipoNC = original.tipo_comprobante === "FA" ? "NCA" : original.tipo_comprobante === "FC" ? "NCC" : "NCB";
       const user = (req as any).user;
 
+      const montoTotal = parseFloat(original.monto_total);
+      const montoYaAcreditado = parseFloat(original.monto_acreditado || "0");
+      const saldoPendiente = montoTotal - montoYaAcreditado;
+
       const montoParcial = monto !== undefined && monto !== null ? parseFloat(monto) : undefined;
       const esParcial = montoParcial !== undefined && !isNaN(montoParcial) && montoParcial > 0
-        && montoParcial < parseFloat(original.monto_total);
+        && montoParcial < saldoPendiente - 0.009;
+
+      // Validate partial amount doesn't exceed pending balance
+      if (montoParcial !== undefined && montoParcial > saldoPendiente + 0.009) {
+        return res.status(400).json({ error: `El monto a acreditar ($${montoParcial.toFixed(2)}) supera el saldo pendiente de la factura ($${saldoPendiente.toFixed(2)})` });
+      }
+
+      const montoNC = montoParcial ?? saldoPendiente;
 
       const ncItems = esParcial
         ? [{ descripcion: `Anulación parcial de comprobante ${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}${motivo ? ` — ${motivo}` : ""}`, cantidad: 1, precioUnitario: montoParcial }]
@@ -384,16 +395,25 @@ export function registerBillingRoutes(app: Express) {
         puntoVentaOverride: original.punto_venta,
       } as NewInvoiceData);
 
-      // Nota de crédito total: anula la factura original. Parcial: la original sigue vigente,
-      // solo se deja registrado el vínculo con la NC para trazabilidad.
+      // Actualiza monto_acreditado y estado de la factura original.
+      // - NC parcial: suma el monto al acreditado. Si llega al total → anulada; si no → parcial.
+      // - NC total: anula directamente.
       if (esParcial) {
+        const nuevoAcreditado = montoYaAcreditado + (montoParcial as number);
+        const nuevoEstado = nuevoAcreditado >= montoTotal - 0.009 ? "anulada" : "parcial";
         await db.execute(sql`
-          UPDATE sales_invoices SET nota_credito_id = ${nc.id}
+          UPDATE sales_invoices
+            SET nota_credito_id = ${nc.id},
+                monto_acreditado = ${nuevoAcreditado.toFixed(2)},
+                estado = ${nuevoEstado}
           WHERE id = ${id}
         `);
       } else {
         await db.execute(sql`
-          UPDATE sales_invoices SET estado = 'anulada', nota_credito_id = ${nc.id}
+          UPDATE sales_invoices
+            SET estado = 'anulada',
+                monto_acreditado = ${montoTotal.toFixed(2)},
+                nota_credito_id = ${nc.id}
           WHERE id = ${id}
         `);
       }
