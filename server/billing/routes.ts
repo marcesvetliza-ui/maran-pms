@@ -377,7 +377,14 @@ export function registerBillingRoutes(app: Express) {
       const montoNC = montoParcial ?? saldoPendiente;
 
       const ncItems = esParcial
-        ? [{ descripcion: `Anulación parcial de comprobante ${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}${motivo ? ` — ${motivo}` : ""}`, cantidad: 1, precioUnitario: montoParcial }]
+        ? [{
+            descripcion: `Anulación parcial de comprobante ${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}${motivo ? ` — ${motivo}` : ""}`,
+            cantidad: 1,
+            precioUnitario: montoParcial as number,
+            alicuotaIva: "no_gravado" as const,
+            subtotalNeto: 0,
+            subtotal: montoParcial as number,
+          }]
         : (items ?? original.items ?? []);
 
       const nc = await emitirFactura({
