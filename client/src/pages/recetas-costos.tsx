@@ -215,14 +215,13 @@ export default function RecetasCostosPage() {
       });
       return res.json();
     },
-    onSuccess: (createdItem: MenuItem) => {
+    onSuccess: (_createdItem: MenuItem) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/menu/items"] });
-      setIsMenuItemDialogOpen(false);
-      menuItemForm.reset();
       toast({ title: "Plato creado" });
-      if (isNewItemWizard) {
-        setIsNewItemWizard(false);
-        openRecipeDialog(createdItem);
+      // Only close the old step-1 dialog if it was open (legacy flow)
+      if (isMenuItemDialogOpen) {
+        setIsMenuItemDialogOpen(false);
+        menuItemForm.reset();
       }
     },
   });
@@ -372,7 +371,25 @@ export default function RecetasCostosPage() {
             <UtensilsCrossed className="h-4 w-4 mr-2" />
             Categorías
           </Button>
-          <Button onClick={() => openMenuItemDialog()} data-testid="button-add-menu-item">
+          <Button
+            onClick={() => {
+              setSelectedRecipeItem(null);
+              setEditingMenuItem(null);
+              setIsEditingBasicData(true);
+              menuItemForm.reset({
+                name: "",
+                categoryId: menuCategories[0]?.id || "",
+                description: "",
+                price: 0,
+                preparationTime: 0,
+                isAvailable: "true",
+                isEditable: "false",
+                defaultCourse: undefined,
+              });
+              setIsRecipeDialogOpen(true);
+            }}
+            data-testid="button-add-menu-item"
+          >
             <Plus className="h-4 w-4 mr-2" />
             Agregar Plato
           </Button>
@@ -511,7 +528,7 @@ export default function RecetasCostosPage() {
         </Card>
       )}
 
-      {/* Recipe Dialog */}
+      {/* Recipe Dialog — unified for new dish and edit */}
       <Dialog
         open={isRecipeDialogOpen}
         onOpenChange={(open) => {
@@ -519,6 +536,7 @@ export default function RecetasCostosPage() {
           if (!open) {
             setIsEditingBasicData(false);
             setEditingMenuItem(null);
+            setSelectedRecipeItem(null);
           }
         }}
       >
@@ -526,43 +544,70 @@ export default function RecetasCostosPage() {
           <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <ChefHat className="h-5 w-5" />
-              Receta - {selectedRecipeItem?.name}
+              {selectedRecipeItem ? `Receta — ${selectedRecipeItem.name}` : "Nuevo Plato"}
             </DialogTitle>
             <DialogDescription>
-              {selectedRecipeItem && (
-                <span>
-                  Precio de venta: ${parseFloat(selectedRecipeItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                </span>
-              )}
+              {selectedRecipeItem
+                ? `Precio de venta: $${parseFloat(selectedRecipeItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+                : "Completá los datos básicos y agregá los ingredientes de la receta en un solo paso."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+            {/* Basic data section — always expanded for new dish, collapsible for existing */}
             <div className="border rounded-md">
-              <button
-                type="button"
-                className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
-                onClick={() => setIsEditingBasicData((v) => !v)}
-                data-testid="button-toggle-basic-data"
-              >
-                <span>Datos del plato (nombre, categoría, precio...)</span>
-                <Edit className="h-4 w-4 text-muted-foreground" />
-              </button>
-              {isEditingBasicData && (
-                <div className="border-t p-3">
+              {selectedRecipeItem ? (
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
+                  onClick={() => setIsEditingBasicData((v) => !v)}
+                  data-testid="button-toggle-basic-data"
+                >
+                  <span>Datos del plato (nombre, categoría, precio...)</span>
+                  <Edit className="h-4 w-4 text-muted-foreground" />
+                </button>
+              ) : (
+                <div className="px-3 py-2 text-sm font-medium bg-muted/40 rounded-t-md border-b">
+                  Datos básicos del plato
+                </div>
+              )}
+              {(isEditingBasicData || !selectedRecipeItem) && (
+                <div className={selectedRecipeItem ? "border-t p-3" : "p-3"}>
                   <Form {...menuItemForm}>
                     <form
-                      onSubmit={menuItemForm.handleSubmit((data) => {
-                        if (!selectedRecipeItem) return;
-                        updateMenuItemMutation.mutate(
-                          { id: selectedRecipeItem.id, data },
-                          {
-                            onSuccess: (updated: MenuItem) => {
-                              setSelectedRecipeItem(updated);
+                      onSubmit={menuItemForm.handleSubmit(async (data) => {
+                        if (!selectedRecipeItem) {
+                          // NEW DISH: create dish then recipe
+                          createMenuItemMutation.mutate(data, {
+                            onSuccess: async (createdItem: MenuItem) => {
+                              setSelectedRecipeItem(createdItem);
+                              menuItemForm.reset({
+                                name: createdItem.name,
+                                categoryId: createdItem.categoryId,
+                                description: createdItem.description || "",
+                                price: parseFloat(createdItem.price),
+                                preparationTime: createdItem.preparationTime || 0,
+                                isAvailable: createdItem.isAvailable || "true",
+                                isEditable: (createdItem as any).isEditable || "false",
+                                defaultCourse: (createdItem as any).defaultCourse ?? undefined,
+                              });
                               setIsEditingBasicData(false);
+                              const existing = recipes.find(r => r.menuItemId === createdItem.id);
+                              if (!existing) await createRecipeMutation.mutateAsync(createdItem.id);
                             },
-                          }
-                        );
+                          });
+                        } else {
+                          // EXISTING DISH: update
+                          updateMenuItemMutation.mutate(
+                            { id: selectedRecipeItem.id, data },
+                            {
+                              onSuccess: (updated: MenuItem) => {
+                                setSelectedRecipeItem(updated);
+                                setIsEditingBasicData(false);
+                              },
+                            }
+                          );
+                        }
                       })}
                       className="space-y-3"
                     >
@@ -601,6 +646,19 @@ export default function RecetasCostosPage() {
                           </FormItem>
                         )}
                       />
+                      <FormField
+                        control={menuItemForm.control}
+                        name="description"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Descripción</FormLabel>
+                            <FormControl>
+                              <Textarea {...field} placeholder="Descripción del plato" rows={2} data-testid="input-recipe-item-description" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
                       <div className="grid grid-cols-2 gap-3">
                         <FormField
                           control={menuItemForm.control}
@@ -629,6 +687,25 @@ export default function RecetasCostosPage() {
                           )}
                         />
                       </div>
+                      <FormField
+                        control={menuItemForm.control}
+                        name="defaultCourse"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Curso predeterminado</FormLabel>
+                            <div className="flex gap-2 flex-wrap">
+                              {[{ value: 1, label: "1° Entradas" }, { value: 2, label: "2° Principal" }, { value: 3, label: "3° Postres" }].map(({ value, label }) => (
+                                <Button key={value} type="button" variant={field.value === value ? "default" : "outline"} size="sm" onClick={() => field.onChange(value)}>
+                                  {label}
+                                </Button>
+                              ))}
+                              <Button type="button" variant={!field.value ? "secondary" : "outline"} size="sm" onClick={() => field.onChange(undefined)}>
+                                Sin curso
+                              </Button>
+                            </div>
+                          </FormItem>
+                        )}
+                      />
                       <div className="flex gap-3">
                         <FormField
                           control={menuItemForm.control}
@@ -636,11 +713,7 @@ export default function RecetasCostosPage() {
                           render={({ field }) => (
                             <FormItem className="flex items-center gap-3 p-3 border rounded-md flex-1">
                               <FormControl>
-                                <Switch
-                                  checked={field.value === "true"}
-                                  onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
-                                  data-testid="switch-recipe-item-available"
-                                />
+                                <Switch checked={field.value === "true"} onCheckedChange={(c) => field.onChange(c ? "true" : "false")} data-testid="switch-recipe-item-available" />
                               </FormControl>
                               <FormLabel className="cursor-pointer !mt-0">Disponible</FormLabel>
                             </FormItem>
@@ -652,11 +725,7 @@ export default function RecetasCostosPage() {
                           render={({ field }) => (
                             <FormItem className="flex items-center gap-3 p-3 border rounded-md flex-1">
                               <FormControl>
-                                <Switch
-                                  checked={field.value === "true"}
-                                  onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
-                                  data-testid="switch-recipe-item-editable"
-                                />
+                                <Switch checked={field.value === "true"} onCheckedChange={(c) => field.onChange(c ? "true" : "false")} data-testid="switch-recipe-item-editable" />
                               </FormControl>
                               <FormLabel className="cursor-pointer !mt-0">Fuera de menú</FormLabel>
                             </FormItem>
@@ -664,12 +733,19 @@ export default function RecetasCostosPage() {
                         />
                       </div>
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingBasicData(false)}>
-                          Cancelar
-                        </Button>
-                        <Button type="submit" size="sm" disabled={updateMenuItemMutation.isPending} data-testid="button-save-recipe-item-basic-data">
-                          {updateMenuItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                          Guardar datos
+                        {selectedRecipeItem && (
+                          <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingBasicData(false)}>
+                            Cancelar
+                          </Button>
+                        )}
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={createMenuItemMutation.isPending || updateMenuItemMutation.isPending}
+                          data-testid="button-save-recipe-item-basic-data"
+                        >
+                          {(createMenuItemMutation.isPending || updateMenuItemMutation.isPending) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          {selectedRecipeItem ? "Guardar datos" : "Crear Plato y cargar receta →"}
                         </Button>
                       </div>
                     </form>
@@ -678,7 +754,15 @@ export default function RecetasCostosPage() {
               )}
             </div>
 
-            {currentRecipe && currentRecipe.ingredients.length > 0 && (
+            {!selectedRecipeItem && (
+              <div className="border-2 border-dashed rounded-md p-6 text-center text-sm text-muted-foreground space-y-1">
+                <ChefHat className="h-8 w-8 mx-auto opacity-30 mb-2" />
+                <p className="font-medium">Ingredientes y costos</p>
+                <p>Guardá los datos básicos del plato para habilitar esta sección.</p>
+              </div>
+            )}
+
+            {selectedRecipeItem && currentRecipe && currentRecipe.ingredients.length > 0 && (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -735,7 +819,7 @@ export default function RecetasCostosPage() {
               </Table>
             )}
 
-            {currentRecipe && selectedRecipeItem && (
+            {selectedRecipeItem && currentRecipe && (
               <div className="flex items-center gap-4 p-3 bg-muted rounded-md text-sm">
                 <div>Costo: <strong>${recipeCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
                 <div>Precio: <strong>${parseFloat(selectedRecipeItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
@@ -751,7 +835,7 @@ export default function RecetasCostosPage() {
               </div>
             )}
 
-            <div className="border-t pt-4 space-y-3">
+            {selectedRecipeItem && <div className="border-t pt-4 space-y-3">
               <Label className="block font-medium">Agregar Ingrediente</Label>
 
               <div className="space-y-1">
@@ -894,7 +978,8 @@ export default function RecetasCostosPage() {
                 <Plus className="h-4 w-4 mr-1" />
                 Agregar Ingrediente
               </Button>
-            </div>
+            </div>}
+
           </div>
 
           <DialogFooter className="shrink-0 pt-2 border-t">
