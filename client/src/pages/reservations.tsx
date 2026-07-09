@@ -3686,6 +3686,7 @@ function ReservationDetailDialog({
             config={billingConfig}
             initialValues={initialValues}
             onSuccess={() => setFacturaEmitida(true)}
+            cashArea="recepcion"
           />
         );
       })()}
