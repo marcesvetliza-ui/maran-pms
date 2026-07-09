@@ -5904,8 +5904,8 @@ export default function RestaurantPage() {
             <Select value={compTipo} onValueChange={v => { const prevTipo = compTipo; setCompTipo(v); setCompCondicionIva(v === "FA" ? "Responsable Inscripto" : "Consumidor Final"); recalcCompItemsForTipo(v, prevTipo); }}>
               <SelectTrigger data-testid="select-comp-tipo"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>
-                <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>
+                <SelectItem value="FA">Factura A</SelectItem>
+                <SelectItem value="FB">Factura B</SelectItem>
                 <SelectItem value="voucher_justo">Voucher Justo</SelectItem>
                 <SelectItem value="voucher_pedidos_ya">Voucher PedidosYa</SelectItem>
               </SelectContent>

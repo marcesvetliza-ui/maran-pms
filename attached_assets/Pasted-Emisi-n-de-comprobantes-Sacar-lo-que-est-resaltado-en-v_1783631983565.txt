@@ -1,0 +1,25 @@
+Emisión de comprobantes
+
+
+
+Sacar lo que está resaltado en verde porque las F.A no solo se emiten a R.I. sino a Monotributo, por ahora, y F.B. no solo se emiten a consumidor final / persona física sino a Exentos que son jurídicos o, como escuche hoy, persona no humana.
+
+Hay que tener en cuenta la necesidad, pocas veces, de modificar un comprobante electrónico de venta una vez emitido. En el sistema de escritorio es factible ya que se saca de línea el comprobante y permite modificarlo pero en cambio el nuevo sistema web no tenes chance, te equivocas va nota de crédito y esto lo tenes que definir 
+
+Que podes modificar
+detalle de los artículos, no los artículos
+formas de pago
+
+Si te equivocas en la condición de venta, nota de crédito y listo
+
+Para las facturas T casi no se puede modificar nada porque hasta la descripción del artículo va a arca
+
+Si vas a permitir esto tenes que tener en cuenta la contabilidad porque el asiento ya fue hecho. En el sistema de escritorio al editar la factura tienes la minuta, al grabar se borra esa minuta y, utilizando el mismo número, haces una nueva. Si permitís hacer esto en ventas tenes que pensar cómo vas a encarar esto. 
+
+Recordà que no se pueden eliminar por ningún motivo los comprobantes electrónicos emitidos, como así los clientes y productos una vez utilizado
+
+Para comprobantes como voucher tenes el mismo camino que para los comprobantes de compras/inventario, borras y cargas de nuevo o editas el comprobante y lo modificas. 
+
+Va lo mismo para la contabilidad, si se borra el comprobante se elimina la minuta; si se modifica el comprobante podes: tomar la minuta y la modificas; tomas el número de minuta lo eliminas y haces una nueva minuta pero con el mismo número; tomás el número de minuta lo eliminas y haces una nueva minuta pero con el número siguiente
+
+Para los recibos de cobro de cuenta corriente u órdenes de pago a proveedores en los dos sistemas de grandi si te equivocas tienes que eliminar y hacer de nuevo, eso elimina la conciliación haciendo que los comprobantes involucrados vuelvan a aparecer como pendiente de cobro/pago. 

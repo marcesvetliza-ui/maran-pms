@@ -455,8 +455,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           <Select value={tipo} onValueChange={v => { const prevTipo = tipo; setTipo(v); setCondicionIva(v === "FA" ? "Responsable Inscripto" : v === "FC" ? "Monotributista" : "Consumidor Final"); recalcForTipo(v, prevTipo); }}>
             <SelectTrigger data-testid="select-tipo-factura"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {tipos.includes("FA") && <SelectItem value="FA">Factura A — Responsable Inscripto</SelectItem>}
-              {tipos.includes("FB") && <SelectItem value="FB">Factura B — Consumidor Final / Persona Física</SelectItem>}
+              {tipos.includes("FA") && <SelectItem value="FA">Factura A</SelectItem>}
+              {tipos.includes("FB") && <SelectItem value="FB">Factura B</SelectItem>}
               {tipos.includes("FC") && <SelectItem value="FC">Factura C — Monotributista</SelectItem>}
               {tipos.filter(t => NON_FISCAL_TIPOS_SET.has(t)).map(t => (
                 <SelectItem key={t} value={t}>{NON_FISCAL_LABELS[t] ?? t}</SelectItem>
