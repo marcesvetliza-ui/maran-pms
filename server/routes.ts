@@ -679,7 +679,7 @@ export async function registerRoutes(
   });
 
   // Reconciliación de pagos CC sin movimiento en Cuenta Corriente
-  app.post("/api/admin/reconcile-cc-payments", requireAuth, async (req, res) => {
+  app.post("/api/admin/reconcile-cc-payments", requireRole(["admin", "manager"]), async (req, res) => {
     try {
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       // Obtener todos los pagos con método cuenta_corriente
@@ -783,6 +783,114 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error en reconciliación CC:", error);
       res.status(500).json({ error: "Error en reconciliación" });
+    }
+  });
+
+  // Revisar saldos pendientes de checkout: crea cargos CC faltantes para reservas checked_out con balance > 0
+  app.post("/api/admin/reconcile-checkout-debts", requireRole(["admin", "manager"]), async (req, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+      // Obtener todas las reservas checked_out con empresa, agencia o huésped
+      const checkedOutRows = await db.execute(sql`
+        SELECT r.id, r.reservation_code, r.company_id, r.agency_id, r.guest_id,
+               r.total_room_amount, r.final_rate_per_night, r.nights,
+               r.room_id, ro.room_number,
+               g.first_name, g.last_name,
+               COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND (c.status IS NULL OR c.status = 'active')), 0) AS charges_total,
+               COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS payments_total
+        FROM reservations r
+        LEFT JOIN rooms ro ON r.room_id = ro.id
+        LEFT JOIN guests g ON r.guest_id = g.id
+        WHERE r.status = 'checked_out'
+          AND (r.company_id IS NOT NULL OR r.agency_id IS NOT NULL OR r.guest_id IS NOT NULL)
+      `);
+
+      let created = 0;
+      let skipped = 0;
+      let failed = 0;
+
+      for (const row of (checkedOutRows.rows as any[])) {
+        try {
+          const savedRoomTotal = parseFloat(row.total_room_amount || "0");
+          const roomTotal = savedRoomTotal > 0
+            ? savedRoomTotal
+            : parseFloat(row.final_rate_per_night || "0") * (parseInt(row.nights) || 0);
+          const chargesTotal = parseFloat(row.charges_total || "0");
+          const paymentsTotal = parseFloat(row.payments_total || "0");
+          const balance = roomTotal + chargesTotal - paymentsTotal;
+
+          if (balance <= 0.01) { skipped++; continue; }
+
+          // Verificar si ya existe un cargo de deuda para esta reserva
+          const existingMov = await storage.getAccountMovementsByReservation(row.id);
+          const alreadyHasDebtCargo = existingMov.some(
+            m => m.type === "cargo" && m.description?.includes("cierre con deuda")
+          );
+          if (alreadyHasDebtCargo) { skipped++; continue; }
+
+          const guestName = row.first_name ? `${row.first_name} ${row.last_name}` : "Huésped";
+          const roomNum = row.room_number || row.room_id || "N/A";
+          const descCC = `Saldo por estadía ${row.reservation_code} — Hab. ${roomNum} (cierre con deuda)`;
+          const amtCC = balance.toFixed(2);
+
+          if (row.company_id) {
+            await storage.createAccountMovement({
+              entityType: "company",
+              entityId: row.company_id,
+              date: today,
+              type: "cargo",
+              description: descCC,
+              amount: amtCC,
+              reservationId: row.id,
+              reservationCode: row.reservation_code,
+              guestName,
+            });
+            created++;
+          } else if (row.agency_id) {
+            await storage.createAccountMovement({
+              entityType: "agency",
+              entityId: row.agency_id,
+              date: today,
+              type: "cargo",
+              description: descCC,
+              amount: amtCC,
+              reservationId: row.id,
+              reservationCode: row.reservation_code,
+              guestName,
+            });
+            created++;
+          } else if (row.guest_id) {
+            await storage.createAccountMovement({
+              entityType: "guest",
+              entityId: row.guest_id,
+              date: today,
+              type: "cargo",
+              description: descCC,
+              amount: amtCC,
+              reservationId: row.id,
+              reservationCode: row.reservation_code,
+              guestName,
+            });
+            created++;
+          } else {
+            skipped++;
+          }
+        } catch (rowError) {
+          failed++;
+          console.error(`[reconcile-checkout-debts] Error procesando reserva ${row?.id}:`, rowError);
+        }
+      }
+
+      res.json({
+        created,
+        skipped,
+        failed,
+        message: `${created} cargo(s) creado(s), ${skipped} omitido(s)${failed > 0 ? `, ${failed} con error` : ""}`,
+      });
+    } catch (error) {
+      console.error("Error en revisión de saldos pendientes:", error);
+      res.status(500).json({ error: "Error al revisar saldos pendientes" });
     }
   });
 
