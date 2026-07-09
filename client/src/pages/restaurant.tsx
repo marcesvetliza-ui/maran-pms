@@ -3292,7 +3292,7 @@ export default function RestaurantPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Nombre</TableHead>
-                        <TableHead>Tipo</TableHead>
+                        <TableHead>Inscripción ARCA</TableHead>
                         <TableHead>Documento</TableHead>
                         <TableHead>Teléfono</TableHead>
                         <TableHead>Email</TableHead>
@@ -3305,9 +3305,30 @@ export default function RestaurantPage() {
                         <TableRow key={g.id} data-testid={`row-client-${g.id}`}>
                           <TableCell className="font-medium">{g.firstName} {g.lastName}</TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="text-xs">
-                              {g.tipoPersona === "juridica" ? "Jurídica" : "Física"}
-                            </Badge>
+                            {(() => {
+                              const vc = (g as any).vatCondition || (g.tipoPersona === "juridica" ? "responsable_inscripto" : "consumidor_final");
+                              const labels: Record<string, string> = {
+                                responsable_inscripto: "Resp. Inscripto",
+                                consumidor_final: "Cons. Final",
+                                exento: "Exento",
+                                monotributista: "Monotributista",
+                                no_responsable: "No Responsable",
+                                no_categorizado: "No Categorizado",
+                              };
+                              const colors: Record<string, string> = {
+                                responsable_inscripto: "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300",
+                                consumidor_final: "bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300",
+                                exento: "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300",
+                                monotributista: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300",
+                                no_responsable: "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300",
+                                no_categorizado: "bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/30 dark:text-orange-300",
+                              };
+                              return (
+                                <Badge variant="outline" className={`text-xs ${colors[vc] || ""}`}>
+                                  {labels[vc] || vc}
+                                </Badge>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {g.documentType === "cuit" || g.tipoPersona === "juridica"
