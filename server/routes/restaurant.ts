@@ -265,7 +265,8 @@ export function registerRestaurantRoutes(app: Express) {
       const effectiveReservationId = reservationId || roomReservationId;
       const primarySplit = Array.isArray(paymentSplits) && paymentSplits.length > 0 ? paymentSplits[0] : null;
       const effectivePrimaryMethod = primarySplit ? primarySplit.method : (paymentMethod || "cash");
-      const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || effectivePrimaryMethod === "cuenta_habitacion";
+      const hasRoomChargeSplits = Array.isArray(paymentSplits) && paymentSplits.some((s: any) => s.method === "cuenta_habitacion");
+      const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || effectivePrimaryMethod === "cuenta_habitacion" || hasRoomChargeSplits;
       const effectivePaymentMethod = isRoomCharge && effectivePrimaryMethod === "cuenta_habitacion" ? "room_charge" : effectivePrimaryMethod;
 
       let finalTotal = parseFloat(order.total || "0");
@@ -467,9 +468,9 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
-      // Emitir factura AFIP si se solicitó
+      // Emitir factura AFIP si se solicitó — nunca cuando el pago va a habitación
       let invoiceId: number | undefined;
-      if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
+      if (emitInvoice && !isRoomCharge && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
@@ -845,9 +846,9 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
-      // Emitir factura AFIP si se solicitó
+      // Emitir factura AFIP si se solicitó — nunca cuando el pago va a habitación
       let invoiceId: number | undefined;
-      if (emitInvoice && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
+      if (emitInvoice && method !== "cuenta_habitacion" && ["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");

@@ -5732,7 +5732,8 @@ export default function RestaurantPage() {
                 }
 
                 const effReceiptType = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
-                const isFactura = ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
+                const hasRoomCharge = closePaymentSplits.some(s => s.method === "cuenta_habitacion");
+                const isFactura = !hasRoomCharge && ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
                 const isFactA = effReceiptType === "factura_a";
                 const vatCond = isFactA
                   ? "responsable_inscripto"
