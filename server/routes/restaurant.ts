@@ -3,7 +3,7 @@ import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
 import { db } from "../db";
-import { restaurantOrders } from "@shared/schema";
+import { restaurantOrders, orderItems, menuItems } from "@shared/schema";
 import { eq, and, not, inArray } from "drizzle-orm";
 
 export function registerRestaurantRoutes(app: Express) {
@@ -195,6 +195,36 @@ export function registerRestaurantRoutes(app: Express) {
       res.json(order);
     } catch (error) {
       res.status(500).json({ error: "Error fetching order" });
+    }
+  });
+
+  // Get order detail by order number (for room folio voucher view)
+  app.get("/api/restaurant/orders/by-number/:num", async (req, res) => {
+    try {
+      const [order] = await db
+        .select()
+        .from(restaurantOrders)
+        .where(eq(restaurantOrders.orderNumber, req.params.num))
+        .limit(1);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const items = await db
+        .select({
+          id: orderItems.id,
+          quantity: orderItems.quantity,
+          unitPrice: orderItems.unitPrice,
+          subtotal: orderItems.subtotal,
+          notes: orderItems.notes,
+          status: orderItems.status,
+          menuItemName: menuItems.name,
+        })
+        .from(orderItems)
+        .leftJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
+        .where(and(eq(orderItems.orderId, order.id), not(inArray(orderItems.status, ["cancelled", "voided"]))));
+
+      res.json({ ...order, items });
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching order detail" });
     }
   });
 

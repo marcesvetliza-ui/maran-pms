@@ -1707,6 +1707,7 @@ function ReservationDetailDialog({
   const [bulkTransferNote, setBulkTransferNote] = useState("");
   const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
+  const [restaurantVoucherOrderNum, setRestaurantVoucherOrderNum] = useState<string | null>(null);
   const [newCharge, setNewCharge] = useState({
     description: "",
     amount: "",
@@ -1843,6 +1844,16 @@ function ReservationDetailDialog({
       const res = await fetch(`/api/reservations/${reservation.id}/payments?includeAnulados=true`);
       return res.json();
     },
+  });
+
+  const { data: restaurantVoucherDetail, isLoading: isLoadingVoucher } = useQuery<any>({
+    queryKey: ["/api/restaurant/orders/by-number", restaurantVoucherOrderNum],
+    queryFn: async () => {
+      const res = await fetch(`/api/restaurant/orders/by-number/${restaurantVoucherOrderNum}`, { credentials: "include" });
+      if (!res.ok) throw new Error("No encontrado");
+      return res.json();
+    },
+    enabled: !!restaurantVoucherOrderNum,
   });
 
   const { data: changelog = [] } = useQuery<any[]>({
@@ -2816,6 +2827,9 @@ function ReservationDetailDialog({
               <div className="divide-y max-h-[150px] overflow-y-auto">
                 {consumptionCharges.map((charge) => {
                   const isAnulado = (charge as any).status === "anulado";
+                  const restaurantOrderNum = charge.category === "restaurant"
+                    ? (charge.description.match(/Pedido\s+(\S+)/)?.[1] ?? null)
+                    : null;
                   return (
                   <div key={charge.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`charge-row-${charge.id}`}>
                     <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
@@ -2828,6 +2842,18 @@ function ReservationDetailDialog({
                       <span className={`font-medium tabular-nums ${isAnulado ? "line-through text-muted-foreground" : ""}`} data-testid={`text-charge-amount-${charge.id}`}>
                         ${parseFloat(charge.amount).toFixed(2)}
                       </span>
+                      {restaurantOrderNum && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6"
+                          onClick={() => setRestaurantVoucherOrderNum(restaurantOrderNum)}
+                          title="Ver detalle del consumo"
+                          data-testid={`button-voucher-${charge.id}`}
+                        >
+                          <Eye className="h-3 w-3 text-orange-500" />
+                        </Button>
+                      )}
                       {!isLocked && !isAnulado && (
                         <>
                         <Button 
@@ -2878,6 +2904,68 @@ function ReservationDetailDialog({
                 <span data-testid="text-total-consumptions">${totalConsumptions.toFixed(2)}</span>
               </div>
             </div>
+
+            {/* Dialog detalle consumo restaurant */}
+            <Dialog open={!!restaurantVoucherOrderNum} onOpenChange={(o) => { if (!o) setRestaurantVoucherOrderNum(null); }}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Detalle de Consumo — Restaurante</DialogTitle>
+                  {restaurantVoucherDetail && (
+                    <DialogDescription>
+                      Pedido #{restaurantVoucherDetail.orderNumber}
+                      {restaurantVoucherDetail.waiterName ? ` · Mozo: ${restaurantVoucherDetail.waiterName}` : ""}
+                    </DialogDescription>
+                  )}
+                </DialogHeader>
+                {isLoadingVoucher ? (
+                  <div className="space-y-2 py-4">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </div>
+                ) : restaurantVoucherDetail ? (
+                  <div className="space-y-3">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Descripción</TableHead>
+                          <TableHead className="text-center w-14">Cant.</TableHead>
+                          <TableHead className="text-right w-28">Subtotal</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(restaurantVoucherDetail.items || []).map((item: any) => {
+                          const customName = (item.notes || "").match(/^\[(.+?)\]/)?.[1];
+                          const displayName = customName || item.menuItemName || "Ítem";
+                          return (
+                            <TableRow key={item.id}>
+                              <TableCell className="text-sm">
+                                {displayName}
+                                {item.notes && !customName && <span className="block text-xs text-muted-foreground">{item.notes}</span>}
+                              </TableCell>
+                              <TableCell className="text-center text-sm">{item.quantity}</TableCell>
+                              <TableCell className="text-right text-sm font-medium">
+                                ${parseFloat(item.subtotal || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                    <div className="flex justify-between font-semibold text-sm pt-1 border-t px-1">
+                      <span>Total</span>
+                      <span>${parseFloat(restaurantVoucherDetail.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">* Precio incluye IVA. El desglose se realiza al facturar al huésped.</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No se encontró el detalle del pedido.</p>
+                )}
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setRestaurantVoucherOrderNum(null)}>Cerrar</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <div className="border rounded-lg">
               <div className="flex items-center justify-between p-3 border-b bg-muted/50">
