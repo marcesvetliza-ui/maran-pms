@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote, Undo2 } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote, Undo2, Building2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -59,9 +59,15 @@ export function ReservationDetailModal({
   const [editLateCheckOut, setEditLateCheckOut] = useState(false);
   const [editRatePerNight, setEditRatePerNight] = useState("");
   const [checkoutStep, setCheckoutStep] = useState(0);
-  const [checkoutReceiptType, setCheckoutReceiptType] = useState("ticket");
+  const [checkoutReceiptType, setCheckoutReceiptType] = useState("cierre_habitacion");
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState("efectivo");
   const [checkoutPayAmount, setCheckoutPayAmount] = useState("");
+  const [checkoutBillingTarget, setCheckoutBillingTarget] = useState<"guest" | "company" | "agency">("guest");
+  const [checkoutCompanyId, setCheckoutCompanyId] = useState("");
+  const [checkoutAgencyId, setCheckoutAgencyId] = useState("");
+
+  const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
+  const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
 
   const { data: reservation, isLoading } = useQuery<ReservationWithDetails>({
     queryKey: ["/api/reservations", reservationId],
@@ -106,8 +112,27 @@ export function ReservationDetailModal({
     },
   });
 
-  const startCheckout = () => {
-    setCheckoutStep(1); setCheckoutReceiptType("ticket"); setCheckoutPaymentMethod("efectivo"); setCheckoutPayAmount("");
+  const startCheckout = (res?: typeof reservation) => {
+    const r = res || reservation;
+    setCheckoutStep(1);
+    setCheckoutReceiptType("cierre_habitacion");
+    setCheckoutPayAmount("");
+    if (r?.companyId) {
+      setCheckoutPaymentMethod("cuenta_corriente");
+      setCheckoutBillingTarget("company");
+      setCheckoutCompanyId(r.companyId);
+      setCheckoutAgencyId("");
+    } else if (r?.agencyId) {
+      setCheckoutPaymentMethod("cuenta_corriente");
+      setCheckoutBillingTarget("agency");
+      setCheckoutAgencyId(r.agencyId);
+      setCheckoutCompanyId("");
+    } else {
+      setCheckoutPaymentMethod("efectivo");
+      setCheckoutBillingTarget("guest");
+      setCheckoutCompanyId("");
+      setCheckoutAgencyId("");
+    }
   };
 
   const startEditing = () => {
@@ -295,10 +320,10 @@ export function ReservationDetailModal({
           checkoutStep > 0 ? (
             <div className="space-y-4 py-2">
               <div className="flex items-center gap-2 mb-2">
-                {[1,2,3,4].map(s => <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= checkoutStep ? "bg-primary" : "bg-muted"}`} />)}
+                {[1,2,3].map(s => <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= checkoutStep ? "bg-primary" : "bg-muted"}`} />)}
               </div>
               <p className="text-xs text-muted-foreground text-center">
-                Paso {checkoutStep} de 4: {checkoutStep === 1 ? "Resumen de cuenta" : checkoutStep === 2 ? "Pago" : checkoutStep === 3 ? "Comprobante" : "Confirmar"}
+                Paso {checkoutStep} de 3: {checkoutStep === 1 ? "Resumen de cuenta" : checkoutStep === 2 ? "Pago y comprobante" : "Confirmar"}
               </p>
 
               {checkoutStep === 1 && (() => {
@@ -335,7 +360,7 @@ export function ReservationDetailModal({
                     </div>
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => setCheckoutStep(0)}>Cancelar</Button>
-                      <Button size="sm" onClick={() => setCheckoutStep(balance > 0 ? 2 : 3)} data-testid="button-checkout-step1-next">{balance > 0 ? "Registrar Pago" : "Siguiente"}</Button>
+                      <Button size="sm" onClick={() => setCheckoutStep(2)} data-testid="button-checkout-step1-next">{balance > 0 ? "Registrar Pago" : "Siguiente"}</Button>
                     </div>
                   </div>
                 );
@@ -347,38 +372,113 @@ export function ReservationDetailModal({
                 const balance = totalAmount - totalPayments;
                 return (
                   <div className="space-y-3">
-                    <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
-                      Saldo pendiente: <span className="font-bold">${balance.toFixed(2)}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Monto</Label>
-                        <Input type="number" min={0} step="0.01" value={checkoutPayAmount || balance.toFixed(2)} onChange={(e) => setCheckoutPayAmount(e.target.value)} data-testid="input-checkout-amount" />
+                    {balance > 0 && (
+                      <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
+                        Saldo pendiente: <span className="font-bold">${balance.toFixed(2)}</span>
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Método</Label>
-                        <Select value={checkoutPaymentMethod} onValueChange={setCheckoutPaymentMethod}>
-                          <SelectTrigger data-testid="select-checkout-method"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="efectivo">Efectivo</SelectItem>
-                            <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                            <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                            <SelectItem value="transferencia">Transferencia</SelectItem>
-                            <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                          </SelectContent>
-                        </Select>
+                    )}
+                    {balance > 0 && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Monto</Label>
+                          <Input type="number" min={0} step="0.01" value={checkoutPayAmount || balance.toFixed(2)} onChange={(e) => setCheckoutPayAmount(e.target.value)} data-testid="input-checkout-amount" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Método de pago</Label>
+                          <Select value={checkoutPaymentMethod} onValueChange={setCheckoutPaymentMethod}>
+                            <SelectTrigger data-testid="select-checkout-method"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="efectivo">Efectivo</SelectItem>
+                              <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                              <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                              <SelectItem value="transferencia">Transferencia</SelectItem>
+                              <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                              <SelectItem value="cuenta_corriente">Cta. Corriente</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
+                    )}
+                    {balance > 0 && checkoutPaymentMethod === "cuenta_corriente" && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Facturar a</Label>
+                          <Select value={checkoutBillingTarget} onValueChange={(v) => { setCheckoutBillingTarget(v as "guest" | "company" | "agency"); setCheckoutCompanyId(""); setCheckoutAgencyId(""); }}>
+                            <SelectTrigger data-testid="select-checkout-billing-target"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="guest">Huésped</SelectItem>
+                              <SelectItem value="company">Empresa</SelectItem>
+                              <SelectItem value="agency">Agencia</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {checkoutBillingTarget === "company" && (
+                          <div className="space-y-1">
+                            <Label className="text-xs flex items-center gap-1"><Building2 className="h-3 w-3" />Empresa</Label>
+                            <Select value={checkoutCompanyId} onValueChange={setCheckoutCompanyId}>
+                              <SelectTrigger data-testid="select-checkout-company"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                              <SelectContent>
+                                {companies.filter((c: any) => c.id).map((c: any) => (
+                                  <SelectItem key={c.id} value={c.id}>{c.razonSocial || c.nombreFantasia || c.name || c.id}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        {checkoutBillingTarget === "agency" && (
+                          <div className="space-y-1">
+                            <Label className="text-xs flex items-center gap-1"><Building2 className="h-3 w-3" />Agencia</Label>
+                            <Select value={checkoutAgencyId} onValueChange={setCheckoutAgencyId}>
+                              <SelectTrigger data-testid="select-checkout-agency"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                              <SelectContent>
+                                {agencies.filter((a: any) => a.id).map((a: any) => (
+                                  <SelectItem key={a.id} value={a.id}>{a.razonSocial || a.nombreFantasia || a.name || a.id}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Tipo de comprobante</Label>
+                      <Select value={checkoutReceiptType} onValueChange={setCheckoutReceiptType}>
+                        <SelectTrigger data-testid="select-checkout-receipt"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
+                          <SelectItem value="ticket">Ticket</SelectItem>
+                          <SelectItem value="factura_a">Factura A</SelectItem>
+                          <SelectItem value="factura_b">Factura B</SelectItem>
+                          <SelectItem value="factura_c">Factura C</SelectItem>
+                          <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => setCheckoutStep(1)}>Atrás</Button>
-                      <Button size="sm" onClick={() => {
-                        const amount = checkoutPayAmount || balance.toFixed(2);
-                        if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
-                        addPaymentMutation.mutate({ amount, method: checkoutPaymentMethod, receiptType: checkoutReceiptType }, { onSuccess: () => setCheckoutStep(3) });
-                      }} disabled={addPaymentMutation.isPending} data-testid="button-checkout-pay">
-                        {addPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => setCheckoutStep(3)} data-testid="button-checkout-skip-pay">Omitir</Button>
+                      {balance > 0 && (
+                        <Button size="sm" onClick={() => {
+                          const amount = checkoutPayAmount || balance.toFixed(2);
+                          if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
+                          if (checkoutPaymentMethod === "cuenta_corriente" && checkoutBillingTarget === "company" && !checkoutCompanyId && !reservation.companyId) {
+                            toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
+                          }
+                          if (checkoutPaymentMethod === "cuenta_corriente" && checkoutBillingTarget === "agency" && !checkoutAgencyId && !reservation.agencyId) {
+                            toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
+                          }
+                          addPaymentMutation.mutate({
+                            amount,
+                            method: checkoutPaymentMethod,
+                            receiptType: checkoutReceiptType,
+                            billingTarget: checkoutBillingTarget,
+                            companyId: checkoutBillingTarget === "company" ? (checkoutCompanyId || reservation.companyId || undefined) : undefined,
+                            agencyId: checkoutBillingTarget === "agency" ? (checkoutAgencyId || reservation.agencyId || undefined) : undefined,
+                          }, { onSuccess: () => setCheckoutStep(3) });
+                        }} disabled={addPaymentMutation.isPending} data-testid="button-checkout-pay">
+                          {addPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
+                        </Button>
+                      )}
+                      <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => setCheckoutStep(3)} data-testid="button-checkout-skip-pay">{balance > 0 ? "Omitir pago" : "Siguiente"}</Button>
                     </div>
                   </div>
                 );
@@ -386,35 +486,13 @@ export function ReservationDetailModal({
 
               {checkoutStep === 3 && (
                 <div className="space-y-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Tipo de Comprobante</Label>
-                    <Select value={checkoutReceiptType} onValueChange={setCheckoutReceiptType}>
-                      <SelectTrigger data-testid="select-checkout-receipt"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ticket">Ticket</SelectItem>
-                        <SelectItem value="factura_a">Factura A</SelectItem>
-                        <SelectItem value="factura_b">Factura B</SelectItem>
-                        <SelectItem value="factura_c">Factura C</SelectItem>
-                        <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setCheckoutStep(2)}>Atrás</Button>
-                    <Button size="sm" onClick={() => setCheckoutStep(4)} data-testid="button-checkout-step3-next">Siguiente</Button>
-                  </div>
-                </div>
-              )}
-
-              {checkoutStep === 4 && (
-                <div className="space-y-3">
                   <div className="p-3 bg-muted/50 rounded-md text-sm space-y-1">
                     <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.lastName} {reservation.guest?.firstName}</span>.</p>
                     <p>Habitación <span className="font-bold">{reservation.room?.roomNumber}</span> quedará en estado <Badge variant="outline" className="text-orange-700">Sucia</Badge>.</p>
                     <p>Se creará tarea de limpieza en Housekeeping.</p>
                   </div>
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setCheckoutStep(3)}>Atrás</Button>
+                    <Button variant="outline" size="sm" onClick={() => setCheckoutStep(2)}>Atrás</Button>
                     <Button variant="destructive" size="sm" onClick={() => { checkOutMutation.mutate(); setCheckoutStep(0); }} disabled={checkOutMutation.isPending} data-testid="button-checkout-confirm">
                       {checkOutMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
                     </Button>
