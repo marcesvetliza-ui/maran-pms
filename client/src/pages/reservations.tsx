@@ -2642,7 +2642,7 @@ function ReservationDetailDialog({
               <div className="p-3">
                 <div className="flex justify-between text-sm mb-2">
                   <span>Tarifa por noche</span>
-                  <span>${reservation.finalRatePerNight || 0}</span>
+                  <span>${(parseFloat(reservation.totalRoomAmount || "0") / (reservation.nights || 1)).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 {reservation.discountType !== "none" && (
                   <div className="flex justify-between text-sm mb-2 text-muted-foreground">
