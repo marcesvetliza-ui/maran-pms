@@ -242,6 +242,16 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
+      // Auto-recalculate totalRoomAmount if nights change but totalRoomAmount wasn't explicitly sent
+      // This fixes planning drag-and-drop which only sends roomId/checkInDate/checkOutDate/nights
+      if (req.body.nights !== undefined && req.body.totalRoomAmount === undefined) {
+        const newNights = Number(req.body.nights);
+        const rate = parseFloat(existing.finalRatePerNight || "0");
+        if (!isNaN(newNights) && newNights > 0 && rate > 0) {
+          req.body.totalRoomAmount = (rate * newNights).toFixed(2);
+        }
+      }
+
       const finalRoomId = req.body.roomId || existing.roomId;
       const finalCheckIn = req.body.checkInDate || existing.checkInDate;
       const finalCheckOut = req.body.checkOutDate || existing.checkOutDate;
