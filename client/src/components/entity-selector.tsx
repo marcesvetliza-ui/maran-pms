@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,9 +68,10 @@ interface GuestSelectorProps {
   onCreateNew: (guest: InsertGuest) => void;
   selectedGuest?: Guest | null;
   onClear?: () => void;
+  cardClassName?: string;
 }
 
-export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }: GuestSelectorProps) {
+export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, cardClassName }: GuestSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [mode, setMode] = useState<"search" | "create">("search");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -174,7 +176,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
 
   if (selectedGuest) {
     return (
-      <Card className="bg-accent/30">
+      <Card className={cn("bg-accent/30", cardClassName)}>
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap">
@@ -208,7 +210,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear }:
   }
 
   return (
-    <Card>
+    <Card className={cn(cardClassName)}>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <User className="h-4 w-4" />
@@ -597,9 +599,10 @@ interface CompanySelectorProps {
   onCreateNew: (company: InsertCompany) => void;
   selectedCompany?: Company | null;
   onClear?: () => void;
+  cardClassName?: string;
 }
 
-export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClear }: CompanySelectorProps) {
+export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClear, cardClassName }: CompanySelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [mode, setMode] = useState<"search" | "create">("search");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -703,7 +706,7 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
 
   if (selectedCompany) {
     return (
-      <Card className="bg-accent/30">
+      <Card className={cn("bg-accent/30", cardClassName)}>
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap">
@@ -730,7 +733,7 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
   }
 
   return (
-    <Card>
+    <Card className={cn(cardClassName)}>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Building2 className="h-4 w-4" />
@@ -992,9 +995,10 @@ interface AgencySelectorProps {
   onCreateNew: (agency: InsertAgency) => void;
   selectedAgency?: Agency | null;
   onClear?: () => void;
+  cardClassName?: string;
 }
 
-export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear }: AgencySelectorProps) {
+export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear, cardClassName }: AgencySelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [mode, setMode] = useState<"search" | "create">("search");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -1056,7 +1060,7 @@ export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear 
 
   if (selectedAgency) {
     return (
-      <Card className="bg-accent/30">
+      <Card className={cn("bg-accent/30", cardClassName)}>
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap">
@@ -1083,7 +1087,7 @@ export function AgencySelector({ onSelect, onCreateNew, selectedAgency, onClear 
   }
 
   return (
-    <Card>
+    <Card className={cn(cardClassName)}>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Plane className="h-4 w-4" />

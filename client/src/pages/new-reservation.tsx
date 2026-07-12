@@ -9,6 +9,8 @@ import {
   Calendar,
   DollarSign,
   Check,
+  CheckCircle2,
+  AlertCircle,
   Sunrise,
   Sunset,
   ShoppingCart,
@@ -281,6 +283,18 @@ export default function NewReservationPage() {
 
   const canSubmit = selectedGuest && selectedRoomTypeId && selectedRoomId && selectedRatePlanId && nights > 0 && checkInDate && checkOutDate;
 
+  const sectionCardClass = (isComplete: boolean, isRequired: boolean): string => {
+    if (isComplete) return "border-green-500 bg-green-50 dark:bg-green-950/30 dark:border-green-700 transition-colors";
+    if (isRequired) return "border-amber-400 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-600 transition-colors";
+    return "transition-colors";
+  };
+
+  const SectionStatus = ({ complete, required }: { complete: boolean; required?: boolean }) => {
+    if (complete) return <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 ml-auto flex-shrink-0" />;
+    if (required) return <AlertCircle className="h-4 w-4 text-amber-500 ml-auto flex-shrink-0" />;
+    return null;
+  };
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex flex-col gap-1">
@@ -311,6 +325,7 @@ export default function NewReservationPage() {
             onSelect={handleGuestSelect}
             onCreateNew={(guest) => createGuestMutation.mutate(guest)}
             onClear={() => setSelectedGuest(null)}
+            cardClassName={sectionCardClass(!!selectedGuest, true)}
           />
 
           <CompanySelector
@@ -318,6 +333,7 @@ export default function NewReservationPage() {
             onSelect={setSelectedCompany}
             onCreateNew={(company) => createCompanyMutation.mutate(company)}
             onClear={() => setSelectedCompany(null)}
+            cardClassName={sectionCardClass(!!selectedCompany, false)}
           />
 
           <AgencySelector
@@ -325,13 +341,15 @@ export default function NewReservationPage() {
             onSelect={setSelectedAgency}
             onCreateNew={(agency) => createAgencyMutation.mutate(agency)}
             onClear={() => setSelectedAgency(null)}
+            cardClassName={sectionCardClass(!!selectedAgency, false)}
           />
 
-          <Card>
+          <Card className={sectionCardClass(nights > 0, true)}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
                 Fechas y Servicios especiales
+                <SectionStatus complete={nights > 0} required />
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -418,11 +436,12 @@ export default function NewReservationPage() {
         </div>
 
         <div className="space-y-6">
-          <Card>
+          <Card className={sectionCardClass(!!(selectedRoomTypeId && selectedRoomId), true)}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <DoorOpen className="h-4 w-4" />
                 Habitacion
+                <SectionStatus complete={!!(selectedRoomTypeId && selectedRoomId)} required />
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -530,11 +549,12 @@ export default function NewReservationPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={sectionCardClass(!!selectedRatePlanId, true)}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <DollarSign className="h-4 w-4" />
                 Tarifa y Descuentos
+                <SectionStatus complete={!!selectedRatePlanId} required />
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
