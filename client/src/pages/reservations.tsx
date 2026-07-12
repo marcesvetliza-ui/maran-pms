@@ -1662,6 +1662,35 @@ function ReservationDetailDialog({
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
+  const [coWizardStep, setCoWizardStep] = useState(0);
+  const [coReceiptType, setCoReceiptType] = useState("cierre_habitacion");
+  const [coPayMethod, setCoPayMethod] = useState("efectivo");
+  const [coPayAmount, setCoPayAmount] = useState("");
+  const [coBillingTarget, setCoBillingTarget] = useState<"guest" | "company" | "agency">("guest");
+  const [coCompanyId, setCoCompanyId] = useState("");
+  const [coAgencyId, setCoAgencyId] = useState("");
+
+  const openCheckoutWizard = () => {
+    setCoPayAmount("");
+    setCoReceiptType("cierre_habitacion");
+    if (reservation.companyId) {
+      setCoPayMethod("cuenta_corriente");
+      setCoBillingTarget("company");
+      setCoCompanyId(reservation.companyId);
+      setCoAgencyId("");
+    } else if (reservation.agencyId) {
+      setCoPayMethod("cuenta_corriente");
+      setCoBillingTarget("agency");
+      setCoAgencyId(reservation.agencyId);
+      setCoCompanyId("");
+    } else {
+      setCoPayMethod("efectivo");
+      setCoBillingTarget("guest");
+      setCoCompanyId("");
+      setCoAgencyId("");
+    }
+    setCoWizardStep(1);
+  };
 
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
     queryKey: ["/api/charge-types"],
@@ -1691,6 +1720,46 @@ function ReservationDetailDialog({
         }
       } catch {}
       toast({ title: "Error al realizar check-out", description: msg, variant: "destructive" });
+    },
+  });
+
+  const checkoutProperMutation = useMutation({
+    mutationFn: async () => apiRequest("POST", `/api/reservations/${reservation.id}/check-out`, { forceCheckout: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
+      queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+      setCoWizardStep(0);
+      onOpenChange(false);
+      toast({ title: "Check-out realizado", description: "La habitación quedó en estado Sucia." });
+    },
+    onError: (error: any) => {
+      let msg = "No se pudo realizar el check-out.";
+      try {
+        const raw = error?.message || "";
+        const j = raw.indexOf("{");
+        if (j !== -1) { const b = JSON.parse(raw.slice(j)); msg = b?.error || b?.message || msg; }
+      } catch {}
+      toast({ title: "Error en check-out", description: msg, variant: "destructive" });
+    },
+  });
+
+  const coAddPaymentMutation = useMutation({
+    mutationFn: async (data: { amount: string; method: string; receiptType: string; billingTarget: string; companyId?: string; agencyId?: string }) => {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      return apiRequest("POST", "/api/payments", { ...data, reservationId: reservation.id, date: today });
+    },
+    onSuccess: () => {
+      refetchCharges();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] });
+      toast({ title: "Pago registrado" });
+    },
+    onError: (error: any) => {
+      const msg = error?.data?.error || error?.message || "No se pudo registrar el pago";
+      toast({ title: "Error al registrar pago", description: msg, variant: "destructive" });
     },
   });
 
@@ -3382,11 +3451,11 @@ function ReservationDetailDialog({
               <Button
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
-                onClick={() => setEarlyCheckoutDialogOpen(true)}
+                onClick={openCheckoutWizard}
                 data-testid="button-early-checkout"
               >
                 <LogOut className="h-4 w-4 mr-2" />
-                Check-out anticipado
+                Check-out
               </Button>
             )}
             {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
@@ -3409,40 +3478,193 @@ function ReservationDetailDialog({
         </DialogFooter>
       </DialogContent>
 
-      {/* Early Checkout Confirmation Dialog */}
-      <AlertDialog open={earlyCheckoutDialogOpen} onOpenChange={setEarlyCheckoutDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
+      {/* Checkout Wizard Dialog */}
+      <Dialog open={coWizardStep > 0} onOpenChange={(open) => { if (!open) setCoWizardStep(0); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
               <LogOut className="h-5 w-5 text-orange-500" />
-              Confirmar Check-out Anticipado
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                <p>
-                  El huésped <strong>{reservation.guest?.lastName} {reservation.guest?.firstName}</strong> tiene reserva 
-                  hasta el <strong>{(() => { const [y,m,d] = reservation.checkOutDate.split("-"); return `${d}/${m}/${y}`; })()}</strong>.
-                </p>
-                <p>Al confirmar el check-out anticipado, la habitación <strong>{reservation.room?.roomNumber}</strong> quedará libre inmediatamente.</p>
-                <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded p-2">
-                  Verificá que el folio esté saldado antes de liberar la habitación.
-                </p>
+              Check-out — Hab. {reservation.room?.roomNumber}
+            </DialogTitle>
+            <DialogDescription>
+              {reservation.guest?.lastName} {reservation.guest?.firstName} · {reservation.reservationCode}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Step indicator */}
+          <div className="flex items-center gap-2">
+            {[1,2,3].map(s => (
+              <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= coWizardStep ? "bg-primary" : "bg-muted"}`} />
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground text-center -mt-2">
+            Paso {coWizardStep} de 3: {coWizardStep === 1 ? "Resumen de cuenta" : coWizardStep === 2 ? "Pago y comprobante" : "Confirmar check-out"}
+          </p>
+
+          {/* Step 1: Resumen */}
+          {coWizardStep === 1 && (() => {
+            const totalPayments = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+            const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+            const totalAmount = parseFloat(reservation.totalRoomAmount || "0") + totalChargesAmt;
+            const balance = totalAmount - totalPayments;
+            return (
+              <div className="space-y-3">
+                <div className="p-3 bg-muted/50 rounded-md space-y-1 text-sm">
+                  <div className="flex justify-between"><span>Habitación ({reservation.nights} noches)</span><span>${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+                  {totalChargesAmt > 0 && <div className="flex justify-between"><span>Cargos extras</span><span>${totalChargesAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
+                  <div className="flex justify-between border-t pt-1"><span>Pagado</span><span className="text-green-600">-${totalPayments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+                  <div className="flex justify-between font-bold border-t pt-1"><span>Saldo pendiente</span><span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setCoWizardStep(0)}>Cancelar</Button>
+                  <Button size="sm" onClick={() => setCoWizardStep(2)} data-testid="button-co-step1-next">
+                    {balance > 0 ? "Registrar Pago" : "Siguiente"}
+                  </Button>
+                </div>
               </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={(e) => { e.stopPropagation(); setEarlyCheckoutDialogOpen(false); }}>Volver</AlertDialogCancel>
-            <Button
-              onClick={(e) => { e.stopPropagation(); earlyCheckoutMutation.mutate(); }}
-              disabled={earlyCheckoutMutation.isPending}
-              className="bg-orange-600 hover:bg-orange-700"
-              data-testid="button-confirm-early-checkout"
-            >
-              {earlyCheckoutMutation.isPending ? "Procesando..." : "Confirmar Check-out anticipado"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            );
+          })()}
+
+          {/* Step 2: Pago + Comprobante */}
+          {coWizardStep === 2 && (() => {
+            const totalPayments = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+            const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+            const totalAmount = parseFloat(reservation.totalRoomAmount || "0") + totalChargesAmt;
+            const balance = totalAmount - totalPayments;
+            return (
+              <div className="space-y-3">
+                {balance > 0 && (
+                  <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
+                    Saldo pendiente: <span className="font-bold">${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {balance > 0 && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Monto</Label>
+                      <Input type="number" min={0} step="0.01" value={coPayAmount || balance.toFixed(2)} onChange={(e) => setCoPayAmount(e.target.value)} data-testid="input-co-amount" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Método de pago</Label>
+                      <Select value={coPayMethod} onValueChange={setCoPayMethod}>
+                        <SelectTrigger data-testid="select-co-method"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="efectivo">Efectivo</SelectItem>
+                          <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                          <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                          <SelectItem value="transferencia">Transferencia</SelectItem>
+                          <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                          <SelectItem value="cuenta_corriente">Cta. Corriente</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+                {balance > 0 && coPayMethod === "cuenta_corriente" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Facturar a</Label>
+                      <Select value={coBillingTarget} onValueChange={(v) => { setCoBillingTarget(v as "guest" | "company" | "agency"); setCoCompanyId(""); setCoAgencyId(""); }}>
+                        <SelectTrigger data-testid="select-co-billing"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="guest">Huésped</SelectItem>
+                          <SelectItem value="company">Empresa</SelectItem>
+                          <SelectItem value="agency">Agencia</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {coBillingTarget === "company" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Empresa</Label>
+                        <Select value={coCompanyId} onValueChange={setCoCompanyId}>
+                          <SelectTrigger data-testid="select-co-company"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                          <SelectContent>
+                            {companiesForCC.filter((c: any) => c.id).map((c: any) => (
+                              <SelectItem key={c.id} value={c.id}>{(c as any).razonSocial || (c as any).nombreFantasia || c.id}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {coBillingTarget === "agency" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Agencia</Label>
+                        <Select value={coAgencyId} onValueChange={setCoAgencyId}>
+                          <SelectTrigger data-testid="select-co-agency"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                          <SelectContent>
+                            {agenciesForCC.filter((a: any) => a.id).map((a: any) => (
+                              <SelectItem key={a.id} value={a.id}>{(a as any).razonSocial || (a as any).nombreFantasia || a.id}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs">Tipo de comprobante</Label>
+                  <Select value={coReceiptType} onValueChange={setCoReceiptType}>
+                    <SelectTrigger data-testid="select-co-receipt"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
+                      <SelectItem value="ticket">Ticket</SelectItem>
+                      <SelectItem value="factura_a">Factura A</SelectItem>
+                      <SelectItem value="factura_b">Factura B</SelectItem>
+                      <SelectItem value="factura_c">Factura C</SelectItem>
+                      <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setCoWizardStep(1)}>Atrás</Button>
+                  {balance > 0 && (
+                    <Button size="sm" onClick={() => {
+                      const amount = coPayAmount || balance.toFixed(2);
+                      if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
+                      if (coPayMethod === "cuenta_corriente" && coBillingTarget === "company" && !coCompanyId && !reservation.companyId) {
+                        toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
+                      }
+                      if (coPayMethod === "cuenta_corriente" && coBillingTarget === "agency" && !coAgencyId && !reservation.agencyId) {
+                        toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
+                      }
+                      coAddPaymentMutation.mutate({
+                        amount,
+                        method: coPayMethod,
+                        receiptType: coReceiptType,
+                        billingTarget: coBillingTarget,
+                        companyId: coBillingTarget === "company" ? (coCompanyId || reservation.companyId || undefined) : undefined,
+                        agencyId: coBillingTarget === "agency" ? (coAgencyId || reservation.agencyId || undefined) : undefined,
+                      }, { onSuccess: () => setCoWizardStep(3) });
+                    }} disabled={coAddPaymentMutation.isPending} data-testid="button-co-pay">
+                      {coAddPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
+                    </Button>
+                  )}
+                  <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => setCoWizardStep(3)} data-testid="button-co-skip">
+                    {balance > 0 ? "Omitir pago" : "Siguiente"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Step 3: Confirmar checkout */}
+          {coWizardStep === 3 && (
+            <div className="space-y-3">
+              <div className="p-3 bg-muted/50 rounded-md text-sm space-y-1">
+                <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.lastName} {reservation.guest?.firstName}</span>.</p>
+                <p>Habitación <span className="font-bold">{reservation.room?.roomNumber}</span> quedará en estado <Badge variant="outline" className="text-orange-700">Sucia</Badge>.</p>
+                <p>Se creará una tarea de limpieza en Housekeeping.</p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setCoWizardStep(2)}>Atrás</Button>
+                <Button variant="destructive" size="sm" onClick={() => checkoutProperMutation.mutate()} disabled={checkoutProperMutation.isPending} data-testid="button-co-confirm">
+                  {checkoutProperMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Transfer Charge Dialog */}
       <Dialog open={transferringChargeId !== null} onOpenChange={(open) => {
