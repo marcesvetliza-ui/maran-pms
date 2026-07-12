@@ -1,0 +1,78 @@
+Dashboard
+Muestra datos erróneos, por lo menos hoy 7 por lo tanto hice captura de como está hoy y un video para control
+Habitaciones disponibles hay mucho más que 6
+En ocupación hay 11 habitaciones ocupadas, no 12. Deberías informar la cantidad de early check in y late check out
+Según 66 habitaciones hay un 16.67% de ocupación, redondeando 17% 
+Hay 13 check in hoy, no 12
+En huésped in house tenes tenes 10 no 12
+Video disponible habitaciones disponibles.mp4
+
+
+Huéspedes In House 
+Esto da dos informaciones distintas según el clic que se haga
+Huéspedes in house 
+Supuestamente muestra la fecha ingresada en el filtro de fecha el cual puede ir para atrás pero no para adelante pero
+trae huéspedes de otras fechas 
+informa que hay 47 habitaciones pero en esa fecha hay 24 habitaciones entre in, late check out y reservas que entran hoy
+informa que hay 54 personas ¿?
+
+Listado policía
+Debe de contar con filtros para que se pueda ingresar fechas desde y hasta ya que la mayoría de las veces piden para atrás, rara vez piden de la fecha pero eso está bien
+Los datos que informa el listado son incompletos, te dejo una captura del que emite el sistema de escritorio, el cual te muestra los datos del titular y los acompañantes que serían el nombre y apellido, tipo y número de documento
+
+La policía ha pedido que el informe se lo manden por xls y no por pdf, ve la posibilidad de exportar a este formato, por si acaso
+
+Te dejo una cantidad de capturas de pantalla del día 7 de julio en donde muestra al inconsistencia de los datos, luego que los analices borralos
+
+
+
+
+
+
+
+Llegadas del día
+Hay 13 check ins pendientes, no 12 para el día 07/07
+En hotelería se mezcla mucho el inglés y el español con términos  muy internalizados como check in/ registrarse; check out pagar la cuenta e irse; pero Dirty es sucia, pero a tu gusto
+Se Informa que la habitación 802 está ocupada cuando no hay hecho el ingreso todavía
+
+Se Informa que la habitación 603 esta limpia_ocupada pero la habitación está limpia pero no ocupada porque el pasajero no llego todavia
+
+
+Anulaciones del día
+Faltan datos como ser 
+usuario anulo la reserva, dice Por Recepción pero no el usuario
+fecha y hora que anuló la reserva
+formato incorrecto de fechas aaaa/mm/dd
+si son anulaciones del día porque me trae anulaciones del día 10 siendo que hoy es 7
+falta un filtro para buscar anulaciones por fechas y/o habitación, para atrás y para adelante
+Estas son cosa que me ha pedido lucía en su momento para saber qué había pasado con tal o cual reserva
+
+Reservas recientes
+Muestras la fecha con formato incorrecto y yo mostraría el usuario que hizo la reserva, la fecha y hora, aca y en 
+
+y no es en el primer lugar donde mostras mal la fecha por lo que me pregunto o recepción jamás se dio cuenta, que lindo que está todo, o no les interesa estas “pequeñeces” pero si el sistema de grandi, u otro, mostrara así las fechas, mamita el grito que pegan
+
+
+
+Estado de habitaciones
+Si es una vista rápida del hotel ¿porque mostras este conjunto de habitaciones? ¿Cuál es el criterio? ¿algunas al azar? aparte los colores no son fieles a lo que dice debajo y las habitaciones dicen Mant cuando, por ejemplo la 805, está Sucia 
+
+
+Alerta del sistema no informa qué habitación es, fechas desde hasta que esta en mantenimiento
+
+
+Desayunos
+
+El listado de desayunos corresponde a la cantidad de personas alojadas, según la cantidad de pax por habitación. Si vemos hoy sabado 11/07 vemos que dice que informas 27 y si desplegamos nos muestra esto
+
+esta trayendo una reserva que no corresponde a la fecha
+no estás contando las reservas que se retiran hoy, las cuales desayunan
+solo estás contando los alojamientos que tienen una fecha de egreso mayor a la fecha
+no estás ordenando por número de habitación
+la cantidad de alojamientos que se van hoy son 15 eso hace que es el número sea mucho mayor
+
+
+Salidas del Día
+Informas la cantidad de outs pendientes a la fecha, pero no informas aca la fecha de ingreso y partida
+
+
