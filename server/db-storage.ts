@@ -562,7 +562,7 @@ export class DatabaseStorage implements IStorage {
     const todayStr = getArgentinaToday();
     const allRes = await db.select().from(reservations).where(
       and(
-        or(eq(reservations.status, "confirmed"), eq(reservations.status, "pending")),
+        inArray(reservations.status, ["confirmed", "pending", "tentative", "web_checkin"] as any),
         eq(reservations.checkInDate, todayStr)
       )
     );
@@ -790,22 +790,67 @@ export class DatabaseStorage implements IStorage {
 
     // Excluir habitaciones virtuales (REUB y similares) de todas las estadísticas
     const realRooms = allRooms.filter(r => !r.isVirtual);
-
     const totalRooms = realRooms.length;
-    const availableRooms = realRooms.filter(r => r.status === "available").length;
-    const occupiedRooms = realRooms.filter(r => r.status === "occupied").length;
+
+    // Estadísticas de habitaciones por status housekeeping (solo para referencia interna)
     const dirtyRooms = realRooms.filter(r => r.status === "dirty").length;
     const cleaningRooms = realRooms.filter(r => r.status === "cleaning").length;
-    const maintenanceRooms = realRooms.filter(r => r.status === "maintenance").length;
     const oosRooms = realRooms.filter(r => r.status === "oos").length;
 
-    const todayCheckInsResult = await db.select({ cnt: count() }).from(reservations).where(
-      and(
-        eq(reservations.checkInDate, today),
-        inArray(reservations.status, ["confirmed", "pending", "tentative"] as any)
-      )
-    );
-    const todayCheckIns = todayCheckInsResult[0]?.cnt ?? 0;
+    // Ocupación basada en reservas: habitaciones con reserva activa hoy
+    // (checkIn <= hoy AND checkOut > hoy AND status != cancelled/checked_out)
+    const occupiedRoomsRows = await db.execute(sql`
+      SELECT COUNT(DISTINCT r.room_id) AS cnt
+      FROM reservations r
+      JOIN rooms rm ON rm.id = r.room_id
+      WHERE r.check_in_date <= ${today}
+        AND r.check_out_date > ${today}
+        AND r.status NOT IN ('cancelled', 'checked_out')
+        AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
+    `);
+    const occupiedRooms = Number((occupiedRoomsRows.rows[0] as any)?.cnt ?? 0);
+
+    // Habitaciones en mantenimiento hoy (bloqueadas por maintenance_blocks)
+    const maintenanceRoomsRows = await db.execute(sql`
+      SELECT COUNT(DISTINCT mb.room_id) AS cnt
+      FROM maintenance_blocks mb
+      JOIN rooms rm ON rm.id = mb.room_id
+      WHERE mb.block_from <= ${today}
+        AND mb.block_to >= ${today}
+        AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
+    `);
+    const maintenanceRooms = Number((maintenanceRoomsRows.rows[0] as any)?.cnt ?? 0);
+
+    // Detalles de bloques de mantenimiento activos hoy (para alertas)
+    const maintenanceBlockDetailRows = await db.execute(sql`
+      SELECT rm.room_number, mb.block_from, mb.block_to, mb.notes
+      FROM maintenance_blocks mb
+      JOIN rooms rm ON rm.id = mb.room_id
+      WHERE mb.block_from <= ${today}
+        AND mb.block_to >= ${today}
+        AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
+      ORDER BY rm.room_number
+    `);
+    const maintenanceBlockDetails = maintenanceBlockDetailRows.rows.map((r: any) => ({
+      roomNumber: r.room_number as string,
+      blockFrom: r.block_from as string,
+      blockTo: r.block_to as string,
+      notes: (r.notes as string) || null,
+    }));
+
+    // Disponibles = total - ocupadas (por reserva) - en mantenimiento (por bloque)
+    const availableRooms = Math.max(0, totalRooms - occupiedRooms - maintenanceRooms);
+
+    // Check-ins hoy: todas las reservas con check-in = hoy, sin importar status excepto canceladas/checked_out
+    const todayCheckInsResult = await db.execute(sql`
+      SELECT COUNT(*) AS cnt
+      FROM reservations r
+      JOIN rooms rm ON rm.id = r.room_id
+      WHERE r.check_in_date = ${today}
+        AND r.status NOT IN ('cancelled', 'checked_out')
+        AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
+    `);
+    const todayCheckIns = Number((todayCheckInsResult.rows[0] as any)?.cnt ?? 0);
 
     const todayCheckOutsResult = await db.select({ cnt: count() }).from(reservations).where(
       and(eq(reservations.checkOutDate, today), eq(reservations.status, "checked_in"))
@@ -822,8 +867,7 @@ export class DatabaseStorage implements IStorage {
     );
     const pendingReservations = pendingResult[0]?.cnt ?? 0;
 
-    // Desayunos mañana = pax en reservas activas (checked_in) que pasan la noche de hoy
-    // Solo reservas con check-in ya realizado (status = checked_in) para habitaciones reales
+    // Desayunos mañana = pax en reservas checked_in que pasan la noche de hoy
     const tonightRows = await db.execute(sql`
       SELECT
         COALESCE(SUM(r.number_of_guests), 0) AS pax,
@@ -838,13 +882,13 @@ export class DatabaseStorage implements IStorage {
     const breakfastsTomorrow = Number((tonightRows.rows[0] as any)?.pax ?? 0);
     const roomsTonight = Number((tonightRows.rows[0] as any)?.rooms_count ?? 0);
 
-    // Personas in house = sum(numberOfGuests) de reservas checked_in en habitaciones reales ocupadas
-    // Solo status = 'checked_in' para evitar contar reservas históricas múltiples por cuarto
+    // Personas in house = sum(numberOfGuests) de reservas checked_in activas hoy
     const inHouseRows = await db.execute(sql`
       SELECT COALESCE(SUM(r.number_of_guests), 0) AS pax
-      FROM rooms rm
-      JOIN reservations r ON r.room_id = rm.id
-      WHERE rm.status = 'occupied'
+      FROM reservations r
+      JOIN rooms rm ON rm.id = r.room_id
+      WHERE r.check_in_date <= ${today}
+        AND r.check_out_date > ${today}
         AND r.status = 'checked_in'
         AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
     `);
@@ -859,13 +903,14 @@ export class DatabaseStorage implements IStorage {
       cleaningRooms,
       maintenanceRooms,
       oosRooms,
-      todayCheckIns: Number(todayCheckIns),
+      todayCheckIns,
       todayCheckOuts: Number(todayCheckOuts),
       occupancyRate,
       totalGuests: Number(totalGuests),
       pendingReservations: Number(pendingReservations),
       breakfastsTomorrow,
       roomsTonight,
+      maintenanceBlockDetails,
     };
   }
 

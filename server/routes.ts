@@ -258,58 +258,36 @@ export async function registerRoutes(
     }
   });
 
-  // In-house guests: all reservations for occupied rooms
+  // In-house guests: reservations active on the requested date (by date range)
   app.get("/api/dashboard/inhouse", requireAuth, async (req, res) => {
     try {
       const { reservationCompanions } = await import("@shared/schema");
 
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       const requestedDate = typeof req.query.date === "string" && req.query.date ? req.query.date : today;
-      const isPastDate = requestedDate < today;
 
       let activeReservations: typeof reservations.$inferSelect[] = [];
       let roomNumberMap = new Map<string, string>();
 
-      if (isPastDate) {
-        // Para fechas pasadas: buscar reservas que estaban activas ese día por rango de fechas
-        // Incluye checked_out porque ya salieron
-        const rows = await db.select({
-          reservation: reservations,
-          roomNumber: rooms.roomNumber,
-        })
-          .from(reservations)
-          .innerJoin(rooms, eq(rooms.id, reservations.roomId))
-          .where(
-            and(
-              sql`${reservations.checkInDate} <= ${requestedDate}`,
-              sql`${reservations.checkOutDate} > ${requestedDate}`,
-              ne(reservations.status, "cancelled"),
-              sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`
-            )
-          );
-        for (const row of rows) {
-          activeReservations.push(row.reservation);
-          roomNumberMap.set(row.reservation.roomId, row.roomNumber);
-        }
-      } else {
-        // Para hoy: habitaciones físicamente ocupadas
-        const occupiedRooms = await db.select({ id: rooms.id, roomNumber: rooms.roomNumber })
-          .from(rooms)
-          .where(and(eq(rooms.status, "occupied"), sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`));
-
-        if (occupiedRooms.length === 0) return res.json([]);
-        roomNumberMap = new Map(occupiedRooms.map((r) => [r.id, r.roomNumber]));
-        const occupiedRoomIds = occupiedRooms.map((r) => r.id);
-
-        activeReservations = await db.select()
-          .from(reservations)
-          .where(
-            and(
-              inArray(reservations.roomId, occupiedRoomIds),
-              ne(reservations.status, "cancelled"),
-              ne(reservations.status, "checked_out")
-            )
-          );
+      // Siempre usar rango de fechas: checkIn <= fecha AND checkOut > fecha AND no canceladas
+      // Esto evita el bug de mostrar reservas sin filtro de fecha cuando se usa status de habitación
+      const rows = await db.select({
+        reservation: reservations,
+        roomNumber: rooms.roomNumber,
+      })
+        .from(reservations)
+        .innerJoin(rooms, eq(rooms.id, reservations.roomId))
+        .where(
+          and(
+            sql`${reservations.checkInDate} <= ${requestedDate}`,
+            sql`${reservations.checkOutDate} > ${requestedDate}`,
+            ne(reservations.status, "cancelled"),
+            sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`
+          )
+        );
+      for (const row of rows) {
+        activeReservations.push(row.reservation);
+        roomNumberMap.set(row.reservation.roomId, row.roomNumber);
       }
 
       if (activeReservations.length === 0) return res.json([]);

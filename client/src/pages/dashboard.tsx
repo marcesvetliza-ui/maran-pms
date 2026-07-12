@@ -45,6 +45,16 @@ type DashboardStats = {
   pendingReservations: number;
   breakfastsTomorrow: number;
   roomsTonight: number;
+  maintenanceBlockDetails: { roomNumber: string; blockFrom: string; blockTo: string; notes?: string | null }[];
+};
+
+const fmtDate = (d: string | null | undefined): string =>
+  d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+
+const fmtDateTime = (d: string | Date | null | undefined): string => {
+  if (!d) return "—";
+  const dt = typeof d === "string" ? new Date(d) : d;
+  return isNaN(dt.getTime()) ? "—" : dt.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
 
 function StatCard({
@@ -158,10 +168,14 @@ function RoomStatusBadge({ status }: { status: string }) {
     available: { label: "Disponible", className: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
     occupied: { label: "Ocupada", className: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" },
     cleaning: { label: "Limpieza", className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400" },
+    dirty: { label: "Sucia", className: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400" },
+    dirty_occupied: { label: "Sucia/Ocup.", className: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400" },
+    limpia_ocupada: { label: "Limpia/Ocup.", className: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" },
     maintenance: { label: "Mantenimiento", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
+    oos: { label: "Fuera Servicio", className: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" },
   };
 
-  const config = statusConfig[status] || { label: status, className: "" };
+  const config = statusConfig[status] || { label: status, className: "bg-muted text-muted-foreground" };
 
   return <Badge className={config.className}>{config.label}</Badge>;
 }
@@ -723,9 +737,18 @@ export default function Dashboard() {
               </div>
             ) : arrivals.length > 0 ? (
               <div className="space-y-3">
-                {arrivals.slice(0, 5).map((reservation) => {
+                {arrivals.slice(0, 8).map((reservation) => {
                   const roomStatus = reservation.room?.status;
                   const isRoomReady = roomStatus === "available";
+                  const roomStatusLabels: Record<string, string> = {
+                    cleaning: "En limpieza",
+                    dirty: "Sucia",
+                    dirty_occupied: "Sucia/Ocupada",
+                    limpia_ocupada: "Limpia/Ocupada",
+                    maintenance: "En mantenimiento",
+                    occupied: "Ocupada por otro huésped",
+                    oos: "Fuera de servicio",
+                  };
                   return (
                     <div
                       key={reservation.id}
@@ -736,13 +759,13 @@ export default function Dashboard() {
                         <p className="font-medium truncate">
                           {reservation.guest?.lastName} {reservation.guest?.firstName}
                         </p>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
                           <span>Hab. {reservation.room?.roomNumber}</span>
-                          {!isRoomReady && (
+                          <span>·</span>
+                          <span>{fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}</span>
+                          {!isRoomReady && roomStatus && (
                             <Badge variant="secondary" className="text-xs">
-                              {roomStatus === "cleaning" ? "En limpieza" : 
-                               roomStatus === "maintenance" ? "Mantenimiento" : 
-                               roomStatus === "occupied" ? "Ocupada" : roomStatus}
+                              {roomStatusLabels[roomStatus] ?? roomStatus}
                             </Badge>
                           )}
                         </div>
@@ -790,7 +813,7 @@ export default function Dashboard() {
               </div>
             ) : departures.length > 0 ? (
               <div className="space-y-3">
-                {departures.slice(0, 5).map((reservation) => (
+                {departures.slice(0, 8).map((reservation) => (
                   <div
                     key={reservation.id}
                     className="flex items-center justify-between gap-3 p-3 rounded-md border bg-orange-50/50 dark:bg-orange-900/10"
@@ -800,9 +823,13 @@ export default function Dashboard() {
                       <p className="font-medium truncate">
                         {reservation.guest?.lastName} {reservation.guest?.firstName}
                       </p>
-                      <p className="text-sm text-muted-foreground">
-                        Hab. {reservation.room?.roomNumber} | ${reservation.totalRoomAmount}
-                      </p>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
+                        <span>Hab. {reservation.room?.roomNumber}</span>
+                        <span>·</span>
+                        <span>Ingresó: {fmtDate(reservation.checkInDate)}</span>
+                        <span>·</span>
+                        <span>Sale: {fmtDate(reservation.checkOutDate)}</span>
+                      </div>
                     </div>
                     <Button
                       size="sm"
@@ -842,13 +869,18 @@ export default function Dashboard() {
               {todayCancelled.map((log: any, i: number) => (
                 <div key={i} className="flex flex-col sm:flex-row sm:items-start gap-2 p-3 rounded-md border border-destructive/20 bg-background">
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm">{log.guestName} — Hab. {log.roomNumber}</p>
-                    <p className="text-xs text-muted-foreground">{log.reservationCode} · {log.checkInDate} → {log.checkOutDate}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium text-sm">{log.guestName} — Hab. {log.roomNumber}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {log.reservationCode} · {fmtDate(log.checkInDate)} → {fmtDate(log.checkOutDate)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Anulada: {fmtDateTime(log.cancellationDate)}
+                      {log.cancelledBy ? ` · Por: ${log.cancelledBy}` : ""}
+                    </p>
                     {log.reason && (
                       <p className="text-xs mt-1 text-destructive/80 italic">Motivo: {log.reason}</p>
-                    )}
-                    {log.cancelledBy && (
-                      <p className="text-xs text-muted-foreground">Por: {log.cancelledBy}</p>
                     )}
                   </div>
                 </div>
@@ -902,8 +934,13 @@ export default function Dashboard() {
                           {reservation.guest?.lastName} {reservation.guest?.firstName}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          Hab. {reservation.room?.roomNumber} | {reservation.checkInDate} - {reservation.checkOutDate}
+                          Hab. {reservation.room?.roomNumber} · {fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}
                         </p>
+                        {reservation.createdAt && (
+                          <p className="text-xs text-muted-foreground/70">
+                            Registrada: {fmtDateTime(reservation.createdAt)}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <ReservationStatusBadge status={reservation.status} />
@@ -941,30 +978,43 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : roomsOverview && roomsOverview.length > 0 ? (
-              <div className="grid grid-cols-4 gap-2">
-                {roomsOverview.slice(0, 12).map((room) => (
-                  <div
-                    key={room.id}
-                    className={`flex flex-col items-center justify-center p-3 rounded-md border text-center ${
-                      room.status === "available"
-                        ? "bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800"
-                        : room.status === "occupied"
-                        ? "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
-                        : room.status === "cleaning"
-                        ? "bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800"
-                        : "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
-                    }`}
-                    data-testid={`room-tile-${room.id}`}
-                  >
-                    <span className="text-lg font-bold">{room.roomNumber}</span>
-                    <span className="text-xs text-muted-foreground capitalize">
-                      {room.status === "available" ? "Libre" : 
-                       room.status === "occupied" ? "Ocupada" : 
-                       room.status === "cleaning" ? "Limpieza" : "Mant."}
-                    </span>
+              (() => {
+                const roomStatusStyle: Record<string, { bg: string; label: string }> = {
+                  available:    { bg: "bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800",   label: "Libre" },
+                  occupied:     { bg: "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800",       label: "Ocupada" },
+                  cleaning:     { bg: "bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800", label: "Limpieza" },
+                  dirty:        { bg: "bg-orange-50 border-orange-200 dark:bg-orange-900/20 dark:border-orange-800", label: "Sucia" },
+                  dirty_occupied: { bg: "bg-orange-50 border-orange-200 dark:bg-orange-900/20 dark:border-orange-800", label: "Sucia/Ocup." },
+                  limpia_ocupada: { bg: "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800",     label: "Limpia/Ocup." },
+                  maintenance:  { bg: "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800",           label: "Mant." },
+                  oos:          { bg: "bg-gray-50 border-gray-200 dark:bg-gray-900/20 dark:border-gray-700",       label: "Fuera Serv." },
+                };
+                const attentionStatuses = ["dirty", "cleaning", "maintenance", "occupied", "dirty_occupied", "limpia_ocupada", "oos"];
+                const priorityRooms = [...roomsOverview]
+                  .filter(r => attentionStatuses.includes(r.status))
+                  .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
+                const availableRoomsForDisplay = [...roomsOverview]
+                  .filter(r => r.status === "available")
+                  .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
+                const displayRooms = [...priorityRooms, ...availableRoomsForDisplay].slice(0, 16);
+                return (
+                  <div className="grid grid-cols-4 gap-2">
+                    {displayRooms.map((room) => {
+                      const s = roomStatusStyle[room.status] ?? { bg: "bg-muted border-border", label: room.status };
+                      return (
+                        <div
+                          key={room.id}
+                          className={`flex flex-col items-center justify-center p-3 rounded-md border text-center ${s.bg}`}
+                          data-testid={`room-tile-${room.id}`}
+                        >
+                          <span className="text-lg font-bold">{room.roomNumber}</span>
+                          <span className="text-xs text-muted-foreground">{s.label}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                );
+              })()
             ) : (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <DoorOpen className="h-12 w-12 text-muted-foreground/50 mb-3" />
@@ -977,23 +1027,13 @@ export default function Dashboard() {
 
             {/* Room Status Legend */}
             {roomsOverview && roomsOverview.length > 0 && (
-              <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t">
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-green-500" />
-                  <span className="text-sm text-muted-foreground">Disponible</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-blue-500" />
-                  <span className="text-sm text-muted-foreground">Ocupada</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-yellow-500" />
-                  <span className="text-sm text-muted-foreground">Limpieza</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-red-500" />
-                  <span className="text-sm text-muted-foreground">Mantenimiento</span>
-                </div>
+              <div className="flex flex-wrap items-center gap-3 mt-4 pt-4 border-t">
+                <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded-full bg-green-500" /><span className="text-xs text-muted-foreground">Libre</span></div>
+                <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded-full bg-blue-500" /><span className="text-xs text-muted-foreground">Ocupada</span></div>
+                <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded-full bg-yellow-500" /><span className="text-xs text-muted-foreground">Limpieza</span></div>
+                <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded-full bg-orange-500" /><span className="text-xs text-muted-foreground">Sucia</span></div>
+                <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded-full bg-red-500" /><span className="text-xs text-muted-foreground">Mantenimiento</span></div>
+                <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded-full bg-gray-400" /><span className="text-xs text-muted-foreground">Fuera Servicio</span></div>
               </div>
             )}
           </CardContent>
@@ -1012,9 +1052,18 @@ export default function Dashboard() {
           <CardContent>
             <div className="space-y-2">
               {stats.maintenanceRooms > 0 && (
-                <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
-                  <Clock className="h-4 w-4" />
-                  <span>{stats.maintenanceRooms} habitación(es) en mantenimiento</span>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200 font-medium">
+                    <Clock className="h-4 w-4 shrink-0" />
+                    <span>{stats.maintenanceRooms} habitación(es) bloqueada(s) por mantenimiento hoy</span>
+                  </div>
+                  {(stats.maintenanceBlockDetails ?? []).map((blk, i) => (
+                    <div key={i} className="ml-6 text-sm text-yellow-700 dark:text-yellow-300">
+                      Hab. <span className="font-semibold">{blk.roomNumber}</span>
+                      {" — "}del {fmtDate(blk.blockFrom)} al {fmtDate(blk.blockTo)}
+                      {blk.notes ? ` · ${blk.notes}` : ""}
+                    </div>
+                  ))}
                 </div>
               )}
               {stats.pendingReservations > 0 && (
