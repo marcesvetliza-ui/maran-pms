@@ -23,6 +23,7 @@ import {
   Building2,
   ListChecks,
   X,
+  Receipt,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -312,6 +313,18 @@ export default function CheckOutPage() {
       });
     },
   });
+
+  function buildFacturaInitialValues(): EmitirFacturaInitialValues {
+    const g = selectedReservation?.guest as any;
+    return {
+      razonSocial: g ? `${g.lastName || ""} ${g.firstName || ""}`.trim() || undefined : undefined,
+      dni: g?.documentNumber || undefined,
+      items: [{
+        descripcion: `Alojamiento Hab. ${selectedReservation?.room?.roomNumber || ""} (${folio?.nights || selectedReservation?.nights || 1} noche${((folio?.nights || 1) !== 1) ? "s" : ""})`,
+        precioUnitario: folio?.grandTotal || 0,
+      }],
+    };
+  }
 
   const today = getLocalToday();
   const overdueReservations = reservations?.filter((res) => res.checkOutDate < today) ?? [];
@@ -986,6 +999,9 @@ export default function CheckOutPage() {
                 onClick={() => {
                   if (isEarlyCheckout) { setEarlyCheckoutDialog(true); return; }
                   if (isHistorical && balance > 0.01) { setDebtWarningDialog(true); return; }
+                  if (balance <= 0.01 && ["factura_a", "factura_b", "factura_c"].includes(receiptTypeForFreeCheckout)) {
+                    pendingFacturaTipoRef.current = receiptTypeForFreeCheckout;
+                  }
                   selectedReservation && checkOutMutation.mutate(selectedReservation.id);
                 }}
                 disabled={(!isHistorical && balance > 0.01) || checkOutMutation.isPending}
@@ -1059,7 +1075,17 @@ export default function CheckOutPage() {
               </CardContent>
             </Card>
 
-            <div className="flex flex-col sm:flex-row justify-center gap-3">
+            <div className="flex flex-col sm:flex-row justify-center gap-3 flex-wrap">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setFacturaInitialValues(buildFacturaInitialValues());
+                  setShowFacturar(true);
+                }}
+                data-testid="button-emitir-factura-step3"
+              >
+                <Receipt className="h-4 w-4 mr-2" />Emitir Factura
+              </Button>
               <Button
                 variant="outline"
                 className="border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
