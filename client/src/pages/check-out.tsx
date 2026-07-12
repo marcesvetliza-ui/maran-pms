@@ -57,6 +57,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails, Charge, Payment, PaymentMethod } from "@shared/schema";
+import { EmitirFacturaDialog } from "@/pages/billing";
+import type { EmitirFacturaInitialValues } from "@/pages/billing";
 
 const paymentMethodLabels: Record<PaymentMethod, string> = {
   efectivo: "Efectivo",
@@ -108,6 +110,9 @@ export default function CheckOutPage() {
   const [debtWarningDialog, setDebtWarningDialog] = useState(false);
   const [itemPayMode, setItemPayMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [showFacturar, setShowFacturar] = useState(false);
+  const [pendingFacturaTipo, setPendingFacturaTipo] = useState("");
+  const [facturaInitialValues, setFacturaInitialValues] = useState<EmitirFacturaInitialValues | undefined>(undefined);
 
   const handleToggleItem = (id: string, amount: number) => {
     const next = new Set(selectedItemIds);
@@ -129,6 +134,8 @@ export default function CheckOutPage() {
     setSelectedItemIds(new Set());
     setPaymentAmount("");
   };
+
+  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
 
   const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/dashboard/departures"],
@@ -186,7 +193,10 @@ export default function CheckOutPage() {
         agencyId: data.agencyId || null,
       });
     },
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
+      if (["factura_a", "factura_b", "factura_c"].includes(vars.receiptType)) {
+        setPendingFacturaTipo(vars.receiptType);
+      }
       refetchFolio();
       setPaymentAmount("");
       setPaymentReference("");
@@ -266,8 +276,9 @@ export default function CheckOutPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
 
       const methods = folio?.payments?.map(p => paymentMethodLabels[p.method as PaymentMethod] || p.method) || [];
+      const g = selectedReservation?.guest as any;
       setFinalSummary({
-        guestName: `${selectedReservation?.guest?.lastName} ${selectedReservation?.guest?.firstName}`,
+        guestName: `${g?.lastName || ""} ${g?.firstName || ""}`.trim(),
         roomNumber: selectedReservation?.room?.roomNumber || "",
         checkOutDate: new Date().toLocaleDateString("es-AR"),
         totalPaid: folio?.totalPayments || 0,
@@ -275,6 +286,18 @@ export default function CheckOutPage() {
       });
       setCheckoutComplete(true);
       setWizardStep(3);
+      if (pendingFacturaTipo) {
+        setFacturaInitialValues({
+          razonSocial: `${g?.lastName || ""} ${g?.firstName || ""}`.trim() || undefined,
+          dni: g?.documentNumber || undefined,
+          items: [{
+            descripcion: `Alojamiento Hab. ${selectedReservation?.room?.roomNumber || ""} (${folio?.nights || selectedReservation?.nights || 1} noche${((folio?.nights || 1) !== 1) ? "s" : ""})`,
+            precioUnitario: folio?.grandTotal || 0,
+          }],
+        });
+        setShowFacturar(true);
+        setPendingFacturaTipo("");
+      }
     },
     onError: async (error: any) => {
       let message = "No se pudo realizar el check-out. Intente nuevamente.";
@@ -722,8 +745,10 @@ export default function CheckOutPage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
+                            <SelectItem value="ticket">Ticket</SelectItem>
                             <SelectItem value="factura_a">Factura A</SelectItem>
                             <SelectItem value="factura_b">Factura B</SelectItem>
+                            <SelectItem value="factura_c">Factura C</SelectItem>
                             <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
                           </SelectContent>
                         </Select>
@@ -1318,6 +1343,14 @@ export default function CheckOutPage() {
         </DialogContent>
       </Dialog>
 
+      {showFacturar && (
+        <EmitirFacturaDialog
+          open={showFacturar}
+          onClose={() => setShowFacturar(false)}
+          config={billingConfig}
+          initialValues={facturaInitialValues}
+        />
+      )}
     </div>
   );
 }

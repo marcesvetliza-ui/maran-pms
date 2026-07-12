@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote, Undo2, Building2 } from "lucide-react";
 import {
@@ -19,6 +19,8 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { getLocalToday } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import type { ReservationWithDetails, ReservationStatus } from "@shared/schema";
+import { EmitirFacturaDialog } from "@/pages/billing";
+import type { EmitirFacturaInitialValues } from "@/pages/billing";
 
 function getStatusBadge(status: ReservationStatus) {
   const config: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -60,6 +62,9 @@ export function ReservationDetailModal({
   const [editRatePerNight, setEditRatePerNight] = useState("");
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [checkoutReceiptType, setCheckoutReceiptType] = useState("cierre_habitacion");
+  const [showCheckoutFactura, setShowCheckoutFactura] = useState(false);
+  const [checkoutFacturaInitial, setCheckoutFacturaInitial] = useState<EmitirFacturaInitialValues | undefined>(undefined);
+  const checkoutPendingInvoiceRef = useRef(false);
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState("efectivo");
   const [checkoutPayAmount, setCheckoutPayAmount] = useState("");
   const [checkoutBillingTarget, setCheckoutBillingTarget] = useState<"guest" | "company" | "agency">("guest");
@@ -96,6 +101,8 @@ export function ReservationDetailModal({
       toast({ title: "Error", description: "No se pudo actualizar la reserva.", variant: "destructive" });
     },
   });
+
+  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
 
   const addPaymentMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -197,6 +204,19 @@ export function ReservationDetailModal({
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({ title: "Check-out realizado", description: "El huesped ha sido despedido." });
       onOpenChange(false);
+      if (checkoutPendingInvoiceRef.current) {
+        checkoutPendingInvoiceRef.current = false;
+        const g = reservation?.guest as any;
+        setCheckoutFacturaInitial({
+          razonSocial: g ? `${g.lastName || ""} ${g.firstName || ""}`.trim() : undefined,
+          dni: g?.documentNumber || undefined,
+          items: [{
+            descripcion: `Alojamiento Hab. ${reservation?.room?.roomNumber || ""} (${reservation?.nights || 1} noche${(reservation?.nights || 1) !== 1 ? "s" : ""})`,
+            precioUnitario: parseFloat(reservation?.totalRoomAmount || "0"),
+          }],
+        });
+        setShowCheckoutFactura(true);
+      }
     },
     onError: (error: any) => {
       const message = error?.data?.error || error?.message || "No se pudo realizar el check-out.";
@@ -300,6 +320,7 @@ export function ReservationDetailModal({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
@@ -473,7 +494,12 @@ export function ReservationDetailModal({
                             billingTarget: checkoutBillingTarget,
                             companyId: checkoutBillingTarget === "company" ? (checkoutCompanyId || reservation.companyId || undefined) : undefined,
                             agencyId: checkoutBillingTarget === "agency" ? (checkoutAgencyId || reservation.agencyId || undefined) : undefined,
-                          }, { onSuccess: () => setCheckoutStep(3) });
+                          }, { onSuccess: () => {
+                            if (["factura_a", "factura_b", "factura_c"].includes(checkoutReceiptType)) {
+                              checkoutPendingInvoiceRef.current = true;
+                            }
+                            setCheckoutStep(3);
+                          } });
                         }} disabled={addPaymentMutation.isPending} data-testid="button-checkout-pay">
                           {addPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
                         </Button>
@@ -746,5 +772,15 @@ export function ReservationDetailModal({
         </DialogContent>
       </Dialog>
     </Dialog>
+
+    {showCheckoutFactura && (
+      <EmitirFacturaDialog
+        open={showCheckoutFactura}
+        onClose={() => setShowCheckoutFactura(false)}
+        config={billingConfig}
+        initialValues={checkoutFacturaInitial}
+      />
+    )}
+  </>
   );
 }
