@@ -1670,6 +1670,7 @@ function ReservationDetailDialog({
   const [coCompanyId, setCoCompanyId] = useState("");
   const [coAgencyId, setCoAgencyId] = useState("");
   const [coShowFacturar, setCoShowFacturar] = useState(false);
+  const [coPendingInvoice, setCoPendingInvoice] = useState(false);
 
   const openCheckoutWizard = () => {
     setCoPayAmount("");
@@ -1736,6 +1737,10 @@ function ReservationDetailDialog({
       setCoWizardStep(0);
       onOpenChange(false);
       toast({ title: "Check-out realizado", description: "La habitación quedó en estado Sucia." });
+      if (coPendingInvoice) {
+        setCoPendingInvoice(false);
+        setCoShowFacturar(true);
+      }
     },
     onError: (error: any) => {
       let msg = "No se pudo realizar el check-out.";
@@ -1755,6 +1760,7 @@ function ReservationDetailDialog({
     },
     onSuccess: () => {
       refetchCharges();
+      refetchPayments();
       queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] });
       toast({ title: "Pago registrado" });
     },
@@ -3677,7 +3683,7 @@ function ReservationDetailDialog({
                         agencyId: coBillingTarget === "agency" ? (coAgencyId || reservation.agencyId || undefined) : undefined,
                       }, { onSuccess: () => {
                         if (["factura_a", "factura_b", "factura_c"].includes(coReceiptType)) {
-                          setCoShowFacturar(true);
+                          setCoPendingInvoice(true);
                         }
                         setCoWizardStep(3);
                       } });

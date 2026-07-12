@@ -522,6 +522,48 @@ export function registerReservationsRoutes(app: Express) {
       await storage.updateReservation(req.params.id, { status: "checked_in" });
       await storage.updateRoom(reservation.roomId, { status: "occupied" });
 
+      // Registrar cargo de alojamiento en el folio al hacer check-in
+      try {
+        const roomNum = room.roomNumber || req.params.id;
+        const totalRoomAmt = parseFloat(reservation.totalRoomAmount || "0");
+        const earlyCharge = parseFloat(reservation.earlyCheckInCharge || "0");
+        const lateCharge = parseFloat(reservation.lateCheckOutCharge || "0");
+        const nights = reservation.nights || 1;
+        if (totalRoomAmt > 0) {
+          await storage.addFolioCharge(
+            "reservation",
+            req.params.id,
+            totalRoomAmt,
+            `Alojamiento Hab. ${roomNum} (${nights} noche${nights !== 1 ? "s" : ""})`,
+            "room",
+            req.params.id,
+            (req as any).user?.username,
+          );
+        }
+        if (earlyCharge > 0) {
+          await storage.addFolioCharge(
+            "reservation",
+            req.params.id,
+            earlyCharge,
+            `Early Check-in${reservation.earlyCheckInTime ? " " + reservation.earlyCheckInTime + " hs" : ""}`,
+            "room",
+            req.params.id,
+            (req as any).user?.username,
+          );
+        }
+        if (lateCharge > 0) {
+          await storage.addFolioCharge(
+            "reservation",
+            req.params.id,
+            lateCharge,
+            `Late Check-out${reservation.lateCheckOutTime ? " " + reservation.lateCheckOutTime + " hs" : ""}`,
+            "room",
+            req.params.id,
+            (req as any).user?.username,
+          );
+        }
+      } catch (e) { console.error("[Folio] Error registrando cargo alojamiento:", e); }
+
       if (reservation.guestId) {
         const preferences = await storage.getActiveGuestPreferences(reservation.guestId);
         for (const pref of preferences) {
