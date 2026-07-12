@@ -384,6 +384,7 @@ export default function CheckOutPage() {
 
   if (wizardStep > 0 && selectedReservation) {
     return (
+      <>
       <div className="flex flex-col gap-6 p-6">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={cancelWizard} data-testid="button-cancel-wizard">
@@ -1105,6 +1106,15 @@ export default function CheckOutPage() {
           </div>
         )}
       </div>
+      {showFacturar && (
+        <EmitirFacturaDialog
+          open={showFacturar}
+          onClose={() => setShowFacturar(false)}
+          config={billingConfig}
+          initialValues={facturaInitialValues}
+        />
+      )}
+      </>
     );
   }
 
