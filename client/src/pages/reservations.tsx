@@ -1669,6 +1669,7 @@ function ReservationDetailDialog({
   const [coBillingTarget, setCoBillingTarget] = useState<"guest" | "company" | "agency">("guest");
   const [coCompanyId, setCoCompanyId] = useState("");
   const [coAgencyId, setCoAgencyId] = useState("");
+  const [coShowFacturar, setCoShowFacturar] = useState(false);
 
   const openCheckoutWizard = () => {
     setCoPayAmount("");
@@ -3503,17 +3504,54 @@ function ReservationDetailDialog({
 
           {/* Step 1: Resumen */}
           {coWizardStep === 1 && (() => {
-            const totalPayments = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+            const totalPaymentsAmt = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
             const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-            const totalAmount = parseFloat(reservation.totalRoomAmount || "0") + totalChargesAmt;
-            const balance = totalAmount - totalPayments;
+            const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
+            const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
+            const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
+            const totalAmount = subtotalRoom + totalChargesAmt;
+            const balance = totalAmount - totalPaymentsAmt;
+            const activeCharges = consumptionCharges.filter((c: any) => c.status !== "anulado");
             return (
               <div className="space-y-3">
-                <div className="p-3 bg-muted/50 rounded-md space-y-1 text-sm">
-                  <div className="flex justify-between"><span>Habitación ({reservation.nights} noches)</span><span>${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
-                  {totalChargesAmt > 0 && <div className="flex justify-between"><span>Cargos extras</span><span>${totalChargesAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>}
-                  <div className="flex justify-between border-t pt-1"><span>Pagado</span><span className="text-green-600">-${totalPayments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
-                  <div className="flex justify-between font-bold border-t pt-1"><span>Saldo pendiente</span><span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
+                <div className="p-3 bg-muted/50 rounded-md space-y-1 text-sm max-h-64 overflow-y-auto">
+                  <div className="flex justify-between font-medium pb-1 border-b">
+                    <span>Habitación ({reservation.nights} noche{reservation.nights !== 1 ? "s" : ""})</span>
+                    <span>${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {earlyChg > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                      <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
+                      <span>${earlyChg.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {lateChg > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                      <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
+                      <span>${lateChg.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {activeCharges.length > 0 && (
+                    <div className="pt-1 border-t space-y-0.5">
+                      {activeCharges.map((c: any) => (
+                        <div key={c.id} className="flex justify-between gap-2">
+                          <span className="flex items-center gap-1 min-w-0">
+                            <Badge variant="outline" className="text-xs py-0 shrink-0">{categoryLabels[c.category] || c.category}</Badge>
+                            <span className="truncate text-muted-foreground">{c.description}</span>
+                          </span>
+                          <span className="shrink-0">${parseFloat(c.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t pt-1 text-green-600">
+                    <span>Pagado</span>
+                    <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between font-bold border-t pt-1">
+                    <span>Saldo pendiente</span>
+                    <span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => setCoWizardStep(0)}>Cancelar</Button>
@@ -3529,7 +3567,10 @@ function ReservationDetailDialog({
           {coWizardStep === 2 && (() => {
             const totalPayments = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
             const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-            const totalAmount = parseFloat(reservation.totalRoomAmount || "0") + totalChargesAmt;
+            const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
+            const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
+            const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
+            const totalAmount = subtotalRoom + totalChargesAmt;
             const balance = totalAmount - totalPayments;
             return (
               <div className="space-y-3">
@@ -3634,7 +3675,12 @@ function ReservationDetailDialog({
                         billingTarget: coBillingTarget,
                         companyId: coBillingTarget === "company" ? (coCompanyId || reservation.companyId || undefined) : undefined,
                         agencyId: coBillingTarget === "agency" ? (coAgencyId || reservation.agencyId || undefined) : undefined,
-                      }, { onSuccess: () => setCoWizardStep(3) });
+                      }, { onSuccess: () => {
+                        if (["factura_a", "factura_b", "factura_c"].includes(coReceiptType)) {
+                          setCoShowFacturar(true);
+                        }
+                        setCoWizardStep(3);
+                      } });
                     }} disabled={coAddPaymentMutation.isPending} data-testid="button-co-pay">
                       {coAddPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
                     </Button>
@@ -3665,6 +3711,59 @@ function ReservationDetailDialog({
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Factura desde checkout wizard */}
+      {coShowFacturar && (() => {
+        const g = reservation.guest;
+        const isJuridica = (g as any)?.tipoPersona === "juridica";
+        const guestName = isJuridica
+          ? (g?.firstName || "")
+          : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
+        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || "";
+        const razonSocial = companyName || guestName;
+        const cuit = (reservation.company as any)?.cuilCuit || g?.cuilCuit || "";
+        const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
+        const vatMap: Record<string, string> = {
+          responsable_inscripto: "Responsable Inscripto",
+          monotributista: "Monotributista",
+          exento: "Exento",
+          consumidor_final: "Consumidor Final",
+          no_responsable: "No Responsable",
+          no_categorizado: "No Categorizado (Extranjero)",
+        };
+        const guestVat = (g as any)?.vatCondition || "consumidor_final";
+        const condicionIva = cuit
+          ? (vatMap[guestVat] || "Responsable Inscripto")
+          : (vatMap[guestVat] || "Consumidor Final");
+        const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
+        const domicilio = domicilioParts.join(", ");
+        const roomNum = reservation.room?.roomNumber || "";
+        const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+        const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
+        const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
+        const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
+        const totalPaymentsAmt = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+        const amount = Math.max((subtotalRoom + totalChargesAmt) - totalPaymentsAmt, 0);
+        const desc = `Alojamiento Hab. ${roomNum} — ${reservation.checkInDate} al ${reservation.checkOutDate} (${reservation.nights} noche${reservation.nights !== 1 ? "s" : ""})`;
+        const initialValues: EmitirFacturaInitialValues = {
+          razonSocial,
+          cuit,
+          dni,
+          condicionIva,
+          domicilio,
+          items: [{ descripcion: desc, precioUnitario: amount }],
+        };
+        return (
+          <EmitirFacturaDialog
+            open={coShowFacturar}
+            onClose={() => setCoShowFacturar(false)}
+            config={billingConfig}
+            initialValues={initialValues}
+            onSuccess={() => { setFacturaEmitida(true); setCoShowFacturar(false); }}
+            cashArea="recepcion"
+          />
+        );
+      })()}
 
       {/* Transfer Charge Dialog */}
       <Dialog open={transferringChargeId !== null} onOpenChange={(open) => {
