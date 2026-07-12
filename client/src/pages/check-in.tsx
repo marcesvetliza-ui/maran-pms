@@ -181,8 +181,16 @@ export default function CheckInPage() {
     const tomorrowDate = new Date();
     tomorrowDate.setDate(tomorrowDate.getDate() + 1);
     const tomorrowStr = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+    // Habitaciones con reservas confirmadas para hoy (check-in pendiente) no deben ofrecerse para walk-in
+    const roomsWithTodayReservation = new Set(
+      reservations?.map(r => r.roomId).filter(Boolean) ?? []
+    );
+
     return rooms?.filter((room) => {
       if (selectedRoomTypeId && room.roomTypeId !== selectedRoomTypeId) return false;
+      // Excluir habitaciones con reserva confirmada para hoy
+      if (roomsWithTodayReservation.has(room.id)) return false;
       if (room.status === "available") return true;
       if (room.status === "maintenance") {
         const hasActiveBlock = maintenanceBlocks.some(
@@ -347,10 +355,19 @@ export default function CheckInPage() {
       resetWalkInForm();
       setActiveTab("reservations");
     },
-    onError: () => {
+    onError: (error: any) => {
+      const raw = error?.message || "";
+      let description = "No se pudo completar el walk-in. Intente nuevamente.";
+      try {
+        const jsonStart = raw.indexOf("{");
+        if (jsonStart >= 0) {
+          const parsed = JSON.parse(raw.substring(jsonStart));
+          description = parsed.error || parsed.message || description;
+        }
+      } catch {}
       toast({
-        title: "Error",
-        description: "No se pudo completar el walk-in. Intente nuevamente.",
+        title: "Error al registrar walk-in",
+        description,
         variant: "destructive",
       });
     },
