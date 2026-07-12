@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { getLocalToday, formatDateAR } from "@/lib/utils";
@@ -111,8 +111,9 @@ export default function CheckOutPage() {
   const [itemPayMode, setItemPayMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [showFacturar, setShowFacturar] = useState(false);
-  const [pendingFacturaTipo, setPendingFacturaTipo] = useState("");
+  const pendingFacturaTipoRef = useRef("");
   const [facturaInitialValues, setFacturaInitialValues] = useState<EmitirFacturaInitialValues | undefined>(undefined);
+  const [receiptTypeForFreeCheckout, setReceiptTypeForFreeCheckout] = useState("cierre_habitacion");
 
   const handleToggleItem = (id: string, amount: number) => {
     const next = new Set(selectedItemIds);
@@ -195,7 +196,7 @@ export default function CheckOutPage() {
     },
     onSuccess: (_, vars) => {
       if (["factura_a", "factura_b", "factura_c"].includes(vars.receiptType)) {
-        setPendingFacturaTipo(vars.receiptType);
+        pendingFacturaTipoRef.current = vars.receiptType;
       }
       refetchFolio();
       setPaymentAmount("");
@@ -286,7 +287,7 @@ export default function CheckOutPage() {
       });
       setCheckoutComplete(true);
       setWizardStep(3);
-      if (pendingFacturaTipo) {
+      if (pendingFacturaTipoRef.current) {
         setFacturaInitialValues({
           razonSocial: `${g?.lastName || ""} ${g?.firstName || ""}`.trim() || undefined,
           dni: g?.documentNumber || undefined,
@@ -296,7 +297,7 @@ export default function CheckOutPage() {
           }],
         });
         setShowFacturar(true);
-        setPendingFacturaTipo("");
+        pendingFacturaTipoRef.current = "";
       }
     },
     onError: async (error: any) => {
@@ -328,6 +329,8 @@ export default function CheckOutPage() {
     setWizardStep(1);
     setCheckoutComplete(false);
     setFinalSummary(null);
+    pendingFacturaTipoRef.current = "";
+    setReceiptTypeForFreeCheckout("cierre_habitacion");
     if (reservation.companyId) {
       setPaymentBillingTarget("company");
       setCcCompanyId(reservation.companyId);
@@ -351,6 +354,8 @@ export default function CheckOutPage() {
     setWizardStep(0);
     setCheckoutComplete(false);
     setFinalSummary(null);
+    pendingFacturaTipoRef.current = "";
+    setReceiptTypeForFreeCheckout("cierre_habitacion");
   };
 
   const todayDisplay = new Date().toLocaleDateString("es-ES", {
@@ -624,10 +629,33 @@ export default function CheckOutPage() {
             {balance <= 0.01 ? (
               !isHistorical && (
                 <Card className="border-green-300 bg-green-50 dark:bg-green-900/10 dark:border-green-800">
-                  <CardContent className="flex flex-col items-center py-8 gap-3">
+                  <CardContent className="flex flex-col items-center py-6 gap-3">
                     <CircleCheck className="h-12 w-12 text-green-500" />
                     <h3 className="text-lg font-semibold text-green-700 dark:text-green-400" data-testid="text-account-settled">Cuenta saldada</h3>
                     <p className="text-sm text-muted-foreground">El huésped no tiene saldo pendiente.</p>
+                    <div className="w-full max-w-xs mt-1">
+                      <Label className="text-xs text-muted-foreground mb-1 block">Tipo de comprobante al cerrar</Label>
+                      <Select value={receiptTypeForFreeCheckout} onValueChange={(v) => {
+                        setReceiptTypeForFreeCheckout(v);
+                        if (["factura_a", "factura_b", "factura_c"].includes(v)) {
+                          pendingFacturaTipoRef.current = v;
+                        } else {
+                          pendingFacturaTipoRef.current = "";
+                        }
+                      }}>
+                        <SelectTrigger data-testid="select-free-checkout-receipt">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
+                          <SelectItem value="ticket">Ticket</SelectItem>
+                          <SelectItem value="factura_a">Factura A</SelectItem>
+                          <SelectItem value="factura_b">Factura B</SelectItem>
+                          <SelectItem value="factura_c">Factura C</SelectItem>
+                          <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </CardContent>
                 </Card>
               )
