@@ -3726,8 +3726,9 @@ function ReservationDetailDialog({
           ? (g?.firstName || "")
           : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
         const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || "";
-        const razonSocial = companyName || guestName;
-        const cuit = (reservation.company as any)?.cuilCuit || g?.cuilCuit || "";
+        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || "";
+        const razonSocial = companyName || agencyName || guestName;
+        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || g?.cuilCuit || "";
         const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
         const vatMap: Record<string, string> = {
           responsable_inscripto: "Responsable Inscripto",
@@ -3738,11 +3739,15 @@ function ReservationDetailDialog({
           no_categorizado: "No Categorizado (Extranjero)",
         };
         const guestVat = (g as any)?.vatCondition || "consumidor_final";
-        const condicionIva = cuit
+        const companyCondIva = (reservation.company as any)?.condicionIva || "";
+        const agencyCondIva = (reservation.agency as any)?.condicionIva || "";
+        const condicionIva = companyCondIva || agencyCondIva || (cuit
           ? (vatMap[guestVat] || "Responsable Inscripto")
-          : (vatMap[guestVat] || "Consumidor Final");
+          : (vatMap[guestVat] || "Consumidor Final"));
+        const companyDom = (reservation.company as any)?.domicilio || "";
+        const agencyDom = (reservation.agency as any)?.domicilio || "";
         const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
-        const domicilio = domicilioParts.join(", ");
+        const domicilio = companyDom || agencyDom || domicilioParts.join(", ");
         const roomNum = reservation.room?.roomNumber || "";
         const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
         const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
@@ -4066,8 +4071,9 @@ function ReservationDetailDialog({
           ? (g?.firstName || "")
           : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
         const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || "";
-        const razonSocial = companyName || guestName;
-        const cuit = (reservation.company as any)?.cuilCuit || g?.cuilCuit || "";
+        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || "";
+        const razonSocial = companyName || agencyName || guestName;
+        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || g?.cuilCuit || "";
         const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
         const vatMap: Record<string, string> = {
           responsable_inscripto: "Responsable Inscripto",
@@ -4078,11 +4084,15 @@ function ReservationDetailDialog({
           no_categorizado: "No Categorizado (Extranjero)",
         };
         const guestVat = (g as any)?.vatCondition || "consumidor_final";
-        const condicionIva = cuit
+        const companyCondIva = (reservation.company as any)?.condicionIva || "";
+        const agencyCondIva = (reservation.agency as any)?.condicionIva || "";
+        const condicionIva = companyCondIva || agencyCondIva || (cuit
           ? (vatMap[guestVat] || "Responsable Inscripto")
-          : (vatMap[guestVat] || "Consumidor Final");
+          : (vatMap[guestVat] || "Consumidor Final"));
+        const companyDom = (reservation.company as any)?.domicilio || "";
+        const agencyDom = (reservation.agency as any)?.domicilio || "";
         const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
-        const domicilio = domicilioParts.join(", ");
+        const domicilio = companyDom || agencyDom || domicilioParts.join(", ");
         const roomNum = reservation.room?.roomNumber || "";
         const desc = `Alojamiento Hab. ${roomNum} — ${reservation.checkInDate} al ${reservation.checkOutDate} (${reservation.nights} noche${reservation.nights !== 1 ? "s" : ""})`;
         const amount = Math.max(balance, 0);

@@ -1231,6 +1231,7 @@ export default function CheckOutPage() {
           onClose={() => setShowFacturar(false)}
           config={billingConfig}
           initialValues={facturaInitialValues}
+          requiresEmission={true}
         />
       )}
       </>
@@ -1532,6 +1533,7 @@ export default function CheckOutPage() {
           onClose={() => setShowFacturar(false)}
           config={billingConfig}
           initialValues={facturaInitialValues}
+          requiresEmission={true}
         />
       )}
     </div>

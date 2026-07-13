@@ -269,7 +269,7 @@ export type EmitirFacturaInitialValues = {
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -277,6 +277,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   onSuccess?: () => void;
   allowedTipos?: Array<string>;
   cashArea?: string;
+  requiresEmission?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB", "FC"];
@@ -291,15 +292,26 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [puntoVentaNum, setPuntoVentaNum] = useState("");
+  const [entitySearch, setEntitySearch] = useState("");
+  const [showEntityDropdown, setShowEntityDropdown] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showCloseWarning, setShowCloseWarning] = useState(false);
+  const [emitted, setEmitted] = useState(false);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
-  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
-    queryKey: ["/api/companies"],
-    enabled: !!cashArea,
-  });
-  const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
-    queryKey: ["/api/agencies"],
-    enabled: !!cashArea,
-  });
+  const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
+  const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
+
+  const entityResults: any[] = entitySearch.length >= 2
+    ? [
+        ...companies.map((c: any) => ({ ...c, _type: "Empresa" })),
+        ...agencies.map((a: any) => ({ ...a, _type: "Agencia" })),
+      ].filter((e: any) => {
+        const name = (e.razonSocial || e.nombreFantasia || "").toLowerCase();
+        const cuitVal = (e.cuilCuit || "").replace(/-/g, "");
+        return name.includes(entitySearch.toLowerCase()) || cuitVal.includes(entitySearch.replace(/-/g, ""));
+      }).slice(0, 8)
+    : [];
 
   useEffect(() => {
     if (open && initialValues) {
@@ -329,6 +341,45 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     if (!open) resetForm();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialValues]);
+
+  function selectEntity(entity: any) {
+    const rs = entity.razonSocial || entity.nombreFantasia || "";
+    const cuitVal = entity.cuilCuit || "";
+    const condVal = entity.condicionIva || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
+    const domVal = entity.domicilio || entity.direccion || "";
+    setRazonSocial(rs);
+    setCuit(cuitVal);
+    setCondicionIva(condVal);
+    if (domVal) setDomicilio(domVal);
+    if (cuitVal) {
+      const auto = condVal === "Monotributista" ? "FC" : "FA";
+      const nextTipo = tipos.includes(auto) ? auto : tipos.includes("FB") ? "FB" : tipos[0];
+      setTipo(nextTipo);
+      recalcForTipo(nextTipo, tipo);
+    }
+    setEntitySearch("");
+    setShowEntityDropdown(false);
+    setFieldErrors({});
+  }
+
+  function validateForm(): Record<string, string> {
+    const errs: Record<string, string> = {};
+    if (!razonSocial.trim()) errs.razonSocial = "Requerido";
+    if (tipo === "FA") {
+      const cuitClean = cuit.replace(/-/g, "");
+      if (!cuitClean) errs.cuit = "Requerido para Factura A";
+      else if (!/^\d{11}$/.test(cuitClean)) errs.cuit = "Debe tener 11 dígitos (ej: 20123456789)";
+      if (condicionIva === "Consumidor Final") errs.condicionIva = "Factura A no aplica para Consumidor Final";
+    }
+    items.forEach((it, i) => {
+      if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
+      if (it.precioUnitario <= 0) errs[`precio_${i}`] = "Precio debe ser mayor a 0";
+    });
+    if (cashArea && cashFormaPago === "cuenta_corriente" && !ccEntityId) {
+      errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : "una agencia"}`;
+    }
+    return errs;
+  }
 
   function newItem(): Item {
     return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: tipo === "FC" ? "no_gravado" : "21", subtotalNeto: 0, subtotal: 0 };
@@ -405,6 +456,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           ? `${TIPO_LABELS[data.tipo_comprobante]?.nombre ?? data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}`
           : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}`,
       });
+      setEmitted(true);
       onSuccess?.();
       onClose(); resetForm();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
@@ -416,6 +468,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
     setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
+    setEntitySearch(""); setShowEntityDropdown(false); setFieldErrors({});
+    setShowConfirm(false); setShowCloseWarning(false); setEmitted(false);
   }
 
   const isFA = tipo === "FA";
@@ -423,13 +477,23 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const isNonFiscal = NON_FISCAL_TIPOS_SET.has(tipo);
   const ambiente: AmbienteMode = config?.arcaAmbiente ?? "ficticio";
 
-  function handleSubmit() {
-    if (!razonSocial.trim()) return toast({ title: "Ingrese Razón Social / Nombre", variant: "destructive" });
-    if (isFA && !cuit.trim()) return toast({ title: "CUIT es requerido para Factura A", variant: "destructive" });
-    if (items.some(it => !it.descripcion.trim())) return toast({ title: "Todos los ítems deben tener descripción", variant: "destructive" });
-    if (cashArea && cashFormaPago === "cuenta_corriente" && !ccEntityId) {
-      return toast({ title: `Seleccione ${ccEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
+  function handleClose() {
+    if (requiresEmission && !emitted) {
+      setShowCloseWarning(true);
+    } else {
+      onClose(); resetForm();
     }
+  }
+
+  function handleSubmit() {
+    const errs = validateForm();
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setShowConfirm(true);
+  }
+
+  function handleConfirmEmit() {
+    setShowConfirm(false);
     mutation.mutate({
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
@@ -447,9 +511,75 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }
 
   return (
-    <Dialog open={open} onOpenChange={o => { if (!o) { onClose(); resetForm(); } }}>
+    <>
+    <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Emitir comprobante</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
+
+        {showConfirm ? (
+          <div className="space-y-4">
+            <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-blue-600" />
+                <span className="font-semibold text-sm">Vista previa del comprobante</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Tipo:</span>
+                <span className="font-medium text-sm">{TIPO_LABELS[tipo]?.nombre ?? tipo}</span>
+                {isNonFiscal && <span className="text-xs text-amber-600">(sin CAE)</span>}
+                {!isNonFiscal && <span className="text-xs text-green-700 dark:text-green-400">(fiscal ARCA)</span>}
+              </div>
+              <Separator />
+              <div>
+                <div className="font-semibold text-sm">{razonSocial}</div>
+                {cuit && <div className="text-xs text-muted-foreground">CUIT: {cuit}</div>}
+                {!cuit && dni && <div className="text-xs text-muted-foreground">DNI: {dni}</div>}
+                <div className="text-xs text-muted-foreground">{condicionIva}</div>
+                {domicilio && <div className="text-xs text-muted-foreground">{domicilio}</div>}
+              </div>
+              <Separator />
+              <div className="space-y-1">
+                {items.map((it, i) => (
+                  <div key={i} className="flex justify-between text-sm">
+                    <span>{it.descripcion}{it.cantidad > 1 ? ` ×${it.cantidad}` : ""}</span>
+                    <span className="font-medium">${fPeso(it.subtotal)}</span>
+                  </div>
+                ))}
+              </div>
+              <Separator />
+              {isFC ? (
+                <div className="text-xs text-muted-foreground">Factura C — no discrimina IVA</div>
+              ) : (
+                <div className="space-y-0.5 text-xs text-muted-foreground">
+                  <div className="flex justify-between"><span>Neto:</span><span>${fPeso(preview.neto)}</span></div>
+                  {preview.iva21 > 0 && <div className="flex justify-between"><span>IVA 21%:</span><span>${fPeso(preview.iva21)}</span></div>}
+                  {preview.iva105 > 0 && <div className="flex justify-between"><span>IVA 10.5%:</span><span>${fPeso(preview.iva105)}</span></div>}
+                  {preview.exento > 0 && <div className="flex justify-between"><span>Exento:</span><span>${fPeso(preview.exento)}</span></div>}
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-sm pt-1">
+                <span>TOTAL:</span><span>${fPeso(totalPreview)}</span>
+              </div>
+              {cashArea && (
+                <div className="text-xs text-muted-foreground pt-1 border-t">
+                  Forma de pago: {cashFormaPago === "efectivo" ? "Efectivo" : cashFormaPago === "tarjeta_credito" ? "Tarjeta Crédito" : cashFormaPago === "tarjeta_debito" ? "Tarjeta Débito" : cashFormaPago === "transferencia" ? "Transferencia" : cashFormaPago === "mercadopago" ? "MercadoPago" : cashFormaPago === "cuenta_corriente" ? "Cuenta Corriente" : cashFormaPago}
+                </div>
+              )}
+            </div>
+            {!isNonFiscal && ambiente === "ficticio" && (
+              <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />Modo ficticio — CAE simulado (no válido fiscalmente)
+              </p>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowConfirm(false)}>← Editar</Button>
+              <Button onClick={handleConfirmEmit} disabled={mutation.isPending} data-testid="btn-confirmar-emitir">
+                {mutation.isPending ? "Emitiendo..." : "Confirmar y emitir PDF"}
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
+        <>
 
         <div className="space-y-1">
           <Label>Tipo de comprobante</Label>
@@ -541,22 +671,67 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
         <div className="space-y-3">
           <Label className="text-sm font-semibold">Datos del receptor</Label>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground flex items-center gap-1"><Search className="w-3 h-3" /> Buscar empresa/agencia para autocompletar</Label>
+            <div className="relative">
+              <Input
+                value={entitySearch}
+                onChange={e => { setEntitySearch(e.target.value); setShowEntityDropdown(true); }}
+                onFocus={() => setShowEntityDropdown(true)}
+                onBlur={() => setTimeout(() => setShowEntityDropdown(false), 200)}
+                placeholder="Nombre o CUIT de empresa/agencia..."
+                className="text-sm"
+                data-testid="input-entity-search"
+              />
+              {showEntityDropdown && entityResults.length > 0 && (
+                <div className="absolute z-50 w-full bg-popover border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
+                  {entityResults.map((e: any) => (
+                    <button
+                      key={e.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted cursor-pointer flex items-center justify-between"
+                      onMouseDown={() => selectEntity(e)}
+                    >
+                      <span>
+                        <span className="font-medium">{e.razonSocial || e.nombreFantasia}</span>
+                        <span className="text-muted-foreground text-xs ml-2">{e._type}</span>
+                      </span>
+                      {e.cuilCuit && <span className="text-muted-foreground text-xs">{e.cuilCuit}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showEntityDropdown && entitySearch.length >= 2 && entityResults.length === 0 && (
+                <div className="absolute z-50 w-full bg-popover border rounded-md shadow-sm mt-1 px-3 py-2 text-sm text-muted-foreground">
+                  Sin resultados
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">{isFA ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
-              <Input value={razonSocial} onChange={e => setRazonSocial(e.target.value)} placeholder="EMPRESA S.A." data-testid="input-razon-social" />
+              <Input value={razonSocial} onChange={e => { setRazonSocial(e.target.value); if (fieldErrors.razonSocial) setFieldErrors(p => ({ ...p, razonSocial: "" })); }} placeholder="EMPRESA S.A." data-testid="input-razon-social" className={fieldErrors.razonSocial ? "border-red-500" : ""} />
+              {fieldErrors.razonSocial && <p className="text-xs text-red-500">{fieldErrors.razonSocial}</p>}
             </div>
             {isFA ? (
-              <div className="space-y-1"><Label className="text-xs">CUIT *</Label><Input value={cuit} onChange={e => setCuit(e.target.value)} placeholder="XX-XXXXXXXX-X" data-testid="input-cuit" /></div>
+              <div className="space-y-1">
+                <Label className="text-xs">CUIT *</Label>
+                <Input value={cuit} onChange={e => { setCuit(e.target.value); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="20-12345678-9" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
+                {fieldErrors.cuit && <p className="text-xs text-red-500">{fieldErrors.cuit}</p>}
+              </div>
             ) : (
               <div className="space-y-1"><Label className="text-xs">DNI (opcional)</Label><Input value={dni} onChange={e => setDni(e.target.value)} placeholder="00000000" data-testid="input-dni" /></div>
             )}
             <div className="space-y-1">
               <Label className="text-xs">Condición IVA</Label>
-              <Select value={condicionIva} onValueChange={setCondicionIva}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select value={condicionIva} onValueChange={v => { setCondicionIva(v); if (fieldErrors.condicionIva) setFieldErrors(p => ({ ...p, condicionIva: "" })); }}>
+                <SelectTrigger className={fieldErrors.condicionIva ? "border-red-500" : ""}><SelectValue /></SelectTrigger>
                 <SelectContent>{CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
               </Select>
+              {fieldErrors.condicionIva && <p className="text-xs text-red-500">{fieldErrors.condicionIva}</p>}
             </div>
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">Domicilio (opcional)</Label>
@@ -577,9 +752,17 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             {items.map((item, idx) => (
               <div key={idx} className="border rounded-lg p-3 space-y-2" data-testid={`item-row-${idx}`}>
                 <div className="grid grid-cols-12 gap-2">
-                  <div className="col-span-6 space-y-1"><Label className="text-xs">Descripción *</Label><Input value={item.descripcion} onChange={e => updateItem(idx, "descripcion", e.target.value)} placeholder="Hospedaje habitación..." /></div>
+                  <div className="col-span-6 space-y-1">
+                    <Label className="text-xs">Descripción *</Label>
+                    <Input value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder="Hospedaje habitación..." className={fieldErrors[`desc_${idx}`] ? "border-red-500" : ""} />
+                    {fieldErrors[`desc_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`desc_${idx}`]}</p>}
+                  </div>
                   <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
-                  <div className="col-span-2 space-y-1"><Label className="text-xs">P. Unit.</Label><Input type="number" min="0" step="0.01" value={item.precioUnitario || ""} onChange={e => updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0)} placeholder="0.00" /></div>
+                  <div className="col-span-2 space-y-1">
+                    <Label className="text-xs">P. Unit.</Label>
+                    <Input type="number" min="0" step="0.01" value={item.precioUnitario || ""} onChange={e => { updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0); if (fieldErrors[`precio_${idx}`]) setFieldErrors(p => ({ ...p, [`precio_${idx}`]: "" })); }} placeholder="0.00" className={fieldErrors[`precio_${idx}`] ? "border-red-500" : ""} />
+                    {fieldErrors[`precio_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`precio_${idx}`]}</p>}
+                  </div>
                   <div className="col-span-2 space-y-1">
                     <Label className="text-xs">Alíc. IVA</Label>
                     {isFC ? (
@@ -627,13 +810,38 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => { onClose(); resetForm(); }}>Cancelar</Button>
+          <Button variant="outline" onClick={handleClose}>Cancelar</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending} data-testid="btn-emitir-confirmar">
-            {mutation.isPending ? "Emitiendo..." : "Emitir y descargar PDF"}
+            Revisar →
+          </Button>
+        </DialogFooter>
+        </>
+        )}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={showCloseWarning} onOpenChange={o => { if (!o) setShowCloseWarning(false); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-amber-600">
+            <AlertTriangle className="w-5 h-5" />
+            ¿Cerrar sin emitir comprobante?
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          El huésped ya realizó el check-out. Se recomienda emitir un comprobante fiscal (Factura A, B o C) o interno antes de cerrar.
+        </p>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => setShowCloseWarning(false)}>
+            Volver a facturar
+          </Button>
+          <Button variant="destructive" onClick={() => { setShowCloseWarning(false); onClose(); resetForm(); }}>
+            Cerrar sin comprobante
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 
