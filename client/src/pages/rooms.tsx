@@ -24,6 +24,12 @@ import {
   X,
   Ban,
   ShieldCheck,
+  LogIn,
+  LogOut,
+  Clock,
+  User,
+  Eye,
+  OctagonMinus,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -70,10 +76,10 @@ import type { RoomWithType, RoomType, InsertRoom, RoomStatus, ChargeType } from 
 
 function RoomStatusBadge({ status }: { status: RoomStatus }) {
   const statusConfig: Record<string, { label: string; className: string }> = {
-    available: { label: "Disponible", className: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
+    available: { label: "Libre limpia", className: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
     occupied: { label: "Ocupada", className: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" },
-    dirty: { label: "Sucia", className: "bg-orange-200 text-orange-900 dark:bg-orange-900/40 dark:text-orange-400" },
-    cleaning: { label: "Limpieza", className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400" },
+    dirty: { label: "Libre sucia", className: "bg-orange-200 text-orange-900 dark:bg-orange-900/40 dark:text-orange-400" },
+    cleaning: { label: "En limpieza", className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400" },
     maintenance: { label: "Mantenimiento", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
     oos: { label: "Fuera de Servicio", className: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" },
     inspected: { label: "Inspeccionada", className: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400" },
@@ -136,6 +142,70 @@ function RoomFeatures({ features, maxOccupancy }: { features?: string[] | null; 
         );
       })}
     </div>
+  );
+}
+
+function RoomDropdownMenu({
+  room,
+  onEdit,
+  onStatus,
+  onMaintenance,
+  onDelete,
+}: {
+  room: RoomWithType;
+  onEdit: () => void;
+  onStatus: (s: RoomStatus) => void;
+  onMaintenance: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" data-testid={`btn-menu-${room.id}`}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={onEdit}>
+          <Pencil className="mr-2 h-4 w-4" />
+          Editar
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onStatus("available")}>
+          <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
+          Libre limpia
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onStatus("dirty")}>
+          <OctagonMinus className="mr-2 h-4 w-4 text-orange-500" />
+          Libre sucia
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onStatus("cleaning")}>
+          <Sparkles className="mr-2 h-4 w-4 text-yellow-600" />
+          Enviar a Limpieza
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onStatus("inspected")}>
+          <Eye className="mr-2 h-4 w-4 text-teal-600" />
+          Inspeccionada
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onStatus("limpia_ocupada")}>
+          <ShieldCheck className="mr-2 h-4 w-4 text-emerald-600" />
+          Limpia ocupada
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onStatus("no_molestar")}>
+          <Ban className="mr-2 h-4 w-4 text-purple-600" />
+          No molestar
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onMaintenance}>
+          <Wrench className="mr-2 h-4 w-4 text-orange-500" />
+          Reportar a Mantenimiento
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+          <Trash2 className="mr-2 h-4 w-4" />
+          Eliminar
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -386,12 +456,45 @@ export default function RoomsPage() {
     queryKey: ["/api/maintenance/work-orders"],
   });
 
+  const { data: allReservations = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations"],
+  });
+
   const openWorkOrderRoomIds = new Set(
     (workOrders || [])
       .filter((wo) => wo.status === "pending" || wo.status === "in_progress")
       .map((wo) => wo.roomId)
       .filter(Boolean)
   );
+
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+  const activeResByRoom = new Map<string, any>();
+  const entradaHoyRoomIds = new Set<string>();
+  const salidaHoyRoomIds = new Set<string>();
+  const proximaLlegadaByRoom = new Map<string, any>();
+
+  for (const res of allReservations) {
+    if (!res.roomId) continue;
+    const isActive = res.status === "checked_in" || res.status === "limpia_ocupada" || res.status === "no_molestar";
+    if (isActive) {
+      activeResByRoom.set(res.roomId, res);
+    }
+    const isCheckedIn = res.status === "checked_in";
+    const isPendingArrival = res.status === "confirmed" || res.status === "reserved" || res.status === "web_checkin";
+    if (isPendingArrival && res.checkInDate === todayStr) {
+      entradaHoyRoomIds.add(res.roomId);
+    }
+    if (isCheckedIn && res.checkOutDate === todayStr) {
+      salidaHoyRoomIds.add(res.roomId);
+    }
+    if (isPendingArrival && res.checkInDate >= todayStr) {
+      const existing = proximaLlegadaByRoom.get(res.roomId);
+      if (!existing || res.checkInDate < existing.checkInDate) {
+        proximaLlegadaByRoom.set(res.roomId, res);
+      }
+    }
+  }
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: RoomStatus }) => {
@@ -445,8 +548,12 @@ export default function RoomsPage() {
   const filteredRooms = rooms?.filter((room) => {
     if ((room as any).isVirtual) return false;
     const matchesSearch = room.roomNumber.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || room.status === statusFilter;
     const matchesType = typeFilter === "all" || room.roomTypeId === typeFilter;
+    let matchesStatus = false;
+    if (statusFilter === "all") matchesStatus = true;
+    else if (statusFilter === "libre_limpias") matchesStatus = room.status === "available" || room.status === "inspected";
+    else if (statusFilter === "ocupadas_all") matchesStatus = room.status === "occupied" || room.status === "limpia_ocupada" || room.status === "no_molestar";
+    else matchesStatus = room.status === statusFilter;
     return matchesSearch && matchesStatus && matchesType;
   })?.sort((a, b) => {
     if (a.floor !== b.floor) return a.floor - b.floor;
@@ -469,12 +576,11 @@ export default function RoomsPage() {
   const realRooms = rooms?.filter((r) => !(r as any).isVirtual) ?? [];
   const statusCounts = {
     all: realRooms.length,
-    available: realRooms.filter((r) => r.status === "available").length,
-    occupied: realRooms.filter((r) => r.status === "occupied").length,
+    libre_limpias: realRooms.filter((r) => r.status === "available" || r.status === "inspected").length,
+    ocupadas_all: realRooms.filter((r) => r.status === "occupied" || r.status === "limpia_ocupada" || r.status === "no_molestar").length,
     dirty: realRooms.filter((r) => r.status === "dirty").length,
     cleaning: realRooms.filter((r) => r.status === "cleaning").length,
     maintenance: realRooms.filter((r) => r.status === "maintenance").length,
-    oos: realRooms.filter((r) => r.status === "oos").length,
   };
 
   return (
@@ -499,23 +605,24 @@ export default function RoomsPage() {
       </div>
 
       {/* Status Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-6">
+      <div className="grid gap-3 grid-cols-3 md:grid-cols-6">
         {[
-          { key: "all", label: "Total", color: "bg-muted" },
-          { key: "available", label: "Disponibles", color: "bg-green-100 dark:bg-green-900/30" },
-          { key: "occupied", label: "Ocupadas", color: "bg-blue-100 dark:bg-blue-900/30" },
-          { key: "dirty", label: "Sucias", color: "bg-orange-200 dark:bg-orange-900/30" },
-          { key: "cleaning", label: "Limpieza", color: "bg-yellow-100 dark:bg-yellow-900/30" },
-          { key: "maintenance", label: "Mantenimiento", color: "bg-red-100 dark:bg-red-900/30" },
-        ].map(({ key, label, color }) => (
+          { key: "all", label: "Total", color: "bg-muted", textColor: "" },
+          { key: "libre_limpias", label: "Libre Limpias", color: "bg-green-100 dark:bg-green-900/30", textColor: "text-green-800 dark:text-green-300" },
+          { key: "ocupadas_all", label: "Ocupadas", color: "bg-blue-100 dark:bg-blue-900/30", textColor: "text-blue-800 dark:text-blue-300" },
+          { key: "dirty", label: "Sucias", color: "bg-orange-100 dark:bg-orange-900/30", textColor: "text-orange-800 dark:text-orange-300" },
+          { key: "cleaning", label: "En Limpieza", color: "bg-yellow-100 dark:bg-yellow-900/30", textColor: "text-yellow-800 dark:text-yellow-300" },
+          { key: "maintenance", label: "Mantenimiento", color: "bg-red-100 dark:bg-red-900/30", textColor: "text-red-800 dark:text-red-300" },
+        ].map(({ key, label, color, textColor }) => (
           <Card
             key={key}
             className={`cursor-pointer hover-elevate ${statusFilter === key ? "ring-2 ring-primary" : ""}`}
-            onClick={() => setStatusFilter(key)}
+            onClick={() => setStatusFilter(statusFilter === key && key !== "all" ? "all" : key)}
+            data-testid={`filter-card-${key}`}
           >
             <CardContent className={`p-4 ${color} rounded-lg`}>
-              <div className="text-2xl font-bold">{statusCounts[key as keyof typeof statusCounts]}</div>
-              <div className="text-sm text-muted-foreground">{label}</div>
+              <div className={`text-2xl font-bold ${textColor}`}>{statusCounts[key as keyof typeof statusCounts]}</div>
+              <div className="text-xs text-muted-foreground font-medium mt-0.5">{label}</div>
             </CardContent>
           </Card>
         ))}
@@ -580,105 +687,149 @@ export default function RoomsPage() {
         </div>
       ) : filteredRooms && filteredRooms.length > 0 ? (
         viewMode === "grid" ? (
-          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {filteredRooms.map((room) => (
-              <Card
-                key={room.id}
-                className={`hover-elevate cursor-pointer ${
-                  room.status === "available"
-                    ? "border-green-200 dark:border-green-800"
-                    : room.status === "occupied"
-                    ? "border-blue-200 dark:border-blue-800"
-                    : room.status === "dirty"
-                    ? "border-orange-400 dark:border-orange-700"
-                    : room.status === "cleaning"
-                    ? "border-yellow-200 dark:border-yellow-800"
-                    : "border-red-200 dark:border-red-800"
-                }`}
-                data-testid={`room-card-${room.id}`}
-              >
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="text-2xl">{room.roomNumber}</CardTitle>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEditRoom(room)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => updateStatusMutation.mutate({ id: room.id, status: "available" })}
-                        >
-                          <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
-                          Marcar Disponible
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => updateStatusMutation.mutate({ id: room.id, status: "cleaning" })}
-                        >
-                          <Sparkles className="mr-2 h-4 w-4 text-yellow-600" />
-                          Enviar a Limpieza
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => updateStatusMutation.mutate({ id: room.id, status: "limpia_ocupada" })}
-                        >
-                          <ShieldCheck className="mr-2 h-4 w-4 text-emerald-600" />
-                          Limpia ocupada
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => updateStatusMutation.mutate({ id: room.id, status: "no_molestar" })}
-                        >
-                          <Ban className="mr-2 h-4 w-4 text-purple-600" />
-                          No molestar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
-                        >
-                          <Wrench className="mr-2 h-4 w-4 text-orange-500" />
-                          Reportar a Mantenimiento
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => deleteMutation.mutate(room.id)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                  <CardDescription>Piso {room.floor}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <RoomStatusBadge status={room.status} />
-                      <span className="text-sm text-muted-foreground">
-                        {room.roomType?.name || "Sin tipo"}
+          <div className="flex flex-col gap-6">
+            {(() => {
+              const floors = [...new Set(filteredRooms.map((r) => r.floor))].sort((a, b) => a - b);
+              return floors.map((floor) => {
+                const floorRooms = filteredRooms.filter((r) => r.floor === floor);
+                const floorFree = floorRooms.filter((r) => r.status === "available" || r.status === "inspected").length;
+                return (
+                  <div key={floor}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="h-px flex-1 bg-border" />
+                      <span className="text-sm font-semibold text-muted-foreground px-2">
+                        Piso {floor}
+                        {floorFree > 0 && (
+                          <span className="ml-2 text-xs font-normal text-green-600 dark:text-green-400">
+                            · {floorFree} libre{floorFree !== 1 ? "s" : ""}
+                          </span>
+                        )}
                       </span>
-                      {openWorkOrderRoomIds.has(room.id) && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-400">
-                              <AlertTriangle className="h-3 w-3" />
-                              Mant. pendiente
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>Tiene una orden de mantenimiento abierta</TooltipContent>
-                        </Tooltip>
-                      )}
+                      <div className="h-px flex-1 bg-border" />
                     </div>
-                    <RoomFeatures features={room.features} maxOccupancy={room.maxOccupancy} />
+                    <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+                      {floorRooms.map((room) => {
+                        const isOccupied = room.status === "occupied" || room.status === "limpia_ocupada" || room.status === "no_molestar";
+                        const activeRes = activeResByRoom.get(room.id);
+                        const proximaRes = proximaLlegadaByRoom.get(room.id);
+                        const hasEntrada = entradaHoyRoomIds.has(room.id);
+                        const hasSalida = salidaHoyRoomIds.has(room.id);
+                        const borderClass = room.status === "available" || room.status === "inspected"
+                          ? "border-green-200 dark:border-green-800"
+                          : isOccupied
+                          ? "border-blue-200 dark:border-blue-800"
+                          : room.status === "dirty"
+                          ? "border-orange-400 dark:border-orange-700"
+                          : room.status === "cleaning"
+                          ? "border-yellow-200 dark:border-yellow-800"
+                          : "border-red-200 dark:border-red-800";
+                        return (
+                          <Card
+                            key={room.id}
+                            className={`hover-elevate cursor-pointer relative ${borderClass}`}
+                            data-testid={`room-card-${room.id}`}
+                          >
+                            {/* Badges entrada/salida */}
+                            {(hasEntrada || hasSalida) && (
+                              <div className="absolute top-2 right-10 flex gap-1 z-10">
+                                {hasEntrada && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="inline-flex items-center gap-0.5 rounded-full bg-green-600 text-white px-1.5 py-0.5 text-[10px] font-bold">
+                                        <LogIn className="h-2.5 w-2.5" />
+                                        Entrada
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Tiene check-in hoy</TooltipContent>
+                                  </Tooltip>
+                                )}
+                                {hasSalida && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500 text-white px-1.5 py-0.5 text-[10px] font-bold">
+                                        <LogOut className="h-2.5 w-2.5" />
+                                        Salida
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Tiene check-out hoy</TooltipContent>
+                                  </Tooltip>
+                                )}
+                              </div>
+                            )}
+                            <CardHeader className="pb-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <CardTitle className="text-2xl">{room.roomNumber}</CardTitle>
+                                <RoomDropdownMenu
+                                  room={room}
+                                  onEdit={() => handleEditRoom(room)}
+                                  onStatus={(s) => updateStatusMutation.mutate({ id: room.id, status: s })}
+                                  onMaintenance={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
+                                  onDelete={() => deleteMutation.mutate(room.id)}
+                                />
+                              </div>
+                              <CardDescription className="text-xs">{room.roomType?.name || "Sin tipo"}</CardDescription>
+                            </CardHeader>
+                            <CardContent className="pt-0">
+                              <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <RoomStatusBadge status={room.status} />
+                                  {openWorkOrderRoomIds.has(room.id) && (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-400">
+                                          <AlertTriangle className="h-3 w-3" />
+                                          Mant.
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent>Tiene una orden de mantenimiento abierta</TooltipContent>
+                                    </Tooltip>
+                                  )}
+                                </div>
+                                {isOccupied && activeRes && (
+                                  <div className="text-xs text-muted-foreground space-y-0.5 border-t pt-2 mt-1">
+                                    <div className="flex items-center gap-1.5 font-medium text-foreground">
+                                      <User className="h-3 w-3 shrink-0" />
+                                      <span className="truncate">{activeRes.guest?.firstName} {activeRes.guest?.lastName}</span>
+                                    </div>
+                                    {activeRes.checkOutDate && (
+                                      <div className="flex items-center gap-1.5">
+                                        <LogOut className="h-3 w-3 shrink-0 text-amber-500" />
+                                        <span>
+                                          {activeRes.checkOutDate === todayStr
+                                            ? <span className="font-semibold text-amber-600 dark:text-amber-400">Salida hoy</span>
+                                            : `Sale ${new Date(activeRes.checkOutDate + "T12:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" })}`}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {!isOccupied && proximaRes && proximaRes.checkInDate === todayStr && (
+                                  <div className="text-xs border-t pt-2 mt-1 space-y-0.5">
+                                    <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400 font-medium">
+                                      <LogIn className="h-3 w-3 shrink-0" />
+                                      <span>Llega hoy — {proximaRes.guest?.firstName} {proximaRes.guest?.lastName}</span>
+                                    </div>
+                                  </div>
+                                )}
+                                {!isOccupied && proximaRes && proximaRes.checkInDate > todayStr && (
+                                  <div className="text-xs border-t pt-2 mt-1">
+                                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                                      <Clock className="h-3 w-3 shrink-0" />
+                                      <span>Próx. llegada {new Date(proximaRes.checkInDate + "T12:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" })}</span>
+                                    </div>
+                                  </div>
+                                )}
+                                <RoomFeatures features={room.features} maxOccupancy={room.maxOccupancy} />
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                );
+              });
+            })()}
           </div>
         ) : (
           <Card>
@@ -721,58 +872,13 @@ export default function RoomsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditRoom(room)}>
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: room.id, status: "available" })}
-                          >
-                            <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
-                            Marcar Disponible
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: room.id, status: "cleaning" })}
-                          >
-                            <Sparkles className="mr-2 h-4 w-4 text-yellow-600" />
-                            Enviar a Limpieza
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: room.id, status: "limpia_ocupada" })}
-                          >
-                            <ShieldCheck className="mr-2 h-4 w-4 text-emerald-600" />
-                            Limpia ocupada
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: room.id, status: "no_molestar" })}
-                          >
-                            <Ban className="mr-2 h-4 w-4 text-purple-600" />
-                            No molestar
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
-                          >
-                            <Wrench className="mr-2 h-4 w-4 text-orange-500" />
-                            Reportar a Mantenimiento
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => deleteMutation.mutate(room.id)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Eliminar
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <RoomDropdownMenu
+                        room={room}
+                        onEdit={() => handleEditRoom(room)}
+                        onStatus={(s) => updateStatusMutation.mutate({ id: room.id, status: s })}
+                        onMaintenance={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
+                        onDelete={() => deleteMutation.mutate(room.id)}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
