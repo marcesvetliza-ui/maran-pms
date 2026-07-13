@@ -864,7 +864,7 @@ export default function PlanningPage() {
                 <PopoverTrigger asChild>
                   <Button variant="outline" size="sm" className="h-7 px-2 text-xs" data-testid="button-date-picker">
                     <CalendarSearch className="h-3.5 w-3.5 mr-1" />
-                    {dateRange.start}
+                    {new Date(dateRange.start + "T12:00:00").toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="center">
