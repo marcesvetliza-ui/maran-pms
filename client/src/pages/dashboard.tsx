@@ -18,6 +18,7 @@ import {
   ChevronUp,
   Hotel,
   Printer,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -232,6 +233,12 @@ export default function Dashboard() {
   const [inHouseDate, setInHouseDate] = useLocalState(() =>
     new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
   );
+  const [policeFrom, setPoliceFrom] = useLocalState(() =>
+    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+  );
+  const [policeTo, setPoliceTo] = useLocalState(() =>
+    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+  );
 
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
@@ -276,7 +283,7 @@ export default function Dashboard() {
     const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
     const selectedDateObj = new Date(inHouseDate + "T12:00:00");
     const dateStr = selectedDateObj.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-    const totalPax = inHouseData.reduce((s, e) => s + (e.numberOfGuests || e.adults + e.children), 0);
+    const totalPax = inHouseData.reduce((s, e) => s + 1 + (e.companions?.length ?? 0), 0);
 
     const rows = inHouseData.flatMap((entry) => {
       const g = entry.guest;
@@ -515,29 +522,26 @@ export default function Dashboard() {
                 Listado In House
               </CardTitle>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">Fecha:</label>
-                  <input
-                    type="date"
-                    value={inHouseDate}
-                    max={new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })}
-                    onChange={(e) => setInHouseDate(e.target.value)}
-                    data-testid="input-inhouse-date"
-                    className="text-xs border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
                 {!inHouseLoading && inHouseData.length > 0 && (
-                  <Button variant="outline" size="sm" onClick={printInHouseList} data-testid="button-print-inhouse">
-                    <Printer className="h-4 w-4 mr-1" />
-                    Imprimir
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" onClick={printInHouseList} data-testid="button-print-inhouse">
+                      <Printer className="h-4 w-4 mr-1" />
+                      Imprimir PDF
+                    </Button>
+                    <Button variant="outline" size="sm" asChild data-testid="button-xls-inhouse">
+                      <a href="/api/dashboard/inhouse/export-xls?mode=inhouse" download>
+                        <FileSpreadsheet className="h-4 w-4 mr-1" />
+                        XLS Actual
+                      </a>
+                    </Button>
+                  </>
                 )}
                 <Button variant="ghost" size="sm" onClick={() => setInHouseOpen(false)}>Cerrar</Button>
               </div>
             </div>
             <CardDescription>
-              {new Date(inHouseDate + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
-              {" · "}{inHouseData.length} habitación(es) · {inHouseData.reduce((s, e) => s + (e.numberOfGuests || e.adults + e.children), 0)} persona(s)
+              Ocupantes actuales (check-in confirmado) ·{" "}
+              {inHouseLoading ? "…" : `${inHouseData.length} habitación(es) · ${inHouseData.reduce((s, e) => s + 1 + (e.companions?.length ?? 0), 0)} persona(s)`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -604,6 +608,45 @@ export default function Dashboard() {
                 </table>
               </div>
             )}
+
+            {/* Sección: Reporte Policial por Período */}
+            <div className="mt-6 pt-4 border-t">
+              <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4" />
+                Reporte Policial por Período (XLS)
+              </p>
+              <p className="text-xs text-muted-foreground mb-3">
+                Descargá el listado de todos los huéspedes que ingresaron entre las fechas seleccionadas (para presentación policial o entre fechas).
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex items-center gap-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Desde:</label>
+                  <input
+                    type="date"
+                    value={policeFrom}
+                    onChange={(e) => setPoliceFrom(e.target.value)}
+                    data-testid="input-police-from"
+                    className="text-xs border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Hasta:</label>
+                  <input
+                    type="date"
+                    value={policeTo}
+                    onChange={(e) => setPoliceTo(e.target.value)}
+                    data-testid="input-police-to"
+                    className="text-xs border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <Button variant="default" size="sm" asChild data-testid="button-xls-period">
+                  <a href={`/api/dashboard/inhouse/export-xls?mode=period&from=${policeFrom}&to=${policeTo}`} download>
+                    <FileSpreadsheet className="h-4 w-4 mr-1" />
+                    Descargar XLS
+                  </a>
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -279,9 +279,7 @@ export async function registerRoutes(
         .innerJoin(rooms, eq(rooms.id, reservations.roomId))
         .where(
           and(
-            sql`${reservations.checkInDate} <= ${requestedDate}`,
-            sql`${reservations.checkOutDate} > ${requestedDate}`,
-            ne(reservations.status, "cancelled"),
+            eq(reservations.status, "checked_in"),
             sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`
           )
         );
@@ -351,6 +349,112 @@ export async function registerRoutes(
       res.json(result);
     } catch (e: any) {
       console.error("[inhouse] error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Listado policial de período: XLS con reservas que ingresaron entre from/to
+  app.get("/api/dashboard/inhouse/export-xls", requireAuth, async (req, res) => {
+    try {
+      const ExcelJS = (await import("exceljs")).default;
+      const { reservationCompanions } = await import("@shared/schema");
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const from = typeof req.query.from === "string" && req.query.from ? req.query.from : today;
+      const to = typeof req.query.to === "string" && req.query.to ? req.query.to : today;
+      const mode = req.query.mode === "inhouse" ? "inhouse" : "period";
+
+      const rows = await db.select({ reservation: reservations, roomNumber: rooms.roomNumber })
+        .from(reservations)
+        .innerJoin(rooms, eq(rooms.id, reservations.roomId))
+        .where(
+          mode === "inhouse"
+            ? and(eq(reservations.status, "checked_in"), sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`)
+            : and(
+                sql`${reservations.checkInDate} >= ${from}`,
+                sql`${reservations.checkInDate} <= ${to}`,
+                ne(reservations.status, "cancelled"),
+                sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`
+              )
+        )
+        .orderBy(rooms.roomNumber);
+
+      if (rows.length === 0) {
+        res.status(200).json({ message: "Sin resultados" });
+        return;
+      }
+
+      const reservationIds = rows.map((r) => r.reservation.id);
+      const guestIds = rows.map((r) => r.reservation.guestId).filter(Boolean) as string[];
+      const guestList = guestIds.length > 0 ? await db.select().from(guests).where(inArray(guests.id, guestIds)) : [];
+      const guestMap = new Map(guestList.map((g) => [g.id, g]));
+      const companionList = await db.select().from(reservationCompanions).where(inArray(reservationCompanions.reservationId, reservationIds));
+      const companionsByRes = new Map<string, typeof companionList>();
+      for (const c of companionList) {
+        if (!companionsByRes.has(c.reservationId)) companionsByRes.set(c.reservationId, []);
+        companionsByRes.get(c.reservationId)!.push(c);
+      }
+
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("Listado Policial");
+      ws.columns = [
+        { header: "Hab.", key: "hab", width: 8 },
+        { header: "Apellido", key: "apellido", width: 20 },
+        { header: "Nombre", key: "nombre", width: 18 },
+        { header: "Tipo Doc.", key: "tipoDoc", width: 10 },
+        { header: "N° Doc.", key: "nroDoc", width: 14 },
+        { header: "Nacionalidad", key: "nac", width: 14 },
+        { header: "F. Nacimiento", key: "fecNac", width: 14 },
+        { header: "Domicilio", key: "domicilio", width: 30 },
+        { header: "Ingreso", key: "ingreso", width: 12 },
+        { header: "Egreso", key: "egreso", width: 12 },
+        { header: "Rol", key: "rol", width: 12 },
+      ];
+      ws.getRow(1).font = { bold: true };
+      ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
+
+      const fmtDate = (d: string | null | undefined) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+
+      for (const row of rows) {
+        const r = row.reservation;
+        const g = r.guestId ? guestMap.get(r.guestId) : undefined;
+        const domicilio = [g?.direccion, g?.localidad, g?.provincia].filter(Boolean).join(", ");
+        ws.addRow({
+          hab: row.roomNumber,
+          apellido: (g?.lastName ?? "").toUpperCase(),
+          nombre: g?.firstName ?? "",
+          tipoDoc: g?.documentType?.toUpperCase() ?? "",
+          nroDoc: g?.documentNumber ?? "",
+          nac: g?.nationality ?? "",
+          fecNac: fmtDate((g as any)?.fechaNacimiento ?? g?.dateOfBirth),
+          domicilio,
+          ingreso: fmtDate(r.checkInDate),
+          egreso: fmtDate(r.checkOutDate),
+          rol: "Titular",
+        });
+        for (const c of (companionsByRes.get(r.id) ?? [])) {
+          ws.addRow({
+            hab: row.roomNumber,
+            apellido: (c.lastName ?? "").toUpperCase(),
+            nombre: c.firstName ?? "",
+            tipoDoc: c.documentType?.toUpperCase() ?? "",
+            nroDoc: c.documentNumber ?? "",
+            nac: c.nationality ?? "",
+            fecNac: fmtDate(c.dateOfBirth),
+            domicilio: "",
+            ingreso: fmtDate(r.checkInDate),
+            egreso: fmtDate(r.checkOutDate),
+            rol: "Acomp.",
+          });
+        }
+      }
+
+      const label = mode === "inhouse" ? `InHouse_${today}` : `Policial_${from}_${to}`;
+      res.setHeader("Content-Disposition", `attachment; filename="Listado_${label}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      await wb.xlsx.write(res);
+      res.end();
+    } catch (e: any) {
+      console.error("[inhouse-xls] error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
