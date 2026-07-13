@@ -7,6 +7,8 @@ import { db } from "../db";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { emitirFactura } from "../billing/invoiceService";
+import { generarResumenCuentaPDF } from "../billing/invoicePdf";
+import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
@@ -717,6 +719,52 @@ export function registerReservationsRoutes(app: Express) {
       });
     } catch (error) {
       res.status(500).json({ error: "Error fetching folio" });
+    }
+  });
+
+  // GET /api/reservations/:id/folio/pdf — Resumen de cuenta (PDF de cortesía)
+  app.get("/api/reservations/:id/folio/pdf", requireAuth, async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
+
+      const [chargesList, paymentsList, config] = await Promise.all([
+        storage.getCharges(req.params.id),
+        storage.getPayments(req.params.id),
+        getBillingConfig(),
+      ]);
+
+      const activePayments = paymentsList.filter((p) => (p as any).status !== "anulado");
+      const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+      const totalCharges = chargesList.reduce((s, c) => s + parseFloat(c.amount), 0);
+      const grandTotal = roomTotal + totalCharges;
+      const totalPayments = activePayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+      const balance = grandTotal - totalPayments;
+
+      const printedAt = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+      const pdfBuf = await generarResumenCuentaPDF({
+        reservationCode: reservation.reservationCode,
+        guestName: `${reservation.guest?.firstName ?? ""} ${reservation.guest?.lastName ?? ""}`.trim(),
+        roomNumber: reservation.room?.roomNumber ?? "",
+        checkInDate: reservation.checkInDate,
+        checkOutDate: reservation.checkOutDate,
+        nights: reservation.nights ?? 1,
+        roomRate: parseFloat(reservation.finalRatePerNight || "0"),
+        roomTotal,
+        charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount })),
+        payments: activePayments.map(p => ({ date: p.date, method: p.method, amount: p.amount, reference: p.reference, notes: p.notes })),
+        grandTotal,
+        totalPayments,
+        balance,
+        printedAt,
+      }, config);
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="Resumen_${reservation.reservationCode}.pdf"`);
+      res.send(pdfBuf);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error generando PDF" });
     }
   });
 

@@ -327,7 +327,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       }
     }
     if (!open) resetForm();
-  }, [open]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialValues]);
 
   function newItem(): Item {
     return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: tipo === "FC" ? "no_gravado" : "21", subtotalNeto: 0, subtotal: 0 };

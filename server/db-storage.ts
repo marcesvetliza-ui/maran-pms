@@ -262,7 +262,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCompanies(): Promise<Company[]> {
-    return db.select().from(companies);
+    return db.select().from(companies).orderBy(asc(companies.razonSocial));
   }
 
   async getCompany(id: string): Promise<Company | undefined> {
@@ -302,7 +302,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAgencies(): Promise<Agency[]> {
-    return db.select().from(agencies);
+    return db.select().from(agencies).orderBy(asc(agencies.razonSocial));
   }
 
   async getAgency(id: string): Promise<Agency | undefined> {

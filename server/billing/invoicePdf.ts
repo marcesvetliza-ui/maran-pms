@@ -223,3 +223,353 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
     doc.end();
   });
 }
+
+export interface VoucherHabitacionData {
+  numero: number;
+  puntoVenta: number;
+  fechaEmision: string;
+  reservationCode: string;
+  guestName: string;
+  roomNumber: string;
+  checkInDate: string;
+  checkOutDate: string;
+  nights: number;
+  roomRate: number;
+  roomTotal: number;
+  charges: Array<{ description: string; date: string; amount: string; category?: string }>;
+  payments: Array<{ date: string; method: string; amount: string; reference?: string | null; notes?: string | null }>;
+  grandTotal: number;
+  totalPayments: number;
+  balance: number;
+}
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  efectivo: "Efectivo ARS",
+  tarjeta_debito: "Tarjeta Débito",
+  tarjeta_credito: "Tarjeta Crédito",
+  transferencia: "Transferencia",
+  mercadopago: "MercadoPago",
+  cuenta_corriente: "Cuenta Corriente",
+};
+
+export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, config: any): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 30, size: "A4" });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const W = 535;
+    const x0 = 30;
+    let y = 30;
+
+    // ── Header ─────────────────────────────────────────────────
+    doc.rect(x0, y, W, 80).strokeColor("#ccc").lineWidth(0.5).stroke();
+    const centerX = x0 + W / 2;
+    doc.moveTo(centerX, y).lineTo(centerX, y + 80).stroke();
+
+    // Left — emisor
+    const lx = x0 + 8;
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#000")
+      .text(config?.razonSocial ?? "MARAN S.A.", lx, y + 10, { width: centerX - x0 - 16 });
+    doc.font("Helvetica").fontSize(8)
+      .text(`CUIT: ${config?.cuit ?? ""}`, lx, y + 26)
+      .text(config?.domicilioComercial ?? "", lx, y + 37)
+      .text(`${config?.localidad ?? "Paraná"}, ${config?.provincia ?? "Entre Ríos"}`, lx, y + 48);
+
+    // Right — voucher type + number
+    const rx = centerX + 8;
+    doc.font("Helvetica-Bold").fontSize(11)
+      .text("VOUCHER DE ALOJAMIENTO", rx, y + 10, { width: W / 2 - 16 });
+    doc.font("Helvetica").fontSize(9)
+      .text(`N° ${String(data.puntoVenta).padStart(4, "0")}-${String(data.numero).padStart(8, "0")}`, rx, y + 26)
+      .text(`Fecha: ${fDate(data.fechaEmision)}`, rx, y + 39)
+      .text("Comprobante interno — Sin valor fiscal", rx, y + 52);
+    y += 88;
+
+    // ── Datos de la reserva ────────────────────────────────────
+    doc.rect(x0, y, W, 52).strokeColor("#ccc").stroke();
+    doc.font("Helvetica-Bold").fontSize(8).text("Datos de la reserva:", x0 + 6, y + 5);
+    doc.font("Helvetica").fontSize(8)
+      .text(`Huésped: ${data.guestName}`, x0 + 6, y + 17)
+      .text(`Habitación: ${data.roomNumber}`, x0 + 6, y + 29)
+      .text(`Reserva N°: ${data.reservationCode}`, x0 + 6, y + 41);
+
+    const mid = x0 + W / 2;
+    doc.font("Helvetica").fontSize(8)
+      .text(`Check-in: ${fDate(data.checkInDate)}`, mid, y + 17)
+      .text(`Check-out: ${fDate(data.checkOutDate)}`, mid, y + 29)
+      .text(`Noches: ${data.nights}`, mid, y + 41);
+    y += 60;
+
+    // ── Cargos ─────────────────────────────────────────────────
+    doc.rect(x0, y, W, 16).fillColor("#f0f0f0").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
+    doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);
+    doc.text("Concepto", x0 + 4, y + 4, { width: 300 });
+    doc.text("Fecha", x0 + 308, y + 4, { width: 90, align: "center" });
+    doc.text("Importe", x0 + 402, y + 4, { width: 125, align: "right" });
+    y += 16;
+
+    doc.font("Helvetica").fontSize(7.5);
+
+    // Alojamiento (expandido por noche si hay más de 1)
+    if (data.nights > 1 && data.roomRate > 0) {
+      const checkIn = new Date(data.checkInDate + "T12:00:00");
+      for (let i = 0; i < data.nights; i++) {
+        if (y > 720) { doc.addPage(); y = 40; }
+        const nightDate = new Date(checkIn);
+        nightDate.setDate(nightDate.getDate() + i);
+        const label = `Alojamiento noche ${i + 1} — ${fDate(nightDate.toISOString().split("T")[0])}`;
+        doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+        doc.text(label, x0 + 4, y + 3, { width: 300 });
+        doc.text(fDate(nightDate.toISOString().split("T")[0]), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`$ ${fPeso(data.roomRate)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+        y += 14;
+      }
+    } else {
+      if (y > 720) { doc.addPage(); y = 40; }
+      doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+      doc.text(`Alojamiento (${data.nights} noche${data.nights !== 1 ? "s" : ""})`, x0 + 4, y + 3, { width: 300 });
+      doc.text(`${fDate(data.checkInDate)} — ${fDate(data.checkOutDate)}`, x0 + 308, y + 3, { width: 90, align: "center" });
+      doc.text(`$ ${fPeso(data.roomTotal)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+      y += 14;
+    }
+
+    // Cargos adicionales
+    for (const charge of data.charges) {
+      if (y > 720) { doc.addPage(); y = 40; }
+      doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+      doc.text(charge.description, x0 + 4, y + 3, { width: 300 });
+      doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
+      doc.text(`$ ${fPeso(charge.amount)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+      y += 14;
+    }
+
+    // Subtotal
+    y += 4;
+    doc.moveTo(x0, y).lineTo(x0 + W, y).strokeColor("#ccc").stroke();
+    y += 4;
+    doc.font("Helvetica-Bold").fontSize(8)
+      .text("TOTAL CARGOS", x0 + 302, y, { width: 100 })
+      .text(`$ ${fPeso(data.grandTotal)}`, x0 + 402, y, { width: 125, align: "right" });
+    y += 18;
+
+    // ── Pagos ──────────────────────────────────────────────────
+    if (data.payments.length > 0) {
+      doc.rect(x0, y, W, 16).fillColor("#e8f5e9").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
+      doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);
+      doc.text("Pagos recibidos", x0 + 4, y + 4, { width: 300 });
+      doc.text("Fecha", x0 + 308, y + 4, { width: 90, align: "center" });
+      doc.text("Importe", x0 + 402, y + 4, { width: 125, align: "right" });
+      y += 16;
+
+      doc.font("Helvetica").fontSize(7.5);
+      for (const pay of data.payments) {
+        if (y > 720) { doc.addPage(); y = 40; }
+        let ret: any = null;
+        try { if (pay.notes) ret = JSON.parse(pay.notes)?.retencion; } catch {}
+        const methodLabel = PAYMENT_METHOD_LABELS[pay.method] ?? pay.method;
+        const label = ret
+          ? `${methodLabel}${pay.reference ? ` (Ref: ${pay.reference})` : ""} + Ret. ${ret.tipo === "iibb" ? "IIBB" : "Ganancias"} $${fPeso(ret.monto)}`
+          : `${methodLabel}${pay.reference ? ` (Ref: ${pay.reference})` : ""}`;
+        const totalPay = ret ? $n(pay.amount) + $n(ret.monto) : $n(pay.amount);
+
+        doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+        doc.text(label, x0 + 4, y + 3, { width: 300 });
+        doc.text(fDate(pay.date), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`$ ${fPeso(totalPay)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+        y += 14;
+      }
+
+      y += 4;
+      doc.moveTo(x0, y).lineTo(x0 + W, y).strokeColor("#ccc").stroke();
+      y += 4;
+      doc.font("Helvetica-Bold").fontSize(8)
+        .text("TOTAL PAGADO", x0 + 302, y, { width: 100 })
+        .text(`$ ${fPeso(data.totalPayments)}`, x0 + 402, y, { width: 125, align: "right" });
+      y += 18;
+    }
+
+    // ── Saldo ──────────────────────────────────────────────────
+    if (y > 720) { doc.addPage(); y = 40; }
+    const saldoColor = data.balance <= 0.01 ? "#2e7d32" : "#c62828";
+    doc.rect(x0, y, W, 22).fillColor(data.balance <= 0.01 ? "#e8f5e9" : "#ffebee").fill()
+      .rect(x0, y, W, 22).strokeColor(saldoColor).lineWidth(1).stroke().lineWidth(0.5);
+    doc.fillColor(saldoColor).font("Helvetica-Bold").fontSize(10)
+      .text(data.balance <= 0.01 ? "CUENTA SALDADA" : "SALDO PENDIENTE", x0 + 6, y + 5, { width: 300 })
+      .text(`$ ${fPeso(Math.abs(data.balance))}`, x0 + 402, y + 5, { width: 125, align: "right" });
+    doc.fillColor("#000");
+    y += 30;
+
+    // Footer
+    if (y > 750) { doc.addPage(); y = 40; }
+    doc.font("Helvetica").fontSize(6).fillColor("#888")
+      .text("Este comprobante es un documento interno del hotel. No tiene validez fiscal.", x0, y, { align: "center", width: W })
+      .fillColor("#000");
+
+    doc.end();
+  });
+}
+
+export interface ResumenCuentaData {
+  reservationCode: string;
+  guestName: string;
+  roomNumber: string;
+  checkInDate: string;
+  checkOutDate: string;
+  nights: number;
+  roomRate: number;
+  roomTotal: number;
+  charges: Array<{ description: string; date: string; amount: string; category?: string }>;
+  payments: Array<{ date: string; method: string; amount: string; reference?: string | null; notes?: string | null }>;
+  grandTotal: number;
+  totalPayments: number;
+  balance: number;
+  printedAt: string;
+}
+
+export async function generarResumenCuentaPDF(data: ResumenCuentaData, config: any): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 30, size: "A4" });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const W = 535;
+    const x0 = 30;
+    let y = 30;
+
+    // ── Header ─────────────────────────────────────────────────
+    doc.font("Helvetica-Bold").fontSize(14).fillColor("#000")
+      .text("RESUMEN DE CUENTA", x0, y, { width: W, align: "center" });
+    y += 18;
+    doc.font("Helvetica").fontSize(7).fillColor("#888")
+      .text("Documento de cortesía — Sin valor fiscal", x0, y, { width: W, align: "center" });
+    doc.fillColor("#000");
+    y += 16;
+
+    // Emisor + datos reserva en dos columnas
+    doc.rect(x0, y, W, 64).strokeColor("#ccc").lineWidth(0.5).stroke();
+    const mid = x0 + W / 2;
+    doc.moveTo(mid, y).lineTo(mid, y + 64).stroke();
+
+    doc.font("Helvetica-Bold").fontSize(9).text(config?.razonSocial ?? "MARAN S.A.", x0 + 6, y + 8, { width: W / 2 - 12 });
+    doc.font("Helvetica").fontSize(7.5)
+      .text(config?.domicilioComercial ?? "", x0 + 6, y + 22)
+      .text(`${config?.localidad ?? ""}, ${config?.provincia ?? ""}`, x0 + 6, y + 33)
+      .text(`Emitido: ${data.printedAt}`, x0 + 6, y + 48);
+
+    doc.font("Helvetica-Bold").fontSize(8).text(`Huésped: ${data.guestName}`, mid + 6, y + 8, { width: W / 2 - 12 });
+    doc.font("Helvetica").fontSize(7.5)
+      .text(`Habitación: ${data.roomNumber}  |  Reserva: ${data.reservationCode}`, mid + 6, y + 22)
+      .text(`Check-in: ${fDate(data.checkInDate)}`, mid + 6, y + 34)
+      .text(`Check-out: ${fDate(data.checkOutDate)}  (${data.nights} noche${data.nights !== 1 ? "s" : ""})`, mid + 6, y + 46);
+    y += 72;
+
+    // ── Cargos ─────────────────────────────────────────────────
+    doc.rect(x0, y, W, 16).fillColor("#f0f0f0").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
+    doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);
+    doc.text("Concepto", x0 + 4, y + 4, { width: 300 });
+    doc.text("Fecha", x0 + 308, y + 4, { width: 90, align: "center" });
+    doc.text("Importe", x0 + 402, y + 4, { width: 125, align: "right" });
+    y += 16;
+
+    doc.font("Helvetica").fontSize(7.5);
+
+    // Alojamiento por noche
+    if (data.nights > 1 && data.roomRate > 0) {
+      const checkIn = new Date(data.checkInDate + "T12:00:00");
+      for (let i = 0; i < data.nights; i++) {
+        if (y > 720) { doc.addPage(); y = 40; }
+        const nightDate = new Date(checkIn);
+        nightDate.setDate(nightDate.getDate() + i);
+        doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+        doc.text(`Alojamiento noche ${i + 1}`, x0 + 4, y + 3, { width: 300 });
+        doc.text(fDate(nightDate.toISOString().split("T")[0]), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`$ ${fPeso(data.roomRate)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+        y += 14;
+      }
+    } else {
+      if (y > 720) { doc.addPage(); y = 40; }
+      doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+      doc.text(`Alojamiento (${data.nights} noche${data.nights !== 1 ? "s" : ""})`, x0 + 4, y + 3, { width: 300 });
+      doc.text(`${fDate(data.checkInDate)} — ${fDate(data.checkOutDate)}`, x0 + 308, y + 3, { width: 90, align: "center" });
+      doc.text(`$ ${fPeso(data.roomTotal)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+      y += 14;
+    }
+
+    for (const charge of data.charges) {
+      if (y > 720) { doc.addPage(); y = 40; }
+      doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+      doc.text(charge.description, x0 + 4, y + 3, { width: 300 });
+      doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
+      doc.text(`$ ${fPeso(charge.amount)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+      y += 14;
+    }
+
+    y += 4;
+    doc.moveTo(x0, y).lineTo(x0 + W, y).strokeColor("#ccc").stroke();
+    y += 6;
+    doc.font("Helvetica-Bold").fontSize(8)
+      .text("TOTAL CARGOS", x0 + 302, y, { width: 100 })
+      .text(`$ ${fPeso(data.grandTotal)}`, x0 + 402, y, { width: 125, align: "right" });
+    y += 20;
+
+    // ── Pagos / Anticipos ──────────────────────────────────────
+    if (data.payments.length > 0) {
+      doc.rect(x0, y, W, 16).fillColor("#e8f4fd").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
+      doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);
+      doc.text("Pagos y anticipos registrados", x0 + 4, y + 4, { width: 300 });
+      doc.text("Fecha", x0 + 308, y + 4, { width: 90, align: "center" });
+      doc.text("Importe", x0 + 402, y + 4, { width: 125, align: "right" });
+      y += 16;
+
+      doc.font("Helvetica").fontSize(7.5);
+      for (const pay of data.payments) {
+        if (y > 720) { doc.addPage(); y = 40; }
+        let ret: any = null;
+        try { if (pay.notes) ret = JSON.parse(pay.notes)?.retencion; } catch {}
+        const methodLabel = PAYMENT_METHOD_LABELS[pay.method] ?? pay.method;
+        const label = ret
+          ? `${methodLabel} + Ret. ${ret.tipo === "iibb" ? "IIBB" : "Ganancias"} $${fPeso(ret.monto)}`
+          : `${methodLabel}${pay.reference ? ` (Ref: ${pay.reference})` : ""}`;
+        const totalPay = ret ? $n(pay.amount) + $n(ret.monto) : $n(pay.amount);
+
+        doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+        doc.text(label, x0 + 4, y + 3, { width: 300 });
+        doc.text(fDate(pay.date), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`$ ${fPeso(totalPay)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+        y += 14;
+      }
+
+      y += 4;
+      doc.moveTo(x0, y).lineTo(x0 + W, y).strokeColor("#ccc").stroke();
+      y += 6;
+      doc.font("Helvetica-Bold").fontSize(8)
+        .text("TOTAL PAGADO", x0 + 302, y, { width: 100 })
+        .text(`$ ${fPeso(data.totalPayments)}`, x0 + 402, y, { width: 125, align: "right" });
+      y += 20;
+    }
+
+    // ── Saldo ──────────────────────────────────────────────────
+    if (y > 720) { doc.addPage(); y = 40; }
+    const saldoColor = data.balance <= 0.01 ? "#2e7d32" : "#c62828";
+    doc.rect(x0, y, W, 26).fillColor(data.balance <= 0.01 ? "#e8f5e9" : "#ffebee").fill()
+      .rect(x0, y, W, 26).strokeColor(saldoColor).lineWidth(1).stroke().lineWidth(0.5);
+    doc.fillColor(saldoColor).font("Helvetica-Bold").fontSize(11)
+      .text(data.balance <= 0.01 ? "CUENTA SALDADA — SALDO $0.00" : `SALDO PENDIENTE: $ ${fPeso(data.balance)}`,
+        x0 + 6, y + 7, { width: W - 12, align: "center" });
+    doc.fillColor("#000");
+    y += 34;
+
+    // Footer
+    if (y > 750) { doc.addPage(); y = 40; }
+    doc.font("Helvetica").fontSize(6).fillColor("#888")
+      .text("Este resumen es un documento de cortesía. No constituye comprobante fiscal.", x0, y, { align: "center", width: W })
+      .fillColor("#000");
+
+    doc.end();
+  });
+}

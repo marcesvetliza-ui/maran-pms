@@ -24,6 +24,8 @@ import {
   ListChecks,
   X,
   Receipt,
+  FileDown,
+  Percent,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -115,6 +117,9 @@ export default function CheckOutPage() {
   const pendingFacturaTipoRef = useRef("");
   const [facturaInitialValues, setFacturaInitialValues] = useState<EmitirFacturaInitialValues | undefined>(undefined);
   const [receiptTypeForFreeCheckout, setReceiptTypeForFreeCheckout] = useState("cierre_habitacion");
+  const [showRetencion, setShowRetencion] = useState(false);
+  const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
+  const [retencionMonto, setRetencionMonto] = useState("");
 
   const handleToggleItem = (id: string, amount: number) => {
     const next = new Set(selectedItemIds);
@@ -182,13 +187,14 @@ export default function CheckOutPage() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; receiptType: string; billingTarget: "guest" | "company" | "agency"; companyId?: string; agencyId?: string }) => {
+    mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; receiptType: string; billingTarget: "guest" | "company" | "agency"; companyId?: string; agencyId?: string; notes?: string | null }) => {
       return apiRequest("POST", "/api/payments", {
         reservationId: selectedReservation!.id,
         amount: data.amount,
         method: data.method,
         date: getLocalToday(),
         reference: data.reference || null,
+        notes: data.notes || null,
         receiptType: data.receiptType,
         billingTarget: data.billingTarget,
         companyId: data.companyId || null,
@@ -208,6 +214,9 @@ export default function CheckOutPage() {
       setCcAgencyId("");
       setItemPayMode(false);
       setSelectedItemIds(new Set());
+      setShowRetencion(false);
+      setRetencionMonto("");
+      setRetencionTipo("iibb");
       toast({ title: "Pago registrado" });
     },
     onError: (error: any) => {
@@ -290,12 +299,7 @@ export default function CheckOutPage() {
       setWizardStep(3);
       if (pendingFacturaTipoRef.current) {
         setFacturaInitialValues({
-          razonSocial: `${g?.lastName || ""} ${g?.firstName || ""}`.trim() || undefined,
-          dni: g?.documentNumber || undefined,
-          items: [{
-            descripcion: `Alojamiento Hab. ${selectedReservation?.room?.roomNumber || ""} (${folio?.nights || selectedReservation?.nights || 1} noche${((folio?.nights || 1) !== 1) ? "s" : ""})`,
-            precioUnitario: folio?.grandTotal || 0,
-          }],
+          ...buildFacturaInitialValues(),
         });
         setShowFacturar(true);
         pendingFacturaTipoRef.current = "";
@@ -316,13 +320,36 @@ export default function CheckOutPage() {
 
   function buildFacturaInitialValues(): EmitirFacturaInitialValues {
     const g = selectedReservation?.guest as any;
+    const comp = selectedReservation?.company as any;
+    const ag = selectedReservation?.agency as any;
+    const nights = folio?.nights || selectedReservation?.nights || 1;
+    const nochesLabel = `${nights} noche${nights !== 1 ? "s" : ""}`;
+    const item = {
+      descripcion: `Alojamiento Hab. ${selectedReservation?.room?.roomNumber || ""} (${nochesLabel})`,
+      precioUnitario: folio?.grandTotal || 0,
+    };
+    if (comp) {
+      return {
+        razonSocial: comp.razonSocial || comp.nombreFantasia || undefined,
+        cuit: comp.cuilCuit || undefined,
+        condicionIva: comp.condicionIva || "Responsable Inscripto",
+        domicilio: comp.direccion || undefined,
+        items: [item],
+      };
+    }
+    if (ag) {
+      return {
+        razonSocial: ag.razonSocial || ag.nombreFantasia || undefined,
+        cuit: ag.cuilCuit || undefined,
+        condicionIva: ag.condicionIva || "Responsable Inscripto",
+        domicilio: ag.direccion || undefined,
+        items: [item],
+      };
+    }
     return {
       razonSocial: g ? `${g.lastName || ""} ${g.firstName || ""}`.trim() || undefined : undefined,
       dni: g?.documentNumber || undefined,
-      items: [{
-        descripcion: `Alojamiento Hab. ${selectedReservation?.room?.roomNumber || ""} (${folio?.nights || selectedReservation?.nights || 1} noche${((folio?.nights || 1) !== 1) ? "s" : ""})`,
-        precioUnitario: folio?.grandTotal || 0,
-      }],
+      items: [item],
     };
   }
 
@@ -360,6 +387,9 @@ export default function CheckOutPage() {
       setCcAgencyId("");
       setPaymentMethod("efectivo");
     }
+    setShowRetencion(false);
+    setRetencionMonto("");
+    setRetencionTipo("iibb");
   };
 
   const cancelWizard = () => {
@@ -569,7 +599,18 @@ export default function CheckOutPage() {
               </div>
             )}
 
-            <div className="flex justify-end">
+            <div className="flex justify-between items-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const url = `/api/reservations/${selectedReservation.id}/folio/pdf`;
+                  window.open(url, "_blank");
+                }}
+                data-testid="button-print-account-summary"
+              >
+                <FileDown className="h-4 w-4 mr-1.5" /> Imprimir resumen de cuenta
+              </Button>
               <Button onClick={() => setWizardStep(2)} data-testid="button-continue-to-payment">
                 {isHistorical ? "Continuar al cierre" : "Continuar al pago"} <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
@@ -879,10 +920,71 @@ export default function CheckOutPage() {
                         />
                       </div>
                     </div>
+
+                    {/* Panel de retención impositiva (IIBB / Ganancias) */}
+                    {!showRetencion ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-muted-foreground w-fit"
+                        onClick={() => setShowRetencion(true)}
+                        data-testid="button-show-retencion"
+                      >
+                        <Percent className="h-3 w-3 mr-1" /> Agregar retención impositiva
+                      </Button>
+                    ) : (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Percent className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
+                            <span className="text-sm font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
+                          </div>
+                          <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-700" onClick={() => { setShowRetencion(false); setRetencionMonto(""); }}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs">Tipo</Label>
+                            <Select value={retencionTipo} onValueChange={(v) => setRetencionTipo(v as "iibb" | "ganancias")}>
+                              <SelectTrigger className="h-8 text-sm" data-testid="select-retencion-tipo">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
+                                <SelectItem value="ganancias">Ganancias</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs">Monto retenido</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={retencionMonto}
+                              onChange={(e) => setRetencionMonto(e.target.value)}
+                              placeholder="0.00"
+                              className="h-8 text-sm"
+                              data-testid="input-retencion-monto"
+                            />
+                          </div>
+                        </div>
+                        {retencionMonto && parseFloat(retencionMonto) > 0 && paymentAmount && parseFloat(paymentAmount) > 0 && (
+                          <div className="text-xs text-amber-800 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-900/30 rounded p-2">
+                            <span className="font-medium">Neto recibido:</span> ${parseFloat(paymentAmount).toFixed(2)} &nbsp;
+                            <span className="font-medium">+ Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"}:</span> ${parseFloat(retencionMonto).toFixed(2)} &nbsp;
+                            <span className="font-semibold">= Total cubierto: ${(parseFloat(paymentAmount) + parseFloat(retencionMonto)).toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <Button
                       onClick={() => {
-                        const amount = paymentAmount || balance.toFixed(2);
-                        if (!amount || parseFloat(amount) <= 0) {
+                        const netAmount = paymentAmount || balance.toFixed(2);
+                        if (!netAmount || parseFloat(netAmount) <= 0) {
                           toast({ title: "Ingresá un monto válido", variant: "destructive" });
                           return;
                         }
@@ -894,14 +996,20 @@ export default function CheckOutPage() {
                           toast({ title: "Seleccioná una agencia", description: "Elegí a qué agencia facturarle este pago.", variant: "destructive" });
                           return;
                         }
+                        const retMonto = showRetencion && retencionMonto && parseFloat(retencionMonto) > 0 ? parseFloat(retencionMonto) : 0;
+                        const grossAmount = (parseFloat(netAmount) + retMonto).toFixed(2);
+                        const notes = retMonto > 0
+                          ? JSON.stringify({ retencion: { tipo: retencionTipo, monto: retMonto, neto: parseFloat(netAmount) } })
+                          : null;
                         addPaymentMutation.mutate({
-                          amount,
+                          amount: grossAmount,
                           method: paymentMethod,
                           reference: paymentReference,
                           receiptType: paymentReceiptType,
                           billingTarget: paymentBillingTarget,
                           companyId: paymentBillingTarget === "company" ? ccCompanyId : undefined,
                           agencyId: paymentBillingTarget === "agency" ? ccAgencyId : undefined,
+                          notes,
                         });
                       }}
                       disabled={addPaymentMutation.isPending}
@@ -928,19 +1036,30 @@ export default function CheckOutPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {folio.payments.map((p) => (
-                            <TableRow key={p.id}>
-                              <TableCell>
-                                <div className="flex items-center gap-1.5">
-                                  <span>{paymentMethodLabels[p.method as PaymentMethod] || p.method}</span>
-                                  {(p as any).billingTarget === "company" && (
-                                    <Badge variant="secondary" className="text-xs">Empresa</Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right">${parseFloat(p.amount).toFixed(2)}</TableCell>
-                            </TableRow>
-                          ))}
+                          {folio.payments.map((p) => {
+                            let ret: any = null;
+                            try { if ((p as any).notes) ret = JSON.parse((p as any).notes)?.retencion; } catch {}
+                            return (
+                              <TableRow key={p.id}>
+                                <TableCell>
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span>{paymentMethodLabels[p.method as PaymentMethod] || p.method}</span>
+                                      {(p as any).billingTarget === "company" && (
+                                        <Badge variant="secondary" className="text-xs">Empresa</Badge>
+                                      )}
+                                    </div>
+                                    {ret && (
+                                      <span className="text-xs text-muted-foreground">
+                                        Neto ${ret.neto?.toFixed(2)} + Ret. {ret.tipo === "iibb" ? "IIBB" : "Ganancias"} ${ret.monto?.toFixed(2)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">${parseFloat(p.amount).toFixed(2)}</TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </CardContent>

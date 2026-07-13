@@ -4,7 +4,7 @@ import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
-import { generarFacturaPDF } from "./invoicePdf";
+import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData } from "./invoicePdf";
 import { requireAuth } from "../auth";
 import { storage } from "../db-storage";
 
@@ -302,8 +302,46 @@ export function registerBillingRoutes(app: Express) {
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       const factura = row.rows[0] as any;
       const config = await getBillingConfig();
-      const pdfBuf = await generarFacturaPDF(factura, config);
       const tipo = factura.tipo_comprobante ?? "F";
+
+      // Voucher de alojamiento: PDF mejorado con detalle de folio
+      if (tipo === "cierre_habitacion" && factura.reserva_id) {
+        const reservaId = factura.reserva_id;
+        const [reservation, chargesList, paymentsList] = await Promise.all([
+          storage.getReservation(reservaId),
+          storage.getCharges(reservaId),
+          storage.getPayments(reservaId),
+        ]);
+        if (reservation) {
+          const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
+          const grandTotal = roomTotal + chargesList.reduce((s, c) => s + parseFloat(c.amount), 0);
+          const totalPayments = paymentsList.reduce((s, p) => s + parseFloat(p.amount), 0);
+          const voucherData: VoucherHabitacionData = {
+            numero: Number(factura.numero),
+            puntoVenta: Number(factura.punto_venta),
+            fechaEmision: factura.fecha_emision,
+            reservationCode: reservation.reservationCode,
+            guestName: `${reservation.guest?.firstName ?? ""} ${reservation.guest?.lastName ?? ""}`.trim(),
+            roomNumber: reservation.room?.roomNumber ?? "",
+            checkInDate: reservation.checkInDate,
+            checkOutDate: reservation.checkOutDate,
+            nights: reservation.nights ?? 1,
+            roomRate: parseFloat(reservation.finalRatePerNight || "0"),
+            roomTotal,
+            charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount, category: c.category ?? undefined })),
+            payments: paymentsList.filter(p => p.status === "active").map(p => ({ date: p.date, method: p.method, amount: p.amount, reference: p.reference, notes: p.notes })),
+            grandTotal,
+            totalPayments,
+            balance: grandTotal - totalPayments,
+          };
+          const pdfBuf = await generarVoucherHabitacionPDF(voucherData, config);
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `attachment; filename="Voucher_${factura.punto_venta}_${factura.numero}.pdf"`);
+          return res.send(pdfBuf);
+        }
+      }
+
+      const pdfBuf = await generarFacturaPDF(factura, config);
       const pv = String(factura.punto_venta ?? 1).padStart(4, "0");
       const nro = String(factura.numero ?? 0).padStart(8, "0");
       res.setHeader("Content-Type", "application/pdf");
