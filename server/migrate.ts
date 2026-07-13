@@ -355,20 +355,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_virtual boolean DEFAULT false`)
   );
 
-  await withTimeout("rooms.reub_insert", T, () =>
-    db.execute(sql`
-      INSERT INTO rooms (id, room_number, room_type_id, floor, status, is_virtual)
-      SELECT
-        gen_random_uuid(),
-        'REUB',
-        (SELECT id FROM room_types ORDER BY name LIMIT 1),
-        0,
-        'available',
-        true
-      WHERE
-        (SELECT id FROM room_types ORDER BY name LIMIT 1) IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM rooms WHERE room_number = 'REUB')
-    `)
+  await withTimeout("rooms.reub_delete", T, () =>
+    db.execute(sql`DELETE FROM rooms WHERE room_number = 'REUB' AND (is_virtual = true OR floor = 0)`)
   );
 
   // table_reservations: add area_id for per-salon filtering

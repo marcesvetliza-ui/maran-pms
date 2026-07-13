@@ -443,6 +443,7 @@ export default function RoomsPage() {
   });
 
   const filteredRooms = rooms?.filter((room) => {
+    if ((room as any).isVirtual) return false;
     const matchesSearch = room.roomNumber.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || room.status === statusFilter;
     const matchesType = typeFilter === "all" || room.roomTypeId === typeFilter;
@@ -465,14 +466,15 @@ export default function RoomsPage() {
     setDialogOpen(true);
   };
 
+  const realRooms = rooms?.filter((r) => !(r as any).isVirtual) ?? [];
   const statusCounts = {
-    all: rooms?.length || 0,
-    available: rooms?.filter((r) => r.status === "available").length || 0,
-    occupied: rooms?.filter((r) => r.status === "occupied").length || 0,
-    dirty: rooms?.filter((r) => r.status === "dirty").length || 0,
-    cleaning: rooms?.filter((r) => r.status === "cleaning").length || 0,
-    maintenance: rooms?.filter((r) => r.status === "maintenance").length || 0,
-    oos: rooms?.filter((r) => r.status === "oos").length || 0,
+    all: realRooms.length,
+    available: realRooms.filter((r) => r.status === "available").length,
+    occupied: realRooms.filter((r) => r.status === "occupied").length,
+    dirty: realRooms.filter((r) => r.status === "dirty").length,
+    cleaning: realRooms.filter((r) => r.status === "cleaning").length,
+    maintenance: realRooms.filter((r) => r.status === "maintenance").length,
+    oos: realRooms.filter((r) => r.status === "oos").length,
   };
 
   return (

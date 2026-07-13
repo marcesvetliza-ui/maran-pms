@@ -798,12 +798,7 @@ export async function refreshRealData() {
       } catch (e) {}
     }
 
-    // Ensure the REUB virtual room exists (comodín — never deleted by seed)
-    await db.execute(sql`
-      INSERT INTO rooms (id, room_number, room_type_id, floor, status, is_virtual)
-      SELECT gen_random_uuid(), 'REUB', 'rt1', 0, 'available', true
-      WHERE NOT EXISTS (SELECT 1 FROM rooms WHERE room_number = 'REUB')
-    `);
+    // REUB virtual room removed — no longer needed
 
     const realAreas = [
       { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor" as const, capacity: 72, hasTables: "true" as const, isActive: "true" as const },
