@@ -66,6 +66,7 @@ export function ReservationDetailModal({
   const [checkoutFacturaInitial, setCheckoutFacturaInitial] = useState<EmitirFacturaInitialValues | undefined>(undefined);
   const checkoutPendingInvoiceRef = useRef(false);
   const checkoutReceiptTypeRef = useRef("cierre_habitacion");
+  const checkoutFacturaInitialRef = useRef<EmitirFacturaInitialValues | undefined>(undefined);
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState("efectivo");
   const [checkoutPayAmount, setCheckoutPayAmount] = useState("");
   const [checkoutBillingTarget, setCheckoutBillingTarget] = useState<"guest" | "company" | "agency">("guest");
@@ -214,31 +215,8 @@ export function ReservationDetailModal({
       const savedReceiptType = checkoutReceiptTypeRef.current;
       if (checkoutPendingInvoiceRef.current) {
         checkoutPendingInvoiceRef.current = false;
-        const g = reservation?.guest as any;
-        const comp = (reservation as any)?.company;
-        const ag = (reservation as any)?.agency;
-        const extraCharges = reservation?.charges?.reduce((s, c) => s + parseFloat(c.amount), 0) || 0;
-        const totalAmount = parseFloat(reservation?.totalRoomAmount || "0") + extraCharges;
-        const nights = reservation?.nights || 1;
-        const roomNum = reservation?.room?.roomNumber || "";
-        setCheckoutFacturaInitial({
-          razonSocial: comp?.razonSocial || comp?.name || ag?.razonSocial || ag?.nombreFantasia ||
-            (g ? `${g.lastName || ""} ${g.firstName || ""}`.trim() : undefined),
-          cuit: comp?.cuilCuit || ag?.cuilCuit || g?.cuilCuit || undefined,
-          dni: (!comp && !ag) ? (g?.documentNumber || undefined) : undefined,
-          condicionIva: comp?.condicionIva || ag?.condicionIva || undefined,
-          domicilio: comp?.direccion || comp?.domicilio || ag?.direccion || ag?.domicilio || undefined,
-          items: [
-            {
-              descripcion: `Alojamiento Hab. ${roomNum} (${nights} noche${nights !== 1 ? "s" : ""})`,
-              precioUnitario: parseFloat(reservation?.totalRoomAmount || "0"),
-            },
-            ...(reservation?.charges ?? []).map((c: any) => ({
-              descripcion: c.description || "Cargo adicional",
-              precioUnitario: parseFloat(c.amount),
-            })),
-          ],
-        });
+        setCheckoutFacturaInitial(checkoutFacturaInitialRef.current);
+        checkoutFacturaInitialRef.current = undefined;
         setShowCheckoutFactura(true);
       } else if (["cierre_habitacion", "voucher", "ticket"].includes(savedReceiptType)) {
         window.open(`/api/reservations/${reservationId}/folio/pdf`, "_blank");
@@ -648,7 +626,38 @@ export function ReservationDetailModal({
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setCheckoutStep(2)}>Atrás</Button>
-                    <Button variant="destructive" size="sm" onClick={() => { checkoutReceiptTypeRef.current = checkoutReceiptType; checkOutMutation.mutate(); setCheckoutStep(0); }} disabled={checkOutMutation.isPending} data-testid="button-checkout-confirm">
+                    <Button variant="destructive" size="sm" onClick={() => {
+                      checkoutReceiptTypeRef.current = checkoutReceiptType;
+                      checkoutPendingInvoiceRef.current = ["factura_a", "factura_b", "factura_c"].includes(checkoutReceiptType);
+                      if (checkoutPendingInvoiceRef.current && reservation) {
+                        const g = reservation.guest as any;
+                        const comp = (reservation as any).company;
+                        const ag = (reservation as any).agency;
+                        const nights = reservation.nights || 1;
+                        const roomNum = reservation.room?.roomNumber || "";
+                        const activeCharges = (reservation.charges ?? []).filter((c: any) => (c as any).status !== "anulado");
+                        checkoutFacturaInitialRef.current = {
+                          razonSocial: comp?.razonSocial || comp?.name || ag?.razonSocial || ag?.nombreFantasia ||
+                            (g ? `${g.lastName || ""} ${g.firstName || ""}`.trim() : undefined),
+                          cuit: comp?.cuilCuit || ag?.cuilCuit || g?.cuilCuit || undefined,
+                          dni: (!comp && !ag) ? (g?.documentNumber || undefined) : undefined,
+                          condicionIva: comp?.condicionIva || ag?.condicionIva || undefined,
+                          domicilio: comp?.direccion || comp?.domicilio || ag?.direccion || ag?.domicilio || undefined,
+                          items: [
+                            {
+                              descripcion: `Alojamiento Hab. ${roomNum} (${nights} noche${nights !== 1 ? "s" : ""})`,
+                              precioUnitario: parseFloat(reservation.totalRoomAmount || "0"),
+                            },
+                            ...activeCharges.map((c: any) => ({
+                              descripcion: c.description || "Cargo adicional",
+                              precioUnitario: parseFloat(c.amount),
+                            })),
+                          ],
+                        };
+                      }
+                      checkOutMutation.mutate();
+                      setCheckoutStep(0);
+                    }} disabled={checkOutMutation.isPending} data-testid="button-checkout-confirm">
                       {checkOutMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
                     </Button>
                   </div>
