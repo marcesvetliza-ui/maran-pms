@@ -148,10 +148,10 @@ export default function CheckOutPage() {
     queryKey: ["/api/dashboard/departures"],
   });
 
-  const { data: companies = [] } = useQuery<{ id: string; name: string }[]>({
+  const { data: companies = [] } = useQuery<any[]>({
     queryKey: ["/api/companies"],
   });
-  const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
+  const { data: agencies = [] } = useQuery<any[]>({
     queryKey: ["/api/agencies"],
   });
 
@@ -322,27 +322,32 @@ export default function CheckOutPage() {
     const g = selectedReservation?.guest as any;
     const comp = selectedReservation?.company as any;
     const ag = selectedReservation?.agency as any;
+    // Fallback: use guest's default company/agency if reservation has none linked
+    const guestComp = !comp && g?.companyId ? companies.find((c: any) => c.id === g.companyId) as any : null;
+    const guestAg = !ag && !guestComp && g?.agencyId ? agencies.find((a: any) => a.id === g.agencyId) as any : null;
+    const effectiveComp = comp || guestComp;
+    const effectiveAg = ag || guestAg;
     const nights = folio?.nights || selectedReservation?.nights || 1;
     const nochesLabel = `${nights} noche${nights !== 1 ? "s" : ""}`;
     const item = {
       descripcion: `Alojamiento Hab. ${selectedReservation?.room?.roomNumber || ""} (${nochesLabel})`,
       precioUnitario: folio?.grandTotal || 0,
     };
-    if (comp) {
+    if (effectiveComp) {
       return {
-        razonSocial: comp.razonSocial || comp.nombreFantasia || undefined,
-        cuit: comp.cuilCuit || undefined,
-        condicionIva: comp.condicionIva || "Responsable Inscripto",
-        domicilio: comp.direccion || undefined,
+        razonSocial: effectiveComp.razonSocial || effectiveComp.nombreFantasia || undefined,
+        cuit: effectiveComp.cuilCuit || undefined,
+        condicionIva: effectiveComp.condicionIva || "Responsable Inscripto",
+        domicilio: effectiveComp.direccion || effectiveComp.domicilio || undefined,
         items: [item],
       };
     }
-    if (ag) {
+    if (effectiveAg) {
       return {
-        razonSocial: ag.razonSocial || ag.nombreFantasia || undefined,
-        cuit: ag.cuilCuit || undefined,
-        condicionIva: ag.condicionIva || "Responsable Inscripto",
-        domicilio: ag.direccion || undefined,
+        razonSocial: effectiveAg.razonSocial || effectiveAg.nombreFantasia || undefined,
+        cuit: effectiveAg.cuilCuit || undefined,
+        condicionIva: effectiveAg.condicionIva || "Responsable Inscripto",
+        domicilio: effectiveAg.direccion || effectiveAg.domicilio || undefined,
         items: [item],
       };
     }

@@ -191,19 +191,22 @@ export function registerBillingRoutes(app: Express) {
   // GET /api/billing/invoices
   app.get("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { desde, hasta, tipo, clienteCuit, area, cliente } = req.query as Record<string, string>;
+      const { desde, hasta, tipo, clienteCuit, area, cliente, reservaId } = req.query as Record<string, string>;
       let whereClause = sql`1=1`;
-      if (desde) whereClause = sql`${whereClause} AND fecha_emision >= ${desde}`;
-      if (hasta) whereClause = sql`${whereClause} AND fecha_emision <= ${hasta}`;
-      if (tipo) whereClause = sql`${whereClause} AND tipo_comprobante = ${tipo}`;
-      if (clienteCuit) whereClause = sql`${whereClause} AND cliente_cuit = ${clienteCuit}`;
-      if (area) whereClause = sql`${whereClause} AND punto_venta IN (SELECT numero FROM pos_configs WHERE area = ${area} AND activo = true)`;
-      if (cliente) whereClause = sql`${whereClause} AND LOWER(cliente_razon_social) LIKE ${'%' + cliente.toLowerCase() + '%'}`;
+      if (desde) whereClause = sql`${whereClause} AND si.fecha_emision >= ${desde}`;
+      if (hasta) whereClause = sql`${whereClause} AND si.fecha_emision <= ${hasta}`;
+      if (tipo) whereClause = sql`${whereClause} AND si.tipo_comprobante = ${tipo}`;
+      if (clienteCuit) whereClause = sql`${whereClause} AND si.cliente_cuit = ${clienteCuit}`;
+      if (area) whereClause = sql`${whereClause} AND si.punto_venta IN (SELECT numero FROM pos_configs WHERE area = ${area} AND activo = true)`;
+      if (cliente) whereClause = sql`${whereClause} AND LOWER(si.cliente_razon_social) LIKE ${'%' + cliente.toLowerCase() + '%'}`;
+      if (reservaId) whereClause = sql`${whereClause} AND si.reserva_id::text = ${reservaId}`;
 
       const rows = await db.execute(sql`
-        SELECT * FROM sales_invoices
+        SELECT si.*, pc.area AS area_name
+        FROM sales_invoices si
+        LEFT JOIN pos_configs pc ON pc.numero = si.punto_venta
         WHERE ${whereClause}
-        ORDER BY created_at DESC
+        ORDER BY si.created_at DESC
         LIMIT 200
       `);
       res.json(rows.rows);

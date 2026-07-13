@@ -39,6 +39,15 @@ const CONDICION_IVA_OPTIONS = [
   "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento",
 ];
 
+const AREA_LABELS: Record<string, { label: string; color: string }> = {
+  recepcion: { label: "Recepción", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
+  restaurant: { label: "Restaurant", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
+  spa: { label: "SPA", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
+  eventos: { label: "Eventos", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
+  cocina: { label: "Cocina", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
+  bar: { label: "Bar", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
+};
+
 const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
   FA:  { nombre: "Factura A",    color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   FB:  { nombre: "Factura B",    color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
@@ -81,8 +90,14 @@ export default function BillingPage() {
   const [filtroDesde, setFiltroDesde] = useState(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd"));
   const [filtroHasta, setFiltroHasta] = useState(today());
   const [filtroTipo, setFiltroTipo] = useState("");
+  const [filtroArea, setFiltroArea] = useState("");
 
-  const qp = new URLSearchParams({ desde: filtroDesde, hasta: filtroHasta, ...(filtroTipo ? { tipo: filtroTipo } : {}) }).toString();
+  const qp = new URLSearchParams({
+    desde: filtroDesde,
+    hasta: filtroHasta,
+    ...(filtroTipo ? { tipo: filtroTipo } : {}),
+    ...(filtroArea ? { area: filtroArea } : {}),
+  }).toString();
 
   const { data: invoices = [], isLoading, refetch } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", qp],
@@ -147,14 +162,24 @@ export default function BillingPage() {
                 <Input type="date" value={filtroHasta} onChange={e => setFiltroHasta(e.target.value)} className="w-36 text-sm h-8" />
               </div>
               <Select value={filtroTipo || "__all__"} onValueChange={(v) => setFiltroTipo(v === "__all__" ? "" : v)}>
-                <SelectTrigger className="w-36 h-8 text-sm"><SelectValue placeholder="Tipo..." /></SelectTrigger>
+                <SelectTrigger className="w-36 h-8 text-sm" data-testid="select-filtro-tipo"><SelectValue placeholder="Tipo..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__all__">Todos</SelectItem>
+                  <SelectItem value="__all__">Todos los tipos</SelectItem>
                   <SelectItem value="FA">Factura A</SelectItem>
                   <SelectItem value="FB">Factura B</SelectItem>
                   <SelectItem value="FC">Factura C</SelectItem>
                   <SelectItem value="NCA">NC A</SelectItem>
                   <SelectItem value="NCB">NC B</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={filtroArea || "__all__"} onValueChange={(v) => setFiltroArea(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="w-36 h-8 text-sm" data-testid="select-filtro-area"><SelectValue placeholder="Área..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todas las áreas</SelectItem>
+                  <SelectItem value="recepcion">Recepción</SelectItem>
+                  <SelectItem value="restaurant">Restaurant</SelectItem>
+                  <SelectItem value="spa">SPA</SelectItem>
+                  <SelectItem value="eventos">Eventos</SelectItem>
                 </SelectContent>
               </Select>
               <Button variant="outline" size="sm" onClick={() => refetch()} className="h-8">
@@ -174,6 +199,7 @@ export default function BillingPage() {
                       <thead>
                         <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
                           <th className="px-3 py-2 text-left">Tipo / N°</th>
+                          <th className="px-3 py-2 text-left">Área</th>
                           <th className="px-3 py-2 text-left">Fecha</th>
                           <th className="px-3 py-2 text-left">Cliente</th>
                           <th className="px-3 py-2 text-right">Total</th>
@@ -192,6 +218,13 @@ export default function BillingPage() {
                                   <Badge variant="outline" className={`text-xs w-fit px-1.5 ${tl.color}`}>{tl.nombre}</Badge>
                                   <span className="text-xs font-mono">{padNum(f.punto_venta, 4)}-{padNum(f.numero, 8)}</span>
                                 </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                {f.area_name ? (
+                                  <Badge variant="outline" className={`text-[10px] px-1.5 ${AREA_LABELS[f.area_name]?.color || "bg-gray-100 text-gray-700"}`}>
+                                    {AREA_LABELS[f.area_name]?.label || f.area_name}
+                                  </Badge>
+                                ) : <span className="text-xs text-muted-foreground">—</span>}
                               </td>
                               <td className="px-3 py-2 text-xs">{fDate(f.fecha_emision)}</td>
                               <td className="px-3 py-2">

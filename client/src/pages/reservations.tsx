@@ -45,6 +45,7 @@ import {
   Download,
   Phone,
   AlertCircle,
+  Clock,
 } from "lucide-react";
 import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -1950,6 +1951,20 @@ function ReservationDetailDialog({
     enabled: paymentRows.some(r => r.method === "cuenta_corriente" && r.billingTarget === "agency" && !reservation.agencyId),
   });
 
+  // Always-loaded for billing fallback (guest's default company/agency)
+  const { data: allCompanies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
+  const { data: allAgencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
+
+  // Invoices linked to this reservation (for timeline)
+  const { data: folioInvoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/billing/invoices", "reserva", reservation.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices?reservaId=${reservation.id}`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
   const addChargeMutation = useMutation({
     mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string }) => {
       return apiRequest("POST", "/api/charges", chargeData);
@@ -3382,6 +3397,67 @@ function ReservationDetailDialog({
                 )}
               </div>
             </div>
+
+            {/* ── Movimientos cronológicos del folio ─────────────── */}
+            {(() => {
+              const chargeItems = consumptionCharges.map((c: any) => ({
+                sortDate: new Date(c.date || c.createdAt || 0).getTime(),
+                dateLabel: (() => { const d = new Date(c.date || c.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                type: "cargo" as const,
+                label: c.description,
+                amount: parseFloat(c.amount || "0"),
+                isAnulado: c.status === "anulado",
+                id: `cargo-${c.id}`,
+              }));
+              const paymentItems = (payments || []).map((p: any) => ({
+                sortDate: new Date(p.paymentDate || p.date || p.createdAt || 0).getTime(),
+                dateLabel: (() => { const d = new Date(p.paymentDate || p.date || p.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                type: "pago" as const,
+                label: p.reference || p.notes || p.paymentMethod || "Pago",
+                amount: parseFloat(p.amount || "0"),
+                isAnulado: (p as any).status === "anulado",
+                id: `pago-${p.id}`,
+              }));
+              const invoiceItems = folioInvoices.map((f: any) => ({
+                sortDate: new Date((f.fecha_emision || "") + "T12:00:00").getTime(),
+                dateLabel: (() => { const d = new Date((f.fecha_emision || "") + "T12:00:00"); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                type: "factura" as const,
+                label: `${f.tipo_comprobante} ${String(f.punto_venta).padStart(4,"0")}-${String(f.numero).padStart(8,"0")} — ${f.cliente_razon_social}`,
+                amount: parseFloat(f.monto_total || "0"),
+                isAnulado: f.estado === "anulada",
+                id: `factura-${f.id}`,
+              }));
+              const allItems = [...chargeItems, ...paymentItems, ...invoiceItems].sort((a, b) => b.sortDate - a.sortDate);
+              if (allItems.length === 0) return null;
+              const colorMap = {
+                cargo:   "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
+                pago:    "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
+                factura: "border-purple-200 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-800",
+              };
+              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura" };
+              const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300" };
+              return (
+                <div className="border rounded-lg">
+                  <div className="p-3 border-b bg-muted/50 flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <h4 className="font-semibold text-sm">Movimientos cronológicos</h4>
+                    <span className="text-xs text-muted-foreground ml-auto">{allItems.length} movimiento{allItems.length !== 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
+                    {allItems.map((item) => (
+                      <div key={item.id} className={`flex items-center gap-2 text-xs p-1.5 rounded border ${colorMap[item.type]} ${item.isAnulado ? "opacity-40 line-through" : ""}`} data-testid={`timeline-${item.id}`}>
+                        <span className="text-muted-foreground shrink-0 w-14">{item.dateLabel}</span>
+                        <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4">{labelMap[item.type]}</Badge>
+                        <span className="flex-1 truncate">{item.label}</span>
+                        <span className={`font-medium shrink-0 ${amtColor[item.type]}`}>
+                          {item.type === "pago" ? "−" : ""}${item.amount.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="historial" className="mt-4">
@@ -3725,10 +3801,13 @@ function ReservationDetailDialog({
         const guestName = isJuridica
           ? (g?.firstName || "")
           : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
-        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || "";
-        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || "";
+        // Fallback: guest's default company/agency if reservation has none linked
+        const guestComp = !(reservation.company) && (g as any)?.companyId ? allCompanies.find((c: any) => c.id === (g as any).companyId) as any : null;
+        const guestAg = !(reservation.agency) && !guestComp && (g as any)?.agencyId ? allAgencies.find((a: any) => a.id === (g as any).agencyId) as any : null;
+        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || guestComp?.razonSocial || guestComp?.nombreFantasia || "";
+        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || guestAg?.razonSocial || guestAg?.nombreFantasia || "";
         const razonSocial = companyName || agencyName || guestName;
-        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || g?.cuilCuit || "";
+        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || guestComp?.cuilCuit || guestAg?.cuilCuit || g?.cuilCuit || "";
         const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
         const vatMap: Record<string, string> = {
           responsable_inscripto: "Responsable Inscripto",
@@ -3739,13 +3818,13 @@ function ReservationDetailDialog({
           no_categorizado: "No Categorizado (Extranjero)",
         };
         const guestVat = (g as any)?.vatCondition || "consumidor_final";
-        const companyCondIva = (reservation.company as any)?.condicionIva || "";
-        const agencyCondIva = (reservation.agency as any)?.condicionIva || "";
+        const companyCondIva = (reservation.company as any)?.condicionIva || guestComp?.condicionIva || "";
+        const agencyCondIva = (reservation.agency as any)?.condicionIva || guestAg?.condicionIva || "";
         const condicionIva = companyCondIva || agencyCondIva || (cuit
           ? (vatMap[guestVat] || "Responsable Inscripto")
           : (vatMap[guestVat] || "Consumidor Final"));
-        const companyDom = (reservation.company as any)?.domicilio || "";
-        const agencyDom = (reservation.agency as any)?.domicilio || "";
+        const companyDom = (reservation.company as any)?.domicilio || guestComp?.domicilio || "";
+        const agencyDom = (reservation.agency as any)?.domicilio || guestAg?.domicilio || "";
         const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
         const domicilio = companyDom || agencyDom || domicilioParts.join(", ");
         const roomNum = reservation.room?.roomNumber || "";
@@ -4070,10 +4149,13 @@ function ReservationDetailDialog({
         const guestName = isJuridica
           ? (g?.firstName || "")
           : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
-        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || "";
-        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || "";
+        // Fallback: guest's default company/agency if reservation has none linked
+        const guestComp = !(reservation.company) && (g as any)?.companyId ? allCompanies.find((c: any) => c.id === (g as any).companyId) as any : null;
+        const guestAg = !(reservation.agency) && !guestComp && (g as any)?.agencyId ? allAgencies.find((a: any) => a.id === (g as any).agencyId) as any : null;
+        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || guestComp?.razonSocial || guestComp?.nombreFantasia || "";
+        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || guestAg?.razonSocial || guestAg?.nombreFantasia || "";
         const razonSocial = companyName || agencyName || guestName;
-        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || g?.cuilCuit || "";
+        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || guestComp?.cuilCuit || guestAg?.cuilCuit || g?.cuilCuit || "";
         const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
         const vatMap: Record<string, string> = {
           responsable_inscripto: "Responsable Inscripto",
@@ -4084,13 +4166,13 @@ function ReservationDetailDialog({
           no_categorizado: "No Categorizado (Extranjero)",
         };
         const guestVat = (g as any)?.vatCondition || "consumidor_final";
-        const companyCondIva = (reservation.company as any)?.condicionIva || "";
-        const agencyCondIva = (reservation.agency as any)?.condicionIva || "";
+        const companyCondIva = (reservation.company as any)?.condicionIva || guestComp?.condicionIva || "";
+        const agencyCondIva = (reservation.agency as any)?.condicionIva || guestAg?.condicionIva || "";
         const condicionIva = companyCondIva || agencyCondIva || (cuit
           ? (vatMap[guestVat] || "Responsable Inscripto")
           : (vatMap[guestVat] || "Consumidor Final"));
-        const companyDom = (reservation.company as any)?.domicilio || "";
-        const agencyDom = (reservation.agency as any)?.domicilio || "";
+        const companyDom = (reservation.company as any)?.domicilio || guestComp?.domicilio || "";
+        const agencyDom = (reservation.agency as any)?.domicilio || guestAg?.domicilio || "";
         const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
         const domicilio = companyDom || agencyDom || domicilioParts.join(", ");
         const roomNum = reservation.room?.roomNumber || "";
