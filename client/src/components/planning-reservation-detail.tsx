@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote, Undo2, Building2 } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote, Undo2, Building2, Percent, X, Printer } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -70,6 +70,9 @@ export function ReservationDetailModal({
   const [checkoutBillingTarget, setCheckoutBillingTarget] = useState<"guest" | "company" | "agency">("guest");
   const [checkoutCompanyId, setCheckoutCompanyId] = useState("");
   const [checkoutAgencyId, setCheckoutAgencyId] = useState("");
+  const [showRetencion, setShowRetencion] = useState(false);
+  const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
+  const [retencionMonto, setRetencionMonto] = useState("");
 
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
@@ -124,6 +127,9 @@ export function ReservationDetailModal({
     setCheckoutStep(1);
     setCheckoutReceiptType("cierre_habitacion");
     setCheckoutPayAmount("");
+    setShowRetencion(false);
+    setRetencionMonto("");
+    setRetencionTipo("iibb");
     if (r?.companyId) {
       setCheckoutPaymentMethod("cuenta_corriente");
       setCheckoutBillingTarget("company");
@@ -351,6 +357,8 @@ export function ReservationDetailModal({
                 const totalPayments = reservation.payments?.reduce((s, p) => s + parseFloat(p.amount), 0) || 0;
                 const totalAmount = parseFloat(reservation.totalRoomAmount || "0") + totalCharges;
                 const balance = totalAmount - totalPayments;
+                const fmt = (d: string) => { try { const [y,m,dy] = d.split("-"); return `${dy}/${m}/${y}`; } catch { return d; } };
+                const methodLabel: Record<string, string> = { efectivo: "Efectivo", tarjeta_debito: "Tarjeta Déb.", tarjeta_credito: "Tarjeta Cré.", transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Cte.", efectivo_usd: "Efectivo USD" };
                 return (
                   <div className="space-y-3">
                     {reservation.isUpgrade && (
@@ -373,15 +381,65 @@ export function ReservationDetailModal({
                         </div>
                       </div>
                     )}
-                    <div className="p-3 bg-muted/50 rounded-md space-y-1">
-                      <div className="flex justify-between text-sm"><span>Habitación ({reservation.nights} noches)</span><span>${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span></div>
-                      {totalCharges > 0 && <div className="flex justify-between text-sm"><span>Cargos extras</span><span>${totalCharges.toFixed(2)}</span></div>}
-                      <div className="flex justify-between text-sm border-t pt-1"><span>Pagado</span><span className="text-green-600">-${totalPayments.toFixed(2)}</span></div>
-                      <div className="flex justify-between font-bold pt-1 border-t"><span>Saldo</span><span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toFixed(2)}</span></div>
+
+                    {/* Cargos detallados */}
+                    <div className="rounded-md border overflow-hidden text-sm">
+                      <div className="px-3 py-1.5 bg-muted/60 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Cargos</div>
+                      <div className="divide-y">
+                        <div className="flex justify-between items-start px-3 py-2">
+                          <div>
+                            <div>Alojamiento hab. {reservation.room?.roomNumber}</div>
+                            <div className="text-xs text-muted-foreground">{reservation.nights} noche{(reservation.nights ?? 1) !== 1 ? "s" : ""} × ${parseFloat(reservation.finalRatePerNight || "0").toLocaleString("es-AR", { minimumFractionDigits: 0 })}/noche</div>
+                          </div>
+                          <span className="font-medium">${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        {(reservation.charges ?? []).map((c: any) => (
+                          <div key={c.id} className="flex justify-between items-start px-3 py-2">
+                            <div>
+                              <div>{c.description}</div>
+                              <div className="text-xs text-muted-foreground">{fmt(c.date)}</div>
+                            </div>
+                            <span>${parseFloat(c.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex justify-between items-center px-3 py-2 border-t bg-muted/30 font-semibold">
+                        <span>Total</span>
+                        <span>${totalAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setCheckoutStep(0)}>Cancelar</Button>
-                      <Button size="sm" onClick={() => setCheckoutStep(2)} data-testid="button-checkout-step1-next">{balance > 0 ? "Registrar Pago" : "Siguiente"}</Button>
+
+                    {/* Pagos registrados */}
+                    {(reservation.payments ?? []).length > 0 && (
+                      <div className="rounded-md border overflow-hidden text-sm">
+                        <div className="px-3 py-1.5 bg-muted/60 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pagos registrados</div>
+                        <div className="divide-y">
+                          {(reservation.payments ?? []).map((p: any) => (
+                            <div key={p.id} className="flex justify-between items-start px-3 py-2">
+                              <div>
+                                <div>{methodLabel[p.method] || p.method}</div>
+                                <div className="text-xs text-muted-foreground">{fmt(p.date)}</div>
+                              </div>
+                              <span className="text-green-600 font-medium">-${parseFloat(p.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center font-bold text-base p-3 rounded-md bg-muted/50">
+                      <span>Saldo</span>
+                      <span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Button variant="outline" size="sm" onClick={() => window.open(`/api/reservations/${reservationId}/folio/pdf`, "_blank")} data-testid="button-print-summary">
+                        <Printer className="h-3.5 w-3.5 mr-1.5" /> Imprimir resumen
+                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setCheckoutStep(0)}>Cancelar</Button>
+                        <Button size="sm" onClick={() => setCheckoutStep(2)} data-testid="button-checkout-step1-next">{balance > 0 ? "Registrar Pago" : "Siguiente"}</Button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -475,25 +533,72 @@ export function ReservationDetailModal({
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {/* Retención impositiva */}
+                    {balance > 0 && (!showRetencion ? (
+                      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground w-fit" onClick={() => setShowRetencion(true)} data-testid="button-show-retencion">
+                        <Percent className="h-3 w-3 mr-1" /> Agregar retención impositiva
+                      </Button>
+                    ) : (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Percent className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
+                            <span className="text-sm font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
+                          </div>
+                          <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-700" onClick={() => { setShowRetencion(false); setRetencionMonto(""); }}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs">Tipo</Label>
+                            <Select value={retencionTipo} onValueChange={(v) => setRetencionTipo(v as "iibb" | "ganancias")}>
+                              <SelectTrigger className="h-8 text-sm" data-testid="select-retencion-tipo"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
+                                <SelectItem value="ganancias">Ganancias</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs">Monto retenido</Label>
+                            <Input type="number" step="0.01" min="0" value={retencionMonto} onChange={(e) => setRetencionMonto(e.target.value)} placeholder="0.00" className="h-8 text-sm" data-testid="input-retencion-monto" />
+                          </div>
+                        </div>
+                        {retencionMonto && parseFloat(retencionMonto) > 0 && (checkoutPayAmount || balance > 0) && (
+                          <div className="text-xs text-amber-800 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-900/30 rounded p-2">
+                            <span className="font-medium">Neto:</span> ${parseFloat(checkoutPayAmount || balance.toFixed(2)).toFixed(2)} &nbsp;
+                            <span className="font-medium">+ Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"}:</span> ${parseFloat(retencionMonto).toFixed(2)} &nbsp;
+                            <span className="font-semibold">= Total cubierto: ${(parseFloat(checkoutPayAmount || balance.toFixed(2)) + parseFloat(retencionMonto)).toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => setCheckoutStep(1)}>Atrás</Button>
                       {balance > 0 && (
                         <Button size="sm" onClick={() => {
-                          const amount = checkoutPayAmount || balance.toFixed(2);
-                          if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
+                          const netAmount = checkoutPayAmount || balance.toFixed(2);
+                          if (!netAmount || parseFloat(netAmount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
                           if (checkoutPaymentMethod === "cuenta_corriente" && checkoutBillingTarget === "company" && !checkoutCompanyId && !reservation.companyId) {
                             toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
                           }
                           if (checkoutPaymentMethod === "cuenta_corriente" && checkoutBillingTarget === "agency" && !checkoutAgencyId && !reservation.agencyId) {
                             toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
                           }
+                          const retMonto = showRetencion && retencionMonto && parseFloat(retencionMonto) > 0 ? parseFloat(retencionMonto) : 0;
+                          const grossAmount = (parseFloat(netAmount) + retMonto).toFixed(2);
+                          const notes = retMonto > 0 ? JSON.stringify({ retencion: { tipo: retencionTipo, monto: retMonto, neto: parseFloat(netAmount) } }) : null;
                           addPaymentMutation.mutate({
-                            amount,
+                            amount: grossAmount,
                             method: checkoutPaymentMethod,
                             receiptType: checkoutReceiptType,
                             billingTarget: checkoutBillingTarget,
                             companyId: checkoutBillingTarget === "company" ? (checkoutCompanyId || reservation.companyId || undefined) : undefined,
                             agencyId: checkoutBillingTarget === "agency" ? (checkoutAgencyId || reservation.agencyId || undefined) : undefined,
+                            ...(notes ? { notes } : {}),
                           }, { onSuccess: () => {
                             if (["factura_a", "factura_b", "factura_c"].includes(checkoutReceiptType)) {
                               checkoutPendingInvoiceRef.current = true;

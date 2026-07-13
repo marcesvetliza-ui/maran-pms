@@ -24,10 +24,10 @@ export default function AdminPage() {
   const modules = [
     {
       title: "Facturación",
-      description: "Emitir comprobantes, gestionar folios y registrar pagos de reservas.",
+      description: "Todos los comprobantes emitidos: facturas A/B, notas de crédito y vouchers de todas las áreas del hotel.",
       icon: Receipt,
-      href: "/admin/billing",
-      status: "coming_soon" as const,
+      href: "/billing",
+      status: "available" as const,
       color: "text-blue-600",
       bg: "bg-blue-50 dark:bg-blue-950/30",
       extra: null,
