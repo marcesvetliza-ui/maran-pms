@@ -10,6 +10,7 @@ import {
   ArrowDownRight,
   Clock,
   AlertCircle,
+  AlertTriangle,
   LogIn,
   LogOut,
   XCircle,
@@ -24,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -397,6 +399,8 @@ export default function Dashboard() {
     return s === todayStr;
   });
 
+  const [dirtyRoomDialog, setDirtyRoomDialog] = useLocalState<{ open: boolean; reservation: ReservationWithDetails | null }>({ open: false, reservation: null });
+
   const checkInMutation = useMutation({
     mutationFn: async (id: string) => {
       return apiRequest("POST", `/api/reservations/${id}/check-in`, {});
@@ -407,6 +411,7 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setDirtyRoomDialog({ open: false, reservation: null });
       toast({ title: "Check-in realizado", description: "El huesped ha sido registrado." });
     },
     onError: (error: any) => {
@@ -414,6 +419,15 @@ export default function Dashboard() {
       toast({ title: "Check-in no permitido", description: message, variant: "destructive" });
     },
   });
+
+  const handleArrivalCheckIn = (reservation: ReservationWithDetails) => {
+    const roomStatus = reservation.room?.status;
+    if (roomStatus === "dirty" || roomStatus === "cleaning" || roomStatus === "maintenance") {
+      setDirtyRoomDialog({ open: true, reservation });
+    } else {
+      checkInMutation.mutate(reservation.id);
+    }
+  };
 
 
 
@@ -779,10 +793,10 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : arrivals.length > 0 ? (
-              <div className="space-y-3">
-                {arrivals.slice(0, 8).map((reservation) => {
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                {arrivals.map((reservation) => {
                   const roomStatus = reservation.room?.status;
-                  const isRoomReady = roomStatus === "available";
+                  const isRoomReady = roomStatus === "available" || roomStatus === "inspected";
                   const roomStatusLabels: Record<string, string> = {
                     cleaning: "En limpieza",
                     dirty: "Sucia",
@@ -807,7 +821,7 @@ export default function Dashboard() {
                           <span>·</span>
                           <span>{fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}</span>
                           {!isRoomReady && roomStatus && (
-                            <Badge variant="secondary" className="text-xs">
+                            <Badge variant="secondary" className="text-xs text-orange-700 dark:text-orange-300">
                               {roomStatusLabels[roomStatus] ?? roomStatus}
                             </Badge>
                           )}
@@ -815,13 +829,13 @@ export default function Dashboard() {
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => checkInMutation.mutate(reservation.id)}
-                        disabled={checkInMutation.isPending || !isRoomReady}
-                        variant={isRoomReady ? "default" : "secondary"}
+                        onClick={() => handleArrivalCheckIn(reservation)}
+                        disabled={checkInMutation.isPending}
+                        variant="default"
                         data-testid={`checkin-btn-${reservation.id}`}
                       >
                         <LogIn className="h-4 w-4 mr-1" />
-                        {isRoomReady ? "Check-in" : "No lista"}
+                        Check-in
                       </Button>
                     </div>
                   );
@@ -855,8 +869,8 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : departures.length > 0 ? (
-              <div className="space-y-3">
-                {departures.slice(0, 8).map((reservation) => (
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                {departures.map((reservation) => (
                   <div
                     key={reservation.id}
                     className="flex items-center justify-between gap-3 p-3 rounded-md border bg-orange-50/50 dark:bg-orange-900/10"
@@ -1119,6 +1133,41 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
+      {/* Dialog: habitación sucia al hacer check-in desde Dashboard */}
+      <Dialog open={dirtyRoomDialog.open} onOpenChange={(open) => { if (!open) setDirtyRoomDialog({ open: false, reservation: null }); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Habitación no disponible
+            </DialogTitle>
+            <DialogDescription>
+              La habitación <strong>{dirtyRoomDialog.reservation?.room?.roomNumber}</strong> figura como{" "}
+              <strong>
+                {dirtyRoomDialog.reservation?.room?.status === "dirty"
+                  ? "sucia"
+                  : dirtyRoomDialog.reservation?.room?.status === "cleaning"
+                  ? "en limpieza"
+                  : "en mantenimiento"}
+              </strong>{" "}
+              en el sistema. ¿Desea registrar el check-in de todas formas?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDirtyRoomDialog({ open: false, reservation: null })} data-testid="button-cancel-dirty-dashboard">
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => { if (dirtyRoomDialog.reservation) checkInMutation.mutate(dirtyRoomDialog.reservation.id); }}
+              disabled={checkInMutation.isPending}
+              data-testid="button-confirm-dirty-dashboard"
+            >
+              {checkInMutation.isPending ? "Procesando..." : "Confirmar de todas formas"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
