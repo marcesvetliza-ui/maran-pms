@@ -816,5 +816,32 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS payment_method text`)
   );
 
+  await withTimeout("gift_vouchers (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS gift_vouchers (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_code text NOT NULL UNIQUE,
+        area text NOT NULL,
+        description text NOT NULL,
+        value_type text NOT NULL DEFAULT 'monetario',
+        value_amount decimal(10,2),
+        buyer_name text NOT NULL,
+        buyer_phone text,
+        buyer_email text,
+        beneficiary_name text,
+        status text NOT NULL DEFAULT 'activo',
+        issued_at timestamp NOT NULL DEFAULT now(),
+        expires_at date,
+        used_at timestamp,
+        used_by text,
+        used_notes text,
+        price_paid decimal(10,2),
+        payment_method text,
+        notes text,
+        created_by text
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

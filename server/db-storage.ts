@@ -118,6 +118,8 @@ import {
   folios, folioMovements,
   reservationCompanions,
   type ReservationCompanion, type InsertReservationCompanion,
+  giftVouchers,
+  type GiftVoucher, type InsertGiftVoucher,
 } from "@shared/schema";
 
 export class DatabaseStorage implements IStorage {
@@ -4876,6 +4878,76 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(folios)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(folios.openedAt));
+  }
+
+  // ── Gift Vouchers ───────────────────────────────────────────────────────────
+
+  async getGiftVouchers(filters?: { status?: string; area?: string; search?: string }): Promise<GiftVoucher[]> {
+    const conditions: any[] = [];
+    if (filters?.status && filters.status !== "all") {
+      conditions.push(eq(giftVouchers.status, filters.status as any));
+    }
+    if (filters?.area && filters.area !== "all") {
+      conditions.push(eq(giftVouchers.area, filters.area as any));
+    }
+    if (filters?.search) {
+      const term = `%${filters.search}%`;
+      conditions.push(
+        or(
+          ilike(giftVouchers.voucherCode, term),
+          ilike(giftVouchers.buyerName, term),
+          ilike(giftVouchers.beneficiaryName, term),
+          ilike(giftVouchers.description, term),
+        )
+      );
+    }
+    return db.select().from(giftVouchers)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(giftVouchers.issuedAt));
+  }
+
+  async getGiftVoucher(id: string): Promise<GiftVoucher | undefined> {
+    const [v] = await db.select().from(giftVouchers).where(eq(giftVouchers.id, id));
+    return v;
+  }
+
+  async getGiftVoucherByCode(code: string): Promise<GiftVoucher | undefined> {
+    const [v] = await db.select().from(giftVouchers).where(eq(giftVouchers.voucherCode, code));
+    return v;
+  }
+
+  async createGiftVoucher(data: InsertGiftVoucher): Promise<GiftVoucher> {
+    const [v] = await db.insert(giftVouchers).values(data).returning();
+    return v;
+  }
+
+  async updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined> {
+    const [v] = await db.update(giftVouchers).set(data).where(eq(giftVouchers.id, id)).returning();
+    return v;
+  }
+
+  async markGiftVoucherUsed(id: string, usedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined> {
+    const [v] = await db.update(giftVouchers).set({
+      status: "usado",
+      usedAt: new Date(),
+      usedBy,
+      usedNotes: usedNotes ?? null,
+    }).where(eq(giftVouchers.id, id)).returning();
+    return v;
+  }
+
+  async deleteGiftVoucher(id: string): Promise<boolean> {
+    const result = await db.delete(giftVouchers).where(eq(giftVouchers.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async generateVoucherCode(): Promise<string> {
+    const year = new Date().getFullYear();
+    const result = await db.execute<{ count: string }>(
+      sql`SELECT COUNT(*)::text AS count FROM gift_vouchers WHERE voucher_code LIKE ${'VCHR-' + year + '-%'}`
+    );
+    const count = parseInt((result.rows[0] as any).count ?? "0", 10) + 1;
+    return `VCHR-${year}-${String(count).padStart(4, "0")}`;
   }
 }
 

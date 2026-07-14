@@ -2694,3 +2694,35 @@ export const insertItemLoanSchema = createInsertSchema(itemLoans).omit({ id: tru
 export type InsertItemLoan = z.infer<typeof insertItemLoanSchema>;
 export type ItemLoan = typeof itemLoans.$inferSelect;
 export type ItemLoanWithItem = ItemLoan & { loanItem: LoanItem };
+
+// ── Gift Vouchers ──────────────────────────────────────────────────────────────
+export type GiftVoucherArea = "alojamiento" | "restaurant" | "spa" | "otro";
+export type GiftVoucherStatus = "activo" | "usado" | "vencido" | "cancelado";
+export type GiftVoucherValueType = "monetario" | "descriptivo";
+
+export const giftVouchers = pgTable("gift_vouchers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  voucherCode: text("voucher_code").notNull().unique(),
+  area: text("area").$type<GiftVoucherArea>().notNull(),
+  description: text("description").notNull(),
+  valueType: text("value_type").$type<GiftVoucherValueType>().notNull().default("monetario"),
+  valueAmount: decimal("value_amount", { precision: 10, scale: 2 }),
+  buyerName: text("buyer_name").notNull(),
+  buyerPhone: text("buyer_phone"),
+  buyerEmail: text("buyer_email"),
+  beneficiaryName: text("beneficiary_name"),
+  status: text("status").$type<GiftVoucherStatus>().notNull().default("activo"),
+  issuedAt: timestamp("issued_at").notNull().defaultNow(),
+  expiresAt: date("expires_at"),
+  usedAt: timestamp("used_at"),
+  usedBy: text("used_by"),
+  usedNotes: text("used_notes"),
+  pricePaid: decimal("price_paid", { precision: 10, scale: 2 }),
+  paymentMethod: text("payment_method"),
+  notes: text("notes"),
+  createdBy: text("created_by"),
+});
+
+export const insertGiftVoucherSchema = createInsertSchema(giftVouchers).omit({ id: true, issuedAt: true, usedAt: true });
+export type InsertGiftVoucher = z.infer<typeof insertGiftVoucherSchema>;
+export type GiftVoucher = typeof giftVouchers.$inferSelect;

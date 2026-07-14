@@ -48,6 +48,7 @@ import {
   KeyRound,
   ChefHat,
   Store,
+  Gift,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -143,6 +144,7 @@ const menuSections = [
       { label: "Spa",              icon: Sparkles,        href: "/spa",                roles: SPA_ROLES },
       { label: "Clientes Spa",     icon: Heart,           href: "/spa-clients",        roles: SPA_CLIENTS_ROLES },
       { label: "Eventos",          icon: CalendarCheck,   href: "/events",             roles: EVENTOS_ROLES },
+      { label: "Vouchers Regalo",  icon: Gift,            href: "/gift-vouchers",      roles: SPA_ROLES },
     ],
   },
 

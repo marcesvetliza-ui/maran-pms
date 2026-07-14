@@ -204,6 +204,8 @@ import {
   type AccountEntityType,
   type AccountRetention,
   type AccountMovementAllocation,
+  type GiftVoucher,
+  type InsertGiftVoucher,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -795,6 +797,16 @@ export interface IStorage {
     allocations: { cargoId: string; amount: string }[]
   ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }>;
   getAccountMovementAllocations(pagoId: string): Promise<AccountMovementAllocation[]>;
+
+  // Gift Vouchers
+  getGiftVouchers(filters?: { status?: string; area?: string; search?: string }): Promise<GiftVoucher[]>;
+  getGiftVoucher(id: string): Promise<GiftVoucher | undefined>;
+  getGiftVoucherByCode(code: string): Promise<GiftVoucher | undefined>;
+  createGiftVoucher(data: InsertGiftVoucher): Promise<GiftVoucher>;
+  updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined>;
+  markGiftVoucherUsed(id: string, usedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined>;
+  deleteGiftVoucher(id: string): Promise<boolean>;
+  generateVoucherCode(): Promise<string>;
 }
 
 export class MemStorage implements IStorage {
@@ -5199,4 +5211,14 @@ export class MemStorage implements IStorage {
   async addReservationCompanion(_data: InsertReservationCompanion): Promise<ReservationCompanion> { return {} as ReservationCompanion; }
   async updateReservationCompanion(_id: string, _data: Partial<InsertReservationCompanion>): Promise<ReservationCompanion> { return {} as ReservationCompanion; }
   async deleteReservationCompanion(_id: string): Promise<void> {}
+
+  // Gift Vouchers
+  async getGiftVouchers(_filters?: { status?: string; area?: string; search?: string }): Promise<GiftVoucher[]> { return []; }
+  async getGiftVoucher(_id: string): Promise<GiftVoucher | undefined> { return undefined; }
+  async getGiftVoucherByCode(_code: string): Promise<GiftVoucher | undefined> { return undefined; }
+  async createGiftVoucher(_data: InsertGiftVoucher): Promise<GiftVoucher> { return {} as GiftVoucher; }
+  async updateGiftVoucher(_id: string, _data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined> { return undefined; }
+  async markGiftVoucherUsed(_id: string, _usedBy: string, _usedNotes?: string): Promise<GiftVoucher | undefined> { return undefined; }
+  async deleteGiftVoucher(_id: string): Promise<boolean> { return false; }
+  async generateVoucherCode(): Promise<string> { return `VCHR-${new Date().getFullYear()}-0001`; }
 }
