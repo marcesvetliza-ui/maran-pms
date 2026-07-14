@@ -1157,6 +1157,25 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Restore a cancelled reservation back to "confirmed"
+  app.post("/api/reservations/:id/restore", async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
+      if (reservation.status !== "cancelled") {
+        return res.status(400).json({ error: "Solo se pueden recuperar reservas en estado cancelado" });
+      }
+      await storage.updateReservation(req.params.id, { status: "confirmed" });
+      await audit(req, "restore", "reservations",
+        `Recuperación: ${reservation.reservationCode} — por ${(req as any).user?.username || "sistema"}`,
+        { entityType: "reservation", entityId: req.params.id }
+      );
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Error al recuperar la reserva" });
+    }
+  });
+
   // Check overbooking
   app.get("/api/reservations/check-overbooking", async (req, res) => {
     try {

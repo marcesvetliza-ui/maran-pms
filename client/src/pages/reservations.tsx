@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
+import { useAuth } from "@/App";
 import { getLocalToday, formatDateAR, toArgentinaDateStr } from "@/lib/utils";
 import {
   CalendarCheck,
@@ -46,6 +47,7 @@ import {
   Phone,
   AlertCircle,
   Clock,
+  Undo2,
 } from "lucide-react";
 import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -4206,21 +4208,30 @@ function CancelReservationDialog({
   open,
   onOpenChange,
   onSuccess,
+  currentUserName,
 }: {
   reservation: ReservationWithDetails;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  currentUserName?: string;
 }) {
   const { toast } = useToast();
   const [reason, setReason] = useState("");
   const [cancelledBy, setCancelledBy] = useState("");
 
+  useEffect(() => {
+    if (open) {
+      setCancelledBy(currentUserName || "");
+      setReason("");
+    }
+  }, [open, currentUserName]);
+
   const cancelMutation = useMutation({
     mutationFn: async () => {
       return apiRequest("POST", `/api/reservations/${reservation.id}/cancel`, {
         reason,
-        cancelledBy: cancelledBy || "Usuario del Sistema",
+        cancelledBy: cancelledBy || currentUserName || "Sistema",
       });
     },
     onSuccess: () => {
@@ -4343,6 +4354,7 @@ function CancelReservationDialog({
 
 export default function ReservationsPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [, navigate] = useLocation();
   const searchParams = useSearch();
   const [searchQuery, setSearchQuery] = useState("");
@@ -4369,6 +4381,11 @@ export default function ReservationsPage() {
   const [dateTo, setDateTo] = useState("");
   const [createdFrom, setCreatedFrom] = useState(todayStr);
   const [createdTo, setCreatedTo] = useState(todayStr);
+
+  // Filtros para tab Anuladas
+  const [cancelSearch, setCancelSearch] = useState("");
+  const [cancelFrom, setCancelFrom] = useState("");
+  const [cancelTo, setCancelTo] = useState("");
 
   // Motor de Reservas (web pending)
   const [webSectionExpanded, setWebSectionExpanded] = useState(true);
@@ -4467,6 +4484,35 @@ export default function ReservationsPage() {
   const { data: cancelledLogs = [], isLoading: isLoadingCancelled } = useQuery<any[]>({
     queryKey: ["/api/cancelled-reservations"],
     enabled: dateMode === "anuladas",
+  });
+
+  const filteredCancelledLogs = cancelledLogs.filter((log: any) => {
+    const q = cancelSearch.toLowerCase();
+    if (q && !log.guestName?.toLowerCase().includes(q) && !log.roomNumber?.toLowerCase().includes(q) && !log.reservationCode?.toLowerCase().includes(q)) return false;
+    if (cancelFrom) {
+      const logDate = log.checkInDate || log.cancellationDate;
+      if (logDate && logDate < cancelFrom) return false;
+    }
+    if (cancelTo) {
+      const logDate = log.checkInDate || log.cancellationDate;
+      if (logDate && logDate > cancelTo) return false;
+    }
+    return true;
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/reservations/${id}/restore`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cancelled-reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: "Reserva recuperada", description: "La reserva volvió a estado Confirmada." });
+    },
+    onError: (e: any) => {
+      let msg = "No se pudo recuperar la reserva.";
+      try { const b = JSON.parse(e.message.replace(/^\d+:\s*/, "")); if (b.error) msg = b.error; } catch {}
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    },
   });
 
   useEffect(() => {
@@ -4958,77 +5004,150 @@ export default function ReservationsPage() {
 
       {/* Cancelled Reservations Table */}
       {dateMode === "anuladas" && (
-        isLoadingCancelled ? (
+        <>
+          {/* Filtros de anuladas */}
           <Card>
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16" />)}
+            <CardContent className="p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por huésped, habitación o código..."
+                    value={cancelSearch}
+                    onChange={(e) => setCancelSearch(e.target.value)}
+                    className="pl-10"
+                    data-testid="input-cancel-search"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Check-in entre</span>
+                  <Input
+                    type="date"
+                    value={cancelFrom}
+                    onChange={(e) => setCancelFrom(e.target.value)}
+                    className="h-9 w-36 text-sm"
+                    data-testid="input-cancel-from"
+                  />
+                  <span className="text-muted-foreground text-sm">→</span>
+                  <Input
+                    type="date"
+                    value={cancelTo}
+                    onChange={(e) => setCancelTo(e.target.value)}
+                    className="h-9 w-36 text-sm"
+                    data-testid="input-cancel-to"
+                  />
+                  {(cancelSearch || cancelFrom || cancelTo) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setCancelSearch(""); setCancelFrom(""); setCancelTo(""); }}
+                      data-testid="button-cancel-clear-filters"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
-        ) : cancelledLogs.length > 0 ? (
-          <>
-            <div className="flex items-center justify-between text-sm text-muted-foreground px-1">
-              <span>{cancelledLogs.length} reserva{cancelledLogs.length !== 1 ? "s" : ""} anulada{cancelledLogs.length !== 1 ? "s" : ""}</span>
-            </div>
-            <Card className="border-red-200 dark:border-red-900">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Código</TableHead>
-                    <TableHead>Huésped</TableHead>
-                    <TableHead>Hab.</TableHead>
-                    <TableHead>Check-in</TableHead>
-                    <TableHead>Check-out</TableHead>
-                    <TableHead>Total reserva</TableHead>
-                    <TableHead>Fecha anulación</TableHead>
-                    <TableHead>Anulado por</TableHead>
-                    <TableHead>Motivo</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {cancelledLogs.map((log: any) => (
-                    <TableRow key={log.id} data-testid={`cancelled-log-row-${log.id}`}>
-                      <TableCell className="font-mono text-sm font-medium">{log.reservationCode}</TableCell>
-                      <TableCell>{log.guestName}</TableCell>
-                      <TableCell>{log.roomNumber}</TableCell>
-                      <TableCell>{formatDateAR(log.checkInDate)}</TableCell>
-                      <TableCell>{formatDateAR(log.checkOutDate)}</TableCell>
-                      <TableCell className="font-medium">
-                        {log.totalAmount ? `$${parseFloat(log.totalAmount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
-                      </TableCell>
-                      <TableCell>
-                        {log.cancellationDate
-                          ? new Date(log.cancellationDate).toLocaleString("es-AR", {
-                              day: "2-digit", month: "2-digit", year: "numeric",
-                              hour: "2-digit", minute: "2-digit",
-                              timeZone: "America/Argentina/Buenos_Aires",
-                            })
-                          : "—"}
-                      </TableCell>
-                      <TableCell>{log.cancelledBy || "—"}</TableCell>
-                      <TableCell className="max-w-[250px]">
-                        {log.reason ? (
-                          <span className="text-sm text-muted-foreground italic">{log.reason}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground/50">Sin motivo</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+
+          {isLoadingCancelled ? (
+            <Card>
+              <CardContent className="p-6">
+                <div className="space-y-4">
+                  {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16" />)}
+                </div>
+              </CardContent>
             </Card>
-          </>
-        ) : (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <XCircle className="h-16 w-16 text-muted-foreground/30 mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Sin anulaciones</h3>
-              <p className="text-muted-foreground">No hay reservas anuladas registradas en el sistema.</p>
-            </CardContent>
-          </Card>
-        )
+          ) : filteredCancelledLogs.length > 0 ? (
+            <>
+              <div className="flex items-center justify-between text-sm text-muted-foreground px-1">
+                <span>
+                  {filteredCancelledLogs.length} reserva{filteredCancelledLogs.length !== 1 ? "s" : ""} anulada{filteredCancelledLogs.length !== 1 ? "s" : ""}
+                  {cancelledLogs.length !== filteredCancelledLogs.length && ` (de ${cancelledLogs.length} total)`}
+                </span>
+              </div>
+              <Card className="border-red-200 dark:border-red-900">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Código</TableHead>
+                      <TableHead>Huésped</TableHead>
+                      <TableHead>Hab.</TableHead>
+                      <TableHead>Check-in</TableHead>
+                      <TableHead>Check-out</TableHead>
+                      <TableHead>Total reserva</TableHead>
+                      <TableHead>Fecha anulación</TableHead>
+                      <TableHead>Anulado por</TableHead>
+                      <TableHead>Motivo</TableHead>
+                      <TableHead className="w-[90px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredCancelledLogs.map((log: any) => (
+                      <TableRow key={log.id} data-testid={`cancelled-log-row-${log.id}`}>
+                        <TableCell className="font-mono text-sm font-medium">{log.reservationCode}</TableCell>
+                        <TableCell>{log.guestName}</TableCell>
+                        <TableCell>{log.roomNumber}</TableCell>
+                        <TableCell>{formatDateAR(log.checkInDate)}</TableCell>
+                        <TableCell>{formatDateAR(log.checkOutDate)}</TableCell>
+                        <TableCell className="font-medium">
+                          {log.totalAmount ? `$${parseFloat(log.totalAmount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {log.cancellationDate
+                            ? new Date(log.cancellationDate).toLocaleString("es-AR", {
+                                day: "2-digit", month: "2-digit", year: "numeric",
+                                hour: "2-digit", minute: "2-digit",
+                                timeZone: "America/Argentina/Buenos_Aires",
+                              })
+                            : "—"}
+                        </TableCell>
+                        <TableCell>{log.cancelledBy || "—"}</TableCell>
+                        <TableCell className="max-w-[200px]">
+                          {log.reason ? (
+                            <span className="text-sm text-muted-foreground italic">{log.reason}</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/50">Sin motivo</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {log.reservationId && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs gap-1 text-green-700 border-green-300 hover:bg-green-50 dark:text-green-400 dark:border-green-800 dark:hover:bg-green-950/30"
+                              onClick={() => restoreMutation.mutate(log.reservationId)}
+                              disabled={restoreMutation.isPending}
+                              data-testid={`button-restore-${log.id}`}
+                            >
+                              <Undo2 className="h-3 w-3" />
+                              Recuperar
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <XCircle className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                <h3 className="text-lg font-semibold mb-2">
+                  {cancelSearch || cancelFrom || cancelTo ? "Sin resultados" : "Sin anulaciones"}
+                </h3>
+                <p className="text-muted-foreground">
+                  {cancelSearch || cancelFrom || cancelTo
+                    ? "Ninguna anulación coincide con los filtros aplicados."
+                    : "No hay reservas anuladas registradas en el sistema."}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Reservations Table */}
@@ -5274,6 +5393,7 @@ export default function ReservationsPage() {
           open={cancelDialogOpen}
           onOpenChange={setCancelDialogOpen}
           onSuccess={() => setSelectedReservation(undefined)}
+          currentUserName={user?.username}
         />
       )}
 
