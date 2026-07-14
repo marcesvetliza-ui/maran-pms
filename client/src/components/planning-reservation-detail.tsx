@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, StickyNote, Undo2, Building2, Percent, X, Printer } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, AlertTriangle, Heart, StickyNote, Undo2, Building2, Percent, X, Printer } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -88,6 +88,18 @@ export function ReservationDetailModal({
     },
     enabled: !!reservationId && open,
   });
+
+  const { data: guestPreferences = [] } = useQuery<any[]>({
+    queryKey: ["/api/guests", reservation?.guestId, "preferences"],
+    queryFn: async () => {
+      const res = await fetch(`/api/guests/${reservation!.guestId}/preferences`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!reservation?.guestId && open,
+  });
+  const activePrefs = guestPreferences.filter((p: any) => p.isActive);
+  const criticalPrefs = activePrefs.filter((p: any) => p.priority === "critical" || p.priority === "high");
 
   const updateReservationMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -768,6 +780,37 @@ export function ReservationDetailModal({
                 <div className="text-sm bg-muted/30 rounded-md p-3">
                   <div className="text-muted-foreground mb-1">Notas:</div>
                   <div style={{ whiteSpace: "pre-wrap" }}>{reservation.notes}</div>
+                </div>
+              )}
+              {activePrefs.length > 0 && (
+                <div className={`p-3 rounded-lg border ${criticalPrefs.length > 0 ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30" : "border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30"}`} data-testid="planning-preference-alert">
+                  <div className="flex items-center gap-2 mb-2">
+                    {criticalPrefs.length > 0 ? (
+                      <AlertTriangle className="h-4 w-4 text-red-500" />
+                    ) : (
+                      <Heart className="h-4 w-4 text-orange-500" />
+                    )}
+                    <span className="font-medium text-sm text-foreground">
+                      Preferencias del huésped ({activePrefs.length})
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {activePrefs.map((pref: any) => (
+                      <div key={pref.id} className="flex items-center gap-2 text-sm">
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${
+                            pref.priority === "critical" ? "border-red-400 text-red-700 dark:text-red-300" :
+                            pref.priority === "high" ? "border-orange-400 text-orange-700 dark:text-orange-300" :
+                            ""
+                          }`}
+                        >
+                          {pref.priority === "critical" ? "Crítica" : pref.priority === "high" ? "Alta" : pref.priority === "low" ? "Baja" : "Normal"}
+                        </Badge>
+                        <span className="text-foreground">{pref.title}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
