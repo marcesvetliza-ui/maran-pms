@@ -816,6 +816,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS payment_method text`)
   );
 
+  await withTimeout("reservations.checked_out_at", T, () =>
+    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS checked_out_at timestamp`)
+  );
+
   await withTimeout("gift_vouchers (create)", T, () =>
     db.execute(sql`
       CREATE TABLE IF NOT EXISTS gift_vouchers (

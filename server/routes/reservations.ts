@@ -656,6 +656,27 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Revertir check-out: reservation → checked_in, room → occupied (solo mismo día)
+  // Check if there's an adjacent reservation in a room on a given date
+  app.get("/api/reservations/check-adjacent", requireAuth, async (req, res) => {
+    try {
+      const { roomId, date, direction } = req.query as { roomId: string; date: string; direction: "before" | "after" };
+      if (!roomId || !date || !direction) {
+        return res.status(400).json({ error: "roomId, date y direction son requeridos" });
+      }
+      const all = await storage.getReservations();
+      const found = all.find(r => {
+        if (r.roomId !== roomId) return false;
+        if (["cancelled", "checked_out"].includes(r.status)) return false;
+        if (direction === "before") return r.checkOutDate === date;
+        return r.checkInDate === date;
+      });
+      res.json(found || null);
+    } catch (error) {
+      console.error("check-adjacent error:", error);
+      res.status(500).json({ error: "Error al consultar reservas adyacentes" });
+    }
+  });
+
   app.post("/api/reservations/:id/undo-checkout", requireAuth, async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
@@ -664,10 +685,12 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(400).json({ error: "La reserva no está en estado check-out" });
       }
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-      if (reservation.checkOutDate !== today) {
-        return res.status(400).json({ error: "Solo se puede revertir el check-out el mismo día del egreso" });
+      const checkedOutToday = reservation.checkedOutAt &&
+        new Date(reservation.checkedOutAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }) === today;
+      if (!checkedOutToday) {
+        return res.status(400).json({ error: "Solo se puede revertir el check-out el mismo día que se realizó" });
       }
-      await storage.updateReservation(req.params.id, { status: "checked_in" });
+      await storage.updateReservation(req.params.id, { status: "checked_in", checkedOutAt: null });
       if (reservation.roomId) {
         await storage.updateRoom(reservation.roomId, { status: "occupied" });
       }
@@ -1071,7 +1094,7 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
-      await storage.updateReservation(req.params.id, { status: "checked_out" });
+      await storage.updateReservation(req.params.id, { status: "checked_out", checkedOutAt: new Date() });
       await storage.updateRoom(reservation.roomId, { status: "dirty" });
       // Fire-and-forget: si falla la tarea de limpieza no bloqueamos el check-out
       storage.createCheckoutCleaningTask(reservation.roomId).catch(e =>

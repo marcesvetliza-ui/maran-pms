@@ -4,6 +4,10 @@ import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, Fi
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,6 +66,7 @@ export function ReservationDetailModal({
   const [editEarlyCheckIn, setEditEarlyCheckIn] = useState(false);
   const [editLateCheckOut, setEditLateCheckOut] = useState(false);
   const [editRatePerNight, setEditRatePerNight] = useState("");
+  const [adjacentWarning, setAdjacentWarning] = useState<{ type: "early" | "late"; code: string; pendingValue: boolean } | null>(null);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [checkoutReceiptType, setCheckoutReceiptType] = useState("cierre_habitacion");
   const [showCheckoutFactura, setShowCheckoutFactura] = useState(false);
@@ -328,7 +333,9 @@ export function ReservationDetailModal({
   ) && isCheckInDateValid;
   const canCheckOut = reservation?.status === "checked_in" && isCheckOutDateValid;
   const canUndoCheckIn = reservation?.status === "checked_in" && reservation?.checkInDate === todayLocal;
-  const canUndoCheckOut = reservation?.status === "checked_out" && reservation?.checkOutDate === todayLocal;
+  const canUndoCheckOut = reservation?.status === "checked_out" &&
+    reservation?.checkedOutAt != null &&
+    new Date(reservation.checkedOutAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }) === todayLocal;
   const canCancel = reservation?.status === "confirmed" || reservation?.status === "web_checkin" || reservation?.status === "pending" || reservation?.status === "tentative";
   const totalCharges = reservation?.charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
 
@@ -707,11 +714,33 @@ export function ReservationDetailModal({
               </div>
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={editEarlyCheckIn} onChange={(e) => setEditEarlyCheckIn(e.target.checked)} className="rounded" data-testid="check-edit-early" />
+                  <input type="checkbox" checked={editEarlyCheckIn} onChange={async (e) => {
+                    const checked = e.target.checked;
+                    if (checked && reservation) {
+                      const res = await fetch(`/api/reservations/check-adjacent?roomId=${reservation.roomId}&date=${reservation.checkInDate}&direction=before`, { credentials: "include" });
+                      const adj = res.ok ? await res.json() : null;
+                      if (adj) {
+                        setAdjacentWarning({ type: "early", code: adj.reservationCode, pendingValue: true });
+                        return;
+                      }
+                    }
+                    setEditEarlyCheckIn(checked);
+                  }} className="rounded" data-testid="check-edit-early" />
                   <Sunrise className="h-4 w-4 text-orange-400" /> Early Check-in
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={editLateCheckOut} onChange={(e) => setEditLateCheckOut(e.target.checked)} className="rounded" data-testid="check-edit-late" />
+                  <input type="checkbox" checked={editLateCheckOut} onChange={async (e) => {
+                    const checked = e.target.checked;
+                    if (checked && reservation) {
+                      const res = await fetch(`/api/reservations/check-adjacent?roomId=${reservation.roomId}&date=${reservation.checkOutDate}&direction=after`, { credentials: "include" });
+                      const adj = res.ok ? await res.json() : null;
+                      if (adj) {
+                        setAdjacentWarning({ type: "late", code: adj.reservationCode, pendingValue: true });
+                        return;
+                      }
+                    }
+                    setEditLateCheckOut(checked);
+                  }} className="rounded" data-testid="check-edit-late" />
                   <Sunset className="h-4 w-4 text-purple-400" /> Late Check-out
                 </label>
               </div>
@@ -953,6 +982,34 @@ export function ReservationDetailModal({
         </DialogContent>
       </Dialog>
     </Dialog>
+
+    <AlertDialog open={!!adjacentWarning} onOpenChange={(open) => { if (!open) setAdjacentWarning(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-500" />
+            {adjacentWarning?.type === "early" ? "Reserva saliente el mismo día" : "Reserva entrante el mismo día"}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {adjacentWarning?.type === "early"
+              ? <>La habitación tiene otra reserva (<strong>{adjacentWarning?.code}</strong>) que hace check-out ese mismo día. Aplicar Early Check-in puede generar solapamiento de horarios.</>
+              : <>La habitación tiene otra reserva (<strong>{adjacentWarning?.code}</strong>) que hace check-in ese mismo día. Aplicar Late Check-out puede generar solapamiento de horarios.</>
+            }
+            {" "}¿Querés aplicarlo de todas formas?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setAdjacentWarning(null)}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={() => {
+            if (adjacentWarning?.type === "early") setEditEarlyCheckIn(true);
+            else setEditLateCheckOut(true);
+            setAdjacentWarning(null);
+          }}>
+            Aplicar de todas formas
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
     {showCheckoutFactura && (
       <EmitirFacturaDialog

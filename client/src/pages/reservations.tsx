@@ -213,6 +213,7 @@ export function ReservationFormDialog({
   const [showCompanionForm, setShowCompanionForm] = useState(false);
   const [newCompForm, setNewCompForm] = useState<PendingCompanion>(emptyCompanion);
   const [isUpgrade, setIsUpgrade] = useState(!!(reservation?.isUpgrade));
+  const [adjacentWarning, setAdjacentWarning] = useState<{ type: "early" | "late"; code: string; pendingValue: boolean } | null>(null);
 
   const [formData, setFormData] = useState<Partial<InsertReservation>>({
     reservationCode: reservation?.reservationCode || "",
@@ -648,6 +649,7 @@ export function ReservationFormDialog({
       });
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[95vw] max-w-[600px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
@@ -1361,7 +1363,17 @@ export function ReservationFormDialog({
                   <Switch
                     id="earlyCheckIn"
                     checked={!!formData.earlyCheckIn}
-                    onCheckedChange={(checked) => setFormData({ ...formData, earlyCheckIn: checked, ...(!checked && { earlyCheckInTime: "", earlyCheckInCharge: "" }) })}
+                    onCheckedChange={async (checked) => {
+                      if (checked && formData.roomId && formData.checkInDate) {
+                        const res = await fetch(`/api/reservations/check-adjacent?roomId=${formData.roomId}&date=${formData.checkInDate}&direction=before`, { credentials: "include" });
+                        const adj = res.ok ? await res.json() : null;
+                        if (adj && adj.id !== reservation?.id) {
+                          setAdjacentWarning({ type: "early", code: adj.reservationCode, pendingValue: true });
+                          return;
+                        }
+                      }
+                      setFormData({ ...formData, earlyCheckIn: checked, ...(!checked && { earlyCheckInTime: "", earlyCheckInCharge: "" }) });
+                    }}
                     data-testid="switch-early-checkin"
                   />
                 </div>
@@ -1402,7 +1414,17 @@ export function ReservationFormDialog({
                   <Switch
                     id="lateCheckOut"
                     checked={!!formData.lateCheckOut}
-                    onCheckedChange={(checked) => setFormData({ ...formData, lateCheckOut: checked, ...(!checked && { lateCheckOutTime: "", lateCheckOutCharge: "" }) })}
+                    onCheckedChange={async (checked) => {
+                      if (checked && formData.roomId && formData.checkOutDate) {
+                        const res = await fetch(`/api/reservations/check-adjacent?roomId=${formData.roomId}&date=${formData.checkOutDate}&direction=after`, { credentials: "include" });
+                        const adj = res.ok ? await res.json() : null;
+                        if (adj && adj.id !== reservation?.id) {
+                          setAdjacentWarning({ type: "late", code: adj.reservationCode, pendingValue: true });
+                          return;
+                        }
+                      }
+                      setFormData({ ...formData, lateCheckOut: checked, ...(!checked && { lateCheckOutTime: "", lateCheckOutCharge: "" }) });
+                    }}
                     data-testid="switch-late-checkout"
                   />
                 </div>
@@ -1636,6 +1658,37 @@ export function ReservationFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog open={!!adjacentWarning} onOpenChange={(open) => { if (!open) setAdjacentWarning(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {adjacentWarning?.type === "early" ? "Reserva saliente el mismo día" : "Reserva entrante el mismo día"}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {adjacentWarning?.type === "early"
+              ? <>La habitación tiene otra reserva (<strong>{adjacentWarning?.code}</strong>) que hace check-out ese mismo día. Aplicar Early Check-in puede generar solapamiento de horarios.</>
+              : <>La habitación tiene otra reserva (<strong>{adjacentWarning?.code}</strong>) que hace check-in ese mismo día. Aplicar Late Check-out puede generar solapamiento de horarios.</>
+            }
+            {" "}¿Querés aplicarlo de todas formas?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setAdjacentWarning(null)}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={() => {
+            if (adjacentWarning?.type === "early") {
+              setFormData(prev => ({ ...prev, earlyCheckIn: true }));
+            } else {
+              setFormData(prev => ({ ...prev, lateCheckOut: true }));
+            }
+            setAdjacentWarning(null);
+          }}>
+            Aplicar de todas formas
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
