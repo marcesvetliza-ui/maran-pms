@@ -807,6 +807,109 @@ export function registerReportsRoutes(app: Express) {
     }
   });
 
+  // ── Reporte SPA: Producción por Profesional (con filtros) ─────────────────
+  app.get("/api/reports/spa/por-profesional", requireRole(SPA_REPORT_ROLES), async (req, res) => {
+    try {
+      const today = new Date();
+      const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+      const lastOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()).padStart(2, "0")}`;
+
+      const desde = (req.query.desde as string) || firstOfMonth;
+      const hasta = (req.query.hasta as string) || lastOfMonth;
+      const treatmentId = (req.query.treatmentId as string) || null;
+      const professionalId = (req.query.professionalId as string) || null;
+      const estado = (req.query.estado as string) || null;
+
+      // Filtros opcionales SQL
+      const treatmentFilter = treatmentId ? sql` AND a.treatment_id = ${treatmentId}` : sql``;
+      const professionalFilter = professionalId ? sql` AND a.professional_id = ${professionalId}` : sql``;
+      const estadoFilter = estado && estado !== "all"
+        ? (estado === "cancelados" ? sql` AND a.status IN ('cancelled','no_show')` : sql` AND a.status = ${estado}`)
+        : sql``;
+
+      // Por profesional: totales + % + ingresos estimados
+      const porProfesional = await db.execute(sql`
+        SELECT
+          COALESCE(p.name || ' ' || COALESCE(p.last_name, ''), 'Sin asignar') AS profesional,
+          p.id AS professional_id,
+          COUNT(a.id) AS turnos,
+          COUNT(a.id) FILTER (WHERE a.status = 'completed') AS completados,
+          COUNT(a.id) FILTER (WHERE a.status IN ('cancelled','no_show')) AS cancelados,
+          COUNT(a.id) FILTER (WHERE a.status = 'no_show') AS no_shows,
+          COALESCE(SUM(t.price::numeric) FILTER (WHERE a.status = 'completed'), 0) AS ingresos_estimados
+        FROM spa_appointments a
+        LEFT JOIN spa_professionals p ON p.id = a.professional_id
+        LEFT JOIN spa_treatments t ON t.id = a.treatment_id
+        WHERE a.appointment_date BETWEEN ${desde} AND ${hasta}
+          ${treatmentFilter}${professionalFilter}${estadoFilter}
+        GROUP BY p.id, profesional
+        ORDER BY turnos DESC
+      `);
+
+      // Por tratamiento (dentro de los filtros)
+      const porTratamiento = await db.execute(sql`
+        SELECT
+          t.name AS tratamiento,
+          t.id AS treatment_id,
+          COUNT(a.id) AS turnos,
+          COUNT(a.id) FILTER (WHERE a.status = 'completed') AS completados,
+          COALESCE(SUM(t.price::numeric) FILTER (WHERE a.status = 'completed'), 0) AS ingresos_estimados
+        FROM spa_appointments a
+        JOIN spa_treatments t ON t.id = a.treatment_id
+        WHERE a.appointment_date BETWEEN ${desde} AND ${hasta}
+          ${professionalFilter}${estadoFilter}
+        GROUP BY t.id, t.name
+        ORDER BY turnos DESC
+      `);
+
+      // Totales del período
+      const totales = await db.execute(sql`
+        SELECT
+          COUNT(a.id) AS total_turnos,
+          COUNT(a.id) FILTER (WHERE a.status = 'completed') AS completados,
+          COUNT(a.id) FILTER (WHERE a.status IN ('cancelled','no_show')) AS cancelados,
+          COALESCE(SUM(t.price::numeric) FILTER (WHERE a.status = 'completed'), 0) AS ingresos_estimados
+        FROM spa_appointments a
+        LEFT JOIN spa_treatments t ON t.id = a.treatment_id
+        WHERE a.appointment_date BETWEEN ${desde} AND ${hasta}
+          ${treatmentFilter}${professionalFilter}${estadoFilter}
+      `);
+
+      const tot = (totales.rows[0] as any) || {};
+      const $n = (v: any) => (v === null || v === undefined ? 0 : Number(v));
+      const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
+
+      res.json({
+        desde,
+        hasta,
+        totalTurnos: $n(tot.total_turnos),
+        totalCompletados: $n(tot.completados),
+        totalCancelados: $n(tot.cancelados),
+        ingresosTotales: $n(tot.ingresos_estimados),
+        tasaCompletados: pct($n(tot.completados), $n(tot.total_turnos)),
+        porProfesional: (porProfesional.rows as any[]).map(r => ({
+          profesional: r.profesional,
+          professionalId: r.professional_id,
+          turnos: $n(r.turnos),
+          completados: $n(r.completados),
+          cancelados: $n(r.cancelados),
+          noShows: $n(r.no_shows),
+          pctCompletados: pct($n(r.completados), $n(r.turnos)),
+          ingresosEstimados: $n(r.ingresos_estimados),
+        })),
+        porTratamiento: (porTratamiento.rows as any[]).map(r => ({
+          tratamiento: r.tratamiento,
+          treatmentId: r.treatment_id,
+          turnos: $n(r.turnos),
+          completados: $n(r.completados),
+          ingresosEstimados: $n(r.ingresos_estimados),
+        })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Reporte de Eventos ────────────────────────────────────────────────────
   app.get("/api/reports/events", requireRole(EVENTS_REPORT_ROLES), async (req, res) => {
     try {

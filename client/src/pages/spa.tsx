@@ -43,6 +43,10 @@ import {
   Settings,
   CheckCircle2,
   Printer,
+  BarChart2,
+  TrendingUp,
+  Filter,
+  RefreshCw,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -266,6 +270,19 @@ export default function SpaPage() {
   const [editingProfessional, setEditingProfessional] = useState<SpaProfessional | null>(null);
   const [professionalName, setProfessionalName] = useState("");
   const [professionalLastName, setProfessionalLastName] = useState("");
+
+  // Modal % por Profesional
+  const today = new Date();
+  const defaultDesde = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+  const defaultHasta = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()).padStart(2, "0")}`;
+  const [showProdDialog, setShowProdDialog] = useState(false);
+  const [prodDesde, setProdDesde] = useState(defaultDesde);
+  const [prodHasta, setProdHasta] = useState(defaultHasta);
+  const [prodTreatmentId, setProdTreatmentId] = useState("all");
+  const [prodProfessionalId, setProdProfessionalId] = useState("all");
+  const [prodEstado, setProdEstado] = useState("all");
+  const [appliedFilters, setAppliedFilters] = useState({ desde: defaultDesde, hasta: defaultHasta, treatmentId: "", professionalId: "", estado: "" });
+
   const { toast } = useToast();
 
   const { data: cabins = [], isLoading: cabinsLoading } = useQuery<SpaCabin[]>({
@@ -285,6 +302,27 @@ export default function SpaPage() {
   });
 
   const activeProfessionals = professionals.filter(p => p.isActive === "true");
+
+  type ProdPorProfesionalData = {
+    desde: string; hasta: string;
+    totalTurnos: number; totalCompletados: number; totalCancelados: number;
+    ingresosTotales: number; tasaCompletados: number;
+    porProfesional: { profesional: string; professionalId: string | null; turnos: number; completados: number; cancelados: number; noShows: number; pctCompletados: number; ingresosEstimados: number }[];
+    porTratamiento: { tratamiento: string; treatmentId: string; turnos: number; completados: number; ingresosEstimados: number }[];
+  };
+  const prodQuery = useQuery<ProdPorProfesionalData>({
+    queryKey: ["/api/reports/spa/por-profesional", appliedFilters],
+    queryFn: async () => {
+      const params = new URLSearchParams({ desde: appliedFilters.desde, hasta: appliedFilters.hasta });
+      if (appliedFilters.treatmentId) params.set("treatmentId", appliedFilters.treatmentId);
+      if (appliedFilters.professionalId) params.set("professionalId", appliedFilters.professionalId);
+      if (appliedFilters.estado) params.set("estado", appliedFilters.estado);
+      const res = await fetch(`/api/reports/spa/por-profesional?${params}`);
+      if (!res.ok) throw new Error("Error al cargar reporte");
+      return res.json();
+    },
+    enabled: showProdDialog,
+  });
 
   const { data: spaClients = [] } = useQuery<SpaClientType[]>({
     queryKey: ["/api/spa/clients"],
@@ -1097,20 +1135,29 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               </span>
             </div>
 
-            {viewMode === "daily" && (
-              <Button onClick={() => {
-                setIsEditMode(false);
-                setEditingAppointmentId(null);
-                form.reset({
-                  cabinId: "", treatmentId: "", guestName: "", guestLastName: "",
-                  guestPhone: "", guestEmail: "", appointmentDate: dateStr,
-                  startTime: "", reservationId: "", notes: "",
-                });
-                setIsNewDialogOpen(true);
-              }} data-testid="button-new-appointment">
-                <Plus className="h-4 w-4 mr-2" /> Nuevo Turno
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowProdDialog(true)}
+                data-testid="button-prod-profesional"
+              >
+                <BarChart2 className="h-4 w-4 mr-2" /> % por Profesional
               </Button>
-            )}
+              {viewMode === "daily" && (
+                <Button onClick={() => {
+                  setIsEditMode(false);
+                  setEditingAppointmentId(null);
+                  form.reset({
+                    cabinId: "", treatmentId: "", guestName: "", guestLastName: "",
+                    guestPhone: "", guestEmail: "", appointmentDate: dateStr,
+                    startTime: "", reservationId: "", notes: "",
+                  });
+                  setIsNewDialogOpen(true);
+                }} data-testid="button-new-appointment">
+                  <Plus className="h-4 w-4 mr-2" /> Nuevo Turno
+                </Button>
+              )}
+            </div>
           </div>
 
           {viewMode === "daily" ? (
@@ -1503,6 +1550,223 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               {editingProfessional ? "Guardar" : "Crear"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: % por Profesional */}
+      <Dialog open={showProdDialog} onOpenChange={setShowProdDialog}>
+        <DialogContent className="max-w-4xl flex flex-col max-h-[90vh]">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart2 className="h-5 w-5 text-primary" />
+              Producción por Profesional
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Filtros */}
+          <div className="flex-shrink-0 rounded-lg border bg-muted/30 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Filter className="h-4 w-4" /> Filtros
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Desde</label>
+                <input
+                  type="date"
+                  value={prodDesde}
+                  onChange={e => setProdDesde(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  data-testid="input-prod-desde"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Hasta</label>
+                <input
+                  type="date"
+                  value={prodHasta}
+                  onChange={e => setProdHasta(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  data-testid="input-prod-hasta"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Profesional</label>
+                <Select value={prodProfessionalId} onValueChange={setProdProfessionalId}>
+                  <SelectTrigger className="h-9 text-sm" data-testid="select-prod-profesional">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {professionals.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}{p.lastName ? ` ${p.lastName}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Tratamiento</label>
+                <Select value={prodTreatmentId} onValueChange={setProdTreatmentId}>
+                  <SelectTrigger className="h-9 text-sm" data-testid="select-prod-tratamiento">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {treatments.map(t => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Estado</label>
+                <Select value={prodEstado} onValueChange={setProdEstado}>
+                  <SelectTrigger className="h-9 text-sm" data-testid="select-prod-estado">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="completed">Completados</SelectItem>
+                    <SelectItem value="cancelados">Cancelados / No show</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => setAppliedFilters({
+                  desde: prodDesde,
+                  hasta: prodHasta,
+                  treatmentId: prodTreatmentId === "all" ? "" : prodTreatmentId,
+                  professionalId: prodProfessionalId === "all" ? "" : prodProfessionalId,
+                  estado: prodEstado === "all" ? "" : prodEstado,
+                })}
+                data-testid="button-prod-apply"
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Aplicar
+              </Button>
+            </div>
+          </div>
+
+          {/* Contenido scrolleable */}
+          <div className="overflow-y-auto flex-1 space-y-4 pr-1">
+            {prodQuery.isLoading ? (
+              <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+                <Loader2 className="h-5 w-5 animate-spin" /> Cargando...
+              </div>
+            ) : prodQuery.isError ? (
+              <div className="flex items-center justify-center py-16 text-destructive gap-2">
+                Error al cargar el reporte
+              </div>
+            ) : prodQuery.data ? (
+              <>
+                {/* KPIs resumen */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: "Total turnos", value: prodQuery.data.totalTurnos, color: "text-foreground" },
+                    { label: "Completados", value: prodQuery.data.totalCompletados, color: "text-green-600 dark:text-green-400" },
+                    { label: "Cancelados", value: prodQuery.data.totalCancelados, color: "text-red-500 dark:text-red-400" },
+                    { label: "Tasa completados", value: `${prodQuery.data.tasaCompletados}%`, color: "text-primary" },
+                  ].map(kpi => (
+                    <div key={kpi.label} className="rounded-lg border bg-card p-3 text-center">
+                      <div className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{kpi.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Tabla por profesional */}
+                <div>
+                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                    <TrendingUp className="h-4 w-4 text-primary" /> Por profesional
+                  </h3>
+                  {prodQuery.data.porProfesional.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">Sin datos para el período seleccionado</div>
+                  ) : (
+                    <div className="rounded-md border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/50">
+                            <th className="px-3 py-2 text-left font-medium">Profesional</th>
+                            <th className="px-3 py-2 text-center font-medium">Turnos</th>
+                            <th className="px-3 py-2 text-center font-medium">Completados</th>
+                            <th className="px-3 py-2 text-center font-medium">% Completado</th>
+                            <th className="px-3 py-2 text-center font-medium">Cancelados</th>
+                            <th className="px-3 py-2 text-center font-medium">No show</th>
+                            <th className="px-3 py-2 text-right font-medium">Ingresos est.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {prodQuery.data.porProfesional.map((row, i) => (
+                            <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                              <td className="px-3 py-2.5 font-medium">{row.profesional}</td>
+                              <td className="px-3 py-2.5 text-center">{row.turnos}</td>
+                              <td className="px-3 py-2.5 text-center text-green-600 dark:text-green-400 font-medium">{row.completados}</td>
+                              <td className="px-3 py-2.5 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full bg-primary"
+                                      style={{ width: `${row.pctCompletados}%` }}
+                                    />
+                                  </div>
+                                  <span className="font-semibold text-primary tabular-nums w-8">{row.pctCompletados}%</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-red-500 dark:text-red-400">{row.cancelados}</td>
+                              <td className="px-3 py-2.5 text-center text-muted-foreground">{row.noShows}</td>
+                              <td className="px-3 py-2.5 text-right font-medium">
+                                {row.ingresosEstimados > 0
+                                  ? `$${row.ingresosEstimados.toLocaleString("es-AR", { minimumFractionDigits: 0 })}`
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tabla por tratamiento */}
+                {prodQuery.data.porTratamiento.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4 text-primary" /> Por tratamiento
+                    </h3>
+                    <div className="rounded-md border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/50">
+                            <th className="px-3 py-2 text-left font-medium">Tratamiento</th>
+                            <th className="px-3 py-2 text-center font-medium">Turnos</th>
+                            <th className="px-3 py-2 text-center font-medium">Completados</th>
+                            <th className="px-3 py-2 text-right font-medium">Ingresos est.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {prodQuery.data.porTratamiento.map((row, i) => (
+                            <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                              <td className="px-3 py-2.5">{row.tratamiento}</td>
+                              <td className="px-3 py-2.5 text-center">{row.turnos}</td>
+                              <td className="px-3 py-2.5 text-center text-green-600 dark:text-green-400">{row.completados}</td>
+                              <td className="px-3 py-2.5 text-right font-medium">
+                                {row.ingresosEstimados > 0
+                                  ? `$${row.ingresosEstimados.toLocaleString("es-AR", { minimumFractionDigits: 0 })}`
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
         </DialogContent>
       </Dialog>
 
