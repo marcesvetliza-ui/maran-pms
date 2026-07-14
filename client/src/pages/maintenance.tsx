@@ -1125,8 +1125,8 @@ export default function MaintenancePage() {
       </Tabs>
 
       <Dialog open={isNewOrderDialogOpen} onOpenChange={setIsNewOrderDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-lg flex flex-col max-h-[90vh]">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Nueva Orden de Trabajo</DialogTitle>
             <DialogDescription>Complete los datos para crear una nueva orden de trabajo</DialogDescription>
           </DialogHeader>
@@ -1142,7 +1142,8 @@ export default function MaintenancePage() {
               } else {
                 createOrderMutation.mutate(data);
               }
-            })} className="space-y-4">
+            })} className="flex flex-col min-h-0 flex-1">
+              <div className="overflow-y-auto flex-1 space-y-4 pr-1">
               <FormField
                 control={orderForm.control}
                 name="title"
@@ -1342,7 +1343,8 @@ export default function MaintenancePage() {
                   </FormItem>
                 )}
               />
-              <DialogFooter>
+              </div>
+              <DialogFooter className="flex-shrink-0 pt-4 border-t">
                 <Button type="button" variant="outline" onClick={() => setIsNewOrderDialogOpen(false)}>
                   Cancelar
                 </Button>

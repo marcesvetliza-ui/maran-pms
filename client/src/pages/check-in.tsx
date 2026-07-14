@@ -125,7 +125,7 @@ export default function CheckInPage() {
 
   const { data: allReservations } = useQuery<ReservationWithDetails[]>({
     queryKey: ["/api/reservations"],
-    enabled: activeTab === "webcheckin",
+    enabled: activeTab === "webcheckin" || activeTab === "walkin",
   });
 
   const webCheckinReservations = allReservations
@@ -178,27 +178,42 @@ export default function CheckInPage() {
 
   const availableRooms = (() => {
     const todayStr = getLocalToday();
-    const tomorrowDate = new Date();
-    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-    const tomorrowStr = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    // Fecha de check-out según las noches seleccionadas
+    const checkOutDate = new Date();
+    checkOutDate.setDate(checkOutDate.getDate() + nights);
+    const checkOutStr = checkOutDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
-    // Habitaciones con reservas confirmadas para hoy (check-in pendiente) no deben ofrecerse para walk-in
-    const roomsWithTodayReservation = new Set(
-      reservations?.map(r => r.roomId).filter(Boolean) ?? []
+    // Estatus que indican que la habitación está actualmente ocupada → nunca ofrecer
+    const OCCUPIED_STATUSES = new Set(["occupied", "limpia_ocupada", "no_molestar"]);
+
+    // Habitaciones con reservas que se superponen al período del walk-in
+    const blockedByReservation = new Set(
+      (allReservations ?? [])
+        .filter(r =>
+          (r.status === "confirmed" || r.status === "checked_in" || r.status === "pending") &&
+          r.roomId &&
+          r.checkInDate < checkOutStr &&
+          r.checkOutDate > todayStr
+        )
+        .map(r => r.roomId)
+        .filter(Boolean)
     );
 
     return rooms?.filter((room) => {
       if (selectedRoomTypeId && room.roomTypeId !== selectedRoomTypeId) return false;
-      // Excluir habitaciones con reserva confirmada para hoy
-      if (roomsWithTodayReservation.has(room.id)) return false;
-      if (room.status === "available") return true;
+      // Habitación físicamente ocupada → no
+      if (OCCUPIED_STATUSES.has(room.status)) return false;
+      // Tiene reserva que se superpone → no
+      if (blockedByReservation.has(room.id)) return false;
+      // En mantenimiento: verificar si hay bloqueo activo durante el período
       if (room.status === "maintenance") {
         const hasActiveBlock = maintenanceBlocks.some(
-          blk => blk.roomId === room.id && blk.blockFrom < tomorrowStr && blk.blockTo > todayStr
+          blk => blk.roomId === room.id && blk.blockFrom < checkOutStr && blk.blockTo > todayStr
         );
         return !hasActiveBlock;
       }
-      return false;
+      // available, inspected, dirty, cleaning → sí (no tienen huésped activo)
+      return true;
     });
   })();
 
@@ -666,11 +681,20 @@ export default function CheckInPage() {
                           <SelectValue placeholder="Seleccionar habitacion..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableRooms?.filter(room => room.id).map((room) => (
-                            <SelectItem key={room.id} value={room.id}>
-                              Hab. {room.roomNumber} - Piso {room.floor}
-                            </SelectItem>
-                          ))}
+                          {availableRooms?.filter(room => room.id).map((room) => {
+                            const statusLabel: Record<string, string> = {
+                              available: "",
+                              inspected: " · Inspeccionada",
+                              dirty: " · Sucia",
+                              cleaning: " · En limpieza",
+                              maintenance: " · Mantenimiento",
+                            };
+                            return (
+                              <SelectItem key={room.id} value={room.id}>
+                                Hab. {room.roomNumber} - Piso {room.floor}{statusLabel[room.status] ?? ""}
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                       {availableRooms?.length === 0 && (
