@@ -38,6 +38,8 @@ import {
   RefreshCw,
   CheckCheck,
   ShieldCheck,
+  Search,
+  X,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -466,6 +468,9 @@ export default function MaintenancePage() {
   const [isNewStaffDialogOpen, setIsNewStaffDialogOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<MaintenanceStaff | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("active");
+  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [searchText, setSearchText] = useState<string>("");
   // Block state for new order form
   const [blockRoom, setBlockRoom] = useState(false);
   const [blockFrom, setBlockFrom] = useState("");
@@ -743,11 +748,18 @@ export default function MaintenancePage() {
   };
 
   const filteredOrders = workOrders.filter((order) => {
-    if (statusFilter === "active") {
-      return order.status !== "completed" && order.status !== "cancelled";
-    }
-    if (statusFilter === "completed") {
-      return order.status === "completed";
+    if (statusFilter === "active" && (order.status === "completed" || order.status === "cancelled")) return false;
+    if (statusFilter === "completed" && order.status !== "completed") return false;
+    if (priorityFilter !== "all" && order.priority !== priorityFilter) return false;
+    if (categoryFilter !== "all" && order.category !== categoryFilter) return false;
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      const loc = order.room ? `hab. ${order.room.roomNumber}` : (order.location || "");
+      if (
+        !order.title.toLowerCase().includes(q) &&
+        !order.orderCode.toLowerCase().includes(q) &&
+        !loc.toLowerCase().includes(q)
+      ) return false;
     }
     return true;
   });
@@ -874,9 +886,26 @@ export default function MaintenancePage() {
 
         <TabsContent value="orders" className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
+            {/* Búsqueda */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar por código, título, ubicación..."
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                className="pl-8 w-[260px]"
+                data-testid="input-search-orders"
+              />
+              {searchText && (
+                <button onClick={() => setSearchText("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            {/* Estado */}
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]" data-testid="select-status-filter">
-                <SelectValue placeholder="Filtrar por estado" />
+              <SelectTrigger className="w-[150px]" data-testid="select-status-filter">
+                <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="active">Activas</SelectItem>
@@ -884,6 +913,43 @@ export default function MaintenancePage() {
                 <SelectItem value="all">Todas</SelectItem>
               </SelectContent>
             </Select>
+            {/* Prioridad */}
+            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+              <SelectTrigger className="w-[140px]" data-testid="select-priority-filter">
+                <SelectValue placeholder="Prioridad" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="urgent">Urgente</SelectItem>
+                <SelectItem value="high">Alta</SelectItem>
+                <SelectItem value="medium">Media</SelectItem>
+                <SelectItem value="low">Baja</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Categoría */}
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-[160px]" data-testid="select-category-filter">
+                <SelectValue placeholder="Categoría" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                {Object.entries(categoryLabels).map(([val, label]) => (
+                  <SelectItem key={val} value={val}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* Limpiar filtros */}
+            {(priorityFilter !== "all" || categoryFilter !== "all" || searchText || statusFilter !== "active") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setPriorityFilter("all"); setCategoryFilter("all"); setSearchText(""); setStatusFilter("active"); }}
+                data-testid="button-clear-filters"
+              >
+                <X className="h-3.5 w-3.5 mr-1" />Limpiar filtros
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground ml-auto">{sortedOrders.length} orden(es)</span>
           </div>
 
           <Card>
@@ -891,6 +957,7 @@ export default function MaintenancePage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Codigo</TableHead>
+                  <TableHead>Fecha</TableHead>
                   <TableHead>Titulo</TableHead>
                   <TableHead>Ubicacion</TableHead>
                   <TableHead>Categoria</TableHead>
@@ -903,7 +970,7 @@ export default function MaintenancePage() {
               <TableBody>
                 {sortedOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                       No hay ordenes de trabajo
                     </TableCell>
                   </TableRow>
@@ -911,6 +978,11 @@ export default function MaintenancePage() {
                   sortedOrders.map((order) => (
                     <TableRow key={order.id} data-testid={`row-order-${order.id}`}>
                       <TableCell className="font-mono text-sm">{order.orderCode}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        {order.reportedAt
+                          ? format(new Date(order.reportedAt), "dd/MM/yy", { locale: es })
+                          : "-"}
+                      </TableCell>
                       <TableCell className="font-medium">{order.title}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
