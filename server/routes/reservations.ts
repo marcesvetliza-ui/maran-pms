@@ -106,6 +106,27 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // DEBE ir antes de /:id para que Express no la capture como id="check-adjacent"
+  app.get("/api/reservations/check-adjacent", requireAuth, async (req, res) => {
+    try {
+      const { roomId, date, direction } = req.query as { roomId: string; date: string; direction: "before" | "after" };
+      if (!roomId || !date || !direction) {
+        return res.status(400).json({ error: "roomId, date y direction son requeridos" });
+      }
+      const all = await storage.getReservations();
+      const found = all.find(r => {
+        if (r.roomId !== roomId) return false;
+        if (["cancelled", "checked_out"].includes(r.status)) return false;
+        if (direction === "before") return r.checkOutDate === date;
+        return r.checkInDate === date;
+      });
+      res.json(found || null);
+    } catch (error) {
+      console.error("check-adjacent error:", error);
+      res.status(500).json({ error: "Error al consultar reservas adyacentes" });
+    }
+  });
+
   app.get("/api/reservations/:id", async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
@@ -656,27 +677,6 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Revertir check-out: reservation → checked_in, room → occupied (solo mismo día)
-  // Check if there's an adjacent reservation in a room on a given date
-  app.get("/api/reservations/check-adjacent", requireAuth, async (req, res) => {
-    try {
-      const { roomId, date, direction } = req.query as { roomId: string; date: string; direction: "before" | "after" };
-      if (!roomId || !date || !direction) {
-        return res.status(400).json({ error: "roomId, date y direction son requeridos" });
-      }
-      const all = await storage.getReservations();
-      const found = all.find(r => {
-        if (r.roomId !== roomId) return false;
-        if (["cancelled", "checked_out"].includes(r.status)) return false;
-        if (direction === "before") return r.checkOutDate === date;
-        return r.checkInDate === date;
-      });
-      res.json(found || null);
-    } catch (error) {
-      console.error("check-adjacent error:", error);
-      res.status(500).json({ error: "Error al consultar reservas adyacentes" });
-    }
-  });
-
   app.post("/api/reservations/:id/undo-checkout", requireAuth, async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
