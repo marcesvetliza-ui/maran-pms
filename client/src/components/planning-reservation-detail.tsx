@@ -751,30 +751,28 @@ export function ReservationDetailModal({
                 </div>
                 <div className="space-y-1">
                   <div className="text-muted-foreground">Check-out</div>
-                  <div className="font-medium">{formatDateReadable(reservation.checkOutDate)}</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-muted-foreground">Noches</div>
-                  <div className="font-medium">{reservation.nights}</div>
+                  <div className="font-medium flex items-center gap-2 flex-wrap">
+                    {formatDateReadable(reservation.checkOutDate)}
+                    <span className="text-xs font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                      {reservation.nights} {reservation.nights === 1 ? "noche" : "noches"}
+                    </span>
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-muted-foreground">Tarifa/noche</div>
-                  <div className="font-medium">${reservation.finalRatePerNight}</div>
+                  <div className="font-medium">${Number(reservation.finalRatePerNight || 0).toLocaleString("es-AR")}</div>
                 </div>
               </div>
               <Separator />
               <div className="flex items-center justify-between bg-muted/50 rounded-md p-3">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-muted-foreground" />
-                  <div>
-                    <div className="text-sm text-muted-foreground">Total Habitacion</div>
-                    <div className="font-semibold">${reservation.totalRoomAmount}</div>
-                  </div>
+                <div>
+                  <div className="text-sm text-muted-foreground">Total Habitacion</div>
+                  <div className="font-semibold">${Number(reservation.totalRoomAmount || 0).toLocaleString("es-AR")}</div>
                 </div>
                 {totalCharges > 0 && (
                   <div className="text-right">
                     <div className="text-sm text-muted-foreground">Cargos extras</div>
-                    <div className="font-semibold">${totalCharges.toFixed(2)}</div>
+                    <div className="font-semibold">${totalCharges.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                   </div>
                 )}
               </div>
