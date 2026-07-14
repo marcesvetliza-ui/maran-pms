@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/App";
 import { getLocalToday } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import type { ReservationWithDetails, ReservationStatus } from "@shared/schema";
@@ -49,6 +50,7 @@ export function ReservationDetailModal({
   onEdit?: (reservation: ReservationWithDetails) => void;
 }) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [retroDialogOpen, setRetroDialogOpen] = useState(false);
   const [retroMotivo, setRetroMotivo] = useState("");
@@ -281,7 +283,7 @@ export function ReservationDetailModal({
   const cancelReservationMutation = useMutation({
     mutationFn: async () => apiRequest("POST", `/api/reservations/${reservationId}/cancel`, {
       reason: "Anulado desde Planning",
-      cancelledBy: "Recepción",
+      cancelledBy: user?.username || "Recepción",
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });

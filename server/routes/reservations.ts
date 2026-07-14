@@ -1158,13 +1158,35 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Restore a cancelled reservation back to "confirmed"
-  app.post("/api/reservations/:id/restore", async (req, res) => {
+  app.post("/api/reservations/:id/restore", requireAuth, async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
       if (reservation.status !== "cancelled") {
         return res.status(400).json({ error: "Solo se pueden recuperar reservas en estado cancelado" });
       }
+
+      // Check for conflicts before restoring
+      const blockingStatuses = ["tentative", "pending", "confirmed", "checked_in"];
+      const allReservations = await storage.getReservations();
+      const checkIn = new Date(normalizeDate(reservation.checkInDate) + "T00:00:00Z");
+      const checkOut = new Date(normalizeDate(reservation.checkOutDate) + "T00:00:00Z");
+      const overlapping = allReservations.filter((r) => {
+        if (r.id === reservation.id) return false;
+        if (r.roomId !== reservation.roomId) return false;
+        if (!blockingStatuses.includes(r.status)) return false;
+        const rIn  = new Date(normalizeDate(r.checkInDate) + "T00:00:00Z");
+        const rOut = new Date(normalizeDate(r.checkOutDate) + "T00:00:00Z");
+        return !(checkOut <= rIn || checkIn >= rOut);
+      });
+
+      if (overlapping.length > 0) {
+        const codes = overlapping.map((r) => r.reservationCode).join(", ");
+        return res.status(409).json({
+          error: `No se puede recuperar: la habitación tiene ${overlapping.length === 1 ? "una reserva" : "reservas"} en esas fechas (${codes}). Cambiá la habitación antes de recuperar.`,
+        });
+      }
+
       await storage.updateReservation(req.params.id, { status: "confirmed" });
       await audit(req, "restore", "reservations",
         `Recuperación: ${reservation.reservationCode} — por ${(req as any).user?.username || "sistema"}`,
