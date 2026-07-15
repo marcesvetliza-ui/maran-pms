@@ -226,7 +226,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
   doc.moveTo(M, y).lineTo(M + contentW, y).strokeColor(BORDER).lineWidth(0.5).stroke();
   y += 10;
 
-  const infoH = 48;
+  const infoH = 64;
   doc.roundedRect(M, y, contentW, infoH, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 8, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
@@ -234,12 +234,16 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EMISIÓN", c2, y + 8, { characterSpacing: 0.5 });
   doc.fillColor(DARK).fontSize(9).font("Helvetica").text(formatFecha(pres.fechaEmision), c2, y + 20);
   if (pres.fechaVencimiento) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("VÁLIDO HASTA", c2, y + 32, { characterSpacing: 0.5 });
-    doc.fillColor(DARK).fontSize(9).font("Helvetica").text(formatFecha(pres.fechaVencimiento), c2, y + 44);
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("VÁLIDO HASTA", c2, y + 36, { characterSpacing: 0.5 });
+    doc.fillColor(DARK).fontSize(9).font("Helvetica").text(formatFecha(pres.fechaVencimiento), c2, y + 48);
   }
   if (pres.fechaEvento) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA ESTADÍA", c3, y + 8, { characterSpacing: 0.5 });
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA INGRESO", c3, y + 8, { characterSpacing: 0.5 });
     doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text(formatFecha(pres.fechaEvento), c3, y + 20);
+  }
+  if (pres.fechaFin) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EGRESO", c3, y + 36, { characterSpacing: 0.5 });
+    doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text(formatFecha(pres.fechaFin), c3, y + 48);
   }
   y += infoH + 12;
 
@@ -252,7 +256,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
     doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
     const th = y + 6;
     doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
-    doc.text("PRECIO UNITARIO", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
+    doc.text("PRECIO POR NOCHE", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
     doc.text("DESC.", cols.dto, th, { width: Ws.dto, align: "right" });
     doc.text("P. ESPECIAL", cols.tarifa_dto, th, { width: Ws.tarifa_dto, align: "right" });
     doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
@@ -283,7 +287,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
     const th = y + 6;
     doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
     doc.text("CANTIDAD", cols.noches, th, { width: Ws.noches, align: "right" });
-    doc.text("PRECIO UNITARIO — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
+    doc.text("PRECIO POR NOCHE — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
     doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
     y += 22;
     items.forEach((it, idx) => {
@@ -465,7 +469,7 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
       const th = y + 6;
       doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
       doc.text("CANT.", cols.noches, th, { width: Ws.noches, align: "right" });
-      doc.text("PRECIO UNITARIO — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
+      doc.text("PRECIO POR NOCHE — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
       doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
       y += 22;
       items.forEach((it: any, idx: number) => {

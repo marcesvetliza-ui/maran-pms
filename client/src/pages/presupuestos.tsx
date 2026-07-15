@@ -183,6 +183,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
   const [fechaEmision, setFechaEmision] = useState(presupuesto?.fechaEmision || today);
   const [fechaVencimiento, setFechaVencimiento] = useState(presupuesto?.fechaVencimiento || "");
   const [fechaEvento, setFechaEvento] = useState(presupuesto?.fechaEvento || "");
+  const [fechaFin, setFechaFin] = useState((presupuesto as any)?.fechaFin || "");
   const [participantes, setParticipantes] = useState<string>((presupuesto as any)?.participantes?.toString() || "");
   const [estado, setEstado] = useState<PresupuestoEstado>(presupuesto?.estado || "borrador");
   const [notas, setNotas] = useState(presupuesto?.notas || "");
@@ -281,6 +282,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
     fechaEmision,
     fechaVencimiento: fechaVencimiento || null,
     fechaEvento: fechaEvento || null,
+    fechaFin: fechaFin || null,
     participantes: participantes ? parseInt(participantes) : null,
     estado,
     notas: notas.trim() || null,
@@ -380,8 +382,12 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
               <Input type="date" value={fechaVencimiento} onChange={e => setFechaVencimiento(e.target.value)} className="mt-1" data-testid="input-fecha-vencimiento" />
             </div>
             <div>
-              <Label>Fecha evento / estadía</Label>
+              <Label>Fecha ingreso</Label>
               <Input type="date" value={fechaEvento} onChange={e => setFechaEvento(e.target.value)} className="mt-1" data-testid="input-fecha-evento" />
+            </div>
+            <div>
+              <Label>Fecha egreso</Label>
+              <Input type="date" value={fechaFin} onChange={e => setFechaFin(e.target.value)} className="mt-1" data-testid="input-fecha-fin" />
             </div>
             {(area === "eventos" || area === "spa" || area === "restaurant") && (
               <div>
