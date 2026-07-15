@@ -354,16 +354,20 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARA", M + 12, y + 9, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(13).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 240 });
   const c2 = M + 280, c3 = M + 395;
-  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EVENTO", c2, y + 9, { characterSpacing: 0.5 });
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA INGRESO", c2, y + 9, { characterSpacing: 0.5 });
   doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text(pres.fechaEvento ? formatFecha(pres.fechaEvento) : "A confirmar", c2, y + 21);
-  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PRESUPUESTO N°", c2, y + 38, { characterSpacing: 0.5 });
-  doc.fillColor(DARK).fontSize(9).font("Helvetica").text(pres.numero, c2, y + 50);
-  if (pres.participantes) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARTICIPANTES", c3, y + 9, { characterSpacing: 0.5 });
-    doc.fillColor(DARK).fontSize(10).font("Helvetica-Bold").text(`${pres.participantes} personas`, c3, y + 21);
+  if (pres.fechaFin) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EGRESO", c2, y + 38, { characterSpacing: 0.5 });
+    doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text(formatFecha(pres.fechaFin), c2, y + 50);
   }
-  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("EMISIÓN", c3, y + 38, { characterSpacing: 0.5 });
-  doc.fillColor(DARK).fontSize(9).font("Helvetica").text(formatFecha(pres.fechaEmision), c3, y + 50);
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PRESUPUESTO N°", c3, y + 9, { characterSpacing: 0.5 });
+  doc.fillColor(DARK).fontSize(9).font("Helvetica").text(pres.numero, c3, y + 21);
+  if (pres.participantes) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARTICIPANTES", c3, y + 38, { characterSpacing: 0.5 });
+    doc.fillColor(DARK).fontSize(10).font("Helvetica-Bold").text(`${pres.participantes} personas`, c3, y + 50);
+  }
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("EMISIÓN", c3, y + 38 + (pres.participantes ? 16 : 0), { characterSpacing: 0.5 });
+  doc.fillColor(DARK).fontSize(9).font("Helvetica").text(formatFecha(pres.fechaEmision), c3, y + 50 + (pres.participantes ? 16 : 0));
   y += 82;
 
   // Intro text
@@ -397,18 +401,22 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
   y = headerH + 16;
 
   // Info header box
-  const infoH2 = 48;
+  const infoH2 = 64;
   doc.roundedRect(M, y, contentW, infoH2, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 8, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
   const c2e = M + 280, c3e = M + 390;
-  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EVENTO", c2e, y + 8, { characterSpacing: 0.5 });
+  doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA INGRESO", c2e, y + 8, { characterSpacing: 0.5 });
   doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text(pres.fechaEvento ? formatFecha(pres.fechaEvento) : "A confirmar", c2e, y + 20);
+  if (pres.fechaFin) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EGRESO", c2e, y + 36, { characterSpacing: 0.5 });
+    doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text(formatFecha(pres.fechaFin), c2e, y + 48);
+  }
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PRESUPUESTO N°", c3e, y + 8, { characterSpacing: 0.5 });
   doc.fillColor(DARK).fontSize(9).font("Helvetica").text(pres.numero, c3e, y + 20);
   if (pres.participantes) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARTICIPANTES", c2e, y + 32, { characterSpacing: 0.5 });
-    doc.fillColor(DARK).fontSize(9).font("Helvetica").text(`${pres.participantes} personas`, c2e, y + 44);
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARTICIPANTES", c3e, y + 36, { characterSpacing: 0.5 });
+    doc.fillColor(DARK).fontSize(9).font("Helvetica").text(`${pres.participantes} personas`, c3e, y + 48);
   }
   y += infoH2 + 14;
 
@@ -833,8 +841,12 @@ function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: strin
     doc.fillColor(DARK).fontSize(9.5).font("Helvetica").text(formatFecha(pres.fechaVencimiento), c2x, y + 50);
   }
   if (pres.fechaEvento) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EVENTO", c3x, y + 10, { characterSpacing: 0.5 });
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA INGRESO", c3x, y + 10, { characterSpacing: 0.5 });
     doc.fillColor(NAVY).fontSize(9.5).font("Helvetica-Bold").text(formatFecha(pres.fechaEvento), c3x, y + 22);
+  }
+  if (pres.fechaFin) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EGRESO", c3x, y + 38, { characterSpacing: 0.5 });
+    doc.fillColor(NAVY).fontSize(9.5).font("Helvetica-Bold").text(formatFecha(pres.fechaFin), c3x, y + 50);
   }
   y += infoH + 8;
 
