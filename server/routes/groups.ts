@@ -1020,8 +1020,8 @@ export function registerGroupsRoutes(app: Express) {
       const reservation = group.reservations.find(r => r.id === reservationId);
       if (!reservation) return res.status(404).json({ error: "Reserva no encontrada en el grupo" });
 
-      if (!["confirmed", "pending"].includes(reservation.status)) {
-        return res.status(400).json({ error: "Solo se pueden desasignar reservas confirmadas o pendientes" });
+      if (!["confirmed", "pending", "tentative"].includes(reservation.status)) {
+        return res.status(400).json({ error: "Solo se pueden desasignar reservas confirmadas, pendientes o tentativas" });
       }
 
       // Cancel the reservation

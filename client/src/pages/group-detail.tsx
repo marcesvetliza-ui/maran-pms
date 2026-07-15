@@ -1659,7 +1659,7 @@ export default function GroupDetailPage() {
                                 Cargo
                               </Button>
                             )}
-                            {["confirmed", "pending"].includes(res.status) && (
+                            {["confirmed", "pending", "tentative"].includes(res.status) && (
                               <Button
                                 variant="ghost"
                                 size="icon"
