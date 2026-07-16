@@ -98,6 +98,7 @@ const statusConfig: Record<RoomStatus, { label: string; icon: typeof Sparkles; c
   oos: { label: "Fuera Servicio", icon: XCircle, className: "text-gray-600 dark:text-gray-400", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" },
   limpia_ocupada: { label: "Limpia ocupada", icon: ShieldCheck, className: "text-emerald-600 dark:text-emerald-400", bgClass: "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 border-dashed" },
   no_molestar: { label: "No molestar", icon: Ban, className: "text-purple-600 dark:text-purple-400", bgClass: "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800" },
+  inspected: { label: "Inspeccionada", icon: ShieldCheck, className: "text-teal-600 dark:text-teal-400", bgClass: "bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800" },
 };
 
 const taskStatusConfig: Record<TaskStatus, { label: string; className: string }> = {
