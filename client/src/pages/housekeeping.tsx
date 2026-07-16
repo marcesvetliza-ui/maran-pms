@@ -146,7 +146,7 @@ function RoomCard({
   onEditBedConfig: (roomId: string, currentConfig: string) => void;
 }) {
   const [, navigate] = useLocation();
-  const config = statusConfig[room.status];
+  const config = statusConfig[room.status] ?? { label: room.status, icon: AlertCircle, className: "text-gray-500", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" };
   const Icon = config.icon;
   const pendingTasks = tasks.filter(t => t.status === "pending" || t.status === "in_progress");
   const hasNotes = tasks.some(t => t.notes);
@@ -989,7 +989,7 @@ function MobileRoomCard({
   isUpdating: boolean;
 }) {
   const [, navigate] = useLocation();
-  const config = statusConfig[room.status];
+  const config = statusConfig[room.status] ?? { label: room.status, icon: AlertCircle, className: "text-gray-500", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" };
   const Icon = config.icon;
   const [pending, setPending] = useState<PendingAction | null>(null);
 
