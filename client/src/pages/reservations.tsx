@@ -891,7 +891,7 @@ export function ReservationFormDialog({
                   data-testid="button-toggle-upgrade"
                 >
                   <TrendingUp className="h-4 w-4 mr-1.5" />
-                  Up Grade
+                  {reservation ? "Upgrade / Cambio de categoría" : "Up Grade"}
                 </Button>
               </div>
             </div>
