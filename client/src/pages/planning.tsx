@@ -653,20 +653,21 @@ export default function PlanningPage() {
   // REUB virtual room (always shown separately at top)
   const reubRoom = data?.rooms.find(r => (r as any).isVirtual === true || r.roomNumber === "REUB") ?? null;
 
-  // Available room types and floors for filter UI — exclude REUB
+  // Available room types and floors for filter UI — exclude REUB and inactive
   const availableRoomTypes = data?.rooms
-    ? Array.from(new Map(data.rooms.filter(r => !(r as any).isVirtual).map(r => [r.roomTypeId, r.roomType])).entries()).map(([id, rt]) => ({ id, name: rt?.name ?? id }))
+    ? Array.from(new Map(data.rooms.filter(r => !(r as any).isVirtual && r.isActive !== false).map(r => [r.roomTypeId, r.roomType])).entries()).map(([id, rt]) => ({ id, name: rt?.name ?? id }))
     : [];
   const availableFloors = data?.rooms
-    ? Array.from(new Set(data.rooms.filter(r => !(r as any).isVirtual).map(r => String(r.floor)))).sort((a, b) => Number(a) - Number(b))
+    ? Array.from(new Set(data.rooms.filter(r => !(r as any).isVirtual && r.isActive !== false).map(r => String(r.floor)))).sort((a, b) => Number(a) - Number(b))
     : [];
 
   const isCompareMode = !!(filters.compareRoom1 || filters.compareRoom2);
 
   // Apply filters to rooms (REUB excluded — shown separately)
   const filteredRooms = (data?.rooms ?? []).filter(room => {
-    // REUB is handled separately
+    // REUB is handled separately; exclude inactive rooms entirely from planning
     if ((room as any).isVirtual || room.roomNumber === "REUB") return false;
+    if (room.isActive === false) return false;
 
     // Compare mode: show only the specified rooms
     if (isCompareMode) {

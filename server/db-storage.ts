@@ -228,6 +228,11 @@ export class DatabaseStorage implements IStorage {
       .map(r => ({ ...r, roomType: typesMap.get(r.roomTypeId)! }));
   }
 
+  async getRoomsActive(): Promise<RoomWithType[]> {
+    const allRooms = await this.getRooms();
+    return allRooms.filter(r => r.isActive !== false);
+  }
+
   async getRoom(id: string): Promise<RoomWithType | undefined> {
     const [room] = await db.select().from(rooms).where(eq(rooms.id, id));
     if (!room) return undefined;
@@ -794,8 +799,8 @@ export class DatabaseStorage implements IStorage {
     const allRooms = await db.select().from(rooms);
     const today = getArgentinaToday();
 
-    // Excluir habitaciones virtuales (REUB y similares) de todas las estadísticas
-    const realRooms = allRooms.filter(r => !r.isVirtual);
+    // Excluir habitaciones virtuales e inactivas de todas las estadísticas
+    const realRooms = allRooms.filter(r => !r.isVirtual && r.isActive !== false);
     const totalRooms = realRooms.length;
 
     // Estadísticas de habitaciones por status housekeeping (solo para referencia interna)
@@ -3752,7 +3757,7 @@ export class DatabaseStorage implements IStorage {
 
   async getExecutiveStats(from: string, to: string): Promise<any> {
     const allRooms = await db.select().from(rooms);
-    const realRooms = allRooms.filter(r => !r.isVirtual);
+    const realRooms = allRooms.filter(r => !r.isVirtual && r.isActive !== false);
     const totalRooms = realRooms.length;
 
     const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, dirty: 0, cleaning: 0, maintenance: 0, oos: 0 };

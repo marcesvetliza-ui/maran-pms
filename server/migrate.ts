@@ -864,5 +864,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await withTimeout("rooms.is_active", T, () =>
+    db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

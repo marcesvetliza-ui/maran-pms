@@ -3,7 +3,7 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
 
-const ROOMS_WRITE_ROLES = ["admin", "manager", "jefe_recepcion", "resp_administracion", "reception", "housekeeping", "maintenance"] as [string, ...string[]];
+const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
 
 export function registerRoomsRoutes(app: Express) {
@@ -247,15 +247,9 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/rooms/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
-    try {
-      const deleted = await storage.deleteRoom(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: "Room not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting room" });
-    }
+  // Eliminar habitaciones está deshabilitado por política del sistema.
+  // Usar PATCH con { isActive: false } para deshabilitar.
+  app.delete("/api/rooms/:id", requireRole(ROOMS_WRITE_ROLES), (_req, res) => {
+    res.status(405).json({ error: "No está permitido eliminar habitaciones. Usá la opción Deshabilitar para ocultarla del sistema." });
   });
 }

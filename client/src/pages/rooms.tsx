@@ -72,7 +72,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { RoomWithType, RoomType, InsertRoom, RoomStatus, ChargeType } from "@shared/schema";
+import { useAuth } from "@/App";
+import type { RoomWithType, RoomType, InsertRoom, RoomStatus, ChargeType, SystemUserRole } from "@shared/schema";
+
+// Roles que pueden crear/editar habitaciones y gestionar cargos
+const ROOM_ADMIN_ROLES: SystemUserRole[] = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"];
 
 function RoomStatusBadge({ status }: { status: RoomStatus }) {
   const statusConfig: Record<string, { label: string; className: string }> = {
@@ -150,13 +154,15 @@ function RoomDropdownMenu({
   onEdit,
   onStatus,
   onMaintenance,
-  onDelete,
+  onToggleActive,
+  canManage,
 }: {
   room: RoomWithType;
   onEdit: () => void;
   onStatus: (s: RoomStatus) => void;
   onMaintenance: () => void;
-  onDelete: () => void;
+  onToggleActive: () => void;
+  canManage: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -166,44 +172,59 @@ function RoomDropdownMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={onEdit}>
-          <Pencil className="mr-2 h-4 w-4" />
-          Editar
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => onStatus("available")}>
-          <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
-          Libre limpia
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onStatus("dirty")}>
-          <OctagonMinus className="mr-2 h-4 w-4 text-orange-500" />
-          Libre sucia
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onStatus("cleaning")}>
-          <Sparkles className="mr-2 h-4 w-4 text-yellow-600" />
-          Enviar a Limpieza
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onStatus("inspected")}>
-          <Eye className="mr-2 h-4 w-4 text-teal-600" />
-          Inspeccionada
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onStatus("limpia_ocupada")}>
-          <ShieldCheck className="mr-2 h-4 w-4 text-emerald-600" />
-          Limpia ocupada
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onStatus("no_molestar")}>
-          <Ban className="mr-2 h-4 w-4 text-purple-600" />
-          No molestar
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onMaintenance}>
-          <Wrench className="mr-2 h-4 w-4 text-orange-500" />
-          Reportar a Mantenimiento
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onClick={onDelete}>
-          <Trash2 className="mr-2 h-4 w-4" />
-          Eliminar
-        </DropdownMenuItem>
+        {canManage && (
+          <DropdownMenuItem onClick={onEdit}>
+            <Pencil className="mr-2 h-4 w-4" />
+            Editar habitación
+          </DropdownMenuItem>
+        )}
+        {canManage && <DropdownMenuSeparator />}
+        {room.isActive !== false && (
+          <>
+            <DropdownMenuItem onClick={() => onStatus("available")}>
+              <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
+              Libre limpia
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onStatus("dirty")}>
+              <OctagonMinus className="mr-2 h-4 w-4 text-orange-500" />
+              Libre sucia
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onStatus("cleaning")}>
+              <Sparkles className="mr-2 h-4 w-4 text-yellow-600" />
+              Enviar a Limpieza
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onStatus("inspected")}>
+              <Eye className="mr-2 h-4 w-4 text-teal-600" />
+              Inspeccionada
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onStatus("limpia_ocupada")}>
+              <ShieldCheck className="mr-2 h-4 w-4 text-emerald-600" />
+              Limpia ocupada
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onStatus("no_molestar")}>
+              <Ban className="mr-2 h-4 w-4 text-purple-600" />
+              No molestar
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onMaintenance}>
+              <Wrench className="mr-2 h-4 w-4 text-orange-500" />
+              Reportar a Mantenimiento
+            </DropdownMenuItem>
+          </>
+        )}
+        {canManage && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className={room.isActive !== false ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"}
+              onClick={onToggleActive}
+            >
+              {room.isActive !== false
+                ? <><OctagonMinus className="mr-2 h-4 w-4" />Deshabilitar habitación</>
+                : <><Eye className="mr-2 h-4 w-4" />Habilitar habitación</>
+              }
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -375,6 +396,8 @@ function RoomFormDialog({
 
 export default function RoomsPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const canManage = ROOM_ADMIN_ROLES.includes((user?.role ?? "") as SystemUserRole);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -529,15 +552,16 @@ export default function RoomsPage() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/rooms/${id}`, undefined);
+  const toggleRoomActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      return apiRequest("PATCH", `/api/rooms/${id}`, { isActive });
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Habitación eliminada", description: "La habitación ha sido eliminada del sistema." });
+      toast({ title: vars.isActive ? "Habitación habilitada" : "Habitación deshabilitada", description: vars.isActive ? "La habitación vuelve a estar activa en el sistema." : "La habitación ya no aparecerá en el planning ni en reservas." });
     },
+    onError: () => toast({ title: "Error", description: "No se pudo actualizar la habitación.", variant: "destructive" }),
   });
 
   const createWorkOrderMutation = useMutation({
@@ -569,6 +593,8 @@ export default function RoomsPage() {
 
   const filteredRooms = rooms?.filter((room) => {
     if ((room as any).isVirtual) return false;
+    // Habitaciones inactivas: solo las ve quienes pueden gestionar
+    if (room.isActive === false && !canManage) return false;
     const matchesSearch = room.roomNumber.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = typeFilter === "all" || room.roomTypeId === typeFilter;
     let matchesStatus = false;
@@ -578,6 +604,8 @@ export default function RoomsPage() {
     else matchesStatus = room.status === statusFilter;
     return matchesSearch && matchesStatus && matchesType;
   })?.sort((a, b) => {
+    // Habitaciones inactivas al final
+    if ((a.isActive === false) !== (b.isActive === false)) return a.isActive === false ? 1 : -1;
     if (a.floor !== b.floor) return a.floor - b.floor;
     const numA = parseInt(a.roomNumber.replace(/\D/g, ''), 10) || 0;
     const numB = parseInt(b.roomNumber.replace(/\D/g, ''), 10) || 0;
@@ -595,7 +623,8 @@ export default function RoomsPage() {
     setDialogOpen(true);
   };
 
-  const realRooms = rooms?.filter((r) => !(r as any).isVirtual) ?? [];
+  // Solo habitaciones activas y reales para los contadores
+  const realRooms = rooms?.filter((r) => !(r as any).isVirtual && r.isActive !== false) ?? [];
   const statusCounts = {
     all: realRooms.length,
     libre_limpias: realRooms.filter((r) => r.status === "available" || r.status === "inspected").length,
@@ -614,16 +643,18 @@ export default function RoomsPage() {
           </h1>
           <p className="text-muted-foreground">Gestiona el inventario de habitaciones del hotel</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setChargesSheetOpen(true)} data-testid="button-charge-types">
-            <ReceiptText className="mr-2 h-4 w-4" />
-            Cargos en habitaciones
-          </Button>
-          <Button onClick={handleNewRoom} data-testid="button-new-room">
-            <Plus className="mr-2 h-4 w-4" />
-            Nueva Habitación
-          </Button>
-        </div>
+        {canManage && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setChargesSheetOpen(true)} data-testid="button-charge-types">
+              <ReceiptText className="mr-2 h-4 w-4" />
+              Cargos en habitaciones
+            </Button>
+            <Button onClick={handleNewRoom} data-testid="button-new-room">
+              <Plus className="mr-2 h-4 w-4" />
+              Nueva Habitación
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Status Summary Cards */}
@@ -748,11 +779,16 @@ export default function RoomsPage() {
                         return (
                           <Card
                             key={room.id}
-                            className={`hover-elevate cursor-pointer relative ${borderClass}`}
+                            className={`hover-elevate cursor-pointer relative ${borderClass} ${room.isActive === false ? "opacity-50 grayscale border-dashed" : ""}`}
                             data-testid={`room-card-${room.id}`}
                           >
+                            {room.isActive === false && (
+                              <div className="absolute inset-0 flex items-start justify-end p-2 z-10 pointer-events-none">
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400 uppercase tracking-wide">Deshabilitada</span>
+                              </div>
+                            )}
                             {/* Badges entrada/salida */}
-                            {(hasEntrada || hasSalida) && (
+                            {(hasEntrada || hasSalida) && room.isActive !== false && (
                               <div className="absolute top-2 right-10 flex gap-1 z-10">
                                 {hasEntrada && (
                                   <Tooltip>
@@ -786,7 +822,8 @@ export default function RoomsPage() {
                                   onEdit={() => handleEditRoom(room)}
                                   onStatus={(s) => updateStatusMutation.mutate({ id: room.id, status: s })}
                                   onMaintenance={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
-                                  onDelete={() => deleteMutation.mutate(room.id)}
+                                  onToggleActive={() => toggleRoomActiveMutation.mutate({ id: room.id, isActive: room.isActive === false })}
+                                  canManage={canManage}
                                 />
                               </div>
                               <CardDescription className="text-xs">{room.roomType?.name || "Sin tipo"}</CardDescription>
@@ -899,7 +936,8 @@ export default function RoomsPage() {
                         onEdit={() => handleEditRoom(room)}
                         onStatus={(s) => updateStatusMutation.mutate({ id: room.id, status: s })}
                         onMaintenance={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
-                        onDelete={() => deleteMutation.mutate(room.id)}
+                        onToggleActive={() => toggleRoomActiveMutation.mutate({ id: room.id, isActive: room.isActive === false })}
+                        canManage={canManage}
                       />
                     </TableCell>
                   </TableRow>
