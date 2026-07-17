@@ -1955,7 +1955,7 @@ function ReservationDetailDialog({
       const all = await res.json();
       return all
         .filter((r: ReservationWithDetails) => 
-          (r.status === "checked_in" || r.status === "confirmed" || r.status === "web_checkin") && r.id !== reservation.id
+          (r.status === "checked_in" || r.status === "web_checkin") && r.id !== reservation.id
         )
         .sort((a: ReservationWithDetails, b: ReservationWithDetails) => {
           if (a.status !== b.status) {
@@ -3951,7 +3951,7 @@ function ReservationDetailDialog({
                     {activeReservations?.filter(r => r.id).map((r) => (
                       <SelectItem key={r.id} value={r.id}>
                         Hab. {r.room?.roomNumber} — {r.guest?.lastName} {r.guest?.firstName}
-                        {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}
+                        {r.status === "web_checkin" ? " (web check-in)" : " (en casa)"}
                       </SelectItem>
                     ))}
                     {(!activeReservations || activeReservations.length === 0) && !isActiveReservationsLoading && (
@@ -4016,7 +4016,7 @@ function ReservationDetailDialog({
                   {activeReservations?.filter(r => r.id).map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       Hab. {r.room?.roomNumber} — {r.guest?.lastName} {r.guest?.firstName}
-                      {r.status === "checked_in" ? " (en casa)" : " (confirmada)"}
+                      {r.status === "web_checkin" ? " (web check-in)" : " (en casa)"}
                     </SelectItem>
                   ))}
                   {(!activeReservations || activeReservations.length === 0) && !isActiveReservationsLoading && (
