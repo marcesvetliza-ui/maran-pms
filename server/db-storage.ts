@@ -930,7 +930,6 @@ export class DatabaseStorage implements IStorage {
     const allReservations = await db.select().from(reservations).where(
       and(
         ne(reservations.status, "cancelled"),
-        ne(reservations.status, "pending"),
         sql`${reservations.checkInDate} <= ${endDate}`,
         sql`${reservations.checkOutDate} >= ${startDate}`
       )

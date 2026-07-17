@@ -119,12 +119,12 @@ function parseReservationError(error: any): string {
 
 const VALID_STATUSES: ReservationStatus[] = ["tentative", "pending", "confirmed", "web_checkin", "checked_in", "checked_out", "cancelled"];
 const normalizeStatus = (s: string | null | undefined): ReservationStatus =>
-  VALID_STATUSES.includes(s as ReservationStatus) ? (s as ReservationStatus) : "pending";
+  VALID_STATUSES.includes(s as ReservationStatus) ? (s as ReservationStatus) : "confirmed";
 
 function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
   const statusConfig: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-    tentative:   { label: "Tentativa",    variant: "outline" },
-    pending:     { label: "Pendiente",    variant: "secondary" },
+    tentative:   { label: "Confirmada",   variant: "default" },
+    pending:     { label: "Confirmada",   variant: "default" },
     confirmed:   { label: "Confirmada",   variant: "default" },
     web_checkin: { label: "Pre Check-In", variant: "default" },
     checked_in:  { label: "Check-in",     variant: "default" },
@@ -1112,10 +1112,7 @@ export function ReservationFormDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="tentative">Tentativa</SelectItem>
-                      <SelectItem value="pending">Pendiente</SelectItem>
                       <SelectItem value="confirmed">Confirmada</SelectItem>
-                      <SelectItem value="web_checkin">Pre Check-In</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -5029,10 +5026,7 @@ export default function ReservationsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="tentative">Tentativas</SelectItem>
-                  <SelectItem value="pending">Pendientes</SelectItem>
                   <SelectItem value="confirmed">Confirmadas</SelectItem>
-                  <SelectItem value="web_checkin">Pre Check-In</SelectItem>
                   <SelectItem value="checked_in">Check-in</SelectItem>
                   <SelectItem value="checked_out">Check-out</SelectItem>
                   <SelectItem value="cancelled">Canceladas</SelectItem>

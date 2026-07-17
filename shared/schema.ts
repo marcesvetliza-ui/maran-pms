@@ -235,7 +235,7 @@ export const reservations = pgTable("reservations", {
   discountValue: decimal("discount_value", { precision: 10, scale: 2 }).default("0"),
   finalRatePerNight: decimal("final_rate_per_night", { precision: 10, scale: 2 }),
   totalRoomAmount: decimal("total_room_amount", { precision: 10, scale: 2 }),
-  status: text("status").$type<ReservationStatus>().notNull().default("pending"),
+  status: text("status").$type<ReservationStatus>().notNull().default("confirmed"),
   source: text("source").$type<ReservationSource>().notNull().default("directo"),
   otaChannelId: varchar("ota_channel_id"),
   externalReservationId: text("external_reservation_id"),

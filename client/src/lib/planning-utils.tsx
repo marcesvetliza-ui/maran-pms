@@ -20,7 +20,7 @@ export function formatDateReadable(dateStr: string) {
 
 export const PLANNING_COLORS: Record<PlanningCellStatus, { bg: string; text: string; label: string; border: string }> = {
   available:      { bg: "bg-white dark:bg-zinc-900",              text: "text-zinc-400",                          label: "Disponible",       border: "border-zinc-200 dark:border-zinc-700" },
-  booked:         { bg: "bg-gray-200 dark:bg-gray-700/60",        text: "text-gray-700 dark:text-gray-300",       label: "Reservado",        border: "border-gray-300 dark:border-gray-600" },
+  booked:         { bg: "bg-blue-200 dark:bg-blue-800/60",         text: "text-blue-800 dark:text-blue-100",        label: "Reservado",        border: "border-blue-400 dark:border-blue-600" },
   web_checkin:    { bg: "bg-teal-200 dark:bg-teal-800/70",        text: "text-teal-900 dark:text-teal-100",       label: "Pre Check-In",     border: "border-teal-400 dark:border-teal-500 border-2" },
   checkin_today:  { bg: "bg-gray-200 dark:bg-gray-700",           text: "text-gray-700 dark:text-gray-200",       label: "Check-in hoy",     border: "border-green-700 dark:border-green-500 border-2" },
   checked_in:     { bg: "bg-emerald-200 dark:bg-emerald-800",     text: "text-emerald-900 dark:text-emerald-100", label: "Ocupado",          border: "border-emerald-300 dark:border-emerald-600" },
@@ -83,6 +83,14 @@ export function getPlanningCellClasses(status: PlanningCellStatus, source: Reser
       return "bg-emerald-200 dark:bg-emerald-800 border-2 border-red-500 dark:border-red-400";
     case "web_checkin":
       return "bg-teal-200 dark:bg-teal-800/70 border-2 border-teal-400 dark:border-teal-500";
+    case "booked":
+      if (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(source)) {
+        return "bg-indigo-200 dark:bg-indigo-800/60 border border-indigo-400 dark:border-indigo-700";
+      }
+      if (["empresa", "agencia"].includes(source)) {
+        return "bg-sky-200 dark:bg-sky-800/60 border border-sky-400 dark:border-sky-700";
+      }
+      return "bg-blue-200 dark:bg-blue-800/60 border border-blue-400 dark:border-blue-700";
     default:
       return `${getSourceColor(source)} border`;
   }
