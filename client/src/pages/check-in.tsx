@@ -689,9 +689,16 @@ export default function CheckInPage() {
                               cleaning: " · En limpieza",
                               maintenance: " · Mantenimiento",
                             };
+                            const statusDot: Record<string, string> = {
+                              available: "🟢",
+                              inspected: "🔵",
+                              dirty: "🟠",
+                              cleaning: "🟡",
+                              maintenance: "🔴",
+                            };
                             return (
                               <SelectItem key={room.id} value={room.id}>
-                                Hab. {room.roomNumber} - Piso {room.floor}{statusLabel[room.status] ?? ""}
+                                {statusDot[room.status] ?? "⚪"} Hab. {room.roomNumber} - Piso {room.floor}{statusLabel[room.status] ?? ""}
                               </SelectItem>
                             );
                           })}

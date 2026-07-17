@@ -105,6 +105,14 @@ export default function NewReservationPage() {
     queryKey: ["/api/rate-plans"],
   });
 
+  const { data: allReservations = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations"],
+  });
+
+  const { data: maintenanceBlocks = [] } = useQuery<{ roomId: string; blockFrom: string; blockTo: string }[]>({
+    queryKey: ["/api/maintenance/blocks"],
+  });
+
   const { data: companies } = useQuery<Company[]>({
     queryKey: ["/api/companies"],
   });
@@ -125,15 +133,50 @@ export default function NewReservationPage() {
     return diff > 0 ? diff : 0;
   }, [checkInDate, checkOutDate]);
 
-  const availableRooms = rooms?.filter((room) =>
-    room.status === "available" &&
-    (selectedRoomTypeId ? room.roomTypeId === selectedRoomTypeId : true)
-  );
+  const availableRooms = (() => {
+    const OCCUPIED_STATUSES = new Set(["occupied", "limpia_ocupada", "no_molestar"]);
 
+    // Habitaciones bloqueadas por reservas que se superponen al período
+    const blockedByReservation = new Set(
+      allReservations
+        .filter(r =>
+          (r.status === "confirmed" || r.status === "checked_in" || r.status === "pending" || r.status === "reserved") &&
+          r.roomId &&
+          checkInDate && checkOutDate &&
+          r.checkInDate < checkOutDate &&
+          r.checkOutDate > checkInDate
+        )
+        .map((r: any) => r.roomId)
+        .filter(Boolean)
+    );
+
+    return rooms?.filter((room) => {
+      if (selectedRoomTypeId && room.roomTypeId !== selectedRoomTypeId) return false;
+      if (!selectedRoomTypeId) return false;
+      if (room.isActive === false) return false;
+      // Habitación físicamente ocupada → no
+      if (OCCUPIED_STATUSES.has(room.status)) return false;
+      // Tiene reserva que se superpone → no
+      if (blockedByReservation.has(room.id)) return false;
+      // En mantenimiento: verificar bloqueo activo
+      if (room.status === "maintenance") {
+        const hasActiveBlock = maintenanceBlocks.some(
+          blk => blk.roomId === room.id &&
+            checkInDate && checkOutDate &&
+            blk.blockFrom < checkOutDate &&
+            blk.blockTo > checkInDate
+        );
+        return !hasActiveBlock;
+      }
+      // available, inspected, dirty, cleaning → sí
+      return true;
+    })?.sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber));
+  })();
+
+  // Tarifas: todas las del tipo seleccionado, excluyendo solo las ya vencidas (validTo < hoy)
   const applicableRatePlans = ratePlans?.filter((rp) => {
     if (rp.roomTypeId !== selectedRoomTypeId) return false;
-    if (rp.validFrom && checkInDate < rp.validFrom) return false;
-    if (rp.validTo && checkInDate > rp.validTo) return false;
+    if (rp.validTo && rp.validTo < checkInDate) return false; // plan vencido
     return true;
   });
 
@@ -499,11 +542,24 @@ export default function NewReservationPage() {
                         <SelectValue placeholder={selectedRoomTypeId ? "Seleccionar habitacion..." : "Primero seleccione tipo"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableRooms?.slice().sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber)).map((room) => {
-                          if (!room.id) return null;
+                        {availableRooms?.filter(r => r.id).map((room) => {
+                          const statusLabel: Record<string, string> = {
+                            available: "",
+                            inspected: " · Inspeccionada",
+                            dirty: " · Sucia",
+                            cleaning: " · En limpieza",
+                            maintenance: " · Mantenimiento",
+                          };
+                          const statusDot: Record<string, string> = {
+                            available: "🟢",
+                            inspected: "🔵",
+                            dirty: "🟠",
+                            cleaning: "🟡",
+                            maintenance: "🔴",
+                          };
                           return (
                             <SelectItem key={room.id} value={room.id}>
-                              Hab. {room.roomNumber} — Piso {room.floor}
+                              {statusDot[room.status] ?? "⚪"} Hab. {room.roomNumber} - Piso {room.floor}{statusLabel[room.status] ?? ""}
                             </SelectItem>
                           );
                         })}
