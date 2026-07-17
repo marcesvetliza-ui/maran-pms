@@ -672,6 +672,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(chargeTypes).where(eq(chargeTypes.active, true)).orderBy(chargeTypes.sortOrder);
   }
 
+  async getChargeTypesAll(): Promise<ChargeType[]> {
+    return db.select().from(chargeTypes).orderBy(chargeTypes.sortOrder, chargeTypes.label);
+  }
+
   async createChargeType(ct: InsertChargeType): Promise<ChargeType> {
     const [created] = await db.insert(chargeTypes).values(ct as any).returning();
     return created;

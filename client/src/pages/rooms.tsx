@@ -396,7 +396,7 @@ export default function RoomsPage() {
   const [deletingCTId, setDeletingCTId] = useState<string | null>(null);
 
   const { data: chargeTypesList = [] } = useQuery<ChargeType[]>({
-    queryKey: ["/api/charge-types"],
+    queryKey: ["/api/charge-types/all"],
     enabled: chargesSheetOpen,
   });
 
@@ -418,6 +418,7 @@ export default function RoomsPage() {
       ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit })
       : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/charge-types/all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
       setCtFormOpen(false);
       toast({ title: editingCT ? "Cargo actualizado" : "Cargo creado" });
@@ -426,11 +427,32 @@ export default function RoomsPage() {
   });
 
   const deleteCTMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/charge-types/${id}`),
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/charge-types/${id}`);
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.error || "Error al eliminar");
+      }
+    },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/charge-types/all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
       setDeletingCTId(null);
       toast({ title: "Cargo eliminado" });
+    },
+    onError: (e: any) => {
+      setDeletingCTId(null);
+      toast({ title: "No se puede eliminar", description: e?.message, variant: "destructive" });
+    },
+  });
+
+  const toggleCTMutation = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      apiRequest("PATCH", `/api/charge-types/${id}`, { active }),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/charge-types/all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
+      toast({ title: vars.active ? "Cargo habilitado" : "Cargo deshabilitado" });
     },
     onError: (e: any) => toast({ title: "Error", description: e?.message, variant: "destructive" }),
   });
@@ -973,17 +995,20 @@ export default function RoomsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {chargeTypesList.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-8">Sin cargos configurados</p>
             )}
             {chargeTypesList.map(ct => (
-              <div key={ct.id} className="flex items-center gap-3 border rounded-lg px-3 py-2.5">
+              <div key={ct.id} className={`flex items-center gap-3 border rounded-lg px-3 py-2.5 transition-colors ${!ct.active ? "opacity-50 bg-muted/30 border-dashed" : ""}`}>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-medium truncate">{ct.label}</p>
-                    {ct.allowPriceEdit && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className={`text-sm font-medium truncate ${!ct.active ? "line-through text-muted-foreground" : ""}`}>{ct.label}</p>
+                    {ct.allowPriceEdit && ct.active && (
                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 shrink-0">Variable</span>
+                    )}
+                    {!ct.active && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 shrink-0">Deshabilitado</span>
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{ct.description} · {ct.category}</p>
@@ -995,8 +1020,21 @@ export default function RoomsPage() {
                   }
                 </span>
                 <div className="flex gap-1 shrink-0">
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditCT(ct)} data-testid={`btn-edit-ct-${ct.id}`}>
-                    <Pencil className="h-3.5 w-3.5" />
+                  {ct.active && (
+                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditCT(ct)} data-testid={`btn-edit-ct-${ct.id}`} title="Editar">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={`h-7 w-7 ${ct.active ? "text-muted-foreground hover:text-orange-600" : "text-muted-foreground hover:text-green-600"}`}
+                    onClick={() => toggleCTMutation.mutate({ id: ct.id, active: !ct.active })}
+                    disabled={toggleCTMutation.isPending}
+                    data-testid={`btn-toggle-ct-${ct.id}`}
+                    title={ct.active ? "Deshabilitar cargo" : "Habilitar cargo"}
+                  >
+                    {ct.active ? <OctagonMinus className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                   </Button>
                   {deletingCTId === ct.id ? (
                     <div className="flex gap-1">
@@ -1008,7 +1046,7 @@ export default function RoomsPage() {
                       </Button>
                     </div>
                   ) : (
-                    <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => setDeletingCTId(ct.id)} data-testid={`btn-delete-ct-${ct.id}`}>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => setDeletingCTId(ct.id)} data-testid={`btn-delete-ct-${ct.id}`} title="Eliminar cargo">
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   )}

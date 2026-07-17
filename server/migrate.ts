@@ -851,5 +851,18 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Restore deleted charge types (cochera, pensión completa) if missing
+  await withTimeout("charge_types_restore_missing", T, () =>
+    db.execute(sql`
+      INSERT INTO charge_types (label, description, default_amount, category, sort_order, active, allow_price_edit)
+      SELECT 'Cochera (por día)', 'Cochera', 2500, 'otros', 1, true, false
+      WHERE NOT EXISTS (SELECT 1 FROM charge_types WHERE label = 'Cochera (por día)');
+
+      INSERT INTO charge_types (label, description, default_amount, category, sort_order, active, allow_price_edit)
+      SELECT 'Pensión Completa', 'Pensión Completa', 8000, 'restaurant', 3, true, false
+      WHERE NOT EXISTS (SELECT 1 FROM charge_types WHERE label = 'Pensión Completa');
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

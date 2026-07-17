@@ -1363,6 +1363,16 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Admin endpoint — returns ALL charge types including disabled ones
+  app.get("/api/charge-types/all", requireAuth, async (_req, res) => {
+    try {
+      const types = await storage.getChargeTypesAll();
+      res.json(types);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/charge-types", requireAuth, async (req, res) => {
     try {
       const { label, description, defaultAmount, category, sortOrder, allowPriceEdit } = req.body;
@@ -1395,6 +1405,21 @@ export function registerReservationsRoutes(app: Express) {
 
   app.delete("/api/charge-types/:id", requireAuth, async (req, res) => {
     try {
+      // Check if charge type was ever used (by description match in charges table)
+      const allTypes = await storage.getChargeTypesAll();
+      const ct = allTypes.find(t => t.id === req.params.id);
+      if (!ct) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
+
+      const usageCheck = await db.execute(
+        sql`SELECT COUNT(*) FROM charges WHERE LOWER(description) = LOWER(${ct.label}) OR LOWER(description) = LOWER(${ct.description})`
+      );
+      const usageCount = parseInt((usageCheck.rows[0] as any)?.count ?? "0");
+      if (usageCount > 0) {
+        return res.status(400).json({
+          error: `Este cargo fue utilizado en ${usageCount} registro(s) y no puede eliminarse. Podés deshabilitarlo para que no aparezca en el selector.`
+        });
+      }
+
       const ok = await storage.deleteChargeType(req.params.id);
       if (!ok) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
       res.status(204).send();
