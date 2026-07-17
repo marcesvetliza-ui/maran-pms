@@ -167,6 +167,12 @@ export function ReservationFormDialog({
   const { toast } = useToast();
   const isEditing = !!reservation;
 
+  const sectionCardClass = (isComplete: boolean, isRequired: boolean): string => {
+    if (isComplete) return "border-green-500 bg-green-50 dark:bg-green-950/30 dark:border-green-700 transition-colors";
+    if (isRequired) return "border-amber-400 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-600 transition-colors";
+    return "transition-colors";
+  };
+
   const today = getLocalToday();
   const tomorrowDate = new Date();
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
@@ -676,6 +682,7 @@ export function ReservationFormDialog({
                 setSelectedGuest(null);
                 setFormData((prev) => ({ ...prev, guestId: "" }));
               }}
+              cardClassName={sectionCardClass(!!selectedGuest, !isEditing)}
             />
 
             <CompanySelector
@@ -689,6 +696,7 @@ export function ReservationFormDialog({
                 setSelectedCompany(null);
                 setFormData((prev) => ({ ...prev, companyId: "" }));
               }}
+              cardClassName={sectionCardClass(!!selectedCompany, false)}
             />
 
             <AgencySelector
@@ -702,6 +710,7 @@ export function ReservationFormDialog({
                 setSelectedAgency(null);
                 setFormData((prev) => ({ ...prev, agencyId: "" }));
               }}
+              cardClassName={sectionCardClass(!!selectedAgency, false)}
             />
 
             <div className="grid gap-2">
@@ -728,7 +737,7 @@ export function ReservationFormDialog({
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className={`rounded-lg border p-3 grid grid-cols-2 gap-4 ${sectionCardClass(!!(selectedRoomTypeId && formData.roomId), !isEditing)}`}>
               <div className="grid gap-2">
                 <Label htmlFor="roomType">
                   {isUpgrade ? "Tarifa a cobrar" : "Tipo de Habitación"}
@@ -797,7 +806,7 @@ export function ReservationFormDialog({
               </div>
             </div>
 
-            <div className="grid gap-2">
+            <div className={`rounded-lg border p-3 grid gap-2 ${sectionCardClass(!!formData.ratePlanId, !isEditing)}`}>
               <Label htmlFor="ratePlan">Plan Tarifario</Label>
               <Select
                 value={formData.ratePlanId || ""}
