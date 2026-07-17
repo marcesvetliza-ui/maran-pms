@@ -187,7 +187,7 @@ export function ReservationFormDialog({
     reservation?.agency || null
   );
 
-  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || defaultValues?.roomTypeId || "");
+  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
   const { data: maintenanceBlocks = [] } = useQuery<{ roomId: string; blockFrom: string; blockTo: string }[]>({
@@ -225,8 +225,8 @@ export function ReservationFormDialog({
     guestId: reservation?.guestId || "",
     companyId: reservation?.companyId || "",
     agencyId: reservation?.agencyId || "",
-    roomTypeId: reservation?.roomTypeId || defaultValues?.roomTypeId || "",
-    roomId: reservation?.roomId || defaultValues?.roomId || "",
+    roomTypeId: reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "",
+    roomId: reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || "",
     ratePlanId: reservation?.ratePlanId || "",
     checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
     checkOutDate: reservation?.checkOutDate || (() => {
@@ -269,14 +269,14 @@ export function ReservationFormDialog({
       setSelectedGuest(reservation?.guest || null);
       setSelectedCompany(reservation?.company || null);
       setSelectedAgency(reservation?.agency || null);
-      setSelectedRoomTypeId(reservation?.roomTypeId || defaultValues?.roomTypeId || "");
+      setSelectedRoomTypeId(reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "");
       setFormData({
         reservationCode: reservation?.reservationCode || "",
         guestId: reservation?.guestId || "",
         companyId: reservation?.companyId || "",
         agencyId: reservation?.agencyId || "",
-        roomTypeId: reservation?.roomTypeId || defaultValues?.roomTypeId || "",
-        roomId: reservation?.roomId || defaultValues?.roomId || "",
+        roomTypeId: reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "",
+        roomId: reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || "",
         ratePlanId: reservation?.ratePlanId || "",
         checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
         checkOutDate: reservation?.checkOutDate || (() => {
@@ -647,10 +647,12 @@ export function ReservationFormDialog({
         return isUsable || r.id === formData.roomId;
       })
     : rooms.filter((r) => {
-        const sameRoom = r.id === reservation?.roomId || r.id === defaultValues?.roomId || r.id === formData.roomId;
+        const currentRoomId = reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || formData.roomId;
+        const sameRoom = !!currentRoomId && r.id === currentRoomId;
         const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status) ||
           (r.status === "maintenance" && !hasMaintenanceBlockConflict(r.id));
-        return (isUsable || sameRoom) && r.roomTypeId === selectedRoomTypeId;
+        if (sameRoom) return true;
+        return isUsable && r.roomTypeId === selectedRoomTypeId;
       });
 
   return (
