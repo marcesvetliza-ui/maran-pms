@@ -904,11 +904,6 @@ export function ReservationDetailModal({
             <Button variant="outline" onClick={() => { onOpenChange(false); onNavigate(`/reservations?view=${reservationId}`); }} className="w-full sm:w-auto" data-testid="button-view-full">
               <ExternalLink className="h-4 w-4 mr-2" />Ver Completo
             </Button>
-            {reservation && !isEditing && checkoutStep === 0 && reservation.status !== "checked_out" && reservation.status !== "cancelled" && (
-              <Button variant="ghost" size="sm" onClick={startEditing} className="w-full sm:w-auto" data-testid="button-start-edit">
-                Editar fechas/tarifa
-              </Button>
-            )}
           </DialogFooter>
         )}
       </DialogContent>
