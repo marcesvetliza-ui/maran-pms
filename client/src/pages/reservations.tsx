@@ -43,7 +43,6 @@ import {
   Trash2,
   UserCheck,
   TrendingUp,
-  Download,
   Phone,
   AlertCircle,
   Clock,
@@ -3563,20 +3562,6 @@ function ReservationDetailDialog({
             >
               <FileText className="h-4 w-4 mr-2" />
               Confirmación
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                const url = `/api/reservations/${reservation.id}/confirmation-pdf`;
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `Confirmacion-${reservation.reservationCode || reservation.id}.pdf`;
-                a.click();
-              }}
-              data-testid="button-download-confirmation-pdf"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Descargar PDF
             </Button>
             {onEdit && reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
               <Button
