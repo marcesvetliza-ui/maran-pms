@@ -927,13 +927,17 @@ export class DatabaseStorage implements IStorage {
 
   async getPlanningData(startDate: string, endDate: string): Promise<PlanningData> {
     const allRooms = await this.getRooms();
-    const allReservations = await db.select().from(reservations).where(
-      and(
-        ne(reservations.status, "cancelled"),
-        sql`${reservations.checkInDate} <= ${endDate}`,
-        sql`${reservations.checkOutDate} >= ${startDate}`
-      )
-    );
+    const [allReservations, allBedTypes] = await Promise.all([
+      db.select().from(reservations).where(
+        and(
+          ne(reservations.status, "cancelled"),
+          sql`${reservations.checkInDate} <= ${endDate}`,
+          sql`${reservations.checkOutDate} >= ${startDate}`
+        )
+      ),
+      db.select().from(bedTypes),
+    ]);
+    const bedTypeMap = new Map(allBedTypes.map(bt => [bt.id, bt.name]));
     const allGroupLinks = await db.select().from(groupReservationLinks);
     const allGuests = await db.select().from(guests);
     const allGroups = await db.select().from(groups);
@@ -1013,6 +1017,8 @@ export class DatabaseStorage implements IStorage {
           prefSummary,
           isUpgrade: res.isUpgrade ?? false,
           color: (res as any).color ?? null,
+          numberOfGuests: res.numberOfGuests ?? null,
+          bedTypeName: res.bedTypeId ? (bedTypeMap.get(res.bedTypeId) ?? null) : null,
         };
       }
     }

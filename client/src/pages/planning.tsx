@@ -1282,12 +1282,11 @@ export default function PlanningPage() {
                                         </div>
                                       )}
                                     </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-[200px]">
+                                    <TooltipContent side="top" className="max-w-[220px]">
                                       <div className="text-xs space-y-1">
-                                        <div className="font-semibold">{room.roomNumber} - {room.roomType?.name ?? ""}</div>
-                                        <div>Estado: {getStatusLabel(status)}</div>
                                         {reservation ? (
-                                          <div className="border-t pt-1 mt-1">
+                                          <>
+                                            <div className="font-semibold">{room.roomNumber} — {room.roomType?.name ?? ""}</div>
                                             {reservation.isGroup && reservation.groupName && (
                                               <div className="font-semibold text-indigo-600 dark:text-indigo-400">
                                                 Grupo: {reservation.groupName}
@@ -1295,10 +1294,18 @@ export default function PlanningPage() {
                                             )}
                                             <div className="font-medium">{reservation.guestName}</div>
                                             <div className="text-muted-foreground">
-                                              {reservation.checkIn} a {reservation.checkOut}
+                                              {reservation.checkIn} → {reservation.checkOut}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-muted-foreground">
+                                              {reservation.numberOfGuests != null && (
+                                                <span>{reservation.numberOfGuests} pax</span>
+                                              )}
+                                              {reservation.bedTypeName && (
+                                                <span>· {reservation.bedTypeName}</span>
+                                              )}
                                             </div>
                                             <div className="text-muted-foreground">
-                                              Origen: {getSourceLabel(reservation.source)} ({reservation.source})
+                                              {getSourceLabel(reservation.source)}
                                             </div>
                                             {reservation.earlyCheckIn && (
                                               <div className="text-orange-400 font-medium">
@@ -1323,19 +1330,20 @@ export default function PlanningPage() {
                                             <div className="border-t pt-1 mt-1 text-primary">
                                               Clic para ver detalle
                                             </div>
-                                          </div>
+                                          </>
                                         ) : ghostBlock ? (
-                                          <div className="border-t pt-1 mt-1 space-y-0.5">
-                                            <div className="font-semibold" style={(() => { const hex = ghostBlock.groupColor.replace("#",""); const r=parseInt(hex.substring(0,2),16),g=parseInt(hex.substring(2,4),16),b=parseInt(hex.substring(4,6),16); return {color:`rgb(${r},${g},${b})`}; })()}>
-                                              Grupo: {ghostBlock.groupName}
+                                          <>
+                                            <div className="font-semibold">{room.roomNumber} — {room.roomType?.name ?? ""}</div>
+                                            <div className="border-t pt-1 mt-1 space-y-0.5">
+                                              <div className="font-semibold" style={(() => { const hex = ghostBlock.groupColor.replace("#",""); const r=parseInt(hex.substring(0,2),16),g=parseInt(hex.substring(2,4),16),b=parseInt(hex.substring(4,6),16); return {color:`rgb(${r},${g},${b})`}; })()}>
+                                                Grupo: {ghostBlock.groupName}
+                                              </div>
+                                              <div className="text-muted-foreground text-[10px]">Bloque sin asignar — clic para ir al grupo</div>
                                             </div>
-                                            <div className="text-muted-foreground text-[10px]">Bloque sin asignar — clic para ir al grupo y asignar habitación</div>
-                                          </div>
-                                        ) : isClickable ? (
-                                          <div className="border-t pt-1 mt-1 text-primary">
-                                            Clic para crear reserva
-                                          </div>
-                                        ) : null}
+                                          </>
+                                        ) : (
+                                          <div className="text-muted-foreground">{room.roomNumber} — {getStatusLabel(status)}</div>
+                                        )}
                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
