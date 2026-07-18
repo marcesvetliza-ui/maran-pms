@@ -429,7 +429,13 @@ export default function CheckOutPage() {
             <h1 className="text-2xl font-bold tracking-tight" data-testid="text-wizard-title">
               Check-out — {selectedReservation.guest?.lastName} {selectedReservation.guest?.firstName}
             </h1>
-            <p className="text-muted-foreground">Hab. {selectedReservation.room?.roomNumber}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <DoorOpen className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xl font-bold text-primary tracking-tight">
+                {selectedReservation.room?.roomNumber}
+              </span>
+              <span className="text-xs text-muted-foreground">{(selectedReservation.room as any)?.roomType?.name || ""}</span>
+            </div>
           </div>
         </div>
 
@@ -1342,11 +1348,14 @@ export default function CheckOutPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <DoorOpen className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-2xl font-bold text-primary tracking-tight">
+                    {reservation.room?.roomNumber}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{(reservation.room as any)?.roomType?.name || ""}</span>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="flex items-center gap-2 text-sm">
-                    <DoorOpen className="h-4 w-4 text-muted-foreground" />
-                    <span>Hab. {reservation.room?.roomNumber}</span>
-                  </div>
                   <div className="flex items-center gap-2 text-sm">
                     <User className="h-4 w-4 text-muted-foreground" />
                     <span>{reservation.numberOfGuests} huésped(es)</span>
