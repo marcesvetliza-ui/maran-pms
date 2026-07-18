@@ -134,13 +134,11 @@ export default function NewReservationPage() {
   }, [checkInDate, checkOutDate]);
 
   const availableRooms = (() => {
-    const OCCUPIED_STATUSES = new Set(["occupied", "limpia_ocupada", "no_molestar"]);
-
     // Habitaciones bloqueadas por reservas que se superponen al período
     const blockedByReservation = new Set(
       allReservations
         .filter(r =>
-          (r.status === "confirmed" || r.status === "checked_in" || r.status === "pending" || r.status === "reserved") &&
+          (r.status === "confirmed" || r.status === "checked_in" || r.status === "web_checkin" || r.status === "pending" || r.status === "reserved") &&
           r.roomId &&
           checkInDate && checkOutDate &&
           r.checkInDate < checkOutDate &&
@@ -154,9 +152,8 @@ export default function NewReservationPage() {
       if (selectedRoomTypeId && room.roomTypeId !== selectedRoomTypeId) return false;
       if (!selectedRoomTypeId) return false;
       if (room.isActive === false) return false;
-      // Habitación físicamente ocupada → no
-      if (OCCUPIED_STATUSES.has(room.status)) return false;
-      // Tiene reserva que se superpone → no
+      if ((room as any).isVirtual) return false;
+      // Tiene reserva que se superpone en esas fechas → no
       if (blockedByReservation.has(room.id)) return false;
       // En mantenimiento: verificar bloqueo activo
       if (room.status === "maintenance") {
