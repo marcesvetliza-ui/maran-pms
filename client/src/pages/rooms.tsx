@@ -30,6 +30,11 @@ import {
   User,
   Eye,
   OctagonMinus,
+  Phone,
+  Calendar,
+  RefreshCw,
+  ShieldAlert,
+  Utensils,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -394,10 +399,274 @@ function RoomFormDialog({
   );
 }
 
+// ══════════════════════════════════════════════════════════
+// OCUPADAS VIEW — Habitaciones con huéspedes alojados
+// ══════════════════════════════════════════════════════════
+
+const SOURCE_LABELS: Record<string, string> = {
+  direct: "Directo", booking: "Booking.com", airbnb: "Airbnb",
+  expedia: "Expedia", phone: "Teléfono", walk_in: "Walk-in",
+  web: "Web", agency: "Agencia", company: "Empresa", other: "Otro",
+};
+const SEGMENT_LABELS: Record<string, string> = {
+  LEISURE: "Turismo", CORP: "Corporativo", SPORT: "Deportivo",
+  CONGRESS: "Congreso", OTHER: "Otro",
+};
+
+function OcupadaCard({ item }: { item: any }) {
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const checkOutToday = item.checkOut === todayStr;
+  const checkOutTomorrow = item.nightsRemaining === 1;
+
+  return (
+    <Card
+      className={`relative overflow-hidden border-2 ${
+        checkOutToday
+          ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-900/10"
+          : "border-blue-200 dark:border-blue-800"
+      }`}
+      data-testid={`inhouse-card-${item.reservationId}`}
+    >
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="flex items-baseline gap-2">
+              <CardTitle className="text-3xl font-bold tracking-tight">{item.roomNumber}</CardTitle>
+              <span className="text-xs text-muted-foreground">Piso {item.floor}</span>
+            </div>
+            <CardDescription className="text-xs mt-0.5">{item.roomTypeName || "Sin tipo"}</CardDescription>
+          </div>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            {checkOutToday && (
+              <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 text-[10px]">
+                <LogOut className="h-2.5 w-2.5 mr-0.5" />Salida hoy
+              </Badge>
+            )}
+            {!checkOutToday && checkOutTomorrow && (
+              <Badge variant="outline" className="text-[10px] text-orange-600 dark:text-orange-400 border-orange-300 dark:border-orange-700">Salida mañana</Badge>
+            )}
+            {item.reservationStatus === "web_checkin" && (
+              <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 text-[10px]">Web CI</Badge>
+            )}
+            {item.earlyCheckIn && (
+              <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 text-[10px]">
+                <Clock className="h-2.5 w-2.5 mr-0.5" />Early {item.earlyCheckInTime || ""}
+              </Badge>
+            )}
+            {item.lateCheckOut && (
+              <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 text-[10px]">
+                <Clock className="h-2.5 w-2.5 mr-0.5" />Late {item.lateCheckOutTime || ""}
+              </Badge>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="pt-0 space-y-3">
+        {/* Huésped */}
+        <div className="min-h-[40px]">
+          {item.guest ? (
+            <div>
+              <div className="font-semibold text-sm leading-tight">
+                {item.guest.lastName}{item.guest.firstName ? `, ${item.guest.firstName}` : ""}
+              </div>
+              {item.guest.segment && (
+                <p className="text-[10px] text-muted-foreground">{SEGMENT_LABELS[item.guest.segment] || item.guest.segment}</p>
+              )}
+              {item.guest.phone && (
+                <a href={`tel:${item.guest.phone}`} className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors mt-0.5">
+                  <Phone className="h-3 w-3" />{item.guest.phone}
+                </a>
+              )}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground italic">Sin huésped asignado</div>
+          )}
+        </div>
+
+        {/* Estadía */}
+        <div className="flex flex-col gap-1 text-xs text-muted-foreground border-t pt-2">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Calendar className="h-3 w-3 shrink-0" />
+              {new Date(item.checkIn + "T12:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" })}
+              {" → "}
+              {new Date(item.checkOut + "T12:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" })}
+            </span>
+            <span className={`font-medium text-[11px] ${
+              item.nightsRemaining <= 0 ? "text-amber-600 dark:text-amber-400" :
+              item.nightsRemaining === 1 ? "text-orange-500 dark:text-orange-400" : "text-foreground"
+            }`}>
+              {item.nightsRemaining <= 0 ? "Sale hoy" : `${item.nightsRemaining}n restantes`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="flex items-center gap-1">
+              <Users className="h-3 w-3" />
+              {item.adults}A{item.children > 0 ? ` + ${item.children}N` : ""}
+              {item.companionsCount > 0 ? ` · ${item.companionsCount} acomp.` : ""}
+            </span>
+            <span className="text-muted-foreground/50">·</span>
+            <span>{SOURCE_LABELS[item.source] || item.source}</span>
+          </div>
+        </div>
+
+        {/* Saldo del folio */}
+        <div className={`flex items-center justify-between rounded-md px-3 py-2 ${
+          item.folioBalance <= 0
+            ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
+            : item.folioBalance < 10000
+            ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+            : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
+        }`}>
+          <span className="text-xs font-medium">Saldo cuenta</span>
+          <span className="text-sm font-bold tabular-nums">
+            {item.folioBalance < 0 ? (
+              <span>−${Math.abs(item.folioBalance).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-[10px] font-normal opacity-70">a favor</span></span>
+            ) : (
+              `$${item.folioBalance.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            )}
+          </span>
+        </div>
+
+        {/* Hospitalidad */}
+        {(item.hasPreferences || item.pendingAlertsCount > 0) && (
+          <div className="flex flex-wrap gap-1 border-t pt-2">
+            {item.hasCritical && (
+              <Badge className="bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 text-[10px] gap-0.5">
+                <ShieldAlert className="h-3 w-3" />Pref. crítica
+              </Badge>
+            )}
+            {item.hasSpecialDate && (
+              <Badge className="bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300 text-[10px]">
+                🎂 Fecha especial
+              </Badge>
+            )}
+            {item.hasDiet && (
+              <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 text-[10px] gap-0.5">
+                <Utensils className="h-3 w-3" />Dietario
+              </Badge>
+            )}
+            {item.hasPreferences && !item.hasCritical && !item.hasSpecialDate && !item.hasDiet && (
+              <Badge variant="outline" className="text-[10px]">
+                <User className="h-3 w-3 mr-0.5" />{item.prefsCount} prefer.
+              </Badge>
+            )}
+            {item.pendingAlertsCount > 0 && (
+              <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 text-[10px] gap-0.5">
+                <AlertTriangle className="h-3 w-3" />{item.pendingAlertsCount} alerta{item.pendingAlertsCount !== 1 ? "s" : ""}
+              </Badge>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OcupadasView() {
+  const [search, setSearch] = useState("");
+  const { data: inHouse = [], isLoading, refetch, isFetching } = useQuery<any[]>({
+    queryKey: ["/api/rooms/in-house"],
+  });
+
+  const filtered = search.trim()
+    ? inHouse.filter(item =>
+        item.roomNumber.toLowerCase().includes(search.toLowerCase()) ||
+        (item.guest && `${item.guest.firstName ?? ""} ${item.guest.lastName ?? ""}`.toLowerCase().includes(search.toLowerCase()))
+      )
+    : inHouse;
+
+  const exitingToday = inHouse.filter(i => i.nightsRemaining <= 0).length;
+  const withBalance = inHouse.filter(i => i.folioBalance > 0).length;
+
+  if (isLoading) {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-72" />)}
+      </div>
+    );
+  }
+
+  if (inHouse.length === 0) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+          <BedDouble className="h-16 w-16 text-muted-foreground/50 mb-4" />
+          <h3 className="text-lg font-semibold mb-2">No hay huéspedes alojados</h3>
+          <p className="text-muted-foreground">No hay reservas con check-in activo en este momento.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Resumen rápido */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg px-3 py-2 text-sm font-medium">
+          <BedDouble className="h-4 w-4" />
+          {inHouse.length} alojado{inHouse.length !== 1 ? "s" : ""}
+        </div>
+        {exitingToday > 0 && (
+          <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-lg px-3 py-2 text-sm font-medium">
+            <LogOut className="h-4 w-4" />
+            {exitingToday} salen hoy
+          </div>
+        )}
+        {withBalance > 0 && (
+          <div className="flex items-center gap-2 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 rounded-lg px-3 py-2 text-sm font-medium">
+            <ReceiptText className="h-4 w-4" />
+            {withBalance} con saldo
+          </div>
+        )}
+      </div>
+
+      {/* Búsqueda */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Hab. o huésped..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-10"
+            data-testid="input-search-inhouse"
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => refetch()}
+          disabled={isFetching}
+          title="Actualizar"
+          data-testid="btn-refresh-inhouse"
+        >
+          <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+        </Button>
+        <span className="text-sm text-muted-foreground">{filtered.length} habitaciones</span>
+      </div>
+
+      {/* Grilla de tarjetas */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {filtered.map(item => (
+          <OcupadaCard key={item.reservationId} item={item} />
+        ))}
+      </div>
+      {filtered.length === 0 && search && (
+        <div className="text-center text-muted-foreground py-8">
+          Sin resultados para "<span className="font-medium">{search}</span>"
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RoomsPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const canManage = ROOM_ADMIN_ROLES.includes((user?.role ?? "") as SystemUserRole);
+  const [activeTab, setActiveTab] = useState<"inventario" | "ocupadas">("inventario");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -643,19 +912,50 @@ export default function RoomsPage() {
           </h1>
           <p className="text-muted-foreground">Gestiona el inventario de habitaciones del hotel</p>
         </div>
-        {canManage && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setChargesSheetOpen(true)} data-testid="button-charge-types">
-              <ReceiptText className="mr-2 h-4 w-4" />
-              Cargos en habitaciones
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Tab toggle */}
+          <div className="flex items-center rounded-lg border p-0.5 bg-muted/40">
+            <Button
+              variant={activeTab === "inventario" ? "default" : "ghost"}
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={() => setActiveTab("inventario")}
+              data-testid="tab-inventario"
+            >
+              <DoorOpen className="mr-1.5 h-3.5 w-3.5" />
+              Inventario
             </Button>
-            <Button onClick={handleNewRoom} data-testid="button-new-room">
-              <Plus className="mr-2 h-4 w-4" />
-              Nueva Habitación
+            <Button
+              variant={activeTab === "ocupadas" ? "default" : "ghost"}
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={() => setActiveTab("ocupadas")}
+              data-testid="tab-ocupadas"
+            >
+              <BedDouble className="mr-1.5 h-3.5 w-3.5" />
+              Ocupadas
             </Button>
           </div>
-        )}
+          {canManage && activeTab === "inventario" && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setChargesSheetOpen(true)} data-testid="button-charge-types">
+                <ReceiptText className="mr-2 h-4 w-4" />
+                Cargos en habitaciones
+              </Button>
+              <Button size="sm" onClick={handleNewRoom} data-testid="button-new-room">
+                <Plus className="mr-2 h-4 w-4" />
+                Nueva Habitación
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* ── PESTAÑA: OCUPADAS ───────────────────────────────── */}
+      {activeTab === "ocupadas" && <OcupadasView />}
+
+      {/* ── PESTAÑA: INVENTARIO ─────────────────────────────── */}
+      {activeTab === "inventario" && <>
 
       {/* Status Summary Cards */}
       <div className="grid gap-3 grid-cols-3 md:grid-cols-6">
@@ -966,6 +1266,7 @@ export default function RoomsPage() {
         </Card>
       )}
 
+      </>}
       {/* Room Form Dialog */}
       <RoomFormDialog
         room={selectedRoom}

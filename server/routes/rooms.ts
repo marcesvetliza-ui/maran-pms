@@ -2,6 +2,9 @@ import type { Express } from "express";
 import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
+import { db } from "../db";
+import { reservations, rooms as roomsTable, guests, guestPreferences, folios, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable } from "@shared/schema";
+import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
@@ -150,26 +153,108 @@ export function registerRoomsRoutes(app: Express) {
 
   app.get("/api/rooms/in-house", async (req, res) => {
     try {
-      const allRooms = await storage.getRooms();
-      const occupiedRooms = allRooms.filter(r => r.status === "occupied");
-      const allReservations = await storage.getReservations();
-      const activeReservations = allReservations.filter(r => r.status === "checked_in");
-      const result = [];
-      for (const room of occupiedRooms) {
-        const reservation = activeReservations.find(r => r.roomId === room.id);
-        if (reservation) {
-          const guest = await storage.getGuest(reservation.guestId);
-          result.push({
+      const today = getArgentinaToday();
+
+      const activeRows = await db.select({
+        res: reservations,
+        room: roomsTable,
+      })
+        .from(reservations)
+        .innerJoin(roomsTable, eq(roomsTable.id, reservations.roomId))
+        .where(
+          and(
+            or(eq(reservations.status, "checked_in"), eq(reservations.status, "web_checkin")),
+            sql`(${roomsTable.isVirtual} IS NULL OR ${roomsTable.isVirtual} = false)`
+          )
+        );
+
+      if (activeRows.length === 0) return res.json([]);
+
+      const reservationIds = activeRows.map(r => r.res.id);
+      const guestIds = activeRows.map(r => r.res.guestId).filter(Boolean) as string[];
+
+      const [guestList, allPrefs, allFolios, allAlerts, allCompanions, allRoomTypesList] = await Promise.all([
+        guestIds.length > 0 ? db.select().from(guests).where(inArray(guests.id, guestIds)) : Promise.resolve([]),
+        guestIds.length > 0 ? db.select().from(guestPreferences).where(and(eq(guestPreferences.isActive, true), inArray(guestPreferences.guestId, guestIds))) : Promise.resolve([]),
+        db.select().from(folios).where(and(eq(folios.entityType, "reservation"), inArray(folios.entityId, reservationIds))),
+        db.select().from(hospitalityAlerts).where(and(ne(hospitalityAlerts.status, "completed"), inArray(hospitalityAlerts.reservationId, reservationIds))),
+        db.select().from(reservationCompanions).where(inArray(reservationCompanions.reservationId, reservationIds)),
+        db.select().from(roomTypesTable),
+      ]);
+
+      const guestMap = new Map(guestList.map(g => [g.id, g]));
+      const prefsByGuest = new Map<string, typeof allPrefs>();
+      for (const p of allPrefs) {
+        if (!prefsByGuest.has(p.guestId)) prefsByGuest.set(p.guestId, []);
+        prefsByGuest.get(p.guestId)!.push(p);
+      }
+      const folioByRes = new Map(allFolios.map(f => [f.entityId, f]));
+      const alertsByRes = new Map<string, number>();
+      for (const a of allAlerts) {
+        alertsByRes.set(a.reservationId, (alertsByRes.get(a.reservationId) ?? 0) + 1);
+      }
+      const companionCountByRes = new Map<string, number>();
+      for (const c of allCompanions) {
+        companionCountByRes.set(c.reservationId, (companionCountByRes.get(c.reservationId) ?? 0) + 1);
+      }
+      const roomTypeMap = new Map(allRoomTypesList.map(rt => [rt.id, rt]));
+
+      const daysDiff = (a: string, b: string) => {
+        const da = new Date(a + "T12:00:00");
+        const db2 = new Date(b + "T12:00:00");
+        return Math.round((db2.getTime() - da.getTime()) / 86400000);
+      };
+
+      const result = activeRows
+        .sort((a, b) => a.room.roomNumber.localeCompare(b.room.roomNumber, undefined, { numeric: true }))
+        .map(({ res, room }) => {
+          const guest = res.guestId ? guestMap.get(res.guestId) : undefined;
+          const prefs = res.guestId ? (prefsByGuest.get(res.guestId) ?? []) : [];
+          const folio = folioByRes.get(res.id);
+          const roomType = room.roomTypeId ? roomTypeMap.get(room.roomTypeId) : undefined;
+          return {
             roomId: room.id,
             roomNumber: room.roomNumber,
-            guestName: guest ? `${guest.firstName} ${guest.lastName}` : "Huésped",
-            reservationId: reservation.id,
-          });
-        }
-      }
-      result.sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
+            roomTypeName: roomType?.name ?? null,
+            floor: room.floor,
+            roomStatus: room.status,
+            reservationId: res.id,
+            reservationNumber: (res as any).reservationNumber ?? null,
+            checkIn: res.checkInDate,
+            checkOut: res.checkOutDate,
+            nightsRemaining: daysDiff(today, res.checkOutDate),
+            nightsStayed: daysDiff(res.checkInDate, today),
+            adults: res.adults ?? 1,
+            children: res.children ?? 0,
+            numberOfGuests: res.numberOfGuests ?? 1,
+            source: res.source,
+            earlyCheckIn: res.earlyCheckIn ?? false,
+            earlyCheckInTime: res.earlyCheckInTime ?? null,
+            lateCheckOut: res.lateCheckOut ?? false,
+            lateCheckOutTime: res.lateCheckOutTime ?? null,
+            reservationStatus: res.status,
+            guest: guest ? {
+              id: guest.id,
+              firstName: guest.firstName,
+              lastName: guest.lastName,
+              phone: guest.phone ?? null,
+              email: guest.email ?? null,
+              segment: (guest as any).segment ?? null,
+            } : null,
+            companionsCount: companionCountByRes.get(res.id) ?? 0,
+            folioBalance: folio ? parseFloat(String(folio.balance ?? "0")) : 0,
+            hasPreferences: prefs.length > 0,
+            hasCritical: prefs.some(p => p.priority === "critical"),
+            hasSpecialDate: prefs.some(p => p.category === "fecha_especial"),
+            hasDiet: prefs.some(p => p.category === "alimentacion"),
+            prefsCount: prefs.length,
+            pendingAlertsCount: alertsByRes.get(res.id) ?? 0,
+          };
+        });
+
       res.json(result);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[in-house] error:", error.message);
       res.status(500).json({ error: "Error fetching in-house rooms" });
     }
   });
