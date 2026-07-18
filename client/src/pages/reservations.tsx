@@ -195,6 +195,11 @@ export function ReservationFormDialog({
     enabled: open,
   });
 
+  const { data: allReservationsForFilter = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations"],
+    enabled: open,
+  });
+
   // Cargos adicionales al crear — cargados desde la BD
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
     queryKey: ["/api/charge-types"],
@@ -396,14 +401,21 @@ export function ReservationFormDialog({
     },
   });
 
-  const { data: ratePlans } = useQuery<RatePlan[]>({
+  const { data: ratePlansRaw } = useQuery<RatePlan[]>({
     queryKey: ["/api/rate-plans/by-room-type", selectedRoomTypeId],
     queryFn: async () => {
       if (!selectedRoomTypeId) return [];
-      const res = await fetch(`/api/rate-plans/by-room-type/${selectedRoomTypeId}`);
+      const res = await fetch(`/api/rate-plans/by-room-type/${selectedRoomTypeId}`, { credentials: "include" });
+      if (!res.ok) return [];
       return res.json();
     },
     enabled: !!selectedRoomTypeId,
+  });
+
+  // Filtra planes vencidos: si validTo existe y es anterior a la fecha de check-in, se excluye
+  const ratePlans = ratePlansRaw?.filter(rp => {
+    if (rp.validTo && formData.checkInDate && rp.validTo < formData.checkInDate) return false;
+    return true;
   });
 
   const { data: bedTypes } = useQuery<BedType[]>({
@@ -640,19 +652,42 @@ export function ReservationFormDialog({
     );
   };
 
+  const blockedRoomIdsByReservation = new Set(
+    allReservationsForFilter
+      .filter(r => {
+        const checkIn = formData.checkInDate || today;
+        const checkOut = formData.checkOutDate || tomorrow;
+        const thisResId = reservation?.id;
+        return (
+          r.roomId &&
+          r.id !== thisResId &&
+          ["confirmed", "checked_in", "web_checkin", "pending", "reserved"].includes(r.status) &&
+          r.checkInDate < checkOut &&
+          r.checkOutDate > checkIn
+        );
+      })
+      .map((r: any) => r.roomId)
+  );
+
   const availableRooms = isUpgrade
     ? rooms.filter((r) => {
-        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status) ||
-          (r.status === "maintenance" && !hasMaintenanceBlockConflict(r.id));
-        return isUsable || r.id === formData.roomId;
+        if ((r as any).isVirtual) return false;
+        if (r.isActive === false) return false;
+        if (blockedRoomIdsByReservation.has(r.id)) return false;
+        if (r.status === "maintenance") return !hasMaintenanceBlockConflict(r.id);
+        return true;
       })
     : rooms.filter((r) => {
         const currentRoomId = reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || formData.roomId;
         const sameRoom = !!currentRoomId && r.id === currentRoomId;
-        const isUsable = ["available", "dirty", "cleaning", "inspected"].includes(r.status) ||
-          (r.status === "maintenance" && !hasMaintenanceBlockConflict(r.id));
         if (sameRoom) return true;
-        return isUsable && r.roomTypeId === selectedRoomTypeId;
+        if (!selectedRoomTypeId) return false;
+        if (r.roomTypeId !== selectedRoomTypeId) return false;
+        if ((r as any).isVirtual) return false;
+        if (r.isActive === false) return false;
+        if (blockedRoomIdsByReservation.has(r.id)) return false;
+        if (r.status === "maintenance") return !hasMaintenanceBlockConflict(r.id);
+        return true;
       });
 
   return (
