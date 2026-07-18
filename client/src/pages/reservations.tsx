@@ -214,6 +214,7 @@ export function ReservationFormDialog({
   const [resChargeDesc, setResChargeDesc] = useState("");
   const [resChargeAmount, setResChargeAmount] = useState("");
   const [resChargeQty, setResChargeQty] = useState(1);
+  const [resChargeRecurring, setResChargeRecurring] = useState(false);
   const [resChargeCategory, setResChargeCategory] = useState("otros");
   const [hasVoucher, setHasVoucher] = useState(!!(reservation?.voucherCode || reservation?.voucherNotes));
 
@@ -1306,17 +1307,53 @@ export function ReservationFormDialog({
                           type="number"
                           min={1}
                           value={resChargeQty}
-                          onChange={(e) => setResChargeQty(Math.max(1, parseInt(e.target.value) || 1))}
+                          onChange={(e) => {
+                            setResChargeRecurring(false);
+                            setResChargeQty(Math.max(1, parseInt(e.target.value) || 1));
+                          }}
                           data-testid="input-new-res-charge-qty"
                         />
                       </div>
                     </div>
+                    {/* Toggle cargo por noche */}
+                    <div className="flex items-center gap-3 py-1">
+                      <Switch
+                        id="new-res-recurring-toggle"
+                        checked={resChargeRecurring}
+                        onCheckedChange={(checked) => {
+                          setResChargeRecurring(checked);
+                          const nights = Number(formData.nights) || 1;
+                          setResChargeQty(checked ? nights : 1);
+                        }}
+                        data-testid="switch-new-res-recurring-charge"
+                      />
+                      <Label htmlFor="new-res-recurring-toggle" className="text-xs cursor-pointer select-none">
+                        Cargo por noche
+                        {resChargeRecurring && (
+                          <span className="text-muted-foreground ml-1">· {Number(formData.nights) || 1} noche{(Number(formData.nights) || 1) !== 1 ? "s" : ""}</span>
+                        )}
+                      </Label>
+                    </div>
+                    {resChargeAmount && resChargeRecurring && (
+                      <div className="flex items-center rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2 text-sm">
+                        <span className="text-blue-700 dark:text-blue-300 font-medium">
+                          {Number(formData.nights) || 1} noches × ${parseFloat(resChargeAmount || "0").toFixed(2)} = <span className="font-bold">${(parseFloat(resChargeAmount || "0") * (Number(formData.nights) || 1)).toFixed(2)}</span>
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-end gap-2">
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => { setShowResChargeForm(false); setResChargePreset(""); setResChargeDesc(""); setResChargeAmount(""); setResChargeQty(1); }}
+                        onClick={() => {
+                          setShowResChargeForm(false);
+                          setResChargePreset("");
+                          setResChargeDesc("");
+                          setResChargeAmount("");
+                          setResChargeQty(1);
+                          setResChargeRecurring(false);
+                        }}
                       >
                         Cancelar
                       </Button>
@@ -1331,6 +1368,7 @@ export function ReservationFormDialog({
                           setResChargeDesc("");
                           setResChargeAmount("");
                           setResChargeQty(1);
+                          setResChargeRecurring(false);
                         }}
                         data-testid="button-confirm-new-res-charge"
                       >
@@ -1892,6 +1930,7 @@ function ReservationDetailDialog({
     { label: "Cargo editable", description: "", amount: "", category: "otros" as const, allowPriceEdit: true },
   ];
   const [chargeQty, setChargeQty] = useState(1);
+  const [isRecurringCharge, setIsRecurringCharge] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<typeof chargePresets[0] | null>(null);
   const [newPayment, setNewPayment] = useState({
     amount: "",
@@ -2205,6 +2244,7 @@ function ReservationDetailDialog({
     });
     setSelectedPreset(null);
     setChargeQty(1);
+    setIsRecurringCharge(false);
   };
 
   // Quickly add one more unit of an existing charge (for cochera, etc.)
@@ -2948,13 +2988,43 @@ function ReservationDetailDialog({
                         min="1"
                         step="1"
                         value={chargeQty}
-                        onChange={(e) => setChargeQty(Math.max(1, parseInt(e.target.value) || 1))}
+                        onChange={(e) => {
+                          setIsRecurringCharge(false);
+                          setChargeQty(Math.max(1, parseInt(e.target.value) || 1));
+                        }}
                         data-testid="input-charge-qty"
                       />
                     </div>
                   </div>
 
-                  {newCharge.amount && chargeQty > 1 && (
+                  {/* Toggle cargo repetitivo por noche */}
+                  <div className="flex items-center gap-3 py-1">
+                    <Switch
+                      id="recurring-charge-toggle"
+                      checked={isRecurringCharge}
+                      onCheckedChange={(checked) => {
+                        setIsRecurringCharge(checked);
+                        setChargeQty(checked ? (reservation.nights || 1) : 1);
+                      }}
+                      data-testid="switch-recurring-charge"
+                    />
+                    <Label htmlFor="recurring-charge-toggle" className="text-xs cursor-pointer select-none flex items-center gap-1.5">
+                      <span>Cargo por noche</span>
+                      {isRecurringCharge && (
+                        <span className="text-muted-foreground">· se multiplica por {reservation.nights || 1} noche{(reservation.nights || 1) !== 1 ? "s" : ""}</span>
+                      )}
+                    </Label>
+                  </div>
+
+                  {newCharge.amount && isRecurringCharge && (
+                    <div className="flex items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2 text-sm">
+                      <span className="text-blue-700 dark:text-blue-300 font-medium">
+                        {reservation.nights || 1} noches × ${parseFloat(newCharge.amount || "0").toFixed(2)} = <span className="font-bold">${(parseFloat(newCharge.amount || "0") * (reservation.nights || 1)).toFixed(2)}</span>
+                      </span>
+                    </div>
+                  )}
+
+                  {newCharge.amount && !isRecurringCharge && chargeQty > 1 && (
                     <div className="text-sm text-right text-muted-foreground">
                       Total: <span className="font-semibold text-foreground">
                         ${(parseFloat(newCharge.amount || "0") * chargeQty).toFixed(2)}
@@ -2995,6 +3065,7 @@ function ReservationDetailDialog({
                         setShowAddCharge(false);
                         setSelectedPreset(null);
                         setChargeQty(1);
+                        setIsRecurringCharge(false);
                         setNewCharge({ description: "", amount: "", category: "otros" });
                       }}
                     >
