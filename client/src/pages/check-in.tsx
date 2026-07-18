@@ -183,14 +183,11 @@ export default function CheckInPage() {
     checkOutDate.setDate(checkOutDate.getDate() + nights);
     const checkOutStr = checkOutDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
-    // Estatus que indican que la habitación está actualmente ocupada → nunca ofrecer
-    const OCCUPIED_STATUSES = new Set(["occupied", "limpia_ocupada", "no_molestar"]);
-
     // Habitaciones con reservas que se superponen al período del walk-in
     const blockedByReservation = new Set(
       (allReservations ?? [])
         .filter(r =>
-          (r.status === "confirmed" || r.status === "checked_in" || r.status === "pending") &&
+          (r.status === "confirmed" || r.status === "checked_in" || r.status === "web_checkin" || r.status === "pending") &&
           r.roomId &&
           r.checkInDate < checkOutStr &&
           r.checkOutDate > todayStr
@@ -201,9 +198,9 @@ export default function CheckInPage() {
 
     return rooms?.filter((room) => {
       if (selectedRoomTypeId && room.roomTypeId !== selectedRoomTypeId) return false;
-      // Habitación físicamente ocupada → no
-      if (OCCUPIED_STATUSES.has(room.status)) return false;
-      // Tiene reserva que se superpone → no
+      if ((room as any).isVirtual) return false;
+      if (room.isActive === false) return false;
+      // Tiene reserva que se superpone por fecha → no
       if (blockedByReservation.has(room.id)) return false;
       // En mantenimiento: verificar si hay bloqueo activo durante el período
       if (room.status === "maintenance") {
@@ -212,14 +209,16 @@ export default function CheckInPage() {
         );
         return !hasActiveBlock;
       }
-      // available, inspected, dirty, cleaning → sí (no tienen huésped activo)
       return true;
     });
   })();
 
-  const applicableRatePlans = ratePlans?.filter((rp) => 
-    rp.roomTypeId === selectedRoomTypeId
-  );
+  const applicableRatePlans = ratePlans?.filter((rp) => {
+    if (rp.roomTypeId !== selectedRoomTypeId) return false;
+    const todayStr = getLocalToday();
+    if (rp.validTo && rp.validTo < todayStr) return false;
+    return true;
+  });
 
   const { data: guestPreferences = [] } = useQuery<GuestPreference[]>({
     queryKey: ["/api/guests", selectedReservation?.guestId, "preferences"],
@@ -230,7 +229,16 @@ export default function CheckInPage() {
   const criticalPrefs = activePrefs.filter((p) => p.priority === "critical" || p.priority === "high");
 
   const selectedRatePlan = ratePlans?.find((rp) => rp.id === selectedRatePlanId);
-  const totalAmount = selectedRatePlan ? (parseFloat(selectedRatePlan.baseRate) * nights).toFixed(2) : "0.00";
+
+  const getPaxRate = (plan: RatePlan, pax: number): string => {
+    const paxMap: Record<number, string | null | undefined> = {
+      1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax,
+    };
+    return paxMap[pax] || plan.baseRate;
+  };
+
+  const effectiveNightRate = selectedRatePlan ? getPaxRate(selectedRatePlan, numberOfGuests) : "0";
+  const totalAmount = (parseFloat(effectiveNightRate) * nights).toFixed(2);
 
   const checkInMutation = useMutation({
     mutationFn: async ({ id, motivo }: { id: string; motivo?: string }) => {
@@ -556,24 +564,27 @@ export default function CheckInPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <DoorOpen className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-2xl font-bold text-primary tracking-tight">
+                        {reservation.room?.roomNumber}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{(reservation.room as any)?.roomType?.name || ""}</span>
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="flex items-center gap-2 text-sm">
-                        <DoorOpen className="h-4 w-4 text-muted-foreground" />
-                        <span>Hab. {reservation.room?.roomNumber}</span>
-                      </div>
                       <div className="flex items-center gap-2 text-sm">
                         <User className="h-4 w-4 text-muted-foreground" />
                         <span>{reservation.numberOfGuests} huesped(es)</span>
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
                       <div className="flex items-center gap-2 text-sm">
                         <Calendar className="h-4 w-4 text-muted-foreground" />
                         <span>{formatDateAR(reservation.checkInDate)}</span>
                       </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="flex items-center gap-2 text-sm">
                         <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span>{formatDateAR(reservation.checkOutDate)}</span>
+                        <span>Salida: {formatDateAR(reservation.checkOutDate)}</span>
                       </div>
                     </div>
                     <div className="pt-2">
@@ -720,13 +731,36 @@ export default function CheckInPage() {
                           <SelectValue placeholder="Seleccionar tarifa..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {applicableRatePlans.filter(rp => rp.id).map((rp) => (
-                            <SelectItem key={rp.id} value={rp.id}>
-                              {rp.name} - ${rp.baseRate}/noche
-                            </SelectItem>
-                          ))}
+                          {applicableRatePlans.filter(rp => rp.id).map((rp) => {
+                            const hasPaxRates = rp.rate2pax || rp.rate3pax || rp.rate4pax;
+                            return (
+                              <SelectItem key={rp.id} value={rp.id}>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="font-medium">{rp.name}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    ${Number(rp.baseRate).toLocaleString("es-AR")}
+                                    {rp.rate2pax ? ` · 2P: $${Number(rp.rate2pax).toLocaleString("es-AR")}` : ""}
+                                    {rp.rate3pax ? ` · 3P: $${Number(rp.rate3pax).toLocaleString("es-AR")}` : ""}
+                                    {rp.rate4pax ? ` · 4P: $${Number(rp.rate4pax).toLocaleString("es-AR")}` : ""}
+                                    {!hasPaxRates ? " (tarifa fija)" : ""}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
+                      {selectedRatePlan && (() => {
+                        const paxRate = getPaxRate(selectedRatePlan, numberOfGuests);
+                        const isPaxSpecific = !!(numberOfGuests === 2 ? selectedRatePlan.rate2pax : numberOfGuests === 3 ? selectedRatePlan.rate3pax : numberOfGuests === 4 ? selectedRatePlan.rate4pax : selectedRatePlan.rate1pax);
+                        return (
+                          <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-950/40 rounded text-xs text-blue-700 dark:text-blue-300">
+                            <span>Tarifa para {numberOfGuests} huésped{numberOfGuests > 1 ? "es" : ""}:</span>
+                            <span className="font-bold">${Number(paxRate).toLocaleString("es-AR")}/noche</span>
+                            {isPaxSpecific && <span className="text-blue-500">(tarifa {numberOfGuests}P)</span>}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -787,7 +821,7 @@ export default function CheckInPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Tarifa:</span>
                     <span className="font-medium">
-                      {selectedRatePlan ? `$${selectedRatePlan.baseRate}/noche` : "-"}
+                      {selectedRatePlan ? `$${Number(effectiveNightRate).toLocaleString("es-AR")}/noche` : "-"}
                     </span>
                   </div>
                   <div className="border-t pt-3 mt-3">
@@ -1173,21 +1207,24 @@ export default function CheckInPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <DoorOpen className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-2xl font-bold text-primary tracking-tight">
+                          {reservation.room?.roomNumber}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{(reservation.room as any)?.roomType?.name || ""}</span>
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="flex items-center gap-2 text-sm">
-                          <DoorOpen className="h-4 w-4 text-muted-foreground" />
-                          <span>Hab. {reservation.room?.roomNumber}</span>
-                        </div>
                         <div className="flex items-center gap-2 text-sm">
                           <User className="h-4 w-4 text-muted-foreground" />
                           <span>{reservation.numberOfGuests} huesped(es)</span>
                         </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
                         <div className="flex items-center gap-2 text-sm">
                           <Calendar className="h-4 w-4 text-muted-foreground" />
                           <span>Entrada: {formatDateAR(reservation.checkInDate)}</span>
                         </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
                         <div className="flex items-center gap-2 text-sm">
                           <Clock className="h-4 w-4 text-muted-foreground" />
                           <span>Salida: {formatDateAR(reservation.checkOutDate)}</span>
