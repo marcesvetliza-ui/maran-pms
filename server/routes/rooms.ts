@@ -259,6 +259,75 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
+  // Arriving today: confirmed/web_checkin reservations with checkInDate = today
+  app.get("/api/rooms/arriving-today", async (req, res) => {
+    try {
+      const today = getArgentinaToday();
+
+      const rows = await db.select({
+        res: reservations,
+        room: roomsTable,
+      })
+        .from(reservations)
+        .innerJoin(roomsTable, eq(roomsTable.id, reservations.roomId))
+        .where(
+          and(
+            sql`${reservations.checkInDate} = ${today}`,
+            or(eq(reservations.status, "confirmed"), eq(reservations.status, "web_checkin")),
+            sql`(${roomsTable.isVirtual} IS NULL OR ${roomsTable.isVirtual} = false)`
+          )
+        );
+
+      if (rows.length === 0) return res.json([]);
+
+      const guestIds = rows.map(r => r.res.guestId).filter(Boolean) as string[];
+      const [guestList, allRoomTypesList] = await Promise.all([
+        guestIds.length > 0 ? db.select().from(guests).where(inArray(guests.id, guestIds)) : Promise.resolve([]),
+        db.select().from(roomTypesTable),
+      ]);
+
+      const guestMap = new Map(guestList.map(g => [g.id, g]));
+      const roomTypeMap = new Map(allRoomTypesList.map(rt => [rt.id, rt]));
+
+      const result = rows
+        .sort((a, b) => a.room.roomNumber.localeCompare(b.room.roomNumber, undefined, { numeric: true }))
+        .map(({ res, room }) => {
+          const guest = res.guestId ? guestMap.get(res.guestId) : undefined;
+          const roomType = room.roomTypeId ? roomTypeMap.get(room.roomTypeId) : undefined;
+          return {
+            reservationId: res.id,
+            reservationNumber: (res as any).reservationNumber ?? null,
+            roomId: room.id,
+            roomNumber: room.roomNumber,
+            roomTypeName: roomType?.name ?? null,
+            floor: room.floor,
+            checkIn: res.checkInDate,
+            checkOut: res.checkOutDate,
+            nights: res.nights ?? 1,
+            adults: res.adults ?? 1,
+            children: res.children ?? 0,
+            numberOfGuests: res.numberOfGuests ?? 1,
+            source: res.source,
+            reservationStatus: res.status,
+            earlyCheckIn: res.earlyCheckIn ?? false,
+            earlyCheckInTime: res.earlyCheckInTime ?? null,
+            guest: guest ? {
+              id: guest.id,
+              firstName: guest.firstName,
+              lastName: guest.lastName,
+              phone: guest.phone ?? null,
+              email: guest.email ?? null,
+            } : null,
+          };
+        });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[arriving-today] error:", error.message);
+      res.status(500).json({ error: "Error fetching arriving today" });
+    }
+  });
+
   app.get("/api/rooms/available", async (req, res) => {
     try {
       const { checkIn, checkOut, roomTypeId } = req.query as { checkIn?: string; checkOut?: string; roomTypeId?: string };

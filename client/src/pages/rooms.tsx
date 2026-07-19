@@ -564,10 +564,86 @@ function OcupadaCard({ item }: { item: any }) {
   );
 }
 
+function ArrivingCard({ item }: { item: any }) {
+  return (
+    <Card
+      className="relative overflow-hidden border-2 border-green-200 dark:border-green-800 bg-green-50/20 dark:bg-green-900/10"
+      data-testid={`arriving-card-${item.reservationId}`}
+    >
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="flex items-baseline gap-2">
+              <CardTitle className="text-3xl font-bold tracking-tight">{item.roomNumber}</CardTitle>
+              <span className="text-xs text-muted-foreground">Piso {item.floor}</span>
+            </div>
+            <CardDescription className="text-xs mt-0.5">{item.roomTypeName || "Sin tipo"}</CardDescription>
+          </div>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-[10px]">
+              <LogIn className="h-2.5 w-2.5 mr-0.5" />Por ingresar
+            </Badge>
+            {item.reservationStatus === "web_checkin" && (
+              <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 text-[10px]">Web CI</Badge>
+            )}
+            {item.earlyCheckIn && (
+              <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 text-[10px]">
+                <Clock className="h-2.5 w-2.5 mr-0.5" />Early {item.earlyCheckInTime || ""}
+              </Badge>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-3">
+        {/* Huésped */}
+        <div className="min-h-[40px]">
+          {item.guest ? (
+            <div>
+              <div className="font-semibold text-sm leading-tight">
+                {item.guest.lastName}{item.guest.firstName ? `, ${item.guest.firstName}` : ""}
+              </div>
+              {item.guest.phone && (
+                <a href={`tel:${item.guest.phone}`} className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors mt-0.5">
+                  <Phone className="h-3 w-3" />{item.guest.phone}
+                </a>
+              )}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground italic">Sin huésped asignado</div>
+          )}
+        </div>
+        {/* Estadía */}
+        <div className="flex flex-col gap-1 text-xs text-muted-foreground border-t pt-2">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Calendar className="h-3 w-3 shrink-0" />
+              {new Date(item.checkIn + "T12:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" })}
+              {" → "}
+              {new Date(item.checkOut + "T12:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" })}
+            </span>
+            <span className="font-medium text-[11px] text-foreground">{item.nights}n</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1">
+              <Users className="h-3 w-3" />
+              {item.adults}A{item.children > 0 ? ` + ${item.children}N` : ""}
+            </span>
+            <span className="text-muted-foreground/50">·</span>
+            <span>{SOURCE_LABELS[item.source] || item.source}</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function OcupadasView() {
   const [search, setSearch] = useState("");
   const { data: inHouse = [], isLoading, refetch, isFetching } = useQuery<any[]>({
     queryKey: ["/api/rooms/in-house"],
+  });
+  const { data: arriving = [], isLoading: isLoadingArriving, refetch: refetchArriving, isFetching: isFetchingArriving } = useQuery<any[]>({
+    queryKey: ["/api/rooms/arriving-today"],
   });
 
   const filtered = search.trim()
@@ -577,10 +653,19 @@ function OcupadasView() {
       )
     : inHouse;
 
+  const filteredArriving = search.trim()
+    ? arriving.filter(item =>
+        item.roomNumber.toLowerCase().includes(search.toLowerCase()) ||
+        (item.guest && `${item.guest.firstName ?? ""} ${item.guest.lastName ?? ""}`.toLowerCase().includes(search.toLowerCase()))
+      )
+    : arriving;
+
   const exitingToday = inHouse.filter(i => i.nightsRemaining <= 0).length;
   const withBalance = inHouse.filter(i => i.folioBalance > 0).length;
 
-  if (isLoading) {
+  const handleRefresh = () => { refetch(); refetchArriving(); };
+
+  if (isLoading || isLoadingArriving) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-72" />)}
@@ -588,13 +673,13 @@ function OcupadasView() {
     );
   }
 
-  if (inHouse.length === 0) {
+  if (inHouse.length === 0 && arriving.length === 0) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center justify-center py-12 text-center">
           <BedDouble className="h-16 w-16 text-muted-foreground/50 mb-4" />
           <h3 className="text-lg font-semibold mb-2">No hay huéspedes alojados</h3>
-          <p className="text-muted-foreground">No hay reservas con check-in activo en este momento.</p>
+          <p className="text-muted-foreground">No hay reservas con check-in activo ni llegadas programadas para hoy.</p>
         </CardContent>
       </Card>
     );
@@ -608,6 +693,12 @@ function OcupadasView() {
           <BedDouble className="h-4 w-4" />
           {inHouse.length} alojado{inHouse.length !== 1 ? "s" : ""}
         </div>
+        {arriving.length > 0 && (
+          <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-lg px-3 py-2 text-sm font-medium">
+            <LogIn className="h-4 w-4" />
+            {arriving.length} ingresan hoy
+          </div>
+        )}
         {exitingToday > 0 && (
           <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-lg px-3 py-2 text-sm font-medium">
             <LogOut className="h-4 w-4" />
@@ -618,6 +709,12 @@ function OcupadasView() {
           <div className="flex items-center gap-2 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 rounded-lg px-3 py-2 text-sm font-medium">
             <ReceiptText className="h-4 w-4" />
             {withBalance} con saldo
+          </div>
+        )}
+        {arriving.length > 0 && inHouse.length > 0 && (
+          <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground border rounded-md px-2.5 py-1.5">
+            <span>Ocupación comprometida:</span>
+            <span className="font-semibold text-foreground">{inHouse.length + arriving.length} hab.</span>
           </div>
         )}
       </div>
@@ -637,25 +734,62 @@ function OcupadasView() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => refetch()}
-          disabled={isFetching}
+          onClick={handleRefresh}
+          disabled={isFetching || isFetchingArriving}
           title="Actualizar"
           data-testid="btn-refresh-inhouse"
         >
-          <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-4 w-4 ${(isFetching || isFetchingArriving) ? "animate-spin" : ""}`} />
         </Button>
-        <span className="text-sm text-muted-foreground">{filtered.length} habitaciones</span>
+        <span className="text-sm text-muted-foreground">{filtered.length + filteredArriving.length} habitaciones</span>
       </div>
 
-      {/* Grilla de tarjetas */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {filtered.map(item => (
-          <OcupadaCard key={item.reservationId} item={item} />
-        ))}
-      </div>
-      {filtered.length === 0 && search && (
-        <div className="text-center text-muted-foreground py-8">
-          Sin resultados para "<span className="font-medium">{search}</span>"
+      {/* Grilla ocupadas */}
+      {filtered.length > 0 && (
+        <>
+          {arriving.length > 0 && (
+            <div className="flex items-center gap-2">
+              <BedDouble className="h-4 w-4 text-blue-500" />
+              <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Alojados ahora</span>
+              <div className="flex-1 border-t border-blue-200 dark:border-blue-800 ml-1" />
+            </div>
+          )}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filtered.map(item => (
+              <OcupadaCard key={item.reservationId} item={item} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {filtered.length === 0 && search && inHouse.length > 0 && (
+        <div className="text-center text-muted-foreground py-4">
+          Sin alojados para "<span className="font-medium">{search}</span>"
+        </div>
+      )}
+
+      {/* Sección llegadas de hoy */}
+      {filteredArriving.length > 0 && (
+        <div className="space-y-3 mt-2">
+          <div className="flex items-center gap-2">
+            <LogIn className="h-4 w-4 text-green-500" />
+            <span className="text-sm font-semibold text-green-700 dark:text-green-300">Llegadas de hoy</span>
+            <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-[10px]">
+              {filteredArriving.length} pendiente{filteredArriving.length !== 1 ? "s" : ""}
+            </Badge>
+            <div className="flex-1 border-t border-green-200 dark:border-green-800 ml-1" />
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filteredArriving.map(item => (
+              <ArrivingCard key={item.reservationId} item={item} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {filteredArriving.length === 0 && search && arriving.length > 0 && (
+        <div className="text-center text-muted-foreground py-4">
+          Sin llegadas para "<span className="font-medium">{search}</span>"
         </div>
       )}
     </div>
