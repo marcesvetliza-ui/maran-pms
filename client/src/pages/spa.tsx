@@ -47,6 +47,7 @@ import {
   TrendingUp,
   Filter,
   RefreshCw,
+  FileText,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -2039,6 +2040,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               <DialogFooter className="flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => printComandaTermica(selectedAppointment)} data-testid="button-print-confirmation">
                   <Printer className="h-4 w-4 mr-1" /> Reimprimir comanda
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(`/api/spa/appointments/${selectedAppointment.id}/pdf/confirmacion`, "_blank")}
+                  data-testid="button-spa-pdf-confirmacion"
+                >
+                  <FileText className="h-4 w-4 mr-1" /> Confirmación
                 </Button>
                 {!isBefore(parseISO(selectedAppointment.appointmentDate), startOfDay(new Date())) && (<>
                   {["pending", "confirmed"].includes(selectedAppointment.status) && (

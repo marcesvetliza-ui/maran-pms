@@ -4,6 +4,7 @@ import { db } from "../db";
 import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, desc } from "drizzle-orm";
+import { generateConfirmacionTurnoSpaPdf } from "../spaPdfs";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -741,6 +742,31 @@ export function registerSpaRoutes(app: Express) {
       res.json({ success: ok });
     } catch (error) {
       res.status(500).json({ error: "Error deleting treatment supply" });
+    }
+  });
+
+  // ── PDF: Confirmación de turno SPA ────────────────────────────────────────
+  app.get("/api/spa/appointments/:id/pdf/confirmacion", requireAuth, async (req, res) => {
+    try {
+      const appointment = await storage.getSpaAppointment(req.params.id);
+      if (!appointment) return res.status(404).json({ error: "Turno no encontrado" });
+
+      const account = await storage.getSpaAccountByAppointment(req.params.id);
+
+      let professional = undefined;
+      if (appointment.professionalId) {
+        const [prof] = await db.select().from(spaProfessionals).where(eq(spaProfessionals.id, appointment.professionalId));
+        professional = prof;
+      }
+
+      const pdfBuffer = await generateConfirmacionTurnoSpaPdf(appointment, account, professional);
+      const guestName = `${appointment.guestName}_${appointment.guestLastName || ""}`.replace(/\s+/g, "_");
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="Confirmacion_SPA_${guestName}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("Error generating SPA confirmation PDF:", error);
+      res.status(500).json({ error: "Error generando PDF de confirmación" });
     }
   });
 }
