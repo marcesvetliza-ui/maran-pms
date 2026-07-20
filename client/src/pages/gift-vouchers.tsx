@@ -229,7 +229,7 @@ function CreateVoucherDialog({
             {valueType === "monetario" && (
               <FormField control={form.control} name="valueAmount" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Valor del voucher ($)</FormLabel>
+                  <FormLabel>Saldo a regalar ($)</FormLabel>
                   <FormControl>
                     <Input
                       type="number"
