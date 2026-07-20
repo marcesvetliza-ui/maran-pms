@@ -154,6 +154,22 @@ export function registerInventoryRoutes(app: Express) {
       }
 
       const item = await storage.createInventoryItem(body);
+
+      // If a warehouseId was provided and there's initial stock, seed warehouse_stock
+      const warehouseId = req.body.warehouseId;
+      const initialStock = parseFloat(String(body.currentStock ?? 0));
+      if (warehouseId && initialStock > 0) {
+        await db.execute(sql`
+          INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
+          VALUES (${warehouseId}, ${item.id}, ${initialStock}, now())
+          ON CONFLICT (warehouse_id, item_id) DO UPDATE SET current_stock = ${initialStock}, updated_at = now()
+        `);
+        await db.execute(sql`
+          INSERT INTO stock_movements (item_id, movement_type, quantity, previous_stock, new_stock, notes, source_type, created_at, warehouse_id)
+          VALUES (${item.id}, 'entrada', ${initialStock}, 0, ${initialStock}, 'Stock inicial', 'manual', now(), ${warehouseId})
+        `);
+      }
+
       res.status(201).json(item);
     } catch (error) {
       res.status(500).json({ error: "Error creating inventory item" });

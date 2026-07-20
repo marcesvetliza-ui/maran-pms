@@ -214,6 +214,7 @@ interface InvItemRow {
   quantity: string;
   unit: string;
   costPrice: string;
+  warehouseId: string;
 }
 
 const UNITS = ["unidad", "kg", "g", "litro", "ml", "caja", "paquete", "rollo", "metro", "par"];
@@ -343,7 +344,12 @@ function InvoiceDialog({
     enabled: open,
   });
 
-  const addInvRow = () => setInvItems((p) => [...p, { mode: "new", name: "", existingItemId: "", categoryId: "", quantity: "1", unit: "unidad", costPrice: "0" }]);
+  const { data: invWarehouses = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/warehouses"],
+    enabled: open,
+  });
+
+  const addInvRow = () => setInvItems((p) => [...p, { mode: "new", name: "", existingItemId: "", categoryId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "" }]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
@@ -403,16 +409,20 @@ function InvoiceDialog({
             costPrice: row.costPrice,
             currentStock: row.quantity,
             minStock: 0,
+            warehouseId: row.warehouseId || undefined,
           });
           const item = await itemRes.json();
-          await apiRequest("POST", "/api/inventory/movements", {
-            itemId: item.id,
-            type: "entrada",
-            quantity: row.quantity,
-            reason: invoiceRef,
-            sourceType: "purchase_invoice",
-            sourceId: String(invoice.id),
-          });
+          // Only create a generic movement if no warehouse was selected (warehouse route already recorded it)
+          if (!row.warehouseId) {
+            await apiRequest("POST", "/api/inventory/movements", {
+              itemId: item.id,
+              type: "entrada",
+              quantity: row.quantity,
+              reason: invoiceRef,
+              sourceType: "purchase_invoice",
+              sourceId: String(invoice.id),
+            });
+          }
           inventoryCount++;
         } catch (e) {
           console.warn("Error creating inventory item:", e);
@@ -422,19 +432,29 @@ function InvoiceDialog({
       // Add stock to existing inventory items
       for (const row of validExisting) {
         try {
-          await apiRequest("POST", "/api/inventory/movements", {
-            itemId: row.existingItemId,
-            type: "entrada",
-            quantity: row.quantity,
-            reason: invoiceRef,
-            sourceType: "purchase_invoice",
-            sourceId: String(invoice.id),
-          });
-          // Update cost price on the item if provided
-          if (parseFloat(row.costPrice) > 0) {
-            await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, {
-              costPrice: row.costPrice,
+          if (row.warehouseId) {
+            await apiRequest("POST", `/api/inventory/warehouses/${row.warehouseId}/movements`, {
+              itemId: row.existingItemId,
+              movementType: "entrada",
+              quantity: row.quantity,
+              notes: invoiceRef,
+              unitCost: parseFloat(row.costPrice) > 0 ? row.costPrice : undefined,
             });
+          } else {
+            await apiRequest("POST", "/api/inventory/movements", {
+              itemId: row.existingItemId,
+              type: "entrada",
+              quantity: row.quantity,
+              reason: invoiceRef,
+              sourceType: "purchase_invoice",
+              sourceId: String(invoice.id),
+            });
+            // Update cost price on the item if provided
+            if (parseFloat(row.costPrice) > 0) {
+              await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, {
+                costPrice: row.costPrice,
+              });
+            }
           }
           inventoryCount++;
         } catch (e) {
@@ -920,6 +940,22 @@ function InvoiceDialog({
                           <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
                         </div>
                       </div>
+
+                      {/* Warehouse selector */}
+                      {invWarehouses.length > 0 && (
+                        <div>
+                          <Label className="text-xs mb-1 block">Depósito destino</Label>
+                          <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Sin depósito (stock general)" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">— Sin depósito —</SelectItem>
+                              {(invWarehouses as any[]).filter((w: any) => w.id).map((wh: any) => (
+                                <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

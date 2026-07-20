@@ -246,7 +246,7 @@ export default function InventoryPage() {
   });
 
   const createItemMutation = useMutation({
-    mutationFn: async (data: Partial<InventoryItem>) => {
+    mutationFn: async (data: Partial<InventoryItem> & { warehouseId?: string }) => {
       const res = await apiRequest("POST", "/api/inventory/items", data);
       return res.json();
     },
@@ -1303,6 +1303,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             categories={categories}
             suppliers={suppliers}
             existingItems={items}
+            warehouses={warehouses}
             onSubmit={(data) => createItemMutation.mutate(data)}
             isPending={createItemMutation.isPending}
             onCancel={() => setIsNewItemDialogOpen(false)}
@@ -1399,6 +1400,7 @@ function NewItemForm({
   categories,
   suppliers,
   existingItems,
+  warehouses,
   onSubmit,
   isPending,
   onCancel,
@@ -1406,7 +1408,8 @@ function NewItemForm({
   categories: ItemCategory[];
   suppliers: Supplier[];
   existingItems: InventoryItem[];
-  onSubmit: (data: Partial<InventoryItem>) => void;
+  warehouses: InventoryWarehouse[];
+  onSubmit: (data: Partial<InventoryItem> & { warehouseId?: string }) => void;
   isPending: boolean;
   onCancel: () => void;
 }) {
@@ -1418,6 +1421,7 @@ function NewItemForm({
   const [minStock, setMinStock] = useState(0);
   const [currentStock, setCurrentStock] = useState(0);
   const [itemKind, setItemKind] = useState<string>("venta_directa");
+  const [warehouseId, setWarehouseId] = useState("");
 
   const duplicateMatches = name.trim().length > 1
     ? existingItems.filter(
@@ -1539,6 +1543,22 @@ function NewItemForm({
           data-testid="input-current-stock"
         />
       </div>
+      {warehouses.length > 0 && (
+        <div className="space-y-2">
+          <Label>Depósito destino <span className="text-muted-foreground font-normal">(del stock inicial)</span></Label>
+          <Select value={warehouseId || "__none__"} onValueChange={(v) => setWarehouseId(v === "__none__" ? "" : v)}>
+            <SelectTrigger data-testid="select-warehouse-item">
+              <SelectValue placeholder="Sin depósito asignado" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— Sin depósito asignado —</SelectItem>
+              {warehouses.filter(w => w.id).map((wh) => (
+                <SelectItem key={wh.id} value={wh.id}>{wh.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
           Cancelar
@@ -1554,7 +1574,8 @@ function NewItemForm({
               minStock,
               currentStock,
               itemKind: itemKind as any,
-            });
+              warehouseId: warehouseId || undefined,
+            } as any);
           }}
           disabled={isPending || !name}
           data-testid="button-save-item"
