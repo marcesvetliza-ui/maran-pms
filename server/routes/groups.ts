@@ -111,6 +111,16 @@ export function registerGroupsRoutes(app: Express) {
       if (!group) {
         return res.status(404).json({ error: "Group not found" });
       }
+
+      // Si el nombre cambió, sincronizar el guest placeholder que se usa en planning,
+      // rooming list, folio y cualquier otro lugar que muestra el nombre del grupo
+      if (name !== undefined) {
+        const placeholderCode = `GROUP-${req.params.id}`;
+        await db.update(guestsTable)
+          .set({ firstName: name, lastName: "" })
+          .where(eq(guestsTable.codigo, placeholderCode));
+      }
+
       res.json(group);
     } catch (error: any) {
       console.error("Error updating group:", error?.message || error);
