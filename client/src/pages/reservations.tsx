@@ -453,8 +453,8 @@ export function ReservationFormDialog({
     finalRate = Math.max(0, finalRate);
     
     return {
-      finalRatePerNight: fmtMoney(finalRate),
-      totalRoomAmount: fmtMoney(finalRate * nights),
+      finalRatePerNight: finalRate.toFixed(2),
+      totalRoomAmount: (finalRate * nights).toFixed(2),
     };
   };
 
@@ -994,12 +994,12 @@ export function ReservationFormDialog({
                         // En edición: solo actualiza precio y notas, NO cambia fechas
                         const currentNights = Number(formData.nights) || 1;
                         const totalPrice = parseFloat(pkg.basePrice);
-                        const ratePerNight = fmtMoney(totalPrice / currentNights);
+                        const ratePerNight = (totalPrice / currentNights).toFixed(2);
                         setFormData(prev => ({
                           ...prev,
                           baseRatePerNight: ratePerNight,
                           finalRatePerNight: ratePerNight,
-                          totalRoomAmount: (parseFloat(ratePerNight) * currentNights).toFixed(2),
+                          totalRoomAmount: (totalPrice).toFixed(2),
                           discountType: "none",
                           discountValue: "0",
                           notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
@@ -1014,14 +1014,14 @@ export function ReservationFormDialog({
                         d.setDate(d.getDate() + nights);
                         const newCheckOut = toArgentinaDateStr(d);
                         const totalPrice = parseFloat(pkg.basePrice);
-                        const ratePerNight = fmtMoney(totalPrice / nights);
+                        const ratePerNight = (totalPrice / nights).toFixed(2);
                         setFormData(prev => ({
                           ...prev,
                           checkOutDate: newCheckOut,
                           nights,
                           baseRatePerNight: ratePerNight,
                           finalRatePerNight: ratePerNight,
-                          totalRoomAmount: fmtMoney(totalPrice),
+                          totalRoomAmount: totalPrice.toFixed(2),
                           discountType: "none",
                           discountValue: "0",
                           notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
