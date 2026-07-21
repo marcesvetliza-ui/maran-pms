@@ -912,5 +912,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS unit_amount decimal(10,2)`)
   );
 
+  // Fix: clear valid_to on rate plans that expired in the past but still have current pricing.
+  // These were versioned incorrectly via "nueva versión" flow leaving them hidden.
+  await withTimeout("rate_plans.clear_expired_valid_to", T, () =>
+    db.execute(sql`UPDATE rate_plans SET valid_to = NULL WHERE valid_to < CURRENT_DATE`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
