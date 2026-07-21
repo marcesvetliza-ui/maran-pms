@@ -66,17 +66,19 @@ export async function generateConfirmacionTurnoSpaPdf(
     // Content lives on the left ~60% of the page (right side has the photos in the bg image)
     const contentW = pageW * 0.60 - margin;
 
-    // ── LOGO (top left) ───────────────────────────────────────────────────────
-    const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+    // ── LOGO SPA (top left) ────────────────────────────────────────────────────
+    const spaLogoPath = path.join(process.cwd(), "server", "assets", "spa-logo.png");
+    const hotelLogoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+    const logoPath = fs.existsSync(spaLogoPath) ? spaLogoPath : hotelLogoPath;
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, margin, 28, { height: 42, fit: [130, 42] });
+      doc.image(logoPath, margin, 22, { height: 52, fit: [150, 52] });
     } else {
       doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold")
         .text("MARAN SUITES & TOWERS", margin, 34);
     }
 
     // Orange accent line under logo
-    doc.rect(margin, 76, 130, 2).fill(ORANGE);
+    doc.rect(margin, 80, 150, 2).fill(ORANGE);
 
     let y = 100;
 
