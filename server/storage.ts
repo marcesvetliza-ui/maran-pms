@@ -2068,7 +2068,7 @@ export class MemStorage implements IStorage {
   // Overbooking check - returns true if there is a conflict
   async checkOverbooking(roomId: string, checkInDate: string, checkOutDate: string, excludeReservationId?: string): Promise<boolean> {
     const reservations = Array.from(this.reservations.values());
-    const activeStatuses: ReservationStatus[] = ["tentative", "pending", "confirmed", "checked_in"];
+    const activeStatuses: ReservationStatus[] = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
     
     for (const res of reservations) {
       if (res.roomId !== roomId) continue;

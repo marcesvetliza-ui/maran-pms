@@ -433,7 +433,7 @@ export function registerReservationsRoutes(app: Express) {
       const finalRoomId = roomId || original.roomId;
       const room = await storage.getRoom(finalRoomId);
 
-      const blockingStatuses = ["tentative", "pending", "confirmed", "checked_in"];
+      const blockingStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
       const allReservations = await storage.getReservations();
       const overlapping = allReservations.filter(r => {
         if (r.id === original.id) return false;
@@ -1190,7 +1190,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       // Check for conflicts before restoring
-      const blockingStatuses = ["tentative", "pending", "confirmed", "checked_in"];
+      const blockingStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
       const allReservations = await storage.getReservations();
       const checkIn = new Date(normalizeDate(reservation.checkInDate) + "T00:00:00Z");
       const checkOut = new Date(normalizeDate(reservation.checkOutDate) + "T00:00:00Z");

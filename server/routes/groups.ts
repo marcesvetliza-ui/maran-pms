@@ -186,7 +186,7 @@ export function registerGroupsRoutes(app: Express) {
 
         const allRoomsOfType = await db.select().from(roomsTable).where(eq(roomsTable.roomTypeId, roomTypeId));
         const allReservations = await storage.getReservations();
-        const activeStatuses = ["reserved", "checked_in", "confirmed"];
+        const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
 
         const availableRooms = allRoomsOfType.filter(room => {
           if (room.roomNumber === "REUB") return false;

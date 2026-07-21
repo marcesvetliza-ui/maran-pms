@@ -779,7 +779,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async checkOverbooking(roomId: string, checkInDate: string, checkOutDate: string, excludeReservationId?: string): Promise<boolean> {
-    const activeStatuses = ["tentative", "pending", "confirmed", "checked_in"] as const;
+    const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"] as const;
     let conditions = and(
       eq(reservations.roomId, roomId),
       inArray(reservations.status, activeStatuses as any),

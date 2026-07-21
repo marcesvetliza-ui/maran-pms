@@ -343,7 +343,7 @@ export function registerRoomsRoutes(app: Express) {
         filtered = filtered.filter(r => r.roomTypeId === roomTypeId);
       }
 
-      const activeStatuses = ["reserved", "checked_in", "confirmed"];
+      const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
       const available = filtered.filter(room => {
         const resConflict = allReservations.find(res => {
           if (!activeStatuses.includes(res.status)) return false;
