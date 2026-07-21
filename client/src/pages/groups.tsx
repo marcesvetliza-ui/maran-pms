@@ -804,14 +804,18 @@ function GroupTable({
                     <Pencil className="mr-2 h-4 w-4" />
                     Editar
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-destructive"
-                    onClick={() => setDeleteConfirmGroup(group)}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Eliminar
-                  </DropdownMenuItem>
+                  {group.status === "tentativo" && group.reservations.length === 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() => setDeleteConfirmGroup(group)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Eliminar
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </TableCell>
@@ -1067,14 +1071,8 @@ export default function GroupsPage() {
             <DialogTitle>Confirmar Eliminación</DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
-                <p>¿Está seguro que desea eliminar el grupo <strong className="text-foreground">"{deleteConfirmGroup?.name}"</strong>?</p>
-                {deleteConfirmGroup && deleteConfirmGroup.reservations.filter((r: any) => r.status !== "checked_out" && r.status !== "cancelled").length > 0 && (
-                  <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-destructive">
-                    <strong>Atención:</strong> Este grupo tiene {deleteConfirmGroup.reservations.filter((r: any) => r.status !== "checked_out" && r.status !== "cancelled").length} reserva(s) activa(s).
-                    Al eliminar el grupo, <strong>todas se cancelarán</strong> y las habitaciones quedarán libres en el planning.
-                  </div>
-                )}
-                <p>Esta acción no se puede deshacer.</p>
+                <p>¿Eliminás el grupo <strong className="text-foreground">"{deleteConfirmGroup?.name}"</strong>?</p>
+                <p className="text-xs">Solo se pueden eliminar grupos <strong>Tentativos</strong> sin reservas ni movimientos. Esta acción no se puede deshacer.</p>
               </div>
             </DialogDescription>
           </DialogHeader>

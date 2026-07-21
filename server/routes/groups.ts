@@ -136,9 +136,22 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Group not found" });
       }
 
-      const reservationCount = group.reservations.filter(
-        (r: any) => r.status !== "checked_out" && r.status !== "cancelled"
-      ).length;
+      // Solo se puede eliminar un grupo Tentativo sin reservas ni movimientos financieros
+      if (group.status !== "tentativo") {
+        return res.status(400).json({ error: "Solo se pueden eliminar grupos en estado Tentativo. Para cancelar un grupo usá el estado Cancelado." });
+      }
+      if (group.reservations.length > 0) {
+        return res.status(400).json({ error: "No se puede eliminar un grupo que tiene reservas asignadas." });
+      }
+      const [gCharges, gPayments] = await Promise.all([
+        storage.getGroupCharges(req.params.id),
+        storage.getGroupPayments(req.params.id),
+      ]);
+      if (gCharges.length > 0 || gPayments.length > 0) {
+        return res.status(400).json({ error: "No se puede eliminar un grupo que tiene movimientos financieros registrados." });
+      }
+
+      const reservationCount = 0;
 
       const deleted = await storage.deleteGroup(req.params.id);
       if (!deleted) {
