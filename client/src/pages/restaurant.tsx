@@ -81,7 +81,7 @@ import { Link } from "wouter";
 type RestaurantArea = {
   id: string;
   name: string;
-  areaType: "indoor" | "outdoor" | "terrace" | "bar" | "private";
+  areaType: "indoor" | "outdoor" | "terrace" | "bar" | "private" | "event";
   capacity: number;
   hasTables: string | null;
   isActive: string;
@@ -94,12 +94,16 @@ type RestaurantTable = {
   areaId: string;
   capacity: number;
   shape: "square" | "round" | "rectangular";
-  status: "available" | "occupied" | "reserved";
+  status: "available" | "occupied" | "reserved" | "preloaded";
   positionX: number;
   positionY: number;
   hasWindow: string | null;
   isActive: string;
   area?: RestaurantArea;
+  eventClientName?: string | null;
+  eventClientPhone?: string | null;
+  eventSeats?: number | null;
+  eventNotes?: string | null;
 };
 
 type MenuCategory = {
@@ -254,12 +258,14 @@ const tableStatusColors: Record<string, string> = {
   available: "bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/40",
   occupied: "bg-red-500/20 text-red-700 dark:text-red-400 border-red-500/40",
   reserved: "bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/40",
+  preloaded: "bg-violet-500/20 text-violet-700 dark:text-violet-400 border-violet-500/40",
 };
 
 const tableStatusLabels: Record<string, string> = {
   available: "Disponible",
   occupied: "Ocupada",
   reserved: "Reservada",
+  preloaded: "Pre-cargada",
 };
 
 const receiptTypeLabels: Record<string, string> = {
@@ -742,6 +748,13 @@ export default function RestaurantPage() {
   const [splitEditAmounts, setSplitEditAmounts] = useState<Record<string, string>>({});
   const [menuSearch, setMenuSearch] = useState("");
   const menuSearchRef = useRef<HTMLInputElement>(null);
+  // ── EVENTO POR MESA ─────────────────────────────────────────────────────────
+  const [isEventConfigOpen, setIsEventConfigOpen] = useState(false);
+  const [eventConfigTable, setEventConfigTable] = useState<RestaurantTable | null>(null);
+  const [evtClientName, setEvtClientName] = useState("");
+  const [evtClientPhone, setEvtClientPhone] = useState("");
+  const [evtSeats, setEvtSeats] = useState(2);
+  const [evtNotes, setEvtNotes] = useState("");
   const [showItemNotes, setShowItemNotes] = useState(false);
   const [reservationViewMode, setReservationViewMode] = useState<"day" | "all" | "past">("day");
   const [reservationDateFilter, setReservationDateFilter] = useState(
@@ -1174,6 +1187,16 @@ export default function RestaurantPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
+    },
+  });
+
+  const updateTableEventMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+      const res = await apiRequest("PATCH", `/api/restaurant/tables/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
     },
   });
 
@@ -1684,14 +1707,36 @@ export default function RestaurantPage() {
 
   const activeOrders = orders.filter((o) => o.status !== "closed" && o.status !== "cancelled");
 
+  const openEventConfig = (table: RestaurantTable) => {
+    setEventConfigTable(table);
+    setEvtClientName(table.eventClientName || "");
+    setEvtClientPhone(table.eventClientPhone || "");
+    setEvtSeats(table.eventSeats || table.capacity);
+    setEvtNotes(table.eventNotes || "");
+    setIsEventConfigOpen(true);
+  };
+
   const handleTableClick = (table: RestaurantTable) => {
     if (isEditMode) return;
     setSelectedTable(table);
+
+    // ── Evento por Mesa logic ─────────────────────────────────────────────────
+    const tableArea = areas.find(a => a.id === table.areaId);
+    if (tableArea?.areaType === "event") {
+      if (table.status === "available" || table.status === "preloaded") {
+        openEventConfig(table);
+        return;
+      }
+      // occupied → fall through to normal POS below
+    }
+
     if (table.status === "available") {
       setCurrentOrder(null);
       setNewCovers(table.capacity);
       setNewWaiterName("");
       setIsNewOrderDialogOpen(true);
+    } else if (table.status === "preloaded") {
+      openEventConfig(table);
     } else if (table.status === "occupied") {
       // Defensa frontend: solo considerar órdenes de HOY en Argentina.
       // Aunque el backend ya filtra por fecha, esta capa extra previene que
@@ -2444,7 +2489,15 @@ export default function RestaurantPage() {
                                     </>
                                   );
                                 })()}
-                                {hasReservationToday && !table.status.includes("occupied") && nextReservation && (
+                                {table.status === "preloaded" && table.eventClientName && (
+                                  <span className="text-[9px] truncate max-w-full opacity-90 font-medium">{table.eventClientName.split(" ")[0]}</span>
+                                )}
+                                {table.status === "preloaded" && table.eventSeats && (
+                                  <span className="text-[8px] font-bold px-1 py-0.5 rounded leading-none bg-violet-500/30 text-violet-700 dark:text-violet-400">
+                                    {table.eventSeats} coms.
+                                  </span>
+                                )}
+                                {hasReservationToday && !table.status.includes("occupied") && !table.status.includes("preloaded") && nextReservation && (
                                   <span className="text-[9px] truncate max-w-full opacity-90 font-medium">
                                     {nextReservation.guestName.split(" ")[0]}
                                   </span>
@@ -3549,6 +3602,153 @@ export default function RestaurantPage() {
             >
               {(clientCreateMutation.isPending || clientUpdateMutation.isPending) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {clientEditingId ? "Guardar Cambios" : "Crear Cliente"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── EVENTO POR MESA — Configurar Mesa Dialog ───────────────────────────── */}
+      <Dialog open={isEventConfigOpen} onOpenChange={setIsEventConfigOpen}>
+        <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-violet-600" />
+              Mesa {eventConfigTable?.tableNumber} — Evento
+            </DialogTitle>
+            <DialogDescription>
+              {eventConfigTable?.status === "preloaded"
+                ? "Mesa pre-cargada. Editá los datos o iniciá el servicio."
+                : "Cargá los datos del cliente antes de iniciar el servicio."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            <div className="space-y-2">
+              <Label htmlFor="evt-client-name">Nombre del cliente / anfitrión</Label>
+              <Input
+                id="evt-client-name"
+                value={evtClientName}
+                onChange={(e) => setEvtClientName(e.target.value)}
+                placeholder="Ej: Familia García"
+                data-testid="input-evt-client-name"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="evt-client-phone">Teléfono</Label>
+                <Input
+                  id="evt-client-phone"
+                  value={evtClientPhone}
+                  onChange={(e) => setEvtClientPhone(e.target.value)}
+                  placeholder="Ej: 343 4123456"
+                  data-testid="input-evt-client-phone"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="evt-seats">Comensales</Label>
+                <Input
+                  id="evt-seats"
+                  type="number"
+                  min={1}
+                  value={evtSeats}
+                  onChange={(e) => setEvtSeats(parseInt(e.target.value) || 1)}
+                  data-testid="input-evt-seats"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="evt-notes">Notas internas</Label>
+              <Textarea
+                id="evt-notes"
+                value={evtNotes}
+                onChange={(e) => setEvtNotes(e.target.value)}
+                placeholder="Ej: menú especial, alergias, decoración..."
+                rows={2}
+                data-testid="input-evt-notes"
+              />
+            </div>
+
+            {eventConfigTable?.status === "preloaded" && (
+              <div className="rounded-md bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 px-3 py-2 flex items-center gap-2 text-sm text-violet-700 dark:text-violet-300">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                Mesa pre-cargada — listo para iniciar servicio cuando llegue el cliente.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsEventConfigOpen(false)}
+              className="sm:mr-auto"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={updateTableEventMutation.isPending}
+              onClick={() => {
+                if (!eventConfigTable) return;
+                updateTableEventMutation.mutate({
+                  id: eventConfigTable.id,
+                  data: {
+                    status: "preloaded",
+                    eventClientName: evtClientName.trim() || null,
+                    eventClientPhone: evtClientPhone.trim() || null,
+                    eventSeats: evtSeats,
+                    eventNotes: evtNotes.trim() || null,
+                  },
+                }, {
+                  onSuccess: () => {
+                    toast({ title: "Mesa pre-cargada", description: `Mesa ${eventConfigTable.tableNumber} lista para el evento.` });
+                    setIsEventConfigOpen(false);
+                  },
+                });
+              }}
+              data-testid="button-evt-preload"
+            >
+              {updateTableEventMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+              Guardar Pre-carga
+            </Button>
+            <Button
+              disabled={createOrderMutation.isPending || updateTableEventMutation.isPending}
+              onClick={() => {
+                if (!eventConfigTable) return;
+                const label = evtClientName.trim() || `Mesa ${eventConfigTable.tableNumber}`;
+                const covers = evtSeats || eventConfigTable.capacity;
+                // Save event data and open order
+                updateTableEventMutation.mutate({
+                  id: eventConfigTable.id,
+                  data: {
+                    eventClientName: evtClientName.trim() || null,
+                    eventClientPhone: evtClientPhone.trim() || null,
+                    eventSeats: covers,
+                    eventNotes: evtNotes.trim() || null,
+                  },
+                }, {
+                  onSuccess: () => {
+                    setSelectedTable(eventConfigTable);
+                    createOrderMutation.mutate({
+                      tableId: eventConfigTable.id,
+                      covers,
+                      waiterName: "",
+                      orderLabel: label,
+                    }, {
+                      onSuccess: (order) => {
+                        setIsEventConfigOpen(false);
+                        setCurrentOrder(order);
+                        setOrderView("menu");
+                        setSelectedCategory(null);
+                        setIsOrderDialogOpen(true);
+                      },
+                    });
+                  },
+                });
+              }}
+              data-testid="button-evt-start-service"
+            >
+              {(createOrderMutation.isPending) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UtensilsCrossed className="h-4 w-4 mr-2" />}
+              Iniciar Servicio
             </Button>
           </DialogFooter>
         </DialogContent>

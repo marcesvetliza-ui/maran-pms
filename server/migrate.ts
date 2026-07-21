@@ -868,5 +868,26 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true`)
   );
 
+  // restaurant_tables: event-specific columns for "Evento por Mesa" salon
+  await withTimeout("restaurant_tables.event_cols", T, () =>
+    db.execute(sql`
+      ALTER TABLE restaurant_tables
+        ADD COLUMN IF NOT EXISTS event_client_name text,
+        ADD COLUMN IF NOT EXISTS event_client_phone text,
+        ADD COLUMN IF NOT EXISTS event_seats integer,
+        ADD COLUMN IF NOT EXISTS event_notes text
+    `)
+  );
+
+  // Seed "Evento por Mesa" restaurant area if not present
+  await withTimeout("restaurant_areas.evento_por_mesa_seed", T, () =>
+    db.execute(sql`
+      INSERT INTO restaurant_areas (id, name, area_type, capacity, has_tables, is_active, notes)
+      SELECT 'area-evento-mesa', 'Evento por Mesa', 'event', 100, 'true', 'true',
+             'Salón para eventos con servicio de restaurante (cenas, celebraciones, etc.)'
+      WHERE NOT EXISTS (SELECT 1 FROM restaurant_areas WHERE id = 'area-evento-mesa')
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

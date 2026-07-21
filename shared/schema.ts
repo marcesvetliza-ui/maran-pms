@@ -878,7 +878,7 @@ export const messages = pgTable("messages", {
 // ==================== RESTAURANT MODULE ====================
 
 // Restaurant Areas (Salones)
-export type RestaurantAreaType = "indoor" | "outdoor" | "terrace" | "bar" | "private";
+export type RestaurantAreaType = "indoor" | "outdoor" | "terrace" | "bar" | "private" | "event";
 
 export const restaurantAreas = pgTable("restaurant_areas", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -895,7 +895,7 @@ export type InsertRestaurantArea = z.infer<typeof insertRestaurantAreaSchema>;
 export type RestaurantArea = typeof restaurantAreas.$inferSelect;
 
 // Restaurant Tables
-export type TableStatus = "available" | "occupied" | "reserved";
+export type TableStatus = "available" | "occupied" | "reserved" | "preloaded";
 export type TableShape = "square" | "round" | "rectangular";
 
 export const restaurantTables = pgTable("restaurant_tables", {
@@ -909,6 +909,10 @@ export const restaurantTables = pgTable("restaurant_tables", {
   positionY: integer("position_y").default(0),
   hasWindow: text("has_window").default("false"),
   isActive: text("is_active").default("true"),
+  eventClientName: text("event_client_name"),
+  eventClientPhone: text("event_client_phone"),
+  eventSeats: integer("event_seats"),
+  eventNotes: text("event_notes"),
 });
 
 export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).omit({ id: true });
