@@ -851,11 +851,11 @@ export default function NewReservationPage() {
             <div>
               <p className="text-sm text-muted-foreground">Total</p>
               <p className="font-medium text-lg">
-                ${fmtMoney(parseFloat(totalAmount) + pendingCharges.reduce()}
+                ${fmtMoney(parseFloat(totalAmount) + pendingCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0))}
               </p>
               {pendingCharges.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Hab. ${totalAmount} + cargos ${fmtMoney(pendingCharges.reduce()}
+                  Hab. ${totalAmount} + cargos ${fmtMoney(pendingCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0))}
                 </p>
               )}
             </div>
