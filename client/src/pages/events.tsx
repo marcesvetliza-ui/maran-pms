@@ -1887,7 +1887,7 @@ export default function EventsPage() {
 
                 <div className="flex justify-end border-t pt-4">
                   <div className="text-lg font-bold">
-                    Total: ${calculateEventTotalfmtMoney(selectedEvent)}
+                    Total: ${fmtMoney(calculateEventTotal(selectedEvent))}
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">* Todos los precios incluyen IVA (21%).</p>
@@ -2048,7 +2048,7 @@ export default function EventsPage() {
                       </div>
                       <div className="mt-3 pt-3 border-t flex justify-between font-bold">
                         <span>Total Cargos:</span>
-                        <span>${calculateEventTotalfmtMoney(selectedEvent)}</span>
+                        <span>${fmtMoney(calculateEventTotal(selectedEvent))}</span>
                       </div>
                     </div>
 
@@ -2096,7 +2096,7 @@ export default function EventsPage() {
                       <div className="mt-3 pt-3 border-t space-y-3">
                         <div className="flex justify-between font-bold">
                           <span>Total Pagado:</span>
-                          <span className="text-green-600">${calculateEventPaidfmtMoney(selectedEvent)}</span>
+                          <span className="text-green-600">${fmtMoney(calculateEventPaid(selectedEvent))}</span>
                         </div>
 
                         <div className="flex justify-between font-bold text-lg">
