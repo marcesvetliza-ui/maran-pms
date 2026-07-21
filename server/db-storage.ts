@@ -1611,7 +1611,8 @@ export class DatabaseStorage implements IStorage {
     const group = await this.getGroup(groupId);
     if (!group) throw new Error("Grupo no encontrado");
 
-    const resIds = group.reservations.map((r: any) => r.id).filter(Boolean);
+    const activeReservations = group.reservations.filter((r: any) => r.status !== "cancelled");
+    const resIds = activeReservations.map((r: any) => r.id).filter(Boolean);
 
     // Batch-fetch everything in parallel — no per-reservation queries
     const [gCharges, gPayments, allResCharges, allResPayments] = await Promise.all([
@@ -1644,7 +1645,7 @@ export class DatabaseStorage implements IStorage {
     let extrasTotal = 0;
     let indivPaymentsTotal = 0;
 
-    const resRows = group.reservations.map((res: any) => {
+    const resRows = activeReservations.map((res: any) => {
       const resCharges = chargesMap.get(res.id) || [];
       const resPayments = paymentsMap.get(res.id) || [];
       const accTotal = parseFloat(res.totalRoomAmount || "0");
