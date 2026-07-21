@@ -220,8 +220,9 @@ export function registerReservationsRoutes(app: Express) {
 
       res.status(201).json(reservation);
     } catch (error: any) {
-      console.error("Error creating reservation:", error?.message || error);
-      res.status(500).json({ error: "Error creating reservation" });
+      const detail = error?.message || String(error);
+      console.error("Error creating reservation:", detail);
+      res.status(500).json({ error: detail || "Error creating reservation" });
     }
   });
 

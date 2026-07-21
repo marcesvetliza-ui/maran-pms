@@ -160,7 +160,15 @@ export function QuickReservationDialog({
       return paxMap[pax] || plan.baseRate;
     };
     const planRate = selectedPlan ? getPlanPaxRate(selectedPlan, numberOfGuests) : null;
-    const effectiveRate = manualRate || (selectedPackage ? fmtMoney(parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)) : planRate) || null;
+    // Normaliza el rate para la API: elimina separadores de miles (puntos) y convierte coma decimal a punto
+    const normalizeRate = (r: string) => {
+      const clean = r.replace(/\./g, "").replace(",", ".");
+      const n = parseFloat(clean);
+      return isNaN(n) ? null : n.toFixed(2);
+    };
+    const packageRate = selectedPackage ? (parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)).toFixed(2) : null;
+    const rawEffective = manualRate || packageRate || planRate || null;
+    const effectiveRate = rawEffective ? normalizeRate(rawEffective) : null;
     const packageNote = selectedPackage ? `[Paquete: ${selectedPackage.name}]` : "";
     const finalNotes = [packageNote, notes].filter(Boolean).join(" ") || null;
     try {
@@ -347,7 +355,7 @@ export function QuickReservationDialog({
                 setPackageId(val); setRatePlanId("");
                 const pkg = activePackages.find(p => p.id === val);
                 if (pkg) {
-                  const ratePerNight = fmtMoney(parseFloat(pkg.basePrice) / (pkg.nights || 1));
+                  const ratePerNight = (parseFloat(pkg.basePrice) / (pkg.nights || 1)).toFixed(2);
                   setManualRate(ratePerNight);
                   if (pkg.nights && reservationData) {
                     const nextDay = new Date(reservationData.checkInDate + "T12:00:00");
