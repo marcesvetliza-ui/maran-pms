@@ -1313,11 +1313,54 @@ export class DatabaseStorage implements IStorage {
 
   async getGroups(): Promise<GroupWithDetails[]> {
     const allGroups = await db.select().from(groups).orderBy(desc(groups.createdAt));
-    const results: GroupWithDetails[] = [];
-    for (const group of allGroups) {
-      results.push(await this.buildGroupWithDetails(group));
+    if (allGroups.length === 0) return [];
+
+    const allGroupIds = allGroups.map(g => g.id);
+
+    // Bulk-fetch all blocks and links in 2 queries (instead of 2×N)
+    const [allBlocks, allLinks, allRoomTypesList, allRatePlansList] = await Promise.all([
+      db.select().from(groupRoomBlocks).where(inArray(groupRoomBlocks.groupId, allGroupIds)),
+      db.select().from(groupReservationLinks).where(inArray(groupReservationLinks.groupId, allGroupIds)),
+      db.select().from(roomTypes),
+      db.select().from(ratePlans),
+    ]);
+
+    const roomTypeMap = new Map(allRoomTypesList.map(t => [t.id, t]));
+    const ratePlanMap = new Map(allRatePlansList.map(p => [p.id, p]));
+
+    // Bulk-fetch all linked reservations by status in 1 query (for assigned count + delete confirm)
+    const allResIds = [...new Set(allLinks.map(l => l.reservationId))];
+    const allResRows = allResIds.length > 0
+      ? await db.select({ id: reservations.id, status: reservations.status, groupId: groupReservationLinks.groupId })
+          .from(reservations)
+          .innerJoin(groupReservationLinks, eq(groupReservationLinks.reservationId, reservations.id))
+          .where(inArray(reservations.id, allResIds))
+      : [];
+
+    // Group-level maps
+    const blocksByGroup = new Map<string, any[]>();
+    const resByGroup = new Map<string, any[]>();
+    for (const b of allBlocks) {
+      if (!blocksByGroup.has(b.groupId)) blocksByGroup.set(b.groupId, []);
+      blocksByGroup.get(b.groupId)!.push({
+        ...b,
+        roomType: roomTypeMap.get(b.roomTypeId),
+        ratePlan: b.ratePlanId ? ratePlanMap.get(b.ratePlanId) : undefined,
+      });
     }
-    return results;
+    for (const r of allResRows) {
+      if (!resByGroup.has(r.groupId)) resByGroup.set(r.groupId, []);
+      resByGroup.get(r.groupId)!.push(r);
+    }
+
+    return allGroups.map(group => {
+      const blocks = blocksByGroup.get(group.id) || [];
+      const resRows = resByGroup.get(group.id) || [];
+      const totalRooms = blocks.reduce((sum: number, b: any) => sum + b.quantity, 0);
+      const assignedRooms = resRows.filter((r: any) => r.status !== "cancelled" && r.status !== "checked_out").length;
+      // reservations array in list view only needs status (for delete confirm count)
+      return { ...group, blocks, reservations: resRows as any[], totalRooms, assignedRooms };
+    });
   }
 
   async getGroup(id: string): Promise<GroupWithDetails | undefined> {
@@ -1327,17 +1370,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async buildGroupWithDetails(group: Group): Promise<GroupWithDetails> {
-    const blocks = await this.getGroupBlocks(group.id);
-    const links = await this.getGroupReservationLinks(group.id);
-    const reservationsList: ReservationWithDetails[] = [];
-    for (const link of links) {
-      const res = await this.getReservation(link.reservationId);
-      if (res) {
-        const companions = await this.getReservationCompanions(res.id);
-        (res as any).companions = companions;
-        reservationsList.push(res);
-      }
+    // Parallel: fetch blocks and reservation links
+    const [blocks, links] = await Promise.all([
+      this.getGroupBlocks(group.id),
+      this.getGroupReservationLinks(group.id),
+    ]);
+
+    // Batch-fetch all linked reservations in one call (uses enrichReservations internally)
+    const resIds = links.map(l => l.reservationId);
+    let reservationsList: ReservationWithDetails[] = [];
+    if (resIds.length > 0) {
+      const rawReservations = await db.select().from(reservations).where(inArray(reservations.id, resIds));
+      reservationsList = await this.enrichReservations(rawReservations);
     }
+
     const totalRooms = blocks.reduce((sum, b) => sum + b.quantity, 0);
     const assignedRooms = reservationsList.filter(r => r.status !== "cancelled" && r.status !== "checked_out").length;
     return { ...group, blocks, reservations: reservationsList, totalRooms, assignedRooms };
@@ -1565,8 +1611,31 @@ export class DatabaseStorage implements IStorage {
     const group = await this.getGroup(groupId);
     if (!group) throw new Error("Grupo no encontrado");
 
-    const gCharges = await this.getGroupCharges(groupId);
-    const gPayments = await this.getGroupPayments(groupId);
+    const resIds = group.reservations.map((r: any) => r.id).filter(Boolean);
+
+    // Batch-fetch everything in parallel — no per-reservation queries
+    const [gCharges, gPayments, allResCharges, allResPayments] = await Promise.all([
+      this.getGroupCharges(groupId),
+      this.getGroupPayments(groupId),
+      resIds.length > 0
+        ? db.select().from(charges).where(inArray(charges.reservationId, resIds))
+        : Promise.resolve([]),
+      resIds.length > 0
+        ? db.select().from(payments).where(inArray(payments.reservationId, resIds))
+        : Promise.resolve([]),
+    ]);
+
+    // Build lookup maps
+    const chargesMap = new Map<string, typeof allResCharges>();
+    for (const c of allResCharges) {
+      if (!chargesMap.has(c.reservationId!)) chargesMap.set(c.reservationId!, []);
+      chargesMap.get(c.reservationId!)!.push(c);
+    }
+    const paymentsMap = new Map<string, typeof allResPayments>();
+    for (const p of allResPayments) {
+      if (!paymentsMap.has(p.reservationId!)) paymentsMap.set(p.reservationId!, []);
+      paymentsMap.get(p.reservationId!)!.push(p);
+    }
 
     const groupChargesTotal = gCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
     const groupPaymentsTotal = gPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
@@ -1575,12 +1644,12 @@ export class DatabaseStorage implements IStorage {
     let extrasTotal = 0;
     let indivPaymentsTotal = 0;
 
-    const resRows = await Promise.all(group.reservations.map(async (res) => {
-      const resCharges = await this.getCharges(res.id);
-      const resPayments = await this.getPayments(res.id);
+    const resRows = group.reservations.map((res: any) => {
+      const resCharges = chargesMap.get(res.id) || [];
+      const resPayments = paymentsMap.get(res.id) || [];
       const accTotal = parseFloat(res.totalRoomAmount || "0");
-      const extTotal = resCharges.filter(c => c.status !== "anulado").reduce((s, c) => s + parseFloat(c.amount), 0);
-      const payTotal = resPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+      const extTotal = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+      const payTotal = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
       const nights = res.nights || 0;
 
       accommodationTotal += accTotal;
@@ -1597,7 +1666,7 @@ export class DatabaseStorage implements IStorage {
         paymentsTotal: payTotal,
         balance: accTotal + extTotal - payTotal,
       };
-    }));
+    });
 
     // IMPORTANT: individual payments already carry the distributed amounts per room.
     // groupPaymentsTotal is an audit record of the received total and must NOT be added
