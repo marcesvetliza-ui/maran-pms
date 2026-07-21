@@ -186,7 +186,7 @@ export function ReservationDetailModal({
     updateReservationMutation.mutate({
       checkInDate: editCheckIn, checkOutDate: editCheckOut, source: editChannel, notes: editNotes,
       earlyCheckIn: editEarlyCheckIn, lateCheckOut: editLateCheckOut, finalRatePerNight: editRatePerNight,
-      nights, totalRoomAmount: fmtMoney(rate * nights),
+      nights, totalRoomAmount: rate > 0 ? (rate * nights).toFixed(2) : null,
     });
   };
 

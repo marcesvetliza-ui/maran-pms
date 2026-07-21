@@ -209,6 +209,10 @@ export default function NewReservationPage() {
   }, [baseRate, discountType, discountValue]);
 
   const totalAmount = fmtMoney(finalRate * nights);
+  // Valores para la API: siempre en formato decimal estándar (sin locale)
+  const apiBaseRate = baseRate > 0 ? baseRate.toFixed(2) : null;
+  const apiFinaRate = finalRate > 0 ? finalRate.toFixed(2) : null;
+  const apiTotalAmount = (finalRate > 0 && nights > 0) ? (finalRate * nights).toFixed(2) : null;
 
   const createGuestMutation = useMutation({
     mutationFn: async (guest: InsertGuest): Promise<Guest> => {
@@ -280,11 +284,11 @@ export default function NewReservationPage() {
         checkInDate,
         checkOutDate,
         nights,
-        baseRatePerNight: fmtMoney(baseRate),
+        baseRatePerNight: apiBaseRate,
         discountType,
         discountValue,
-        finalRatePerNight: fmtMoney(finalRate),
-        totalRoomAmount: totalAmount,
+        finalRatePerNight: apiFinaRate,
+        totalRoomAmount: apiTotalAmount,
         status: "confirmed",
         source: selectedAgency ? "agencia" : selectedCompany ? "empresa" : "directo",
         numberOfGuests,
