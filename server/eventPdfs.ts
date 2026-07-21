@@ -48,6 +48,9 @@ function pdfBrandedFooter(doc: InstanceType<typeof PDFDocument>, pageW: number, 
   // Right: website
   doc.fillColor("#ffffff").fontSize(9.5).font("Helvetica-Bold")
     .text(HOTEL_WEB, pageW - margin - 110, footerY + 23, { width: 110, align: "right" });
+  const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+  doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
+    .text(`Generado el ${ts}`, margin, footerY + 50, { width: contentW, align: "center" });
   return footerY;
 }
 

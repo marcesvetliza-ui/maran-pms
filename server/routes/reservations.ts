@@ -2256,6 +2256,9 @@ async function handleConfirmationPdf(req: any, res: any) {
           margin, y, { width: contentW, align: "center" }
         );
     }
+    const _confTs = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
+      .text(`Generado el ${_confTs} | Maran Suites & Towers`, margin, pageH - 20, { align: "center", width: contentW });
 
     doc.end();
   } catch (e: any) {

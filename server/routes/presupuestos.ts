@@ -1065,6 +1065,9 @@ export function registerPresupuestosRoutes(app: Express) {
         generateGeneralPdf(doc, pres, items, conditions);
       }
 
+      const _presTs = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+      doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
+        .text(`Generado el ${_presTs} | Maran Suites & Towers`, 0, doc.page.height - 10, { align: "center", width: doc.page.width });
       doc.end();
     } catch (e: any) {
       res.status(500).json({ error: "Error generando PDF", detail: e?.message });

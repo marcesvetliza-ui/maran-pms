@@ -1189,10 +1189,11 @@ export function registerGroupsRoutes(app: Express) {
       doc.font("Helvetica-Bold").text("Código:", 40, y);
       doc.font("Helvetica").text(group.groupCode, 110, y);
       y += 16;
+      const fmtAR = (d: string) => d ? d.split("-").reverse().join("/") : "";
       doc.font("Helvetica-Bold").text("Check-in:", 40, y);
-      doc.font("Helvetica").text(group.checkInDate, 110, y);
+      doc.font("Helvetica").text(fmtAR(group.checkInDate), 110, y);
       doc.font("Helvetica-Bold").text("Check-out:", 250, y);
-      doc.font("Helvetica").text(group.checkOutDate, 330, y);
+      doc.font("Helvetica").text(fmtAR(group.checkOutDate), 330, y);
       y += 16;
       if (group.contactName) {
         doc.font("Helvetica-Bold").text("Contacto:", 40, y);
@@ -1290,7 +1291,7 @@ export function registerGroupsRoutes(app: Express) {
         for (const p of gPayments) {
           if (y > 740) { doc.addPage(); y = 40; }
           doc.fontSize(9).font("Helvetica")
-            .text(`${p.date} — ${p.method}${p.reference ? ` (${p.reference})` : ""}`, 50, y)
+            .text(`${fmtAR(p.date)} — ${p.method}${p.reference ? ` (${p.reference})` : ""}`, 50, y)
             .text(`$${parseFloat(p.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
           y += 14;
         }

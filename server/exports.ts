@@ -48,6 +48,9 @@ async function genPDF(fn: (doc: InstanceType<typeof PDFDocument>) => void): Prom
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
     fn(doc);
+    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fontSize(6.5).font("Helvetica").fillColor("#aaaaaa")
+      .text(`Generado el ${ts} | Hotel Maran Suites & Towers`, 40, doc.page.height - 22, { align: "center", width: 515 });
     doc.end();
   });
 }

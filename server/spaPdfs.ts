@@ -221,6 +221,9 @@ export async function generateConfirmacionTurnoSpaPdf(
       .text(HOTEL_ADDRESS, margin, footerY + 23, { width: pageW * 0.55 });
     doc.fillColor("#aacccc").fontSize(6.8).font("Helvetica")
       .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, margin, footerY + 33, { width: pageW * 0.55 });
+    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
+      .text(`Generado el ${ts}`, pageW * 0.62 + margin, footerY + 20, { width: pageW * 0.35 - margin, align: "center" });
 
     doc.end();
   });

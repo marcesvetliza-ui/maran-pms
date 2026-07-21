@@ -1318,6 +1318,11 @@ export function registerReportsRoutes(app: Express) {
           }
         };
         render(data);
+        y += 16;
+        if (y > 760) { doc.addPage(); y = 40; }
+        const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+        doc.font("Helvetica").fontSize(7).fillColor("#aaaaaa")
+          .text(`Generado el ${ts} | Hotel Maran Suites & Towers`, x0, y, { align: "center", width: 515 });
         doc.end();
       });
 

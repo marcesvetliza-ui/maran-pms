@@ -253,6 +253,9 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<B
        .text("CUIT 33-68110008-9 · Responsable Inscripto", cx, footerY + 40, { width: cw, align: "center" });
     doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
        .text("MARAN.COM.AR", pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
+    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
+       .text(`Generado el ${ts}`, margin, footerY + 57, { width: cW, align: "center" });
 
     doc.end();
   });

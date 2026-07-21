@@ -219,6 +219,9 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
       .font("Helvetica").fontSize(6).fillColor("#666")
       .text(cae ? `||${cae}||` : "", x0 + W - 200, y + 20, { width: 192, align: "right" })
       .fillColor("#000");
+    const _ts1 = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
+      .text(`Generado el ${_ts1} | Maran Suites & Towers`, x0, y + 48, { align: "center", width: W });
 
     doc.end();
   });
@@ -407,6 +410,10 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
     doc.font("Helvetica").fontSize(6).fillColor("#888")
       .text("Este comprobante es un documento interno del hotel. No tiene validez fiscal.", x0, y, { align: "center", width: W })
       .fillColor("#000");
+    y += 10;
+    const _ts2 = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
+      .text(`Generado el ${_ts2} | Maran Suites & Towers`, x0, y, { align: "center", width: W });
 
     doc.end();
   });
@@ -569,6 +576,10 @@ export async function generarResumenCuentaPDF(data: ResumenCuentaData, config: a
     doc.font("Helvetica").fontSize(6).fillColor("#888")
       .text("Este resumen es un documento de cortesía. No constituye comprobante fiscal.", x0, y, { align: "center", width: W })
       .fillColor("#000");
+    y += 10;
+    const _ts3 = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
+      .text(`Generado el ${_ts3} | Maran Suites & Towers`, x0, y, { align: "center", width: W });
 
     doc.end();
   });
