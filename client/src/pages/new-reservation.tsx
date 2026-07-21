@@ -102,7 +102,14 @@ export default function NewReservationPage() {
   });
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
-    queryKey: ["/api/rate-plans"],
+    queryKey: ["/api/rate-plans/by-room-type", selectedRoomTypeId],
+    queryFn: async () => {
+      if (!selectedRoomTypeId) return [];
+      const res = await fetch(`/api/rate-plans/by-room-type/${selectedRoomTypeId}`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!selectedRoomTypeId,
   });
 
   const { data: allReservations = [] } = useQuery<any[]>({
@@ -170,9 +177,8 @@ export default function NewReservationPage() {
     })?.sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber));
   })();
 
-  // Tarifas: todas las del tipo seleccionado, excluyendo solo las ya vencidas (validTo < hoy)
+  // Tarifas: las del tipo seleccionado (filtradas en servidor), excluyendo las vencidas
   const applicableRatePlans = ratePlans?.filter((rp) => {
-    if (rp.roomTypeId !== selectedRoomTypeId) return false;
     if (rp.validTo && rp.validTo < checkInDate) return false; // plan vencido
     return true;
   });
