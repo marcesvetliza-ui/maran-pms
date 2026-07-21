@@ -171,45 +171,28 @@ export async function generateConfirmacionTurnoSpaPdf(
       y += noteH + 36;
     }
 
-    // ── CHARGES TABLE ─────────────────────────────────────────────────────────
-    if (account?.items?.length) {
-      doc.moveTo(margin, y).lineTo(margin + cardW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
-      y += 14;
+    // ── RECOMMENDATIONS ───────────────────────────────────────────────────────
+    doc.moveTo(margin, y).lineTo(margin + cardW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+    y += 14;
 
-      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold")
-        .text("Detalle de servicios", margin, y);
-      y += 18;
+    doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold")
+      .text("Recomendaciones", margin, y);
+    y += 16;
 
-      // Header
-      doc.roundedRect(margin, y, cardW, 20, 4).fill(NAVY);
-      const thY = y + 6;
-      doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
-      doc.text("Descripción",    margin + 8,  thY, { width: cardW * 0.52 });
-      doc.text("Cant.",          margin + 8,  thY, { width: cardW * 0.66, align: "right" });
-      doc.text("P. Unit.",       margin + 8,  thY, { width: cardW * 0.82, align: "right" });
-      doc.text("Total",          margin + 8,  thY, { width: cardW - 8,    align: "right" });
-      y += 22;
+    const recs = [
+      "Estar 10 minutos antes del turno asignado con su tarjeta voucher en mano (si es digital, no es necesario imprimirlo).",
+      "En el caso de que no pueda asistir al turno reservado le solicitamos que nos avise por este medio con dos horas de anticipación.",
+      "Se aceptan hasta 3 reprogramaciones de turno, a partir de la cuarta reprogramación tendrá un costo adicional del 50% del valor del tratamiento adquirido.",
+      "Con el fin de disfrutar plenamente de las actividades y espacios de relajación, le recomendamos resguardar sus objetos personales y de valor dentro de su bolso, cartera o en el casillero asignado. El establecimiento no se responsabiliza por pérdidas o extravíos.",
+    ];
 
-      let totalItems = 0;
-      for (const item of account.items) {
-        const rH = 18;
-        doc.rect(margin, y, cardW, rH).fillAndStroke("#fafafa", "#eeeeee");
-        doc.fillColor("#1a1a1a").fontSize(8).font("Helvetica")
-          .text(item.description,                        margin + 8, y + 4, { width: cardW * 0.52 });
-        doc.text(String(item.quantity),                  margin + 8, y + 4, { width: cardW * 0.66, align: "right" });
-        doc.text(`$ ${fmtMoney(item.unitPrice)}`,        margin + 8, y + 4, { width: cardW * 0.82, align: "right" });
-        doc.text(`$ ${fmtMoney(item.subtotal)}`,         margin + 8, y + 4, { width: cardW - 8,    align: "right" });
-        totalItems += parseFloat(String(item.subtotal || "0"));
-        y += rH;
-      }
-
-      // Total row
-      doc.roundedRect(margin, y + 2, cardW, 20, 4).fill("#eef2ff");
-      doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold")
-        .text("TOTAL",                              margin + 8, y + 6, { width: cardW * 0.7 });
-      doc.fillColor(NAVY).fontSize(9.5).font("Helvetica-Bold")
-        .text(`$ ${fmtMoney(totalItems)}`,          margin + 8, y + 6, { width: cardW - 8, align: "right" });
-      y += 28;
+    for (const rec of recs) {
+      const textH = doc.heightOfString(`• ${rec}`, { width: cardW - 18 });
+      doc.fillColor(TEAL).fontSize(10).font("Helvetica-Bold")
+        .text("•", margin, y, { width: 10 });
+      doc.fillColor("#444444").fontSize(8).font("Helvetica")
+        .text(rec, margin + 12, y, { width: cardW - 18 });
+      y += textH + 8;
     }
 
     // ── FOOTER STRIP ──────────────────────────────────────────────────────────
