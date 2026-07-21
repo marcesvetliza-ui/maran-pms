@@ -1377,7 +1377,8 @@ export class DatabaseStorage implements IStorage {
     ]);
 
     // Batch-fetch all linked reservations in one call (uses enrichReservations internally)
-    const resIds = links.map(l => l.reservationId);
+    // Deduplicate resIds to guard against duplicate groupReservationLinks entries
+    const resIds = [...new Set(links.map(l => l.reservationId))];
     let reservationsList: ReservationWithDetails[] = [];
     if (resIds.length > 0) {
       const rawReservations = await db.select().from(reservations).where(inArray(reservations.id, resIds));

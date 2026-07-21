@@ -1115,14 +1115,14 @@ export default function GroupDetailPage() {
   const getBedLabel = (res: any) => {
     const btId = res.room?.bedTypeId;
     if (btId && bedTypeMap[btId]) return bedTypeMap[btId];
-    return res.room?.roomType?.name || "-";
+    return "-";
   };
 
   const printRoomingList = () => {
     if (!group) return;
-    const sortedReservations = [...group.reservations].sort(
-      (a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || "")
-    );
+    const sortedReservations = [...group.reservations]
+      .filter(r => r.status !== "cancelled")
+      .sort((a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || ""));
 
     const rows = sortedReservations.map((res, idx) => {
       const companions: any[] = (res as any).companions || [];
@@ -2424,6 +2424,7 @@ export default function GroupDetailPage() {
                 </TableHeader>
                 <TableBody>
                   {group.reservations
+                    .filter(r => r.status !== "cancelled")
                     .sort((a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || ""))
                     .map((res, idx) => (
                       <TableRow key={res.id} data-testid={`row-rooming-${res.id}`}>
