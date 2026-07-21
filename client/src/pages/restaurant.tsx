@@ -3714,43 +3714,39 @@ export default function RestaurantPage() {
               Guardar Pre-carga
             </Button>
             <Button
-              disabled={createOrderMutation.isPending || updateTableEventMutation.isPending}
+              disabled={createOrderMutation.isPending}
               onClick={() => {
                 if (!eventConfigTable) return;
-                const label = evtClientName.trim() || `Mesa ${eventConfigTable.tableNumber}`;
-                const covers = evtSeats || eventConfigTable.capacity;
-                // Save event data and open order
+                const table = eventConfigTable;
+                const label = evtClientName.trim() || `Mesa ${table.tableNumber}`;
+                const covers = evtSeats || table.capacity;
+
+                // 1. Close this dialog immediately so the POS dialog can open on top
+                setIsEventConfigOpen(false);
+                setSelectedTable(table);
+
+                // 2. Persist event data (fire-and-forget — no chaining)
                 updateTableEventMutation.mutate({
-                  id: eventConfigTable.id,
+                  id: table.id,
                   data: {
                     eventClientName: evtClientName.trim() || null,
                     eventClientPhone: evtClientPhone.trim() || null,
                     eventSeats: covers,
                     eventNotes: evtNotes.trim() || null,
                   },
-                }, {
-                  onSuccess: () => {
-                    setSelectedTable(eventConfigTable);
-                    createOrderMutation.mutate({
-                      tableId: eventConfigTable.id,
-                      covers,
-                      waiterName: "",
-                      orderLabel: label,
-                    }, {
-                      onSuccess: (order) => {
-                        setIsEventConfigOpen(false);
-                        setCurrentOrder(order);
-                        setOrderView("menu");
-                        setSelectedCategory(null);
-                        setIsOrderDialogOpen(true);
-                      },
-                    });
-                  },
+                });
+
+                // 3. Create order — global onSuccess opens the POS dialog
+                createOrderMutation.mutate({
+                  tableId: table.id,
+                  covers,
+                  waiterName: "",
+                  orderLabel: label,
                 });
               }}
               data-testid="button-evt-start-service"
             >
-              {(createOrderMutation.isPending) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UtensilsCrossed className="h-4 w-4 mr-2" />}
+              {createOrderMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UtensilsCrossed className="h-4 w-4 mr-2" />}
               Iniciar Servicio
             </Button>
           </DialogFooter>
