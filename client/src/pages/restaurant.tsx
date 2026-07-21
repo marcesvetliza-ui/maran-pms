@@ -754,8 +754,12 @@ export default function RestaurantPage() {
   const [eventConfigTable, setEventConfigTable] = useState<RestaurantTable | null>(null);
   const [evtClientName, setEvtClientName] = useState("");
   const [evtClientPhone, setEvtClientPhone] = useState("");
+  const [evtClientEmail, setEvtClientEmail] = useState("");
   const [evtSeats, setEvtSeats] = useState(2);
   const [evtNotes, setEvtNotes] = useState("");
+  const [evtAdvanceAmount, setEvtAdvanceAmount] = useState("");
+  const [evtAdvanceMethod, setEvtAdvanceMethod] = useState("efectivo");
+  const [evtAdvanceDate, setEvtAdvanceDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [showItemNotes, setShowItemNotes] = useState(false);
   const [reservationViewMode, setReservationViewMode] = useState<"day" | "all" | "past">("day");
   const [reservationDateFilter, setReservationDateFilter] = useState(
@@ -985,9 +989,14 @@ export default function RestaurantPage() {
     },
     enabled: isCloseDialogOpen && !!closeOrderTableId,
   });
+  const closeOrderTable = tables.find(t => t.id === closeOrderTableId);
+  const closeOrderArea = closeOrderTable ? areas.find(a => a.id === closeOrderTable.areaId) : null;
+  const eventTableAdvance = closeOrderArea?.areaType === "event"
+    ? parseFloat((closeOrderTable as any)?.eventAdvanceAmount || "0")
+    : 0;
   const totalAdvanceCredit = closeDialogTableAdvances
     .filter(a => !a.appliedToOrderId)
-    .reduce((s, a) => s + parseFloat(a.amount || "0"), 0);
+    .reduce((s, a) => s + parseFloat(a.amount || "0"), 0) + eventTableAdvance;
 
   // Cuando los adelantos cargan (query async), corregir el monto del primer split
   // solo si el usuario todavía no lo modificó (sigue siendo igual al total bruto)
@@ -1715,8 +1724,12 @@ export default function RestaurantPage() {
     setEventConfigTable(table);
     setEvtClientName(table.eventClientName || "");
     setEvtClientPhone(table.eventClientPhone || "");
+    setEvtClientEmail((table as any).eventClientEmail || "");
     setEvtSeats(table.eventSeats || table.capacity);
     setEvtNotes(table.eventNotes || "");
+    setEvtAdvanceAmount((table as any).eventAdvanceAmount || "");
+    setEvtAdvanceMethod((table as any).eventAdvanceMethod || "efectivo");
+    setEvtAdvanceDate((table as any).eventAdvanceDate || new Date().toISOString().split("T")[0]);
     setIsEventConfigOpen(true);
   };
 
@@ -3664,6 +3677,17 @@ export default function RestaurantPage() {
               </div>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="evt-client-email">Email</Label>
+              <Input
+                id="evt-client-email"
+                type="email"
+                value={evtClientEmail}
+                onChange={(e) => setEvtClientEmail(e.target.value)}
+                placeholder="Ej: cliente@email.com"
+                data-testid="input-evt-client-email"
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="evt-notes">Notas internas</Label>
               <Textarea
                 id="evt-notes"
@@ -3673,6 +3697,49 @@ export default function RestaurantPage() {
                 rows={2}
                 data-testid="input-evt-notes"
               />
+            </div>
+
+            {/* Seña / Anticipo */}
+            <div className="rounded-md border border-dashed p-3 space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Seña / Anticipo (opcional)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="evt-adv-amount" className="text-sm">Monto</Label>
+                  <Input
+                    id="evt-adv-amount"
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    value={evtAdvanceAmount}
+                    onChange={(e) => setEvtAdvanceAmount(e.target.value)}
+                    data-testid="input-evt-advance-amount"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="evt-adv-method" className="text-sm">Forma de pago</Label>
+                  <Select value={evtAdvanceMethod} onValueChange={setEvtAdvanceMethod}>
+                    <SelectTrigger id="evt-adv-method" data-testid="select-evt-advance-method">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="efectivo">Efectivo</SelectItem>
+                      <SelectItem value="transferencia">Transferencia</SelectItem>
+                      <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                      <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="evt-adv-date" className="text-sm">Fecha de la seña</Label>
+                <Input
+                  id="evt-adv-date"
+                  type="date"
+                  value={evtAdvanceDate}
+                  onChange={(e) => setEvtAdvanceDate(e.target.value)}
+                  data-testid="input-evt-advance-date"
+                />
+              </div>
             </div>
 
             {eventConfigTable?.status === "preloaded" && (
@@ -3702,8 +3769,12 @@ export default function RestaurantPage() {
                     status: "preloaded",
                     eventClientName: evtClientName.trim() || null,
                     eventClientPhone: evtClientPhone.trim() || null,
+                    eventClientEmail: evtClientEmail.trim() || null,
                     eventSeats: evtSeats,
                     eventNotes: evtNotes.trim() || null,
+                    eventAdvanceAmount: evtAdvanceAmount ? parseFloat(evtAdvanceAmount).toFixed(2) : null,
+                    eventAdvanceMethod: evtAdvanceAmount ? evtAdvanceMethod : null,
+                    eventAdvanceDate: evtAdvanceAmount ? evtAdvanceDate : null,
                   },
                 }, {
                   onSuccess: () => {
@@ -3735,8 +3806,12 @@ export default function RestaurantPage() {
                   data: {
                     eventClientName: evtClientName.trim() || null,
                     eventClientPhone: evtClientPhone.trim() || null,
+                    eventClientEmail: evtClientEmail.trim() || null,
                     eventSeats: covers,
                     eventNotes: evtNotes.trim() || null,
+                    eventAdvanceAmount: evtAdvanceAmount ? parseFloat(evtAdvanceAmount).toFixed(2) : null,
+                    eventAdvanceMethod: evtAdvanceAmount ? evtAdvanceMethod : null,
+                    eventAdvanceDate: evtAdvanceAmount ? evtAdvanceDate : null,
                   },
                 });
 

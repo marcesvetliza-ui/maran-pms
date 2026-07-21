@@ -914,8 +914,12 @@ export const restaurantTables = pgTable("restaurant_tables", {
   isActive: text("is_active").default("true"),
   eventClientName: text("event_client_name"),
   eventClientPhone: text("event_client_phone"),
+  eventClientEmail: text("event_client_email"),
   eventSeats: integer("event_seats"),
   eventNotes: text("event_notes"),
+  eventAdvanceAmount: decimal("event_advance_amount", { precision: 10, scale: 2 }),
+  eventAdvanceMethod: text("event_advance_method"),
+  eventAdvanceDate: text("event_advance_date"),
 });
 
 export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).omit({ id: true });

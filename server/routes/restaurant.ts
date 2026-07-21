@@ -454,6 +454,15 @@ export function registerRestaurantRoutes(app: Express) {
           for (const adv of tableAdvances.filter(a => !a.appliedToOrderId)) {
             await (storage as any).applyReservationAdvancesToOrder(adv.reservationId, req.params.id);
           }
+          // Clear event table advance after applying (prevents double-application on next event)
+          const tableForAdv = await storage.getRestaurantTable(order.tableId);
+          if (tableForAdv && (tableForAdv as any).eventAdvanceAmount) {
+            await storage.updateRestaurantTable(order.tableId, {
+              eventAdvanceAmount: null,
+              eventAdvanceMethod: null,
+              eventAdvanceDate: null,
+            } as any);
+          }
         } catch (e) {
           console.error("[Advances] Error aplicando adelantos al cierre:", e);
         }

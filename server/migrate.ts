@@ -879,6 +879,17 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // restaurant_tables: email + advance fields for event pre-load
+  await withTimeout("restaurant_tables.event_advance_cols", T, () =>
+    db.execute(sql`
+      ALTER TABLE restaurant_tables
+        ADD COLUMN IF NOT EXISTS event_client_email text,
+        ADD COLUMN IF NOT EXISTS event_advance_amount decimal(10,2),
+        ADD COLUMN IF NOT EXISTS event_advance_method text,
+        ADD COLUMN IF NOT EXISTS event_advance_date text
+    `)
+  );
+
   // Seed "Evento por Mesa" restaurant area if not present
   await withTimeout("restaurant_areas.evento_por_mesa_seed", T, () =>
     db.execute(sql`
