@@ -435,7 +435,7 @@ export function QuickReservationDialog({
                 ))}
                 <div className="flex justify-between px-3 py-1 text-sm font-semibold bg-muted/30">
                   <span>Total cargos</span>
-                  <span>${fmtMoney(pendingCharges.reduce()}</span>
+                  <span>${fmtMoney(pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0))}</span>
                 </div>
               </div>
             )}
