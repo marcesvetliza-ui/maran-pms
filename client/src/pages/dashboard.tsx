@@ -817,7 +817,7 @@ export default function Dashboard() {
                           {reservation.guest?.lastName} {reservation.guest?.firstName}
                         </p>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-                          <span>Hab. {reservation.room?.roomNumber}</span>
+                          <span>Hab. <span className="font-semibold text-foreground">{reservation.room?.roomNumber}</span></span>
                           <span>·</span>
                           <span>{fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}</span>
                           {!isRoomReady && roomStatus && (
@@ -881,7 +881,7 @@ export default function Dashboard() {
                         {reservation.guest?.lastName} {reservation.guest?.firstName}
                       </p>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-                        <span>Hab. {reservation.room?.roomNumber}</span>
+                        <span>Hab. <span className="font-semibold text-foreground">{reservation.room?.roomNumber}</span></span>
                         <span>·</span>
                         <span>Ingresó: {fmtDate(reservation.checkInDate)}</span>
                         <span>·</span>
@@ -927,7 +927,7 @@ export default function Dashboard() {
                 <div key={i} className="flex flex-col sm:flex-row sm:items-start gap-2 p-3 rounded-md border border-destructive/20 bg-background">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium text-sm">{log.guestName} — Hab. {log.roomNumber}</p>
+                      <p className="font-medium text-sm">{log.guestName} — Hab. <span className="font-semibold text-foreground">{log.roomNumber}</span></p>
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {log.reservationCode} · {fmtDate(log.checkInDate)} → {fmtDate(log.checkOutDate)}
@@ -991,7 +991,7 @@ export default function Dashboard() {
                           {reservation.guest?.lastName} {reservation.guest?.firstName}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          Hab. {reservation.room?.roomNumber} · {fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}
+                          Hab. <span className="font-semibold text-foreground">{reservation.room?.roomNumber}</span> · {fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}
                         </p>
                         {reservation.createdAt && (
                           <p className="text-xs text-muted-foreground/70">
