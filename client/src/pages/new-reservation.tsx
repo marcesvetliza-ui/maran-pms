@@ -157,7 +157,7 @@ export default function NewReservationPage() {
     const blockedByReservation = new Set(
       allReservations
         .filter(r =>
-          (r.status === "confirmed" || r.status === "checked_in" || r.status === "web_checkin" || r.status === "pending" || r.status === "reserved") &&
+          (r.status === "tentative" || r.status === "confirmed" || r.status === "checked_in" || r.status === "web_checkin" || r.status === "pending" || r.status === "reserved") &&
           r.roomId &&
           checkInDate && checkOutDate &&
           r.checkInDate < checkOutDate &&

@@ -551,14 +551,19 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(400).json({ error: "Habitación no encontrada" });
       }
 
-      const blockedStatuses = ["occupied", "oos"];
-      if (blockedStatuses.includes(room.status)) {
-        const statusMessages: Record<string, string> = {
-          occupied: "La habitación está ocupada por otro huésped",
-          oos: "La habitación está fuera de servicio",
-        };
-        const message = statusMessages[room.status] || `La habitación no está disponible (estado: ${room.status})`;
-        return res.status(400).json({ error: message });
+      // Fuera de servicio: bloquear siempre
+      if (room.status === "oos") {
+        return res.status(400).json({ error: "La habitación está fuera de servicio" });
+      }
+
+      // Verificar si hay OTRA reserva en checked_in actualmente para esta habitación
+      // (no usar room.status === "occupied" porque puede quedar desactualizado)
+      const allRes = await storage.getReservations();
+      const otherCheckedIn = allRes.find(
+        r => r.id !== req.params.id && r.roomId === reservation.roomId && r.status === "checked_in"
+      );
+      if (otherCheckedIn) {
+        return res.status(400).json({ error: "La habitación está ocupada por otro huésped" });
       }
 
       await storage.updateReservation(req.params.id, { status: "checked_in" });
