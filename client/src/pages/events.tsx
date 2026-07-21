@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -1886,7 +1887,7 @@ export default function EventsPage() {
 
                 <div className="flex justify-end border-t pt-4">
                   <div className="text-lg font-bold">
-                    Total: ${calculateEventTotal(selectedEvent).toFixed(2)}
+                    Total: ${calculateEventTotalfmtMoney(selectedEvent)}
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">* Todos los precios incluyen IVA (21%).</p>
@@ -1948,16 +1949,16 @@ export default function EventsPage() {
                                 <div className="mt-2 pt-2 border-t space-y-1">
                                   <div className="flex justify-between text-sm">
                                     <span>Cargos:</span>
-                                    <span className="font-medium">${tCharges.toFixed(2)}</span>
+                                    <span className="font-medium">${fmtMoney(tCharges)}</span>
                                   </div>
                                   <div className="flex justify-between text-sm">
                                     <span>Pagado:</span>
-                                    <span className="font-medium">${tPayments.toFixed(2)}</span>
+                                    <span className="font-medium">${fmtMoney(tPayments)}</span>
                                   </div>
                                   {tBalance > 0.01 && (
                                     <div className="flex justify-between text-sm text-red-600">
                                       <span>Saldo:</span>
-                                      <span className="font-bold">${tBalance.toFixed(2)}</span>
+                                      <span className="font-bold">${fmtMoney(tBalance)}</span>
                                     </div>
                                   )}
                                 </div>
@@ -1973,13 +1974,13 @@ export default function EventsPage() {
                           <div>
                             <p className="text-sm text-muted-foreground">Total Cargos</p>
                             <p className="text-xl font-bold">
-                              ${eventTables.reduce((s, t) => s + t.charges.reduce((sc, c) => sc + parseFloat(c.total), 0), 0).toFixed(2)}
+                              ${fmtMoney(eventTables.reduce((s, t) => s + t.charges.reduce((sc, c) => sc + parseFloat(c.total), 0), 0))}
                             </p>
                           </div>
                           <div>
                             <p className="text-sm text-muted-foreground">Total Pagado</p>
                             <p className="text-xl font-bold">
-                              ${eventTables.reduce((s, t) => s + t.payments.reduce((sp, p) => sp + parseFloat(p.amount), 0), 0).toFixed(2)}
+                              ${fmtMoney(eventTables.reduce((s, t) => s + t.payments.reduce((sp, p) => sp + parseFloat(p.amount), 0), 0))}
                             </p>
                           </div>
                           <div>
@@ -2047,7 +2048,7 @@ export default function EventsPage() {
                       </div>
                       <div className="mt-3 pt-3 border-t flex justify-between font-bold">
                         <span>Total Cargos:</span>
-                        <span>${calculateEventTotal(selectedEvent).toFixed(2)}</span>
+                        <span>${calculateEventTotalfmtMoney(selectedEvent)}</span>
                       </div>
                     </div>
 
@@ -2095,13 +2096,13 @@ export default function EventsPage() {
                       <div className="mt-3 pt-3 border-t space-y-3">
                         <div className="flex justify-between font-bold">
                           <span>Total Pagado:</span>
-                          <span className="text-green-600">${calculateEventPaid(selectedEvent).toFixed(2)}</span>
+                          <span className="text-green-600">${calculateEventPaidfmtMoney(selectedEvent)}</span>
                         </div>
 
                         <div className="flex justify-between font-bold text-lg">
                           <span>Saldo:</span>
                           <span className={calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent) > 0.01 ? "text-red-600" : "text-green-600"}>
-                            ${(calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent)).toFixed(2)}
+                            ${fmtMoney((calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent)))}
                           </span>
                         </div>
 
@@ -2616,7 +2617,7 @@ export default function EventsPage() {
 
                 <div className="mt-3 pt-3 border-t flex justify-between font-bold">
                   <span>Total Cargos:</span>
-                  <span>${selectedTable.charges.reduce((s, c) => s + parseFloat(c.total), 0).toFixed(2)}</span>
+                  <span>${fmtMoney(selectedTable.charges.reduce((s, c) => s + parseFloat(c.total), 0))}</span>
                 </div>
               </div>
 
@@ -2647,7 +2648,7 @@ export default function EventsPage() {
                   <div className="flex justify-between font-bold">
                     <span>Total Pagado:</span>
                     <span className="text-green-600">
-                      ${selectedTable.payments.reduce((s, p) => s + parseFloat(p.amount), 0).toFixed(2)}
+                      ${fmtMoney(selectedTable.payments.reduce((s, p) => s + parseFloat(p.amount), 0))}
                     </span>
                   </div>
                   {(() => {
@@ -2658,7 +2659,7 @@ export default function EventsPage() {
                       <div className="flex justify-between font-bold text-lg">
                         <span>Saldo:</span>
                         <span className={bal > 0.01 ? "text-red-600" : "text-green-600"}>
-                          ${bal.toFixed(2)}
+                          ${fmtMoney(bal)}
                         </span>
                       </div>
                     );

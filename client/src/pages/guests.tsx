@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
 import {
@@ -825,11 +826,11 @@ function ReservationExpandedDetail({ r }: { r: ReservationWithDetails }) {
         </div>
         <div>
           <p className="text-xs text-muted-foreground">Tarifa por noche</p>
-          <p className="font-medium">${parseFloat(r.finalRatePerNight || "0").toLocaleString("es-AR")}</p>
+          <p className="font-medium">${fmtMoney(r.finalRatePerNight || "0")}</p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground">Total habitación</p>
-          <p className="font-medium">${parseFloat(r.totalRoomAmount || "0").toLocaleString("es-AR")}</p>
+          <p className="font-medium">${fmtMoney(r.totalRoomAmount || "0")}</p>
         </div>
         {r.discountType && r.discountType !== "none" && (
           <div>
@@ -871,7 +872,7 @@ function ReservationExpandedDetail({ r }: { r: ReservationWithDetails }) {
             {activeCharges.map(c => (
               <div key={c.id} className="flex justify-between text-xs">
                 <span>{c.description}</span>
-                <span className="font-medium">${parseFloat(c.amount).toLocaleString("es-AR")}</span>
+                <span className="font-medium">${fmtMoney(c.amount)}</span>
               </div>
             ))}
           </div>
@@ -885,7 +886,7 @@ function ReservationExpandedDetail({ r }: { r: ReservationWithDetails }) {
             {activePayments.map(p => (
               <div key={p.id} className="flex justify-between text-xs">
                 <span>{paymentMethodLabel[p.method || ""] || p.method} · {p.date}</span>
-                <span className="font-medium text-green-700 dark:text-green-400">${parseFloat(p.amount).toLocaleString("es-AR")}</span>
+                <span className="font-medium text-green-700 dark:text-green-400">${fmtMoney(p.amount)}</span>
               </div>
             ))}
           </div>
@@ -1368,7 +1369,7 @@ function GuestDetailDialog({
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-medium">${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR")}</span>
+                          <span className="font-medium">${fmtMoney(reservation.totalRoomAmount || "0")}</span>
                           <ReservationStatusBadge status={reservation.status} />
                           {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
                         </div>

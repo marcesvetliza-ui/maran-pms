@@ -21,7 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
-import { getLocalToday } from "@/lib/utils";
+import { getLocalToday, fmtMoney } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import type { ReservationWithDetails, ReservationStatus } from "@shared/schema";
 import { EmitirFacturaDialog } from "@/pages/billing";
@@ -186,7 +186,7 @@ export function ReservationDetailModal({
     updateReservationMutation.mutate({
       checkInDate: editCheckIn, checkOutDate: editCheckOut, source: editChannel, notes: editNotes,
       earlyCheckIn: editEarlyCheckIn, lateCheckOut: editLateCheckOut, finalRatePerNight: editRatePerNight,
-      nights, totalRoomAmount: (rate * nights).toFixed(2),
+      nights, totalRoomAmount: fmtMoney(rate * nights),
     });
   };
 
@@ -472,14 +472,14 @@ export function ReservationDetailModal({
                   <div className="space-y-3">
                     {balance > 0 && (
                       <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
-                        Saldo pendiente: <span className="font-bold">${balance.toFixed(2)}</span>
+                        Saldo pendiente: <span className="font-bold">${fmtMoney(balance)}</span>
                       </div>
                     )}
                     {balance > 0 && (
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs">Monto</Label>
-                          <Input type="number" min={0} step="0.01" value={checkoutPayAmount || balance.toFixed(2)} onChange={(e) => setCheckoutPayAmount(e.target.value)} data-testid="input-checkout-amount" />
+                          <Input type="number" min={0} step="0.01" value={checkoutPayAmount || String(balance.toFixed(2))} onChange={(e) => setCheckoutPayAmount(e.target.value)} data-testid="input-checkout-amount" />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">Método de pago</Label>
@@ -587,9 +587,9 @@ export function ReservationDetailModal({
                         </div>
                         {retencionMonto && parseFloat(retencionMonto) > 0 && (checkoutPayAmount || balance > 0) && (
                           <div className="text-xs text-amber-800 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-900/30 rounded p-2">
-                            <span className="font-medium">Neto:</span> ${parseFloat(checkoutPayAmount || balance.toFixed(2)).toFixed(2)} &nbsp;
-                            <span className="font-medium">+ Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"}:</span> ${parseFloat(retencionMonto).toFixed(2)} &nbsp;
-                            <span className="font-semibold">= Total cubierto: ${(parseFloat(checkoutPayAmount || balance.toFixed(2)) + parseFloat(retencionMonto)).toFixed(2)}</span>
+                            <span className="font-medium">Neto:</span> ${parseFloat(checkoutPayAmount || fmtMoney(balance)).toFixed(2)} &nbsp;
+                            <span className="font-medium">+ Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"}:</span> ${fmtMoney(retencionMonto)} &nbsp;
+                            <span className="font-semibold">= Total cubierto: ${(parseFloat(checkoutPayAmount || fmtMoney(balance)) + parseFloat(retencionMonto)).toFixed(2)}</span>
                           </div>
                         )}
                       </div>
@@ -599,7 +599,7 @@ export function ReservationDetailModal({
                       <Button variant="outline" size="sm" onClick={() => setCheckoutStep(1)}>Atrás</Button>
                       {balance > 0 && (
                         <Button size="sm" onClick={() => {
-                          const netAmount = checkoutPayAmount || balance.toFixed(2);
+                          const netAmount = checkoutPayAmount || fmtMoney(balance);
                           if (!netAmount || parseFloat(netAmount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
                           if (checkoutPaymentMethod === "cuenta_corriente" && checkoutBillingTarget === "company" && !checkoutCompanyId && !reservation.companyId) {
                             toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
@@ -789,14 +789,14 @@ export function ReservationDetailModal({
                 </div>
                 <div className="space-y-1">
                   <div className="text-muted-foreground">Tarifa/noche</div>
-                  <div className="font-medium">${Number(reservation.finalRatePerNight || 0).toLocaleString("es-AR")}</div>
+                  <div className="font-medium">${fmtMoney(reservation.finalRatePerNight || 0)}</div>
                 </div>
               </div>
               <Separator />
               <div className="flex items-center justify-between bg-muted/50 rounded-md p-3">
                 <div>
                   <div className="text-sm text-muted-foreground">Total Habitacion</div>
-                  <div className="font-semibold">${Number(reservation.totalRoomAmount || 0).toLocaleString("es-AR")}</div>
+                  <div className="font-semibold">${fmtMoney(reservation.totalRoomAmount || 0)}</div>
                 </div>
                 {totalCharges > 0 && (
                   <div className="text-right">

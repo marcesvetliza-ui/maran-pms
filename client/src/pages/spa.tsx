@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -947,7 +948,7 @@ export default function SpaPage() {
     const duration = treatment ? `${treatment.durationMinutes} min` : "";
     const cabinName = cabin?.name || "N/A";
     const profName = professional ? `${professional.name} ${professional.lastName || ""}`.trim() : "";
-    const price = treatment ? `$${parseFloat(treatment.price).toLocaleString("es-AR")}` : "$0";
+    const price = treatment ? `$${fmtMoney(treatment.price)}` : "$0";
     const notes = apt.notes || "";
     const now = format(new Date(), "dd/MM/yyyy HH:mm");
 
@@ -2279,7 +2280,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     </SelectTrigger>
                     <SelectContent>
                       {treatments.filter(t => t.id && t.isActive === "true").map(t => (
-                        <SelectItem key={t.id} value={t.id}>{t.name} — ${parseFloat(t.price).toFixed(2)}</SelectItem>
+                        <SelectItem key={t.id} value={t.id}>{t.name} — ${fmtMoney(t.price)}</SelectItem>
                       ))}
                       <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
                     </SelectContent>

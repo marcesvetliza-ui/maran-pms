@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -366,7 +367,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       if (initialValues.items && initialValues.items.length > 0) {
         setItems(initialValues.items.map(it => {
           const base = it.precioUnitario;
-          const neto = parseFloat((base / 1.21).toFixed(2));
+          const neto = parseFloat(fmtMoney(base / 1.21));
           return { descripcion: it.descripcion, cantidad: 1, precioUnitario: base, alicuotaIva: "21" as const, subtotalNeto: neto, subtotal: base };
         }));
       }
@@ -428,8 +429,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         return { ...item, alicuotaIva: "no_gravado" as const, subtotalNeto: base, subtotal: base };
       }
       // FA y FB: el precio ingresado ya incluye IVA → extraer el neto dividiendo
-      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.21).toFixed(2)), subtotal: base };
-      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.105).toFixed(2)), subtotal: base };
+      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat(fmtMoney(base / 1.21)), subtotal: base };
+      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat(fmtMoney(base / 1.105)), subtotal: base };
       if (nextTipo === "FA") {
         // exento / no_gravado en FA: el monto ingresado es el total
         return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
@@ -451,13 +452,13 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         item.alicuotaIva = "no_gravado";
         item.subtotalNeto = base; item.subtotal = base;
       } else if (!fa) {
-        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
+        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.21)); item.subtotal = base; }
+        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.105)); item.subtotal = base; }
         else { item.subtotalNeto = base; item.subtotal = base; }
       } else {
         // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
-        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
+        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.21)); item.subtotal = base; }
+        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.105)); item.subtotal = base; }
         else { item.subtotalNeto = base; item.subtotal = base; }
       }
       updated[idx] = item;

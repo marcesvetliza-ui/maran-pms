@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
-import { getLocalToday, formatDateAR, toArgentinaDateStr } from "@/lib/utils";
+import { getLocalToday, formatDateAR, toArgentinaDateStr, fmtMoney } from "@/lib/utils";
 import {
   CalendarCheck,
   CalendarRange,
@@ -453,8 +453,8 @@ export function ReservationFormDialog({
     finalRate = Math.max(0, finalRate);
     
     return {
-      finalRatePerNight: finalRate.toFixed(2),
-      totalRoomAmount: (finalRate * nights).toFixed(2),
+      finalRatePerNight: fmtMoney(finalRate),
+      totalRoomAmount: fmtMoney(finalRate * nights),
     };
   };
 
@@ -861,10 +861,10 @@ export function ReservationFormDialog({
                         <div className="flex flex-col gap-0.5">
                           <span className="font-medium">{plan.name}</span>
                           <span className="text-xs text-muted-foreground">
-                            ${Number(plan.baseRate).toLocaleString("es-AR")}
-                            {plan.rate2pax ? ` · 2P: $${Number(plan.rate2pax).toLocaleString("es-AR")}` : ""}
-                            {plan.rate3pax ? ` · 3P: $${Number(plan.rate3pax).toLocaleString("es-AR")}` : ""}
-                            {plan.rate4pax ? ` · 4P: $${Number(plan.rate4pax).toLocaleString("es-AR")}` : ""}
+                            ${fmtMoney(plan.baseRate)}
+                            {plan.rate2pax ? ` · 2P: $${fmtMoney(plan.rate2pax)}` : ""}
+                            {plan.rate3pax ? ` · 3P: $${fmtMoney(plan.rate3pax)}` : ""}
+                            {plan.rate4pax ? ` · 4P: $${fmtMoney(plan.rate4pax)}` : ""}
                             {!hasPaxRates ? " (tarifa fija)" : ""}
                           </span>
                         </div>
@@ -884,7 +884,7 @@ export function ReservationFormDialog({
                 return (
                   <div className="flex items-center gap-1.5 mt-1 px-2 py-1 bg-blue-50 dark:bg-blue-950/40 rounded text-xs text-blue-700 dark:text-blue-300">
                     <span>Tarifa para {numGuests} huésped{numGuests > 1 ? "es" : ""}:</span>
-                    <span className="font-bold">${Number(effectivePaxRate).toLocaleString("es-AR")}/noche</span>
+                    <span className="font-bold">${fmtMoney(effectivePaxRate)}/noche</span>
                     {isPaxSpecific && <span className="text-blue-500">(tarifa {numGuests}P)</span>}
                   </div>
                 );
@@ -994,7 +994,7 @@ export function ReservationFormDialog({
                         // En edición: solo actualiza precio y notas, NO cambia fechas
                         const currentNights = Number(formData.nights) || 1;
                         const totalPrice = parseFloat(pkg.basePrice);
-                        const ratePerNight = (totalPrice / currentNights).toFixed(2);
+                        const ratePerNight = fmtMoney(totalPrice / currentNights);
                         setFormData(prev => ({
                           ...prev,
                           baseRatePerNight: ratePerNight,
@@ -1014,14 +1014,14 @@ export function ReservationFormDialog({
                         d.setDate(d.getDate() + nights);
                         const newCheckOut = toArgentinaDateStr(d);
                         const totalPrice = parseFloat(pkg.basePrice);
-                        const ratePerNight = (totalPrice / nights).toFixed(2);
+                        const ratePerNight = fmtMoney(totalPrice / nights);
                         setFormData(prev => ({
                           ...prev,
                           checkOutDate: newCheckOut,
                           nights,
                           baseRatePerNight: ratePerNight,
                           finalRatePerNight: ratePerNight,
-                          totalRoomAmount: totalPrice.toFixed(2),
+                          totalRoomAmount: fmtMoney(totalPrice),
                           discountType: "none",
                           discountValue: "0",
                           notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
@@ -1337,7 +1337,7 @@ export function ReservationFormDialog({
                     {resChargeAmount && resChargeRecurring && (
                       <div className="flex items-center rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2 text-sm">
                         <span className="text-blue-700 dark:text-blue-300 font-medium">
-                          {Number(formData.nights) || 1} noches × ${parseFloat(resChargeAmount || "0").toFixed(2)} = <span className="font-bold">${(parseFloat(resChargeAmount || "0") * (Number(formData.nights) || 1)).toFixed(2)}</span>
+                          {Number(formData.nights) || 1} noches × ${fmtMoney(resChargeAmount || "0")} = <span className="font-bold">${(parseFloat(resChargeAmount || "0") * (Number(formData.nights) || 1)).toFixed(2)}</span>
                         </span>
                       </div>
                     )}
@@ -1386,7 +1386,7 @@ export function ReservationFormDialog({
                       <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
                         <span>{charge.description}{charge.quantity > 1 ? ` x${charge.quantity}` : ""}</span>
                         <div className="flex items-center gap-2">
-                          <span className="font-medium">${(parseFloat(charge.amount) * charge.quantity).toFixed(2)}</span>
+                          <span className="font-medium">${fmtMoney(parseFloat(charge.amount) * charge.quantity)}</span>
                           <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => setPendingCharges(prev => prev.filter((_, i) => i !== idx))}>
                             <XCircle className="h-3 w-3" />
                           </Button>
@@ -1395,7 +1395,7 @@ export function ReservationFormDialog({
                     ))}
                     <div className="flex justify-between px-3 py-2 text-sm font-semibold bg-muted/30">
                       <span>Total cargos</span>
-                      <span>${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0).toFixed(2)}</span>
+                      <span>${fmtMoney(pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0))}</span>
                     </div>
                   </div>
                 )}
@@ -1406,17 +1406,17 @@ export function ReservationFormDialog({
               <div className="flex justify-between items-center">
                 <div>
                   <p className="text-sm text-muted-foreground">Tarifa Final/Noche</p>
-                  <p className="text-lg font-semibold">${formData.finalRatePerNight || "0.00"}</p>
+                  <p className="text-lg font-semibold">${fmtMoney(formData.finalRatePerNight)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-muted-foreground">Total Alojamiento</p>
-                  <p className="text-lg font-semibold">${formData.totalRoomAmount || "0.00"}</p>
+                  <p className="text-lg font-semibold">${fmtMoney(formData.totalRoomAmount)}</p>
                 </div>
               </div>
               {pendingCharges.length > 0 && (() => {
                 const chargesTotal = pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0);
                 const roomTotal = parseFloat(formData.totalRoomAmount || "0");
-                const grandTotal = (roomTotal + chargesTotal).toFixed(2);
+                const grandTotal = fmtMoney(roomTotal + chargesTotal);
                 return (
                   <div className="border-t pt-2 flex justify-between items-center">
                     <p className="text-sm font-semibold text-foreground">Total General</p>
@@ -1426,7 +1426,7 @@ export function ReservationFormDialog({
               })()}
               {pendingCharges.length === 0 && (
                 <div className="border-t pt-2 flex justify-end">
-                  <p className="text-2xl font-bold text-primary">${formData.totalRoomAmount || "0.00"}</p>
+                  <p className="text-2xl font-bold text-primary">${fmtMoney(formData.totalRoomAmount)}</p>
                 </div>
               )}
             </div>
@@ -2896,18 +2896,18 @@ function ReservationDetailDialog({
                 {earlyCharge > 0 && (
                   <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
                     <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
-                    <span>${earlyCharge.toFixed(2)}</span>
+                    <span>${fmtMoney(earlyCharge)}</span>
                   </div>
                 )}
                 {lateCharge > 0 && (
                   <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
                     <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
-                    <span>${lateCharge.toFixed(2)}</span>
+                    <span>${fmtMoney(lateCharge)}</span>
                   </div>
                 )}
                 <div className="flex justify-between font-semibold pt-2 border-t">
                   <span>Subtotal Alojamiento</span>
-                  <span data-testid="text-subtotal-room">${subtotalRoom.toFixed(2)}</span>
+                  <span data-testid="text-subtotal-room">${fmtMoney(subtotalRoom)}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">* Precio incluye IVA (21%). El desglose se realiza al facturar.</p>
               </div>
@@ -3019,7 +3019,7 @@ function ReservationDetailDialog({
                   {newCharge.amount && isRecurringCharge && (
                     <div className="flex items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2 text-sm">
                       <span className="text-blue-700 dark:text-blue-300 font-medium">
-                        {reservation.nights || 1} noches × ${parseFloat(newCharge.amount || "0").toFixed(2)} = <span className="font-bold">${(parseFloat(newCharge.amount || "0") * (reservation.nights || 1)).toFixed(2)}</span>
+                        {reservation.nights || 1} noches × ${fmtMoney(newCharge.amount || "0")} = <span className="font-bold">${(parseFloat(newCharge.amount || "0") * (reservation.nights || 1)).toFixed(2)}</span>
                       </span>
                     </div>
                   )}
@@ -3027,10 +3027,10 @@ function ReservationDetailDialog({
                   {newCharge.amount && !isRecurringCharge && chargeQty > 1 && (
                     <div className="text-sm text-right text-muted-foreground">
                       Total: <span className="font-semibold text-foreground">
-                        ${(parseFloat(newCharge.amount || "0") * chargeQty).toFixed(2)}
+                        ${fmtMoney(parseFloat(newCharge.amount || "0") * chargeQty)}
                       </span>
                       <span className="ml-1 text-xs">
-                        ({chargeQty} × ${parseFloat(newCharge.amount || "0").toFixed(2)})
+                        ({chargeQty} × ${fmtMoney(newCharge.amount || "0")})
                       </span>
                     </div>
                   )}
@@ -3099,7 +3099,7 @@ function ReservationDetailDialog({
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
                       <span className={`font-medium tabular-nums ${isAnulado ? "line-through text-muted-foreground" : ""}`} data-testid={`text-charge-amount-${charge.id}`}>
-                        ${parseFloat(charge.amount).toFixed(2)}
+                        ${fmtMoney(charge.amount)}
                       </span>
                       {restaurantOrderNum && (
                         <Button
@@ -3160,7 +3160,7 @@ function ReservationDetailDialog({
               </div>
               <div className="flex justify-between p-3 border-t text-sm font-medium">
                 <span>Total Consumos</span>
-                <span data-testid="text-total-consumptions">${totalConsumptions.toFixed(2)}</span>
+                <span data-testid="text-total-consumptions">${fmtMoney(totalConsumptions)}</span>
               </div>
             </div>
 
@@ -3232,7 +3232,7 @@ function ReservationDetailDialog({
                 {!isLocked && (
                 <Button size="sm" variant="outline" onClick={() => {
                   if (!showAddPayment) {
-                    const amt = balance > 0 ? balance.toFixed(2) : "";
+                    const amt = balance > 0 ? fmtMoney(balance) : "";
                     setNewPayment({ ...newPayment, amount: amt });
                     setPaymentRows([{ amount: amt, method: "efectivo", reference: "", billingTarget: "guest" }]);
                   }
@@ -3423,7 +3423,7 @@ function ReservationDetailDialog({
                       Agregar método
                     </Button>
                     <span>
-                      Total: ${paymentRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0).toFixed(2)}
+                      Total: ${fmtMoney(paymentRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))}
                     </span>
                   </div>
                   <div className="flex justify-end gap-2 mt-2">
@@ -3457,7 +3457,7 @@ function ReservationDetailDialog({
                       <span className="text-muted-foreground text-xs">({formatDateAR(payment.date)})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`font-medium ${isAnulado ? "line-through text-muted-foreground" : "text-green-600"}`}>${parseFloat(payment.amount).toFixed(2)}</span>
+                      <span className={`font-medium ${isAnulado ? "line-through text-muted-foreground" : "text-green-600"}`}>${fmtMoney(payment.amount)}</span>
                       {!isLocked && !isAnulado && (
                       <Button 
                         size="icon" 
@@ -3482,7 +3482,7 @@ function ReservationDetailDialog({
               </div>
               <div className="flex justify-between p-3 border-t text-sm font-medium">
                 <span>Total Pagado</span>
-                <span className="text-green-600" data-testid="text-total-payments">${totalPayments.toFixed(2)}</span>
+                <span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span>
               </div>
             </div>
 
@@ -3490,32 +3490,32 @@ function ReservationDetailDialog({
               <div className="p-4">
                 <div className="flex justify-between text-sm mb-1">
                   <span>Subtotal Alojamiento</span>
-                  <span>${parseFloat(reservation.totalRoomAmount || "0").toFixed(2)}</span>
+                  <span>${fmtMoney(reservation.totalRoomAmount || "0")}</span>
                 </div>
                 {earlyCharge > 0 && (
                   <div className="flex justify-between text-sm mb-1 text-amber-600 dark:text-amber-400">
                     <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
-                    <span>${earlyCharge.toFixed(2)}</span>
+                    <span>${fmtMoney(earlyCharge)}</span>
                   </div>
                 )}
                 {lateCharge > 0 && (
                   <div className="flex justify-between text-sm mb-1 text-amber-600 dark:text-amber-400">
                     <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
-                    <span>${lateCharge.toFixed(2)}</span>
+                    <span>${fmtMoney(lateCharge)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm mb-1">
                   <span>+ Consumos</span>
-                  <span>${totalConsumptions.toFixed(2)}</span>
+                  <span>${fmtMoney(totalConsumptions)}</span>
                 </div>
                 <div className="flex justify-between text-sm mb-2 border-b pb-2">
                   <span>- Pagos/Anticipos</span>
-                  <span className="text-green-600">-${totalPayments.toFixed(2)}</span>
+                  <span className="text-green-600">-${fmtMoney(totalPayments)}</span>
                 </div>
                 <div className="flex justify-between font-bold text-lg">
                   <span>SALDO PENDIENTE</span>
                   <span className={balance > 0 ? "text-destructive" : "text-green-600"} data-testid="text-balance">
-                    ${balance.toFixed(2)}
+                    ${fmtMoney(balance)}
                   </span>
                 </div>
                 {balance > 0.01 && !showAddPayment && !isLocked && (
@@ -3524,14 +3524,14 @@ function ReservationDetailDialog({
                       size="sm" 
                       className="w-full" 
                       onClick={() => {
-                        setNewPayment({ amount: balance.toFixed(2), method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
-                        setPaymentRows([{ amount: balance.toFixed(2), method: "efectivo", reference: "", billingTarget: "guest" }]);
+                        setNewPayment({ amount: String(balance.toFixed(2)), method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
+                        setPaymentRows([{ amount: String(balance.toFixed(2)), method: "efectivo", reference: "", billingTarget: "guest" }]);
                         setShowAddPayment(true);
                       }}
                       data-testid="button-pay-balance"
                     >
                       <DollarSign className="h-4 w-4 mr-1" />
-                      Pagar Saldo Pendiente (${balance.toFixed(2)})
+                      Pagar Saldo Pendiente (${fmtMoney(balance)})
                     </Button>
                     <Button
                       size="sm"
@@ -3546,7 +3546,7 @@ function ReservationDetailDialog({
                       data-testid="button-facturar-folio"
                     >
                       <FileText className="h-4 w-4 mr-1" />
-                      Facturar Saldo (${balance.toFixed(2)})
+                      Facturar Saldo (${fmtMoney(balance)})
                       {facturaEmitida && <span className="ml-1 text-xs opacity-70">(ya facturado)</span>}
                     </Button>
                   </div>
@@ -3758,13 +3758,13 @@ function ReservationDetailDialog({
                   {earlyChg > 0 && (
                     <div className="flex justify-between text-amber-600 dark:text-amber-400">
                       <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
-                      <span>${earlyChg.toFixed(2)}</span>
+                      <span>${fmtMoney(earlyChg)}</span>
                     </div>
                   )}
                   {lateChg > 0 && (
                     <div className="flex justify-between text-amber-600 dark:text-amber-400">
                       <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
-                      <span>${lateChg.toFixed(2)}</span>
+                      <span>${fmtMoney(lateChg)}</span>
                     </div>
                   )}
                   {activeCharges.length > 0 && (
@@ -3819,7 +3819,7 @@ function ReservationDetailDialog({
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label className="text-xs">Monto</Label>
-                      <Input type="number" min={0} step="0.01" value={coPayAmount || balance.toFixed(2)} onChange={(e) => setCoPayAmount(e.target.value)} data-testid="input-co-amount" />
+                      <Input type="number" min={0} step="0.01" value={coPayAmount || String(balance.toFixed(2))} onChange={(e) => setCoPayAmount(e.target.value)} data-testid="input-co-amount" />
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs">Método de pago</Label>
@@ -3896,7 +3896,7 @@ function ReservationDetailDialog({
                   <Button variant="outline" size="sm" onClick={() => setCoWizardStep(1)}>Atrás</Button>
                   {balance > 0 && (
                     <Button size="sm" onClick={() => {
-                      const amount = coPayAmount || balance.toFixed(2);
+                      const amount = coPayAmount || fmtMoney(balance);
                       if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
                       if (coPayMethod === "cuenta_corriente" && coBillingTarget === "company" && !coCompanyId && !reservation.companyId) {
                         toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
@@ -4886,7 +4886,7 @@ export default function ReservationsPage() {
                       </div>
                       <div>
                         <span className="text-xs text-muted-foreground block">Total</span>
-                        <span className="font-medium">${Number(wr.total_amount || 0).toLocaleString("es-AR")}</span>
+                        <span className="font-medium">${fmtMoney(wr.total_amount || 0)}</span>
                       </div>
                     </div>
                   </div>
@@ -4957,7 +4957,7 @@ export default function ReservationsPage() {
                 <p><span className="text-muted-foreground">Email:</span> {confirmingReservation.email || "-"}</p>
                 <p><span className="text-muted-foreground">Fechas:</span> {formatDateAR(confirmingReservation.check_in_date)} → {formatDateAR(confirmingReservation.check_out_date)}</p>
                 <p><span className="text-muted-foreground">Tipo:</span> {confirmingReservation.room_type_name || confirmingReservation.room_type_id}</p>
-                <p><span className="text-muted-foreground">Total:</span> ${Number(confirmingReservation.total_amount || 0).toLocaleString("es-AR")}</p>
+                <p><span className="text-muted-foreground">Total:</span> ${fmtMoney(confirmingReservation.total_amount || 0)}</p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Habitación a asignar</label>

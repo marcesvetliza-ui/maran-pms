@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { subDays } from "date-fns";
-import { formatDateAR } from "@/lib/utils";
+import { formatDateAR, fmtMoney } from "@/lib/utils";
 import {
   DollarSign,
   Plus,
@@ -566,10 +566,10 @@ export default function RatePlansPage() {
                             </div>
                             {(plan.rate1pax || plan.rate2pax || plan.rate3pax || plan.rate4pax) && (
                               <div className="flex gap-1.5 mt-1 flex-wrap">
-                                {plan.rate1pax && <Badge variant="outline" className="text-xs">1P: ${plan.rate1pax}</Badge>}
-                                {plan.rate2pax && <Badge variant="outline" className="text-xs">2P: ${plan.rate2pax}</Badge>}
-                                {plan.rate3pax && <Badge variant="outline" className="text-xs">3P: ${plan.rate3pax}</Badge>}
-                                {plan.rate4pax && <Badge variant="outline" className="text-xs">4P: ${plan.rate4pax}</Badge>}
+                                {plan.rate1pax && <Badge variant="outline" className="text-xs">1P: ${fmtMoney(plan.rate1pax)}</Badge>}
+                                {plan.rate2pax && <Badge variant="outline" className="text-xs">2P: ${fmtMoney(plan.rate2pax)}</Badge>}
+                                {plan.rate3pax && <Badge variant="outline" className="text-xs">3P: ${fmtMoney(plan.rate3pax)}</Badge>}
+                                {plan.rate4pax && <Badge variant="outline" className="text-xs">4P: ${fmtMoney(plan.rate4pax)}</Badge>}
                               </div>
                             )}
                           </TableCell>

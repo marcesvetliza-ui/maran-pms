@@ -5,6 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function fmtMoney(value: number | string | null | undefined, decimals = 2): string {
+  const n = typeof value === "string" ? parseFloat(value) : (value ?? 0);
+  if (isNaN(n)) return "0,00";
+  return n.toLocaleString("es-AR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
 export function getLocalToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 }

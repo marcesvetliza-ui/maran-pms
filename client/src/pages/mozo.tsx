@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { fmtMoney } from "@/lib/utils";
 import { Link } from "wouter";
 import { useAuth } from "@/App";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -358,7 +359,7 @@ export default function MozoPage() {
               {detailFetching && <Loader2 className="w-3.5 h-3.5 animate-spin opacity-50" />}
             </div>
             <span className="text-sm font-semibold">
-              ${parseFloat(orderDetail?.total ?? "0").toLocaleString("es-AR")}
+              ${fmtMoney(orderDetail?.total ?? "0")}
             </span>
           </div>
 
@@ -486,7 +487,7 @@ export default function MozoPage() {
                       <p className="text-xs text-muted-foreground truncate">{item.description}</p>
                     )}
                     <p className="text-sm font-semibold text-primary mt-0.5">
-                      ${parseFloat(item.price).toLocaleString("es-AR")}
+                      ${fmtMoney(item.price)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -529,7 +530,7 @@ export default function MozoPage() {
                 <CheckCircle2 className="w-4 h-4" />
               )}
               {totalPendingQty > 0
-                ? `Agregar ${totalPendingQty} ítem${totalPendingQty > 1 ? "s" : ""} — $${totalPendingAmount.toLocaleString("es-AR")}`
+                ? `Agregar ${totalPendingQty} ítem${totalPendingQty > 1 ? "s" : ""} — $${fmtMoney(totalPendingAmount)}`
                 : "Seleccioná ítems"}
             </Button>
           </div>
@@ -624,7 +625,7 @@ function ItemGroup({
               )}
             </div>
             <span className="text-sm font-semibold shrink-0">
-              ${parseFloat(item.subtotal ?? "0").toLocaleString("es-AR")}
+              ${fmtMoney(item.subtotal ?? "0")}
             </span>
             {onRemove && (
               <button

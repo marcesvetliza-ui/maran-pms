@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
 import {
@@ -75,7 +76,7 @@ const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argent
 
 function calcSubtotal(cant: string, precio: string, dto: string): string {
   const s = toNum(cant) * toNum(precio) * (1 - toNum(dto) / 100);
-  return s.toFixed(2);
+  return fmtMoney(s);
 }
 function emptyItem(): ItemRow {
   return { sector: "alojamiento", descripcion: "", detalle: "", cantidad: "1", precioUnitario: "0", descuento: "0", subtotal: "0" };
@@ -288,8 +289,8 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
     notas: notas.trim() || null,
     condiciones: condiciones.trim() || null,
     descuentoGlobal: useItems ? (descuentoGlobal || "0") : "0",
-    subtotal: useItems ? subtotalSuma.toFixed(2) : "0",
-    total: useItems ? totalFinal.toFixed(2) : "0",
+    subtotal: useItems ? fmtMoney(subtotalSuma) : "0",
+    total: useItems ? fmtMoney(totalFinal) : "0",
     areaOrigen: area,
     items: useItems ? items.map((it, ord) => ({
       ...(it.id ? { id: it.id } : {}),

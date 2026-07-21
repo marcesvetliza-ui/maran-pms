@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import {
@@ -196,7 +197,7 @@ export default function NewReservationPage() {
     return baseRate;
   }, [baseRate, discountType, discountValue]);
 
-  const totalAmount = (finalRate * nights).toFixed(2);
+  const totalAmount = fmtMoney(finalRate * nights);
 
   const createGuestMutation = useMutation({
     mutationFn: async (guest: InsertGuest): Promise<Guest> => {
@@ -268,10 +269,10 @@ export default function NewReservationPage() {
         checkInDate,
         checkOutDate,
         nights,
-        baseRatePerNight: baseRate.toFixed(2),
+        baseRatePerNight: fmtMoney(baseRate),
         discountType,
         discountValue,
-        finalRatePerNight: finalRate.toFixed(2),
+        finalRatePerNight: fmtMoney(finalRate),
         totalRoomAmount: totalAmount,
         status: "confirmed",
         source: selectedAgency ? "agencia" : selectedCompany ? "empresa" : "directo",
@@ -703,7 +704,7 @@ export default function NewReservationPage() {
                     <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
                       <span>{charge.description}{charge.quantity > 1 ? ` x${charge.quantity}` : ""}</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-medium">${(parseFloat(charge.amount) * charge.quantity).toFixed(2)}</span>
+                        <span className="font-medium">${fmtMoney(parseFloat(charge.amount) * charge.quantity)}</span>
                         <Button type="button" size="sm" variant="ghost" className="h-5 w-5 p-0 text-destructive" onClick={() => setPendingCharges(prev => prev.filter((_, i) => i !== idx))}>
                           <XCircle className="h-3 w-3" />
                         </Button>
@@ -712,7 +713,7 @@ export default function NewReservationPage() {
                   ))}
                   <div className="flex justify-between px-3 py-2 text-sm font-semibold bg-muted/30">
                     <span>Total cargos</span>
-                    <span>${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0).toFixed(2)}</span>
+                    <span>${fmtMoney(pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0))}</span>
                   </div>
                 </div>
               )}
@@ -789,11 +790,11 @@ export default function NewReservationPage() {
             <div>
               <p className="text-sm text-muted-foreground">Total</p>
               <p className="font-medium text-lg">
-                ${(parseFloat(totalAmount) + pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount || "0") * c.quantity, 0)).toFixed(2)}
+                ${fmtMoney(parseFloat(totalAmount) + pendingCharges.reduce()}
               </p>
               {pendingCharges.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Hab. ${totalAmount} + cargos ${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount || "0") * c.quantity, 0).toFixed(2)}
+                  Hab. ${totalAmount} + cargos ${fmtMoney(pendingCharges.reduce()}
                 </p>
               )}
             </div>

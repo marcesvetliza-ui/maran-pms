@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useAuth } from "@/App";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -445,7 +446,7 @@ function AdvanceDialog({
               {advances.map((adv) => (
                 <div key={adv.id} className="flex items-center justify-between px-3 py-2 rounded-lg border bg-muted/30">
                   <div>
-                    <p className="text-sm font-medium">${parseFloat(adv.amount).toLocaleString("es-AR")}</p>
+                    <p className="text-sm font-medium">${fmtMoney(adv.amount)}</p>
                     <p className="text-xs text-muted-foreground">
                       {payMethodLabel[adv.paymentMethod] || adv.paymentMethod}
                       {adv.voucherNumber && <span className="ml-2 font-mono">{adv.voucherNumber}</span>}
@@ -996,7 +997,7 @@ export default function RestaurantPage() {
     const finalTotal = Math.max(0, fullTotal - totalAdvanceCredit);
     setClosePaymentSplits(prev => {
       if (prev.length === 1 && Math.abs(parseFloat(prev[0].amount || "0") - fullTotal) < 0.01) {
-        return [{ ...prev[0], amount: finalTotal.toFixed(2) }];
+        return [{ ...prev[0], amount: fmtMoney(finalTotal) }];
       }
       return prev;
     });
@@ -1007,7 +1008,7 @@ export default function RestaurantPage() {
     if (!isCloseDialogOpen || !currentOrder) return;
     const fullTotal = parseFloat(currentOrder.total || "0");
     const initialAmount = Math.max(0, fullTotal - totalAdvanceCredit);
-    setClosePaymentSplits([{ id: "1", method: "efectivo", amount: initialAmount.toFixed(2) }]);
+    setClosePaymentSplits([{ id: "1", method: "efectivo", amount: String(initialAmount.toFixed(2)) }]);
     setCloseNonFiscalOverride("__default__");
     setShowAlternateClientSearch(false);
     setCloseBillingClientSearch("");
@@ -1215,7 +1216,7 @@ export default function RestaurantPage() {
         toast({
           title: `Check-in — ${pendingReservation.guestName}`,
           description: advAmt > 0
-            ? `Comanda abierta. Seña de $${advAmt.toLocaleString("es-AR")} se descontará al cerrar.`
+            ? `Comanda abierta. Seña de $${fmtMoney(advAmt)} se descontará al cerrar.`
             : `Comanda abierta correctamente.`,
         });
         return;
@@ -1788,7 +1789,7 @@ export default function RestaurantPage() {
           toast({
             title: `Check-in — ${reservation.guestName}`,
             description: advAmt > 0
-              ? `Seña aplicada a la comanda: $${advAmt.toLocaleString("es-AR")}`
+              ? `Seña aplicada a la comanda: $${fmtMoney(advAmt)}`
               : `Check-in registrado.`,
           });
         } else {
@@ -2039,8 +2040,8 @@ export default function RestaurantPage() {
         item.alicuotaIva = "no_gravado";
         item.subtotalNeto = base; item.subtotal = base;
       } else if (!isFA) {
-        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat((base / 1.105).toFixed(2)); item.subtotal = base; }
+        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.21)); item.subtotal = base; }
+        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.105)); item.subtotal = base; }
         else { item.subtotalNeto = base; item.subtotal = base; }
       } else {
         if (item.alicuotaIva === "21" || item.alicuotaIva === "10.5") {
@@ -2067,8 +2068,8 @@ export default function RestaurantPage() {
         }
         return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
       }
-      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.21).toFixed(2)), subtotal: base };
-      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat((base / 1.105).toFixed(2)), subtotal: base };
+      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat(fmtMoney(base / 1.21)), subtotal: base };
+      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat(fmtMoney(base / 1.105)), subtotal: base };
       return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
     }));
   }
@@ -2258,7 +2259,7 @@ export default function RestaurantPage() {
                           <span className="text-muted-foreground ml-1">({r.partySize}p)</span>
                           {advAmt > 0 && (
                             <span className="ml-2 text-xs font-semibold text-green-700 dark:text-green-400">
-                              <CreditCard className="inline h-3 w-3 mr-0.5" />${advAmt.toLocaleString("es-AR")}
+                              <CreditCard className="inline h-3 w-3 mr-0.5" />${fmtMoney(advAmt)}
                             </span>
                           )}
                         </div>
@@ -2722,7 +2723,7 @@ export default function RestaurantPage() {
                     .map(r => {
                       const t = tables.find(x => x.id === r.tableId);
                       const advAmt = parseFloat(r.advanceAmount || "0");
-                      const advStr = advAmt > 0 ? `  Seña: $${advAmt.toLocaleString("es-AR")}` : "";
+                      const advStr = advAmt > 0 ? `  Seña: $${fmtMoney(advAmt)}` : "";
                       return `${r.reservationTime}  ${r.guestName}  (${r.partySize}p)  Mesa: ${t?.tableNumber || "—"}  Tel: ${r.guestPhone || "—"}  ${reservationStatusLabels[r.status]}${advStr}`;
                     }).join("\n");
                   const w = window.open("", "_blank", "width=600,height=700");
@@ -2752,7 +2753,7 @@ export default function RestaurantPage() {
                   const rows = dayReservations.map(r => {
                     const t = tables.find(x => x.id === r.tableId);
                     const statusLabel = reservationStatusLabels[r.status] || r.status;
-                    const adv = parseFloat(r.advanceAmount || "0") > 0 ? `$${parseFloat(r.advanceAmount!).toLocaleString("es-AR")}` : "";
+                    const adv = parseFloat(r.advanceAmount || "0") > 0 ? `$${fmtMoney(r.advanceAmount!)}` : "";
                     return `<tr>
                       <td>${r.reservationTime}</td>
                       <td><strong>${r.guestName}</strong>${r.notes ? `<br><small style="color:#888">${r.notes}</small>` : ""}</td>
@@ -2977,7 +2978,7 @@ export default function RestaurantPage() {
                                 title="Ver detalle de seña"
                               >
                                 <CreditCard className="h-3 w-3" />
-                                ${advanceAmt.toLocaleString("es-AR")}
+                                ${fmtMoney(advanceAmt)}
                               </button>
                             ) : (isActive && reservation.status !== "check_in") ? (
                               <button
@@ -5140,7 +5141,7 @@ export default function RestaurantPage() {
                                   <button
                                     type="button"
                                     className="absolute -top-5 right-0 text-[10px] text-primary underline whitespace-nowrap"
-                                    onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, amount: remaining.toFixed(2) } : s))}
+                                    onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, amount: String(remaining.toFixed(2)) } : s))}
                                     data-testid={`button-autofill-amount-${idx}`}
                                   >
                                     = ${remaining.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
@@ -5166,7 +5167,7 @@ export default function RestaurantPage() {
                           )}
                           {closePaymentSplits.length < 4 && (
                             <Button variant="outline" size="sm" className="w-full h-8 text-xs"
-                              onClick={() => setClosePaymentSplits(prev => [...prev, { id: String(Date.now()), method: "efectivo", amount: remaining > 0 ? remaining.toFixed(2) : "" }])}
+                              onClick={() => setClosePaymentSplits(prev => [...prev, { id: String(Date.now()), method: "efectivo", amount: remaining > 0 ? String(remaining.toFixed(2)) : "" }])}
                               data-testid="button-add-payment-split"
                             ><Plus className="h-3.5 w-3.5 mr-1" />Agregar forma de pago</Button>
                           )}
@@ -6693,7 +6694,7 @@ export default function RestaurantPage() {
                       <CreditCard className="h-4 w-4 text-green-600 dark:text-green-400" />
                       <div>
                         <span className="text-sm font-semibold text-green-800 dark:text-green-300">Seña registrada</span>
-                        <span className="ml-2 text-sm font-bold text-green-700 dark:text-green-400">${advAmt.toLocaleString("es-AR")}</span>
+                        <span className="ml-2 text-sm font-bold text-green-700 dark:text-green-400">${fmtMoney(advAmt)}</span>
                       </div>
                     </div>
                     <Button size="sm" variant="outline" className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-100 dark:border-green-700 dark:text-green-400"

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Package,
@@ -127,8 +128,8 @@ function PackageFormDialog({
         description,
         roomTypeId: null,
         nights,
-        basePrice: parseFloat(basePrice).toFixed(2),
-        discountPercent: discountPercent ? parseFloat(discountPercent).toFixed(2) : null,
+        basePrice: fmtMoney(basePrice),
+        discountPercent: discountPercent ? fmtMoney(discountPercent) : null,
         validFrom: validFrom || null,
         validUntil: validUntil || null,
         status,
@@ -143,8 +144,8 @@ function PackageFormDialog({
         const total = (parseFloat(basePrice) || 0) + extra;
         await apiRequest("POST", `/api/packages/${newPkg.id}/room-prices`, {
           roomTypeId: rp.roomTypeId,
-          price: total.toFixed(2),
-          extraAmount: extra.toFixed(2),
+          price: fmtMoney(total),
+          extraAmount: fmtMoney(extra),
         });
       }
       return newPkg;
@@ -167,8 +168,8 @@ function PackageFormDialog({
         description,
         roomTypeId: null,
         nights,
-        basePrice: parseFloat(basePrice).toFixed(2),
-        discountPercent: discountPercent ? parseFloat(discountPercent).toFixed(2) : null,
+        basePrice: fmtMoney(basePrice),
+        discountPercent: discountPercent ? fmtMoney(discountPercent) : null,
         validFrom: validFrom || null,
         validUntil: validUntil || null,
         status,
@@ -188,8 +189,8 @@ function PackageFormDialog({
         const total = (parseFloat(basePrice) || 0) + extra;
         await apiRequest("POST", `/api/packages/${pkg!.id}/room-prices`, {
           roomTypeId: rp.roomTypeId,
-          price: total.toFixed(2),
-          extraAmount: extra.toFixed(2),
+          price: fmtMoney(total),
+          extraAmount: fmtMoney(extra),
         });
       }
     },
@@ -454,7 +455,7 @@ function PackageFormDialog({
                         />
                       </div>
                       <div className="flex items-center justify-center rounded-md bg-muted px-3 h-10 text-sm font-semibold tabular-nums">
-                        ${total.toFixed(2)}
+                        ${fmtMoney(total)}
                       </div>
                       <Button
                         type="button"
@@ -639,7 +640,7 @@ export default function PackagesPage() {
                           <div className="text-right">
                             <span className="font-semibold">${rp.price}</span>
                             {extra > 0 && (
-                              <span className="ml-1 text-xs text-muted-foreground">(+${extra.toFixed(2)})</span>
+                              <span className="ml-1 text-xs text-muted-foreground">(+${fmtMoney(extra)})</span>
                             )}
                           </div>
                         </div>

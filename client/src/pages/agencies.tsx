@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -98,14 +99,14 @@ function AgencyReservationDetailRow({ r }: { r: ReservationWithDetails }) {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
-          <span className="font-medium text-sm">${parseFloat(r.totalRoomAmount || "0").toLocaleString("es-AR")}</span>
+          <span className="font-medium text-sm">${fmtMoney(r.totalRoomAmount || "0")}</span>
           {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
         </div>
       </button>
       {expanded && (
         <div className="bg-muted/30 px-4 py-3 space-y-2 text-sm">
           <div className="grid grid-cols-3 gap-2 text-xs">
-            <div><p className="text-muted-foreground">Tarifa/noche</p><p className="font-medium">${parseFloat(r.finalRatePerNight || "0").toLocaleString("es-AR")}</p></div>
+            <div><p className="text-muted-foreground">Tarifa/noche</p><p className="font-medium">${fmtMoney(r.finalRatePerNight || "0")}</p></div>
             <div><p className="text-muted-foreground">Fuente</p><p className="font-medium">{agSourceLabel[r.source || ""] || r.source || "-"}</p></div>
             {r.discountType && r.discountType !== "none" && (
               <div><p className="text-muted-foreground">Descuento</p><p className="font-medium text-green-600">{r.discountType === "percent" ? `${r.discountValue}%` : `$${r.discountValue}`}</p></div>
@@ -116,7 +117,7 @@ function AgencyReservationDetailRow({ r }: { r: ReservationWithDetails }) {
             <div className="border-t pt-2">
               <p className="text-xs font-semibold text-muted-foreground mb-1">Cargos</p>
               {activeCharges.map(c => (
-                <div key={c.id} className="flex justify-between text-xs"><span>{c.description}</span><span>${parseFloat(c.amount).toLocaleString("es-AR")}</span></div>
+                <div key={c.id} className="flex justify-between text-xs"><span>{c.description}</span><span>${fmtMoney(c.amount)}</span></div>
               ))}
             </div>
           )}
@@ -126,7 +127,7 @@ function AgencyReservationDetailRow({ r }: { r: ReservationWithDetails }) {
               {activePayments.map(p => (
                 <div key={p.id} className="flex justify-between text-xs">
                   <span>{agPayMethodLabel[p.method || ""] || p.method} · {p.date}</span>
-                  <span className="text-green-700 dark:text-green-400">${parseFloat(p.amount).toLocaleString("es-AR")}</span>
+                  <span className="text-green-700 dark:text-green-400">${fmtMoney(p.amount)}</span>
                 </div>
               ))}
             </div>
@@ -690,7 +691,7 @@ export default function AgenciesPage() {
               <p className={`text-3xl font-bold ${
                 (accountData?.balance || 0) > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
               }`} data-testid="text-agency-account-balance">
-                ${Math.abs(accountData?.balance || 0).toFixed(2)}
+                ${fmtMoney(Math.abs(accountData?.balance || 0))}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 {(accountData?.balance || 0) > 0 ? "Saldo pendiente de cobro" : "Sin deuda pendiente"}
@@ -738,7 +739,7 @@ export default function AgenciesPage() {
                       <TableCell className={`text-right font-medium tabular-nums ${
                         parseFloat(mov.amount) > 0 ? "text-red-600" : "text-green-600"
                       }`}>
-                        {parseFloat(mov.amount) > 0 ? "+" : ""}${Math.abs(parseFloat(mov.amount)).toFixed(2)}
+                        {parseFloat(mov.amount) > 0 ? "+" : ""}${fmtMoney(Math.abs(parseFloat(mov.amount)))}
                         <span className="block text-xs font-normal text-muted-foreground">
                           {parseFloat(mov.amount) > 0 ? "cargo" : "pago"}
                         </span>

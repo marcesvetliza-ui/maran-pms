@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { fmtMoney } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ const AREA_LABEL: Record<string, string> = {
 };
 
 function formatCurrency(n: number) {
-  return "$ " + Math.round(n).toLocaleString("es-AR");
+  return "$ " + fmtMoney(n, 0);
 }
 
 function formatTime(dateStr: string) {

@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { getLocalToday, formatDateAR } from "@/lib/utils";
+import { getLocalToday, formatDateAR, fmtMoney } from "@/lib/utils";
 import {
   LogOut,
   Search,
@@ -132,7 +132,7 @@ export default function CheckOutPage() {
       (folio.charges || []).forEach((c: any) => {
         if (next.has(c.id)) total += parseFloat(c.amount);
       });
-      setPaymentAmount(total > 0 ? total.toFixed(2) : "");
+      setPaymentAmount(total > 0 ? String(total.toFixed(2)) : "");
     }
   };
 
@@ -530,13 +530,13 @@ export default function CheckOutPage() {
                     <TableRow className="bg-muted/50">
                       <TableCell className="font-medium">Alojamiento ({folio?.nights || selectedReservation.nights} noches)</TableCell>
                       <TableCell>{formatDateAR(selectedReservation.checkInDate)} → {formatDateAR(selectedReservation.checkOutDate)}</TableCell>
-                      <TableCell className="text-right font-medium">${(folio?.roomTotal || parseFloat(selectedReservation.totalRoomAmount || "0")).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-medium">${fmtMoney(folio?.roomTotal || parseFloat(selectedReservation.totalRoomAmount || "0"))}</TableCell>
                     </TableRow>
                     {folio?.charges?.map((charge) => (
                       <TableRow key={charge.id} data-testid={`charge-row-${charge.id}`}>
                         <TableCell>{charge.description}</TableCell>
                         <TableCell>{formatDateAR(charge.date)}</TableCell>
-                        <TableCell className="text-right">${parseFloat(charge.amount).toFixed(2)}</TableCell>
+                        <TableCell className="text-right">${fmtMoney(charge.amount)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -544,7 +544,7 @@ export default function CheckOutPage() {
                 <div className="flex justify-end mt-3 pt-3 border-t">
                   <div className="text-right">
                     <p className="text-sm text-muted-foreground">Total cargos</p>
-                    <p className="text-lg font-bold" data-testid="text-total-charges">${(folio?.grandTotal || 0).toFixed(2)}</p>
+                    <p className="text-lg font-bold" data-testid="text-total-charges">${fmtMoney(folio?.grandTotal || 0)}</p>
                   </div>
                 </div>
               </CardContent>
@@ -569,7 +569,7 @@ export default function CheckOutPage() {
                         <TableRow key={payment.id} data-testid={`payment-row-${payment.id}`}>
                           <TableCell>{formatDateAR(payment.date)}</TableCell>
                           <TableCell>{paymentMethodLabels[payment.method as PaymentMethod] || payment.method}</TableCell>
-                          <TableCell className="text-right">${parseFloat(payment.amount).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">${fmtMoney(payment.amount)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -580,7 +580,7 @@ export default function CheckOutPage() {
                 <div className="flex justify-end mt-3 pt-3 border-t">
                   <div className="text-right">
                     <p className="text-sm text-muted-foreground">Total pagado</p>
-                    <p className="text-lg font-bold" data-testid="text-total-payments">${(folio?.totalPayments || 0).toFixed(2)}</p>
+                    <p className="text-lg font-bold" data-testid="text-total-payments">${fmtMoney(folio?.totalPayments || 0)}</p>
                   </div>
                 </div>
               </CardContent>
@@ -591,7 +591,7 @@ export default function CheckOutPage() {
                 <div>
                   <p className="text-sm font-medium">{balance < -0.01 ? "Saldo a favor del huésped" : "Saldo pendiente"}</p>
                   <p className={`text-2xl font-bold ${balance > 0.01 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`} data-testid="text-balance">
-                    {balance < -0.01 ? `+$${Math.abs(balance).toFixed(2)}` : `$${balance.toFixed(2)}`}
+                    {balance < -0.01 ? `+$${fmtMoney(Math.abs(balance))}` : `$${fmtMoney(balance)}`}
                   </p>
                 </div>
                 {balance <= 0.01 && <CircleCheck className="h-8 w-8 text-green-500" />}
@@ -731,7 +731,7 @@ export default function CheckOutPage() {
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">Registrar pago</CardTitle>
                     <CardDescription>
-                      Saldo pendiente: <span className="font-bold text-red-600 dark:text-red-400">${balance.toFixed(2)}</span>
+                      Saldo pendiente: <span className="font-bold text-red-600 dark:text-red-400">${fmtMoney(balance)}</span>
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4">
@@ -761,7 +761,7 @@ export default function CheckOutPage() {
                                 <p className="text-sm font-medium text-foreground truncate">Alojamiento ({folio.nights} noche{folio.nights !== 1 ? "s" : ""})</p>
                                 <p className="text-xs text-muted-foreground">${folio.roomRate ? parseFloat(folio.roomRate).toFixed(0) : "—"}/noche</p>
                               </div>
-                              <span className="text-sm font-semibold text-foreground shrink-0">${folio.roomTotal.toFixed(2)}</span>
+                              <span className="text-sm font-semibold text-foreground shrink-0">${fmtMoney(folio.roomTotal)}</span>
                             </label>
                           )}
                           {/* Cargos adicionales */}
@@ -776,7 +776,7 @@ export default function CheckOutPage() {
                                 <p className="text-sm font-medium text-foreground truncate">{c.description}</p>
                                 {c.date && <p className="text-xs text-muted-foreground">{c.date}</p>}
                               </div>
-                              <span className="text-sm font-semibold text-foreground shrink-0">${parseFloat(c.amount).toFixed(2)}</span>
+                              <span className="text-sm font-semibold text-foreground shrink-0">${fmtMoney(c.amount)}</span>
                             </label>
                           ))}
                         </div>
@@ -812,7 +812,7 @@ export default function CheckOutPage() {
                           min="0"
                           value={paymentAmount}
                           onChange={(e) => setPaymentAmount(e.target.value)}
-                          placeholder={balance.toFixed(2)}
+                          placeholder={fmtMoney(balance)}
                           data-testid="input-payment-amount"
                         />
                       </div>
@@ -984,9 +984,9 @@ export default function CheckOutPage() {
                         </div>
                         {retencionMonto && parseFloat(retencionMonto) > 0 && paymentAmount && parseFloat(paymentAmount) > 0 && (
                           <div className="text-xs text-amber-800 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-900/30 rounded p-2">
-                            <span className="font-medium">Neto recibido:</span> ${parseFloat(paymentAmount).toFixed(2)} &nbsp;
-                            <span className="font-medium">+ Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"}:</span> ${parseFloat(retencionMonto).toFixed(2)} &nbsp;
-                            <span className="font-semibold">= Total cubierto: ${(parseFloat(paymentAmount) + parseFloat(retencionMonto)).toFixed(2)}</span>
+                            <span className="font-medium">Neto recibido:</span> ${fmtMoney(paymentAmount)} &nbsp;
+                            <span className="font-medium">+ Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"}:</span> ${fmtMoney(retencionMonto)} &nbsp;
+                            <span className="font-semibold">= Total cubierto: ${fmtMoney(parseFloat(paymentAmount) + parseFloat(retencionMonto))}</span>
                           </div>
                         )}
                       </div>
@@ -994,7 +994,7 @@ export default function CheckOutPage() {
 
                     <Button
                       onClick={() => {
-                        const netAmount = paymentAmount || balance.toFixed(2);
+                        const netAmount = paymentAmount || fmtMoney(balance);
                         if (!netAmount || parseFloat(netAmount) <= 0) {
                           toast({ title: "Ingresá un monto válido", variant: "destructive" });
                           return;
@@ -1062,12 +1062,12 @@ export default function CheckOutPage() {
                                     </div>
                                     {ret && (
                                       <span className="text-xs text-muted-foreground">
-                                        Neto ${ret.neto?.toFixed(2)} + Ret. {ret.tipo === "iibb" ? "IIBB" : "Ganancias"} ${ret.monto?.toFixed(2)}
+                                        Neto ${fmtMoney(ret.neto)} + Ret. {ret.tipo === "iibb" ? "IIBB" : "Ganancias"} ${fmtMoney(ret.monto)}
                                       </span>
                                     )}
                                   </div>
                                 </TableCell>
-                                <TableCell className="text-right">${parseFloat(p.amount).toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${fmtMoney(p.amount)}</TableCell>
                               </TableRow>
                             );
                           })}
@@ -1081,7 +1081,7 @@ export default function CheckOutPage() {
                   <CardContent className="flex items-center justify-between p-4">
                     <p className="font-medium">{balance < -0.01 ? "Saldo a favor del huésped" : "Saldo restante"}</p>
                     <p className={`text-xl font-bold ${balance < -0.01 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`} data-testid="text-remaining-balance">
-                      {balance < -0.01 ? `+$${Math.abs(balance).toFixed(2)}` : `$${balance.toFixed(2)}`}
+                      {balance < -0.01 ? `+$${fmtMoney(Math.abs(balance))}` : `$${fmtMoney(balance)}`}
                     </p>
                   </CardContent>
                 </Card>
@@ -1097,7 +1097,7 @@ export default function CheckOutPage() {
                   </DialogTitle>
                   <DialogDescription>
                     Esta reserva tiene un saldo pendiente de{" "}
-                    <span className="font-bold text-red-600">${balance.toFixed(2)}</span>.
+                    <span className="font-bold text-red-600">${fmtMoney(balance)}</span>.
                     {selectedReservation?.companyId
                       ? " La deuda quedará registrada en la cuenta corriente de la empresa."
                       : selectedReservation?.agencyId
@@ -1181,7 +1181,7 @@ export default function CheckOutPage() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Total cobrado</p>
-                    <p className="font-medium" data-testid="text-summary-total">${finalSummary.totalPaid.toFixed(2)}</p>
+                    <p className="font-medium" data-testid="text-summary-total">${fmtMoney(finalSummary.totalPaid)}</p>
                   </div>
                 </div>
                 {finalSummary.methods.length > 0 && (
@@ -1376,7 +1376,7 @@ export default function CheckOutPage() {
                     <CreditCard className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm">Total habitación</span>
                   </div>
-                  <span className="text-lg font-bold">${parseFloat(reservation.totalRoomAmount || "0").toFixed(2)}</span>
+                  <span className="text-lg font-bold">${fmtMoney(reservation.totalRoomAmount || "0")}</span>
                 </div>
                 <div className="pt-2">
                   <Button

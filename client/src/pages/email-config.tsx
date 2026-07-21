@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -573,7 +574,7 @@ function formatBytes(n: number | null) {
   if (!n) return "—";
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  return `${fmtMoney(n / 1024 / 1024)} MB`;
 }
 
 function BackupTab() {

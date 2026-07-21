@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -91,7 +92,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
     setSelected((prev) => {
       const next = { ...prev };
       if (checked) {
-        next[charge.id] = charge.saldoPendiente.toFixed(2);
+        next[charge.id] = fmtMoney(charge.saldoPendiente);
       } else {
         delete next[charge.id];
       }
@@ -119,14 +120,14 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
     mutationFn: async () => {
       const allocations = Object.entries(selected)
         .filter(([, amount]) => parseFloat(amount) > 0)
-        .map(([cargoId, amount]) => ({ cargoId, amount: parseFloat(amount).toFixed(2) }));
+        .map(([cargoId, amount]) => ({ cargoId, amount: fmtMoney(amount) }));
 
       const validRetentions = retentions
         .filter((r) => r.concepto && parseFloat(r.monto) > 0)
-        .map((r) => ({ concepto: r.concepto, monto: parseFloat(r.monto).toFixed(2) }));
+        .map((r) => ({ concepto: r.concepto, monto: fmtMoney(r.monto) }));
 
       const res = await apiRequest("POST", `/api/${pathSegment}/${entityId}/account/payment`, {
-        amount: totalAmount.toFixed(2),
+        amount: fmtMoney(totalAmount),
         description: paymentDescription,
         reference: paymentReference || null,
         paymentMethod: resolvedPaymentMethod,
@@ -156,7 +157,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
         <DialogHeader>
           <DialogTitle>Registrar pago recibido</DialogTitle>
           <DialogDescription>
-            {entityLabel} — Saldo actual: ${Math.abs(balance).toFixed(2)}
+            {entityLabel} — Saldo actual: ${fmtMoney(Math.abs(balance))}
           </DialogDescription>
         </DialogHeader>
 
@@ -176,7 +177,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">{charge.description}</p>
-                        <p className="text-xs text-muted-foreground">{charge.date} · Pendiente: ${charge.saldoPendiente.toFixed(2)}</p>
+                        <p className="text-xs text-muted-foreground">{charge.date} · Pendiente: ${fmtMoney(charge.saldoPendiente)}</p>
                       </div>
                       <Input
                         type="number"
@@ -284,17 +285,17 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
             <div className="rounded-md bg-muted/50 p-3 text-sm space-y-1">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total cancelado</span>
-                <span className="font-medium tabular-nums">${totalAmount.toFixed(2)}</span>
+                <span className="font-medium tabular-nums">${fmtMoney(totalAmount)}</span>
               </div>
               {retentionsTotal > 0 && (
                 <>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Retenciones</span>
-                    <span className="font-medium tabular-nums">-${retentionsTotal.toFixed(2)}</span>
+                    <span className="font-medium tabular-nums">-${fmtMoney(retentionsTotal)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1">
                     <span className="text-muted-foreground">Efectivo/transferencia recibido</span>
-                    <span className="font-semibold tabular-nums">${cashReceived.toFixed(2)}</span>
+                    <span className="font-semibold tabular-nums">${fmtMoney(cashReceived)}</span>
                   </div>
                 </>
               )}

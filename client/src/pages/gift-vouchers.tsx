@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -421,7 +422,7 @@ function MarkUsedDialog({
               <p><span className="font-medium">Beneficiario:</span> {voucher.beneficiaryName || voucher.buyerName}</p>
               <p><span className="font-medium">Descripción:</span> {voucher.description}</p>
               {voucher.valueAmount && (
-                <p><span className="font-medium">Valor:</span> ${Number(voucher.valueAmount).toLocaleString("es-AR")}</p>
+                <p><span className="font-medium">Valor:</span> ${fmtMoney(voucher.valueAmount)}</p>
               )}
             </div>
 
@@ -458,7 +459,7 @@ function MarkUsedDialog({
 
 function printVoucher(v: GiftVoucher) {
   const valueDisplay = v.valueType === "monetario" && v.valueAmount
-    ? `$${Number(v.valueAmount).toLocaleString("es-AR")}`
+    ? `$${fmtMoney(v.valueAmount)}`
     : v.description;
 
   const expiryDisplay = v.expiresAt
@@ -558,7 +559,7 @@ function printVoucher(v: GiftVoucher) {
 
         <div class="value-block">
           ${v.valueType === "monetario" && v.valueAmount
-            ? `<div class="value-num">$${Number(v.valueAmount).toLocaleString("es-AR")}</div>`
+            ? `<div class="value-num">$${fmtMoney(v.valueAmount)}</div>`
             : `<div class="value-desc" style="font-size:18px;font-weight:700;">${v.description}</div>`
           }
           ${v.valueType === "monetario" ? `<div class="value-desc">${v.description}</div>` : ""}
@@ -626,7 +627,7 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Tipo</p><p className="font-medium">{voucher.valueType === "monetario" ? "Monetario" : "Descriptivo"}</p></div>
             <div className="col-span-2"><p className="text-muted-foreground text-xs uppercase tracking-wide">Descripción</p><p className="font-medium">{voucher.description}</p></div>
             {voucher.valueAmount && (
-              <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Valor</p><p className="font-medium text-green-600 font-mono">${Number(voucher.valueAmount).toLocaleString("es-AR")}</p></div>
+              <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Valor</p><p className="font-medium text-green-600 font-mono">${fmtMoney(voucher.valueAmount)}</p></div>
             )}
           </div>
           <Separator />
@@ -640,7 +641,7 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
           <div className="grid grid-cols-2 gap-3">
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Emitido</p><p>{format(new Date(voucher.issuedAt), "dd/MM/yyyy HH:mm")}</p></div>
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Vence</p><p>{voucher.expiresAt ? format(new Date(voucher.expiresAt + "T12:00:00"), "dd/MM/yyyy") : "—"}</p></div>
-            {voucher.pricePaid && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Precio cobrado</p><p className="font-mono">${Number(voucher.pricePaid).toLocaleString("es-AR")}</p></div>}
+            {voucher.pricePaid && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Precio cobrado</p><p className="font-mono">${fmtMoney(voucher.pricePaid)}</p></div>}
             {voucher.paymentMethod && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Forma de pago</p><p className="capitalize">{voucher.paymentMethod}</p></div>}
           </div>
           {voucher.status === "usado" && (
@@ -752,7 +753,7 @@ export default function GiftVouchersPage() {
         <Card>
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Valor en circulación</p>
-            <p className="text-2xl font-bold font-mono">${totalValor.toLocaleString("es-AR")}</p>
+            <p className="text-2xl font-bold font-mono">${fmtMoney(totalValor)}</p>
           </CardContent>
         </Card>
       </div>
@@ -847,7 +848,7 @@ export default function GiftVouchersPage() {
                       <td className="px-4 py-3">{v.beneficiaryName || v.buyerName}</td>
                       <td className="px-4 py-3 text-right font-mono">
                         {v.valueType === "monetario" && v.valueAmount
-                          ? `$${Number(v.valueAmount).toLocaleString("es-AR")}`
+                          ? `$${fmtMoney(v.valueAmount)}`
                           : <span className="text-muted-foreground text-xs">—</span>
                         }
                       </td>

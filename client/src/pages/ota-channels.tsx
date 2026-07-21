@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -236,7 +237,7 @@ export default function OTAChannelsPage() {
                       </div>
                       <div>
                         <span className="text-muted-foreground">Ingresos</span>
-                        <p className="font-medium">${channel.totalRevenue.toFixed(2)}</p>
+                        <p className="font-medium">${fmtMoney(channel.totalRevenue)}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -440,11 +441,11 @@ export default function OTAChannelsPage() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Ingresos Totales</span>
-                    <p className="font-medium text-lg">${selectedChannel.totalRevenue.toFixed(2)}</p>
+                    <p className="font-medium text-lg">${fmtMoney(selectedChannel.totalRevenue)}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Comisiones Pagadas</span>
-                    <p className="font-medium text-lg">${selectedChannel.totalCommission.toFixed(2)}</p>
+                    <p className="font-medium text-lg">${fmtMoney(selectedChannel.totalCommission)}</p>
                   </div>
                 </div>
                 {selectedChannel.lastSyncAt && (

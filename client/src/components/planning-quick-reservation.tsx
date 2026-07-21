@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { toArgentinaDateStr } from "@/lib/utils";
+import { toArgentinaDateStr, fmtMoney } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, RatePlan, Package, BedType, Company, Agency } from "@shared/schema";
@@ -160,7 +160,7 @@ export function QuickReservationDialog({
       return paxMap[pax] || plan.baseRate;
     };
     const planRate = selectedPlan ? getPlanPaxRate(selectedPlan, numberOfGuests) : null;
-    const effectiveRate = manualRate || (selectedPackage ? (parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)).toFixed(2) : planRate) || null;
+    const effectiveRate = manualRate || (selectedPackage ? fmtMoney(parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)) : planRate) || null;
     const packageNote = selectedPackage ? `[Paquete: ${selectedPackage.name}]` : "";
     const finalNotes = [packageNote, notes].filter(Boolean).join(" ") || null;
     try {
@@ -302,10 +302,10 @@ export function QuickReservationDialog({
                         <div className="flex flex-col gap-0.5">
                           <span className="font-medium">{rp.name}</span>
                           <span className="text-xs text-muted-foreground">
-                            ${Number(rp.baseRate).toLocaleString("es-AR")}
-                            {rp.rate2pax ? ` · 2P: $${Number(rp.rate2pax).toLocaleString("es-AR")}` : ""}
-                            {rp.rate3pax ? ` · 3P: $${Number(rp.rate3pax).toLocaleString("es-AR")}` : ""}
-                            {rp.rate4pax ? ` · 4P: $${Number(rp.rate4pax).toLocaleString("es-AR")}` : ""}
+                            ${fmtMoney(rp.baseRate)}
+                            {rp.rate2pax ? ` · 2P: $${fmtMoney(rp.rate2pax)}` : ""}
+                            {rp.rate3pax ? ` · 3P: $${fmtMoney(rp.rate3pax)}` : ""}
+                            {rp.rate4pax ? ` · 4P: $${fmtMoney(rp.rate4pax)}` : ""}
                             {!hasPaxRates ? " (tarifa fija)" : ""}
                           </span>
                         </div>
@@ -324,7 +324,7 @@ export function QuickReservationDialog({
                 return (
                   <div className="flex items-center gap-1.5 mt-1 px-2 py-1 bg-blue-50 dark:bg-blue-950/40 rounded text-xs text-blue-700 dark:text-blue-300">
                     <span>Tarifa para {numberOfGuests} huésped{numberOfGuests > 1 ? "es" : ""}:</span>
-                    <span className="font-bold">${Number(effectivePaxRate).toLocaleString("es-AR")}/noche</span>
+                    <span className="font-bold">${fmtMoney(effectivePaxRate)}/noche</span>
                     {isPaxSpecific && <span className="text-blue-500">(tarifa {numberOfGuests}P)</span>}
                   </div>
                 );
@@ -347,7 +347,7 @@ export function QuickReservationDialog({
                 setPackageId(val); setRatePlanId("");
                 const pkg = activePackages.find(p => p.id === val);
                 if (pkg) {
-                  const ratePerNight = (parseFloat(pkg.basePrice) / (pkg.nights || 1)).toFixed(2);
+                  const ratePerNight = fmtMoney(parseFloat(pkg.basePrice) / (pkg.nights || 1));
                   setManualRate(ratePerNight);
                   if (pkg.nights && reservationData) {
                     const nextDay = new Date(reservationData.checkInDate + "T12:00:00");
@@ -426,7 +426,7 @@ export function QuickReservationDialog({
                   <div key={idx} className="flex items-center justify-between px-3 py-1 text-sm">
                     <span>{charge.description}{charge.quantity > 1 ? ` x${charge.quantity}` : ""}</span>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">${(parseFloat(charge.amount) * charge.quantity).toFixed(2)}</span>
+                      <span className="font-medium">${fmtMoney(parseFloat(charge.amount) * charge.quantity)}</span>
                       <Button type="button" size="sm" variant="ghost" className="h-5 w-5 p-0 text-destructive" onClick={() => setPendingCharges(prev => prev.filter((_, i) => i !== idx))}>
                         <XCircle className="h-3 w-3" />
                       </Button>
@@ -435,7 +435,7 @@ export function QuickReservationDialog({
                 ))}
                 <div className="flex justify-between px-3 py-1 text-sm font-semibold bg-muted/30">
                   <span>Total cargos</span>
-                  <span>${pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0).toFixed(2)}</span>
+                  <span>${fmtMoney(pendingCharges.reduce()}</span>
                 </div>
               </div>
             )}

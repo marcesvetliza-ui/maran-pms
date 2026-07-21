@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Link } from "wouter";
-import { getLocalToday } from "@/lib/utils";
+import { getLocalToday, fmtMoney } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -237,7 +237,7 @@ function calcIvaField(neto: string, alicuota: string): Record<string, string> {
   const n = parseFloat(neto);
   const entry = IVA_MAP[alicuota];
   if (!entry || isNaN(n) || n <= 0) return { ...ALL_IVA_FIELDS };
-  return { ...ALL_IVA_FIELDS, [entry.field]: (n * entry.rate / 100).toFixed(2) };
+  return { ...ALL_IVA_FIELDS, [entry.field]: fmtMoney(n * entry.rate / 100) };
 }
 
 function InvoiceDialog({
@@ -505,7 +505,7 @@ function InvoiceDialog({
       if (netoVal > 0 && Math.abs(itemsTotal - netoVal) > 1) {
         toast({
           title: "Diferencia en artículos",
-          description: `La suma de artículos ($${itemsTotal.toFixed(2)}) no coincide con el Monto Neto ($${netoVal.toFixed(2)}). Revisá los precios antes de finalizar.`,
+          description: `La suma de artículos ($${fmtMoney(itemsTotal)}) no coincide con el Monto Neto ($${fmtMoney(netoVal)}). Revisá los precios antes de finalizar.`,
           variant: "destructive",
         });
         return;

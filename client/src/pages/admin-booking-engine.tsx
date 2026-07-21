@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { fmtMoney } from "@/lib/utils";
 import { Link } from "wouter";
 import {
   ArrowLeft, Globe, Settings, Eye, EyeOff,
@@ -425,7 +426,7 @@ function WebReservationsPanel() {
                   </TableCell>
                   <TableCell className="py-2">
                     <span className="font-semibold text-sm">
-                      ${parseFloat(r.total_amount || "0").toLocaleString("es-AR")}
+                      ${fmtMoney(r.total_amount || "0")}
                     </span>
                   </TableCell>
                   <TableCell className="py-2">

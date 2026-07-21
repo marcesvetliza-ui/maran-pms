@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useAuth } from "@/App";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -1362,17 +1363,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
 
                 <div className="border-t pt-2 flex justify-between text-sm font-semibold">
                   <span>Total contado:</span>
-                  <span>${efectivoContado.toLocaleString("es-AR")}</span>
+                  <span>${fmtMoney(efectivoContado)}</span>
                 </div>
 
                 <div className={`flex justify-between text-sm ${diferencia !== 0 ? "text-red-600" : "text-green-600"}`}>
                   <span>Sistema (efectivo):</span>
-                  <span>${efectivoSistema.toLocaleString("es-AR")}</span>
+                  <span>${fmtMoney(efectivoSistema)}</span>
                 </div>
                 {diferencia !== 0 ? (
                   <div className="flex justify-between text-sm font-semibold text-red-600 bg-red-50 dark:bg-red-950/20 px-2 py-1 rounded border border-red-200 dark:border-red-800">
                     <span>Diferencia:</span>
-                    <span>{diferencia > 0 ? "+" : ""}{diferencia.toLocaleString("es-AR")}</span>
+                    <span>{diferencia > 0 ? "+" : ""}{fmtMoney(diferencia)}</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 font-medium">
@@ -1411,7 +1412,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               <div className="border rounded-lg p-4 bg-muted/20 space-y-1">
                 <p className="text-sm font-semibold">Próximo turno</p>
                 <p className="text-xs text-muted-foreground">El sistema abrirá automáticamente el siguiente turno con saldo inicial $0.</p>
-                <p className="text-xs text-muted-foreground mt-1">Efectivo contado: <strong>${efectivoContado.toLocaleString("es-AR")}</strong></p>
+                <p className="text-xs text-muted-foreground mt-1">Efectivo contado: <strong>${fmtMoney(efectivoContado)}</strong></p>
               </div>
               <div>
                 <label className="text-sm font-medium">¿Quién toma el siguiente turno? <span className="text-muted-foreground font-normal">(opcional)</span></label>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import {
@@ -168,7 +169,7 @@ function AddBlockDialog({
         roomTypeId,
         quantity: Number(quantity),
         ratePlanId: ratePlanId || null,
-        agreedRate: agreedRate ? parseFloat(agreedRate).toFixed(2) : null,
+        agreedRate: agreedRate || null,
         blockCheckInDate: useCustomDates ? blockCheckInDate : null,
         blockCheckOutDate: useCustomDates ? blockCheckOutDate : null,
       }),
@@ -949,7 +950,7 @@ export default function GroupDetailPage() {
         if (data.balanceDiff && Math.abs(data.balanceDiff) > 0.01) {
           toast({
             title: "Pago registrado con diferencia",
-            description: `Diferencia de $${Math.abs(data.balanceDiff).toFixed(2)} ${data.balanceDiff > 0 ? "(pagó de más)" : "(saldo pendiente)"}`,
+            description: `Diferencia de $${fmtMoney(Math.abs(data.balanceDiff))} ${data.balanceDiff > 0 ? "(pagó de más)" : "(saldo pendiente)"}`,
             variant: "destructive",
           });
         } else {
@@ -1603,7 +1604,7 @@ export default function GroupDetailPage() {
                         <TableCell className="text-sm">
                           <div className="flex items-center gap-1.5">
                             {res.finalRatePerNight
-                              ? `$${parseFloat(res.finalRatePerNight).toLocaleString("es-AR")}`
+                              ? `$${fmtMoney(res.finalRatePerNight)}`
                               : <span className="text-destructive font-medium">Sin tarifa</span>
                             }
                             {(res as any).lateCheckOut && (
@@ -1635,7 +1636,7 @@ export default function GroupDetailPage() {
                                 className="h-7 text-xs px-2 text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30"
                                 onClick={() => {
                                   setEditingRateRes(res);
-                                  setEditingRate(res.finalRatePerNight ? parseFloat(res.finalRatePerNight).toFixed(2) : "");
+                                  setEditingRate(res.finalRatePerNight || "");
                                   setEditingLateCheckout(!!(res as any).lateCheckOut);
                                   setEditingLateCheckoutTime((res as any).lateCheckOutTime || "");
                                 }}
@@ -1808,7 +1809,7 @@ export default function GroupDetailPage() {
                         <Button
                           size="sm"
                           onClick={() => {
-                            setMasterPaymentAmount(masterFolio.masterBalance > 0 ? masterFolio.masterBalance.toFixed(2) : "");
+                            setMasterPaymentAmount(masterFolio.masterBalance > 0 ? String(masterFolio.masterBalance.toFixed(2)) : "");
                             setShowMasterPaymentDialog(true);
                           }}
                           disabled={masterFolio.masterBalance <= 0.01}
@@ -2235,14 +2236,14 @@ export default function GroupDetailPage() {
                           <CardDescription>{res.reservationCode} | {res.nights} noches</CardDescription>
                         </div>
                         <Badge variant={res.balance > 0 ? "destructive" : "default"}>
-                          {res.balance > 0 ? `Pendiente: $${res.balance.toFixed(2)}` : "Pagado"}
+                          {res.balance > 0 ? `Pendiente: $${fmtMoney(res.balance)}` : "Pagado"}
                         </Badge>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-2 text-sm">
                       <div className="flex justify-between">
-                        <span>Alojamiento ({res.nights} x ${res.ratePerNight.toFixed(2)})</span>
-                        <span className="font-medium">${res.accommodationTotal.toFixed(2)}</span>
+                        <span>Alojamiento ({res.nights} x ${fmtMoney(res.ratePerNight)})</span>
+                        <span className="font-medium">${fmtMoney(res.accommodationTotal)}</span>
                       </div>
                       
                       {res.charges.length > 0 && (
@@ -2251,12 +2252,12 @@ export default function GroupDetailPage() {
                           {res.charges.map((c: any, i: number) => (
                             <div key={i} className="flex justify-between">
                               <span>{c.description}</span>
-                              <span>${c.amount.toFixed(2)}</span>
+                              <span>${fmtMoney(c.amount)}</span>
                             </div>
                           ))}
                           <div className="flex justify-between font-medium">
                             <span>Subtotal consumos</span>
-                            <span>${res.chargesTotal.toFixed(2)}</span>
+                            <span>${fmtMoney(res.chargesTotal)}</span>
                           </div>
                         </div>
                       )}
@@ -2267,12 +2268,12 @@ export default function GroupDetailPage() {
                           {res.payments.map((p: any, i: number) => (
                             <div key={i} className="flex justify-between text-green-600">
                               <span>{p.method} {p.reference && `(${p.reference})`}</span>
-                              <span>-${p.amount.toFixed(2)}</span>
+                              <span>-${fmtMoney(p.amount)}</span>
                             </div>
                           ))}
                           <div className="flex justify-between font-medium text-green-600">
                             <span>Total pagos</span>
-                            <span>-${res.paymentsTotal.toFixed(2)}</span>
+                            <span>-${fmtMoney(res.paymentsTotal)}</span>
                           </div>
                         </div>
                       )}
@@ -2290,12 +2291,12 @@ export default function GroupDetailPage() {
                       {invoiceData.groupCharges.map((c: any, i: number) => (
                         <div key={i} className="flex justify-between">
                           <span>{c.description}{c.category ? <span className="text-muted-foreground ml-1">({c.category})</span> : null}</span>
-                          <span className="font-medium">${c.amount.toFixed(2)}</span>
+                          <span className="font-medium">${fmtMoney(c.amount)}</span>
                         </div>
                       ))}
                       <div className="flex justify-between font-semibold border-t pt-2 mt-1">
                         <span>Subtotal cargos grupales</span>
-                        <span>${invoiceData.totals.groupCharges.toFixed(2)}</span>
+                        <span>${fmtMoney(invoiceData.totals.groupCharges)}</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -2308,27 +2309,27 @@ export default function GroupDetailPage() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>Total Alojamiento</span>
-                      <span className="font-medium">${invoiceData.totals.accommodation.toFixed(2)}</span>
+                      <span className="font-medium">${fmtMoney(invoiceData.totals.accommodation)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Consumos por habitación</span>
-                      <span className="font-medium">${invoiceData.totals.charges.toFixed(2)}</span>
+                      <span className="font-medium">${fmtMoney(invoiceData.totals.charges)}</span>
                     </div>
                     {invoiceData.totals.groupCharges > 0 && (
                       <div className="flex justify-between">
                         <span>Cargos grupales</span>
-                        <span className="font-medium">${invoiceData.totals.groupCharges.toFixed(2)}</span>
+                        <span className="font-medium">${fmtMoney(invoiceData.totals.groupCharges)}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-green-600">
                       <span>Total Pagos</span>
-                      <span className="font-medium">-${invoiceData.totals.payments.toFixed(2)}</span>
+                      <span className="font-medium">-${fmtMoney(invoiceData.totals.payments)}</span>
                     </div>
                     <div className="border-t pt-2 mt-2">
                       <div className="flex justify-between text-lg font-bold">
                         <span>Saldo Total</span>
                         <span className={invoiceData.totals.balance > 0 ? "text-destructive" : "text-green-600"}>
-                          ${invoiceData.totals.balance.toFixed(2)}
+                          ${fmtMoney(invoiceData.totals.balance)}
                         </span>
                       </div>
                     </div>
@@ -2346,7 +2347,7 @@ export default function GroupDetailPage() {
               <Button
                 variant="default"
                 onClick={() => {
-                  setGroupPaymentAmount(invoiceData.totals.balance.toFixed(2));
+                  setGroupPaymentAmount(totals.balance > 0 ? String(totals.balance.toFixed(2)) : "");
                   setShowGroupPaymentDialog(true);
                 }}
                 data-testid="button-group-payment"
@@ -2767,7 +2768,7 @@ export default function GroupDetailPage() {
                   step="0.01"
                   value={masterPaymentAmount}
                   onChange={(e) => setMasterPaymentAmount(e.target.value)}
-                  placeholder={masterFolio.masterBalance.toFixed(2)}
+                  placeholder={fmtMoney(masterFolio.masterBalance)}
                   data-testid="input-master-payment-amount"
                 />
               </div>
@@ -2961,7 +2962,7 @@ export default function GroupDetailPage() {
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground">
-                  Asignado: ${Object.values(manualDistribution).reduce((a, b) => a + b, 0).toFixed(2)}
+                  Asignado: ${fmtMoney(Object.values(manualDistribution).reduce((a, b) => a + b, 0))}
                   {" / "}Total: ${folioPaymentAmount || "0"}
                 </p>
               </div>
@@ -3006,7 +3007,7 @@ export default function GroupDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Transferir cargo al folio grupal</AlertDialogTitle>
             <AlertDialogDescription>
-              ¿Mover el cargo "{transferChargeTarget?.description}" (${parseFloat(transferChargeTarget?.amount || "0").toFixed(2)}) al folio del grupo?
+              ¿Mover el cargo "{transferChargeTarget?.description}" (${fmtMoney(transferChargeTarget?.amount || "0")}) al folio del grupo?
               Se creará una copia en el folio grupal.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -3188,7 +3189,7 @@ export default function GroupDetailPage() {
               Reserva <span className="font-mono font-medium">{changingReservation?.reservationCode}</span>{" "}
               — Hab. actual: <strong>{changingReservation?.room?.roomNumber}</strong>
               {changingReservation?.finalRatePerNight && (
-                <span className="ml-1 text-muted-foreground">· Tarifa: ${parseFloat(changingReservation.finalRatePerNight).toLocaleString("es-AR")}/noche (se conserva)</span>
+                <span className="ml-1 text-muted-foreground">· Tarifa: ${fmtMoney(changingReservation.finalRatePerNight)}/noche (se conserva)</span>
               )}
             </DialogDescription>
           </DialogHeader>

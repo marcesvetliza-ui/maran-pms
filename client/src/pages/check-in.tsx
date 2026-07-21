@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { getLocalToday, formatDateAR } from "@/lib/utils";
+import { getLocalToday, formatDateAR, fmtMoney } from "@/lib/utils";
 import {
   LogIn,
   Search,
@@ -738,10 +738,10 @@ export default function CheckInPage() {
                                 <div className="flex flex-col gap-0.5">
                                   <span className="font-medium">{rp.name}</span>
                                   <span className="text-xs text-muted-foreground">
-                                    ${Number(rp.baseRate).toLocaleString("es-AR")}
-                                    {rp.rate2pax ? ` · 2P: $${Number(rp.rate2pax).toLocaleString("es-AR")}` : ""}
-                                    {rp.rate3pax ? ` · 3P: $${Number(rp.rate3pax).toLocaleString("es-AR")}` : ""}
-                                    {rp.rate4pax ? ` · 4P: $${Number(rp.rate4pax).toLocaleString("es-AR")}` : ""}
+                                    ${fmtMoney(rp.baseRate)}
+                                    {rp.rate2pax ? ` · 2P: $${fmtMoney(rp.rate2pax)}` : ""}
+                                    {rp.rate3pax ? ` · 3P: $${fmtMoney(rp.rate3pax)}` : ""}
+                                    {rp.rate4pax ? ` · 4P: $${fmtMoney(rp.rate4pax)}` : ""}
                                     {!hasPaxRates ? " (tarifa fija)" : ""}
                                   </span>
                                 </div>
@@ -756,7 +756,7 @@ export default function CheckInPage() {
                         return (
                           <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-950/40 rounded text-xs text-blue-700 dark:text-blue-300">
                             <span>Tarifa para {numberOfGuests} huésped{numberOfGuests > 1 ? "es" : ""}:</span>
-                            <span className="font-bold">${Number(paxRate).toLocaleString("es-AR")}/noche</span>
+                            <span className="font-bold">${fmtMoney(paxRate)}/noche</span>
                             {isPaxSpecific && <span className="text-blue-500">(tarifa {numberOfGuests}P)</span>}
                           </div>
                         );
@@ -821,7 +821,7 @@ export default function CheckInPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Tarifa:</span>
                     <span className="font-medium">
-                      {selectedRatePlan ? `$${Number(effectiveNightRate).toLocaleString("es-AR")}/noche` : "-"}
+                      {selectedRatePlan ? `$${fmtMoney(effectiveNightRate)}/noche` : "-"}
                     </span>
                   </div>
                   <div className="border-t pt-3 mt-3">
@@ -1387,11 +1387,11 @@ export default function CheckInPage() {
                       <div className="grid grid-cols-2 gap-0 divide-y sm:divide-y-0 sm:divide-x">
                         <div className="p-3">
                           <p className="text-xs text-muted-foreground mb-0.5">Tarifa por noche</p>
-                          <p className="font-medium text-foreground">${Number(selectedReservation.finalRatePerNight || 0).toLocaleString("es-AR")}</p>
+                          <p className="font-medium text-foreground">${fmtMoney(selectedReservation.finalRatePerNight || 0)}</p>
                         </div>
                         <div className="p-3">
                           <p className="text-xs text-muted-foreground mb-0.5">Total alojamiento</p>
-                          <p className="font-semibold text-foreground">${Number(selectedReservation.totalRoomAmount || 0).toLocaleString("es-AR")}</p>
+                          <p className="font-semibold text-foreground">${fmtMoney(selectedReservation.totalRoomAmount || 0)}</p>
                         </div>
                       </div>
                       {((selectedReservation as any).bedType?.name || selectedReservation.bedTypeNotes) && (
