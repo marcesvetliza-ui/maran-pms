@@ -3681,7 +3681,7 @@ function ReservationDetailDialog({
                 data-testid="button-edit-from-detail"
               >
                 <Pencil className="h-4 w-4 mr-2" />
-                Editar Reserva
+                Editar
               </Button>
             )}
             {reservation.status === "checked_in" && (

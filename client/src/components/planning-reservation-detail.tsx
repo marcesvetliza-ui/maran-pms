@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, ArrowLeftRight, Sunrise, Sunset, TrendingUp, AlertCircle, AlertTriangle, Heart, StickyNote, Undo2, Building2, Percent, X, Printer } from "lucide-react";
+import { Calendar, User, DollarSign, Bed, Users, LogIn, LogOut, ExternalLink, FileText, Ban, Pencil, Sunrise, Sunset, TrendingUp, AlertCircle, AlertTriangle, Heart, StickyNote, Undo2, Building2, Percent, X, Printer } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -860,7 +860,7 @@ export function ReservationDetailModal({
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" onClick={() => { onEdit(reservation); onOpenChange(false); }} className="w-full sm:w-auto" data-testid="button-edit-reservation">
-                  <ArrowLeftRight className="h-4 w-4 mr-2" />Editar
+                  <Pencil className="h-4 w-4 mr-2" />Editar
                 </Button>
               )
             )}
