@@ -818,6 +818,7 @@ export default function RoomsPage() {
   const [ctAmount, setCtAmount] = useState("");
   const [ctCategory, setCtCategory] = useState("otros");
   const [ctAllowPriceEdit, setCtAllowPriceEdit] = useState(false);
+  const [ctAllowRecurring, setCtAllowRecurring] = useState(false);
   const [ctFormOpen, setCtFormOpen] = useState(false);
   const [deletingCTId, setDeletingCTId] = useState<string | null>(null);
 
@@ -828,7 +829,7 @@ export default function RoomsPage() {
 
   function openNewCT() {
     setEditingCT(null);
-    setCtLabel(""); setCtDescription(""); setCtAmount(""); setCtCategory("otros"); setCtAllowPriceEdit(false);
+    setCtLabel(""); setCtDescription(""); setCtAmount(""); setCtCategory("otros"); setCtAllowPriceEdit(false); setCtAllowRecurring(false);
     setCtFormOpen(true);
   }
   function openEditCT(ct: ChargeType) {
@@ -836,13 +837,14 @@ export default function RoomsPage() {
     setCtLabel(ct.label); setCtDescription(ct.description);
     setCtAmount(String(ct.defaultAmount)); setCtCategory(ct.category);
     setCtAllowPriceEdit(ct.allowPriceEdit ?? false);
+    setCtAllowRecurring((ct as any).allowRecurring ?? false);
     setCtFormOpen(true);
   }
 
   const saveCTMutation = useMutation({
     mutationFn: () => editingCT
-      ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit })
-      : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit }),
+      ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit, allowRecurring: ctAllowRecurring })
+      : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit, allowRecurring: ctAllowRecurring }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/charge-types/all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
@@ -1480,6 +1482,9 @@ export default function RoomsPage() {
                     {ct.allowPriceEdit && ct.active && (
                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 shrink-0">Variable</span>
                     )}
+                    {(ct as any).allowRecurring && ct.active && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">Por noche</span>
+                    )}
                     {!ct.active && (
                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 shrink-0">Deshabilitado</span>
                     )}
@@ -1566,6 +1571,19 @@ export default function RoomsPage() {
                 <div>
                   <p className="text-sm font-medium leading-none">Precio variable</p>
                   <p className="text-xs text-muted-foreground mt-0.5">El recepcionista ingresa el importe al cargar este cargo</p>
+                </div>
+              </div>
+              <div
+                className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${ctAllowRecurring ? "border-blue-400/60 bg-blue-50 dark:bg-blue-950/20" : "border-border bg-muted/20"}`}
+                onClick={() => setCtAllowRecurring(v => !v)}
+                data-testid="toggle-ct-allow-recurring"
+              >
+                <div className={`mt-0.5 h-4 w-4 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${ctAllowRecurring ? "bg-blue-600 border-blue-600" : "border-muted-foreground/40"}`}>
+                  {ctAllowRecurring && <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <div>
+                  <p className="text-sm font-medium leading-none">Habilitado para cargo por noche</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Permite usar este cargo como repetitivo (se actualiza al cambiar las noches)</p>
                 </div>
               </div>
               <div className="flex gap-2 pt-1">

@@ -889,5 +889,17 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await withTimeout("charge_types.allow_recurring", T, () =>
+    db.execute(sql`ALTER TABLE charge_types ADD COLUMN IF NOT EXISTS allow_recurring boolean NOT NULL DEFAULT false`)
+  );
+
+  await withTimeout("charges.is_recurring", T, () =>
+    db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS is_recurring boolean NOT NULL DEFAULT false`)
+  );
+
+  await withTimeout("charges.unit_amount", T, () =>
+    db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS unit_amount decimal(10,2)`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

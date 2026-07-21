@@ -341,6 +341,25 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(404).json({ error: "Reservation not found" });
       }
 
+      // Recalcular cargos repetitivos si cambiaron las noches
+      const oldNights = Number(existing.nights);
+      const newNights = Number(reservation.nights);
+      if (newNights > 0 && newNights !== oldNights) {
+        try {
+          const recurringRows = await db.execute(
+            sql`SELECT id, description, unit_amount FROM charges WHERE reservation_id = ${req.params.id} AND is_recurring = true AND status = 'active' AND unit_amount IS NOT NULL`
+          );
+          for (const rc of recurringRows.rows as any[]) {
+            const newAmount = (parseFloat(rc.unit_amount) * newNights).toFixed(2);
+            const baseDesc = (rc.description as string).replace(/\s*\(x\d+\)$/, "").trim();
+            const newDesc = `${baseDesc} (x${newNights})`;
+            await db.execute(sql`UPDATE charges SET amount = ${newAmount}, description = ${newDesc} WHERE id = ${rc.id}`);
+          }
+        } catch (rcErr: any) {
+          console.warn("[recurring-charges] recalculate failed (non-fatal):", rcErr?.message);
+        }
+      }
+
       if (cambios.length > 0) {
         const operador = (req as any).user?.fullName || (req as any).user?.username || "Sistema";
         for (const cambio of cambios) {
@@ -1375,9 +1394,9 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/charge-types", requireAuth, async (req, res) => {
     try {
-      const { label, description, defaultAmount, category, sortOrder, allowPriceEdit } = req.body;
+      const { label, description, defaultAmount, category, sortOrder, allowPriceEdit, allowRecurring } = req.body;
       if (!label || !description || !defaultAmount) return res.status(400).json({ error: "label, description y defaultAmount son requeridos" });
-      const ct = await storage.createChargeType({ label, description, defaultAmount: String(defaultAmount), category: category || "otros", active: true, sortOrder: sortOrder ?? 0, allowPriceEdit: allowPriceEdit ?? false });
+      const ct = await storage.createChargeType({ label, description, defaultAmount: String(defaultAmount), category: category || "otros", active: true, sortOrder: sortOrder ?? 0, allowPriceEdit: allowPriceEdit ?? false, allowRecurring: allowRecurring ?? false });
       res.status(201).json(ct);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1386,7 +1405,7 @@ export function registerReservationsRoutes(app: Express) {
 
   app.patch("/api/charge-types/:id", requireAuth, async (req, res) => {
     try {
-      const { label, description, defaultAmount, category, sortOrder, active, allowPriceEdit } = req.body;
+      const { label, description, defaultAmount, category, sortOrder, active, allowPriceEdit, allowRecurring } = req.body;
       const updated = await storage.updateChargeType(req.params.id, {
         ...(label !== undefined && { label }),
         ...(description !== undefined && { description }),
@@ -1395,6 +1414,7 @@ export function registerReservationsRoutes(app: Express) {
         ...(sortOrder !== undefined && { sortOrder }),
         ...(active !== undefined && { active }),
         ...(allowPriceEdit !== undefined && { allowPriceEdit }),
+        ...(allowRecurring !== undefined && { allowRecurring }),
       });
       if (!updated) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
       res.json(updated);

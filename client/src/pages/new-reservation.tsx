@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
@@ -79,20 +79,21 @@ export default function NewReservationPage() {
     { value: "MAT_CC_EXTRA", label: "Matrimonial + CC + Extra" },
   ];
 
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowRecurring: boolean }[]>({
     queryKey: ["/api/charge-types"],
   });
   const nrChargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category })),
-    { label: "Cargo personalizado", description: "", amount: "", category: "otros" },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowRecurring: ct.allowRecurring ?? false })),
+    { label: "Cargo personalizado", description: "", amount: "", category: "otros", allowRecurring: false },
   ];
-  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
+  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number; isRecurring?: boolean }>>([]);
   const [showNrChargeForm, setShowNrChargeForm] = useState(false);
   const [nrChargePresetLabel, setNrChargePresetLabel] = useState("");
   const [nrChargeDesc, setNrChargeDesc] = useState("");
   const [nrChargeAmount, setNrChargeAmount] = useState("");
   const [nrChargeQty, setNrChargeQty] = useState(1);
   const [nrChargeCategory, setNrChargeCategory] = useState("otros");
+  const [nrChargeRecurring, setNrChargeRecurring] = useState(false);
 
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
@@ -140,6 +141,16 @@ export default function NewReservationPage() {
     const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
     return diff > 0 ? diff : 0;
   }, [checkInDate, checkOutDate]);
+
+  // Recalcular cargos repetitivos pendientes cuando cambian las noches
+  useEffect(() => {
+    if (nights <= 0) return;
+    setPendingCharges(prev => prev.map(c => {
+      if (!c.isRecurring) return c;
+      const unit = parseFloat(c.amount) / (c.quantity || 1);
+      return { ...c, quantity: nights, amount: String(unit * nights) };
+    }));
+  }, [nights]);
 
   const availableRooms = (() => {
     // Habitaciones bloqueadas por reservas que se superponen al período
@@ -291,13 +302,19 @@ export default function NewReservationPage() {
       if (pendingCharges.length > 0 && created?.id) {
         const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
         for (const charge of pendingCharges) {
-          const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
+          const totalAmt = charge.isRecurring
+            ? charge.amount
+            : (parseFloat(charge.amount) * charge.quantity).toFixed(2);
+          const unitAmt = charge.isRecurring
+            ? String(parseFloat(charge.amount) / (charge.quantity || 1))
+            : undefined;
           await apiRequest("POST", "/api/charges", {
             description: charge.description,
             amount: totalAmt,
             category: charge.category,
             reservationId: created.id,
             date: todayStr,
+            ...(charge.isRecurring && { isRecurring: true, unitAmount: unitAmt }),
           });
         }
       }
@@ -702,9 +719,14 @@ export default function NewReservationPage() {
                 <div className="border rounded-md divide-y">
                   {pendingCharges.map((charge, idx) => (
                     <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
-                      <span>{charge.description}{charge.quantity > 1 ? ` x${charge.quantity}` : ""}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">${fmtMoney(parseFloat(charge.amount) * charge.quantity)}</span>
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        {charge.isRecurring && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium shrink-0">×noche</span>
+                        )}
+                        <span className="truncate">{charge.description}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="font-medium">${fmtMoney(charge.isRecurring ? parseFloat(charge.amount) : parseFloat(charge.amount) * charge.quantity)}</span>
                         <Button type="button" size="sm" variant="ghost" className="h-5 w-5 p-0 text-destructive" onClick={() => setPendingCharges(prev => prev.filter((_, i) => i !== idx))}>
                           <XCircle className="h-3 w-3" />
                         </Button>
@@ -713,7 +735,7 @@ export default function NewReservationPage() {
                   ))}
                   <div className="flex justify-between px-3 py-2 text-sm font-semibold bg-muted/30">
                     <span>Total cargos</span>
-                    <span>${fmtMoney(pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0))}</span>
+                    <span>${fmtMoney(pendingCharges.reduce((sum, c) => sum + (c.isRecurring ? parseFloat(c.amount) : parseFloat(c.amount) * c.quantity), 0))}</span>
                   </div>
                 </div>
               )}
@@ -722,7 +744,7 @@ export default function NewReservationPage() {
                   <Select value={nrChargePresetLabel} onValueChange={(val) => {
                     setNrChargePresetLabel(val);
                     const preset = nrChargePresets.find(p => p.label === val);
-                    if (preset) { setNrChargeDesc(preset.description); setNrChargeAmount(preset.amount); setNrChargeCategory(preset.category); setNrChargeQty(1); }
+                    if (preset) { setNrChargeDesc(preset.description); setNrChargeAmount(preset.amount); setNrChargeCategory(preset.category); setNrChargeQty(1); setNrChargeRecurring(false); }
                   }}>
                     <SelectTrigger data-testid="select-nr-charge-preset"><SelectValue placeholder="Tipo de cargo..." /></SelectTrigger>
                     <SelectContent>
@@ -735,20 +757,59 @@ export default function NewReservationPage() {
                       <Input value={nrChargeDesc} onChange={(e) => setNrChargeDesc(e.target.value)} placeholder="Descripción" className="h-8 text-sm" data-testid="input-nr-charge-desc" />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Precio</Label>
+                      <Label className="text-xs text-muted-foreground">Precio unit.</Label>
                       <Input type="number" value={nrChargeAmount} onChange={(e) => setNrChargeAmount(e.target.value)} placeholder="0.00" className="h-8 text-sm" data-testid="input-nr-charge-amount" />
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">Cant.</Label>
-                      <Input type="number" min={1} value={nrChargeQty} onChange={(e) => setNrChargeQty(Math.max(1, parseInt(e.target.value) || 1))} className="h-8 text-sm" data-testid="input-nr-charge-qty" />
+                      <Input type="number" min={1} value={nrChargeQty} onChange={(e) => { setNrChargeRecurring(false); setNrChargeQty(Math.max(1, parseInt(e.target.value) || 1)); }} className="h-8 text-sm" data-testid="input-nr-charge-qty" />
                     </div>
                   </div>
+                  {/* Toggle cargo repetitivo — solo si el tipo lo permite */}
+                  {nrChargePresets.find(p => p.label === nrChargePresetLabel)?.allowRecurring && (
+                    <div className="flex items-center gap-3 py-1">
+                      <Switch
+                        id="nr-recurring-toggle"
+                        checked={nrChargeRecurring}
+                        onCheckedChange={(checked) => {
+                          setNrChargeRecurring(checked);
+                          setNrChargeQty(checked ? (nights || 1) : 1);
+                        }}
+                        data-testid="switch-nr-recurring-charge"
+                      />
+                      <Label htmlFor="nr-recurring-toggle" className="text-xs cursor-pointer select-none flex items-center gap-1.5">
+                        <span>Cargo por noche</span>
+                        {nrChargeRecurring && nights > 0 && (
+                          <span className="text-muted-foreground">· {nights} noche{nights !== 1 ? "s" : ""}</span>
+                        )}
+                      </Label>
+                    </div>
+                  )}
+                  {nrChargeAmount && nrChargeRecurring && nights > 0 && (
+                    <div className="flex items-center rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2 text-sm">
+                      <span className="text-blue-700 dark:text-blue-300 font-medium">
+                        {nights} noches × ${fmtMoney(nrChargeAmount || "0")} = <span className="font-bold">${fmtMoney(String(parseFloat(nrChargeAmount || "0") * nights))}</span>
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2">
-                    <Button type="button" size="sm" variant="outline" onClick={() => { setShowNrChargeForm(false); setNrChargePresetLabel(""); setNrChargeDesc(""); setNrChargeAmount(""); setNrChargeQty(1); }}>Cancelar</Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => { setShowNrChargeForm(false); setNrChargePresetLabel(""); setNrChargeDesc(""); setNrChargeAmount(""); setNrChargeQty(1); setNrChargeRecurring(false); }}>Cancelar</Button>
                     <Button type="button" size="sm" onClick={() => {
                       if (!nrChargeDesc || !nrChargeAmount) return;
-                      setPendingCharges(prev => [...prev, { description: nrChargeDesc, amount: nrChargeAmount, category: nrChargeCategory, quantity: nrChargeQty }]);
-                      setShowNrChargeForm(false); setNrChargePresetLabel(""); setNrChargeDesc(""); setNrChargeAmount(""); setNrChargeQty(1);
+                      const totalAmt = nrChargeRecurring
+                        ? String(parseFloat(nrChargeAmount) * (nights || 1))
+                        : nrChargeAmount;
+                      const desc = nrChargeRecurring && nights > 1
+                        ? `${nrChargeDesc} (x${nights})`
+                        : nrChargeDesc;
+                      setPendingCharges(prev => [...prev, {
+                        description: desc,
+                        amount: totalAmt,
+                        category: nrChargeCategory,
+                        quantity: nrChargeRecurring ? (nights || 1) : nrChargeQty,
+                        ...(nrChargeRecurring && { isRecurring: true }),
+                      }]);
+                      setShowNrChargeForm(false); setNrChargePresetLabel(""); setNrChargeDesc(""); setNrChargeAmount(""); setNrChargeQty(1); setNrChargeRecurring(false);
                     }} data-testid="button-confirm-nr-charge">Agregar cargo</Button>
                   </div>
                 </div>

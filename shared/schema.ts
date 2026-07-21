@@ -278,6 +278,8 @@ export const charges = pgTable("charges", {
   anuladoPor: text("anulado_por"),
   motivoAnulacion: text("motivo_anulacion"),
   anuladoAt: timestamp("anulado_at"),
+  isRecurring: boolean("is_recurring").notNull().default(false),
+  unitAmount: decimal("unit_amount", { precision: 10, scale: 2 }),
 });
 
 export const insertChargeSchema = createInsertSchema(charges).omit({ id: true });
@@ -294,6 +296,7 @@ export const chargeTypes = pgTable("charge_types", {
   active: boolean("active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   allowPriceEdit: boolean("allow_price_edit").notNull().default(false),
+  allowRecurring: boolean("allow_recurring").notNull().default(false),
 });
 export const insertChargeTypeSchema = createInsertSchema(chargeTypes).omit({ id: true });
 export type InsertChargeType = z.infer<typeof insertChargeTypeSchema>;

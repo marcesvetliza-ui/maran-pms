@@ -201,12 +201,12 @@ export function ReservationFormDialog({
   });
 
   // Cargos adicionales al crear — cargados desde la BD
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean; allowRecurring: boolean }[]>({
     queryKey: ["/api/charge-types"],
   });
   const newResChargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false })),
-    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const, allowPriceEdit: true },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false, allowRecurring: ct.allowRecurring ?? false })),
+    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const, allowPriceEdit: true, allowRecurring: false },
   ];
   const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
   const [showResChargeForm, setShowResChargeForm] = useState(false);
@@ -1315,7 +1315,8 @@ export function ReservationFormDialog({
                         />
                       </div>
                     </div>
-                    {/* Toggle cargo por noche */}
+                    {/* Toggle cargo por noche — solo para tipos habilitados */}
+                    {newResChargePresets.find(p => p.label === resChargePreset)?.allowRecurring && (
                     <div className="flex items-center gap-3 py-1">
                       <Switch
                         id="new-res-recurring-toggle"
@@ -1334,6 +1335,7 @@ export function ReservationFormDialog({
                         )}
                       </Label>
                     </div>
+                    )}
                     {resChargeAmount && resChargeRecurring && (
                       <div className="flex items-center rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2 text-sm">
                         <span className="text-blue-700 dark:text-blue-300 font-medium">
@@ -1830,7 +1832,7 @@ function ReservationDetailDialog({
     setCoWizardStep(1);
   };
 
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean; allowRecurring: boolean }[]>({
     queryKey: ["/api/charge-types"],
   });
 
@@ -1926,8 +1928,8 @@ function ReservationDetailDialog({
     category: "otros" as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
   });
   const chargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false })),
-    { label: "Cargo editable", description: "", amount: "", category: "otros" as const, allowPriceEdit: true },
+    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false, allowRecurring: ct.allowRecurring ?? false })),
+    { label: "Cargo editable", description: "", amount: "", category: "otros" as const, allowPriceEdit: true, allowRecurring: false },
   ];
   const [chargeQty, setChargeQty] = useState(1);
   const [isRecurringCharge, setIsRecurringCharge] = useState(false);
@@ -2102,7 +2104,7 @@ function ReservationDetailDialog({
   });
 
   const addChargeMutation = useMutation({
-    mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string }) => {
+    mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string; isRecurring?: boolean; unitAmount?: string }) => {
       return apiRequest("POST", "/api/charges", chargeData);
     },
     onSuccess: () => {
@@ -2241,6 +2243,7 @@ function ReservationDetailDialog({
       category: newCharge.category,
       reservationId: reservation.id,
       date: getLocalToday(),
+      ...(isRecurringCharge && { isRecurring: true, unitAmount: newCharge.amount }),
     });
     setSelectedPreset(null);
     setChargeQty(1);
@@ -2997,7 +3000,8 @@ function ReservationDetailDialog({
                     </div>
                   </div>
 
-                  {/* Toggle cargo repetitivo por noche */}
+                  {/* Toggle cargo repetitivo por noche — solo para tipos habilitados */}
+                  {selectedPreset?.allowRecurring && (
                   <div className="flex items-center gap-3 py-1">
                     <Switch
                       id="recurring-charge-toggle"
@@ -3015,6 +3019,7 @@ function ReservationDetailDialog({
                       )}
                     </Label>
                   </div>
+                  )}
 
                   {newCharge.amount && isRecurringCharge && (
                     <div className="flex items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2 text-sm">
@@ -3094,6 +3099,7 @@ function ReservationDetailDialog({
                     <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
                       <Badge variant="outline" className="text-xs shrink-0">{categoryLabels[charge.category]}</Badge>
                       {isAnulado && <Badge variant="destructive" className="text-xs shrink-0">ANULADO</Badge>}
+                      {(charge as any).isRecurring && <Badge variant="secondary" className="text-xs shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">×noche</Badge>}
                       <span className={`truncate ${isAnulado ? "line-through text-muted-foreground" : ""}`}>{charge.description}</span>
                       <span className="text-muted-foreground text-xs shrink-0">({formatDateAR(charge.date)})</span>
                     </div>
