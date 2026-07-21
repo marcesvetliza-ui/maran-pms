@@ -1206,6 +1206,9 @@ export default function RestaurantPage() {
       const res = await apiRequest("POST", "/api/restaurant/orders", data);
       return res.json();
     },
+    onError: (e: any) => {
+      toast({ title: "Error al crear pedido", description: e?.message || "No se pudo iniciar el servicio.", variant: "destructive" });
+    },
     onSuccess: (order: RestaurantOrder) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });

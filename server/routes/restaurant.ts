@@ -231,9 +231,6 @@ export function registerRestaurantRoutes(app: Express) {
   app.post("/api/restaurant/orders", async (req, res) => {
     try {
       const { waiterName, tableId, areaId, orderLabel } = req.body;
-      if (!waiterName || !waiterName.trim()) {
-        return res.status(400).json({ error: "Mozo es requerido" });
-      }
       if (!tableId && !areaId) {
         return res.status(400).json({ error: "Se requiere mesa o area" });
       }
