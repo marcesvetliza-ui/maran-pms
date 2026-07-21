@@ -2292,7 +2292,10 @@ export default function RestaurantPage() {
             </Card>
           ) : (
             <div className="grid gap-6">
-              {(selectedArea === "all" ? areas : areas.filter((a) => a.id === selectedArea)).map((area) => {
+              {(selectedArea === "all"
+                ? [...areas].sort((a, b) => (a.areaType === "event" ? 1 : b.areaType === "event" ? -1 : 0))
+                : areas.filter((a) => a.id === selectedArea)
+              ).map((area) => {
                 if (area.hasTables === "false") {
                   const areaOrders = activeOrders.filter((o) => o.areaId === area.id);
                   return (
@@ -2362,8 +2365,8 @@ export default function RestaurantPage() {
                 }
 
                 const areaTables = filteredTables.filter((t) => t.areaId === area.id);
-                const gridCols = 8;
-                const gridRows = 6;
+                const gridCols = area.areaType === "event" ? 5 : 8;
+                const gridRows = area.areaType === "event" ? 3 : 6;
 
                 return (
                   <Card key={area.id}>
