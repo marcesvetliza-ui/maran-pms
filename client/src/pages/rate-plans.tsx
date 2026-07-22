@@ -228,17 +228,9 @@ function RatePlanFormDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="currency">Moneda</Label>
-                <Select
-                  value={formData.currency}
-                  onValueChange={(value) => setFormData({ ...formData, currency: value })}
-                >
-                  <SelectTrigger data-testid="select-currency">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ARS">ARS (Peso Argentino)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center h-10 px-3 rounded-md border bg-muted/50 text-sm text-muted-foreground">
+                  ARS — Peso Argentino
+                </div>
               </div>
             </div>
             {formData.roomTypeId && (
@@ -450,7 +442,7 @@ export default function RatePlansPage() {
     const num = parseFloat(amount);
     return new Intl.NumberFormat("es-AR", {
       style: "currency",
-      currency: currency,
+      currency: currency || "ARS",
     }).format(num);
   };
 
