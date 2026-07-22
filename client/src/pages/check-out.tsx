@@ -1344,6 +1344,11 @@ export default function CheckOutPage() {
                     ) : (
                       <Badge className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-400" data-testid={`badge-early-${reservation.id}`}>Salida {formatDateAR(reservation.checkOutDate)}</Badge>
                     )}
+                    {(reservation as any).lateCheckOut && (
+                      <Badge className="text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border border-yellow-300 dark:border-yellow-700" data-testid={`badge-late-checkout-${reservation.id}`}>
+                        🕐 Late Check-out{(reservation as any).lateCheckOutTime ? ` · ${(reservation as any).lateCheckOutTime} hs` : ""}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </CardHeader>
