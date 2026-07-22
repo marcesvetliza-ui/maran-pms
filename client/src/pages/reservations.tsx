@@ -1224,18 +1224,21 @@ export function ReservationFormDialog({
                     min={0}
                     step="0.01"
                     value={formData.baseRatePerNight || ""}
-                    readOnly
+                    readOnly={formData.ratePlanId !== "__special__"}
+                    onChange={formData.ratePlanId === "__special__" ? (e) => handleBaseRateChange(e.target.value) : undefined}
                     placeholder="0.00"
-                    className="pl-7 bg-muted cursor-not-allowed"
+                    className={`pl-7 ${formData.ratePlanId === "__special__" ? "" : "bg-muted cursor-not-allowed"}`}
                     data-testid="input-base-rate"
-                    title="La tarifa se establece automáticamente según el plan tarifario"
+                    title={formData.ratePlanId === "__special__" ? "Ingrese la tarifa por noche" : "La tarifa se establece automáticamente según el plan tarifario"}
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {selectedPackageId
-                    ? "Definida por el paquete seleccionado"
-                    : "Definida por el plan tarifario seleccionado"}
-                </p>
+                {formData.ratePlanId !== "__special__" && (
+                  <p className="text-xs text-muted-foreground">
+                    {selectedPackageId
+                      ? "Definida por el paquete seleccionado"
+                      : "Definida por el plan tarifario seleccionado"}
+                  </p>
+                )}
               </div>
             </div>
 
