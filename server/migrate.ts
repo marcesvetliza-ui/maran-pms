@@ -922,5 +922,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS special_rate_reason text`)
   );
 
+  await withTimeout("rate_plans.fix_currency_ars", T, () =>
+    db.execute(sql`UPDATE rate_plans SET currency = 'ARS' WHERE currency IS NULL OR currency = '' OR currency != 'ARS'`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
