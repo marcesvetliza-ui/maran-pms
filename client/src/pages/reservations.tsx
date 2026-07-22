@@ -187,7 +187,7 @@ export function ReservationFormDialog({
     reservation?.agency || null
   );
 
-  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "");
+  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
   const { data: maintenanceBlocks = [] } = useQuery<{ roomId: string; blockFrom: string; blockTo: string }[]>({
@@ -231,7 +231,7 @@ export function ReservationFormDialog({
     guestId: reservation?.guestId || "",
     companyId: reservation?.companyId || "",
     agencyId: reservation?.agencyId || "",
-    roomTypeId: reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "",
+    roomTypeId: reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "",
     roomId: reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || "",
     ratePlanId: reservation?.ratePlanId || "",
     checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
@@ -275,13 +275,13 @@ export function ReservationFormDialog({
       setSelectedGuest(reservation?.guest || null);
       setSelectedCompany(reservation?.company || null);
       setSelectedAgency(reservation?.agency || null);
-      setSelectedRoomTypeId(reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "");
+      setSelectedRoomTypeId(reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "");
       setFormData({
         reservationCode: reservation?.reservationCode || "",
         guestId: reservation?.guestId || "",
         companyId: reservation?.companyId || "",
         agencyId: reservation?.agencyId || "",
-        roomTypeId: reservation?.roomTypeId || reservation?.room?.roomTypeId || defaultValues?.roomTypeId || "",
+        roomTypeId: reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "",
         roomId: reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || "",
         ratePlanId: reservation?.ratePlanId || "",
         checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
