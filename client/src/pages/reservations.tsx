@@ -233,7 +233,8 @@ export function ReservationFormDialog({
     agencyId: reservation?.agencyId || "",
     roomTypeId: reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "",
     roomId: reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || "",
-    ratePlanId: reservation?.ratePlanId || "",
+    ratePlanId: (reservation?.specialRateReason && !reservation?.ratePlanId) ? "__special__" : (reservation?.ratePlanId || ""),
+    specialRateReason: reservation?.specialRateReason || "",
     checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
     checkOutDate: reservation?.checkOutDate || (() => {
       if (defaultValues?.checkInDate) {
@@ -283,7 +284,8 @@ export function ReservationFormDialog({
         agencyId: reservation?.agencyId || "",
         roomTypeId: reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "",
         roomId: reservation?.roomId || reservation?.room?.id || defaultValues?.roomId || "",
-        ratePlanId: reservation?.ratePlanId || "",
+        ratePlanId: (reservation?.specialRateReason && !reservation?.ratePlanId) ? "__special__" : (reservation?.ratePlanId || ""),
+        specialRateReason: reservation?.specialRateReason || "",
         checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
         checkOutDate: reservation?.checkOutDate || (() => {
           if (defaultValues?.checkInDate) {
@@ -482,6 +484,10 @@ export function ReservationFormDialog({
   };
 
   const handleRatePlanChange = (ratePlanId: string) => {
+    if (ratePlanId === "__special__") {
+      setFormData({ ...formData, ratePlanId: "__special__", specialRateReason: formData.specialRateReason || "" });
+      return;
+    }
     const plan = ratePlans?.find(p => p.id === ratePlanId);
     if (plan) {
       const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
@@ -490,6 +496,7 @@ export function ReservationFormDialog({
       setFormData({ 
         ...formData, 
         ratePlanId, 
+        specialRateReason: "",
         baseRatePerNight: rate,
         ...totals,
       });
@@ -630,8 +637,14 @@ export function ReservationFormDialog({
       toast({ title: "Fechas inválidas", description: "La fecha de Check-out debe ser posterior al Check-in.", variant: "destructive" });
       return;
     }
+    if (formData.ratePlanId === "__special__" && !formData.specialRateReason?.trim()) {
+      toast({ title: "Motivo requerido", description: "Ingrese el motivo de la tarifa especial para guardar.", variant: "destructive" });
+      return;
+    }
     mutation.mutate({
       ...formData,
+      ratePlanId: formData.ratePlanId === "__special__" ? null : (formData.ratePlanId || null),
+      specialRateReason: formData.ratePlanId === "__special__" ? (formData.specialRateReason || null) : null,
       roomId: finalRoomId,
       roomTypeId: formData.roomTypeId || reservation?.roomTypeId || "",
       guestId: finalGuestId,
@@ -871,9 +884,24 @@ export function ReservationFormDialog({
                       </SelectItem>
                     );
                   })}
+                  <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
                 </SelectContent>
               </Select>
-              {formData.ratePlanId && (() => {
+              {formData.ratePlanId === "__special__" && (
+                <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-1">
+                  <div className="space-y-1.5">
+                    <Label>Motivo de tarifa especial <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
+                    <Textarea
+                      placeholder="Ej: Convenio verbal, cliente frecuente, cortesía gerencia..."
+                      value={formData.specialRateReason || ""}
+                      onChange={(e) => setFormData({ ...formData, specialRateReason: e.target.value })}
+                      rows={2}
+                      data-testid="input-special-rate-reason"
+                    />
+                  </div>
+                </div>
+              )}
+              {formData.ratePlanId && formData.ratePlanId !== "__special__" && (() => {
                 const plan = ratePlans?.find(p => p.id === formData.ratePlanId);
                 if (!plan) return null;
                 const paxMap: Record<number, string | null | undefined> = { 1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax };

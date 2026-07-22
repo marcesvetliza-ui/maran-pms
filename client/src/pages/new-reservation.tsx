@@ -69,6 +69,8 @@ export default function NewReservationPage() {
   const [lateCheckOut, setLateCheckOut] = useState(false);
   const [lateCheckOutTime, setLateCheckOutTime] = useState("");
   const [lateCheckOutCharge, setLateCheckOutCharge] = useState("");
+  const [specialRateReason, setSpecialRateReason] = useState<string>("");
+  const [specialRateAmount, setSpecialRateAmount] = useState<string>("");
 
   const bedConfigOptions = [
     { value: "MAT", label: "Matrimonial" },
@@ -197,7 +199,9 @@ export default function NewReservationPage() {
 
   const selectedRatePlan = ratePlans?.find((rp) => rp.id === selectedRatePlanId);
   
-  const baseRate = selectedRatePlan ? parseFloat(selectedRatePlan.baseRate) : 0;
+  const baseRate = selectedRatePlanId === "__special__"
+    ? (parseFloat(specialRateAmount) || 0)
+    : (selectedRatePlan ? parseFloat(selectedRatePlan.baseRate) : 0);
   const finalRate = useMemo(() => {
     if (!baseRate) return 0;
     if (discountType === "percent") {
@@ -280,7 +284,8 @@ export default function NewReservationPage() {
         agencyId: selectedAgency?.id || null,
         roomTypeId: selectedRoomTypeId,
         roomId: selectedRoomId,
-        ratePlanId: selectedRatePlanId || null,
+        ratePlanId: selectedRatePlanId === "__special__" ? null : (selectedRatePlanId || null),
+        specialRateReason: selectedRatePlanId === "__special__" ? specialRateReason : null,
         checkInDate,
         checkOutDate,
         nights,
@@ -349,7 +354,10 @@ export default function NewReservationPage() {
     },
   });
 
-  const canSubmit = selectedGuest && selectedRoomTypeId && selectedRoomId && selectedRatePlanId && nights > 0 && checkInDate && checkOutDate;
+  const canSubmit = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0 && checkInDate && checkOutDate &&
+    (selectedRatePlanId === "__special__"
+      ? (specialRateReason.trim().length > 0 && parseFloat(specialRateAmount) > 0)
+      : !!selectedRatePlanId);
 
   const sectionCardClass = (isComplete: boolean, isRequired: boolean): string => {
     if (isComplete) return "border-green-500 bg-green-50 dark:bg-green-950/30 dark:border-green-700 transition-colors";
@@ -643,7 +651,7 @@ export default function NewReservationPage() {
                 <Label>Plan de Tarifa</Label>
                 <Select
                   value={selectedRatePlanId}
-                  onValueChange={setSelectedRatePlanId}
+                  onValueChange={(v) => { setSelectedRatePlanId(v); if (v !== "__special__") { setSpecialRateReason(""); setSpecialRateAmount(""); } }}
                   disabled={!selectedRoomTypeId}
                 >
                   <SelectTrigger data-testid="select-rate-plan">
@@ -655,8 +663,24 @@ export default function NewReservationPage() {
                         {rp.name} - ${rp.baseRate}/noche
                       </SelectItem>
                     ))}
+                    <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
                   </SelectContent>
                 </Select>
+                {selectedRatePlanId === "__special__" && (
+                  <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-2">
+                    <div className="space-y-1.5">
+                      <Label>Tarifa por noche <span className="text-destructive">*</span></Label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                        <Input type="number" min={0} step="0.01" placeholder="0.00" value={specialRateAmount} onChange={(e) => setSpecialRateAmount(e.target.value)} className="pl-7" data-testid="input-special-rate-amount" />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Motivo <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
+                      <Textarea placeholder="Ej: Convenio verbal, cliente frecuente, cortesía gerencia..." value={specialRateReason} onChange={(e) => setSpecialRateReason(e.target.value)} rows={2} data-testid="input-special-rate-reason" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

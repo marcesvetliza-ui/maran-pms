@@ -257,6 +257,7 @@ export const reservations = pgTable("reservations", {
   createdAt: timestamp("created_at").notNull(),
   lastModifiedBy: varchar("last_modified_by"),
   checkedOutAt: timestamp("checked_out_at"),
+  specialRateReason: text("special_rate_reason"),
 });
 
 export const insertReservationSchema = createInsertSchema(reservations).omit({ id: true });

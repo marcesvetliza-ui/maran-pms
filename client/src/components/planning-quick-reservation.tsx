@@ -57,6 +57,7 @@ export function QuickReservationDialog({
   const [agencyId, setAgencyId] = useState<string | null>(null);
   const [selectedAgency, setSelectedAgency] = useState<Agency | null>(null);
   const [packageId, setPackageId] = useState("");
+  const [specialRateReason, setSpecialRateReason] = useState("");
 
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
     queryKey: ["/api/charge-types"],
@@ -145,6 +146,14 @@ export function QuickReservationDialog({
       toast({ title: "Fechas inválidas", description: "La fecha de check-out debe ser posterior al check-in.", variant: "destructive" });
       return;
     }
+    if (ratePlanId === "__special__" && (!manualRate || parseFloat(manualRate) <= 0)) {
+      toast({ title: "Tarifa requerida", description: "Ingrese la tarifa por noche para la tarifa especial.", variant: "destructive" });
+      return;
+    }
+    if (ratePlanId === "__special__" && !specialRateReason.trim()) {
+      toast({ title: "Motivo requerido", description: "Ingrese el motivo de la tarifa especial.", variant: "destructive" });
+      return;
+    }
     const finalGuestId = guestId;
     if (!finalGuestId) {
       toast({ title: "Datos incompletos", description: "Seleccione o cree un huésped.", variant: "destructive" });
@@ -175,7 +184,7 @@ export function QuickReservationDialog({
       const createdRes = await mutation.mutateAsync({
         guestId: finalGuestId, roomId: reservationData.roomId, roomTypeId: reservationData.roomTypeId,
         checkInDate: reservationData.checkInDate, checkOutDate, numberOfGuests, nights,
-        status: "confirmed", source, ratePlanId: ratePlanId || null, companyId: companyId || null,
+        status: "confirmed", source, ratePlanId: ratePlanId === "__special__" ? null : (ratePlanId || null), specialRateReason: ratePlanId === "__special__" ? specialRateReason : null, companyId: companyId || null,
         agencyId: agencyId || null, bedTypeId: bedTypeId || null, bedTypeNotes: bedConfig || null,
         baseRatePerNight: effectiveRate, finalRatePerNight: effectiveRate,
         totalRoomAmount: effectiveRate ? (parseFloat(effectiveRate) * nights).toFixed(2) : null,
@@ -298,7 +307,7 @@ export function QuickReservationDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1">
               <Label>Plan tarifario</Label>
-              <Select value={ratePlanId} onValueChange={(val) => { setRatePlanId(val); }}>
+              <Select value={ratePlanId} onValueChange={(val) => { setRatePlanId(val); if (val !== "__special__") setSpecialRateReason(""); }}>
                 <SelectTrigger data-testid="select-rate-plan"><SelectValue placeholder="Seleccionar plan" /></SelectTrigger>
                 <SelectContent>
                   {roomRatePlans.length === 0 ? (
@@ -320,6 +329,7 @@ export function QuickReservationDialog({
                       </SelectItem>
                     );
                   })}
+                  <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
                 </SelectContent>
               </Select>
               {ratePlanId && (() => {
@@ -376,10 +386,17 @@ export function QuickReservationDialog({
           <div className="grid gap-1">
             <Label>
               Tarifa / noche
-              {ratePlanId && <span className="text-xs font-normal text-muted-foreground ml-1">(auto-calculada del plan — editá si necesitás sobrescribir)</span>}
+              {ratePlanId && ratePlanId !== "__special__" && <span className="text-xs font-normal text-muted-foreground ml-1">(auto-calculada del plan — editá si necesitás sobrescribir)</span>}
+              {ratePlanId === "__special__" && <span className="text-xs font-normal text-destructive ml-1">* obligatorio</span>}
             </Label>
             <Input type="number" min={0} step="0.01" placeholder="Ingresar tarifa manualmente" value={manualRate} onChange={(e) => setManualRate(e.target.value)} data-testid="input-manual-rate" />
           </div>
+          {ratePlanId === "__special__" && (
+            <div className="grid gap-1 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700">
+              <Label>Motivo de tarifa especial <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
+              <Textarea placeholder="Ej: Convenio verbal, cliente frecuente, cortesía gerencia..." value={specialRateReason} onChange={(e) => setSpecialRateReason(e.target.value)} rows={2} data-testid="input-special-rate-reason" />
+            </div>
+          )}
 
           <div className="border rounded-lg">
             <div className="flex items-center justify-between p-2 border-b bg-muted/40">

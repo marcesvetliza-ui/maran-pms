@@ -918,5 +918,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`UPDATE rate_plans SET valid_to = NULL WHERE valid_to < CURRENT_DATE`)
   );
 
+  await withTimeout("reservations.special_rate_reason", T, () =>
+    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS special_rate_reason text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

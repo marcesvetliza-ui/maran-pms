@@ -84,6 +84,8 @@ export default function CheckInPage() {
   const [nights, setNights] = useState<number>(1);
   const [numberOfGuests, setNumberOfGuests] = useState<number>(1);
   const [walkInNotes, setWalkInNotes] = useState<string>("");
+  const [walkInSpecialRateReason, setWalkInSpecialRateReason] = useState<string>("");
+  const [walkInSpecialRateAmount, setWalkInSpecialRateAmount] = useState<string>("");
   const [checkInNotes, setCheckInNotes] = useState<string>("");
   const [dirtyRoomDialog, setDirtyRoomDialog] = useState(false);
   const [anticipadoDialog, setAnticipadorDialog] = useState(false);
@@ -237,7 +239,9 @@ export default function CheckInPage() {
     return paxMap[pax] || plan.baseRate;
   };
 
-  const effectiveNightRate = selectedRatePlan ? getPaxRate(selectedRatePlan, numberOfGuests) : "0";
+  const effectiveNightRate = selectedRatePlanId === "__special__"
+    ? (walkInSpecialRateAmount || "0")
+    : (selectedRatePlan ? getPaxRate(selectedRatePlan, numberOfGuests) : "0");
   const totalAmount = (parseFloat(effectiveNightRate) * nights).toFixed(2);
 
   const checkInMutation = useMutation({
@@ -342,14 +346,15 @@ export default function CheckInPage() {
         companyId: selectedCompany?.id || null,
         roomTypeId: selectedRoomTypeId,
         roomId: selectedRoomId,
-        ratePlanId: selectedRatePlanId || null,
+        ratePlanId: selectedRatePlanId === "__special__" ? null : (selectedRatePlanId || null),
+        specialRateReason: selectedRatePlanId === "__special__" ? walkInSpecialRateReason : null,
         checkInDate: today,
         checkOutDate,
         nights,
-        baseRatePerNight: selectedRatePlan?.baseRate || "0",
+        baseRatePerNight: effectiveNightRate,
         discountType: "none",
         discountValue: "0",
-        finalRatePerNight: selectedRatePlan?.baseRate || "0",
+        finalRatePerNight: effectiveNightRate,
         totalRoomAmount: totalAmount,
         status: "confirmed",
         source: selectedCompany ? "empresa" : "directo",
@@ -405,6 +410,8 @@ export default function CheckInPage() {
     setNights(1);
     setNumberOfGuests(1);
     setWalkInNotes("");
+    setWalkInSpecialRateReason("");
+    setWalkInSpecialRateAmount("");
   };
 
   const today = getLocalToday();
@@ -462,7 +469,10 @@ export default function CheckInPage() {
     doCheckIn();
   };
 
-  const canSubmitWalkIn = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0;
+  const canSubmitWalkIn = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0 &&
+    (selectedRatePlanId === "__special__"
+      ? (walkInSpecialRateReason.trim().length > 0 && parseFloat(walkInSpecialRateAmount) > 0)
+      : true);
 
   const todayDisplay = new Date().toLocaleDateString("es-ES", {
     weekday: "long",
@@ -726,7 +736,7 @@ export default function CheckInPage() {
                   {selectedRoomTypeId && applicableRatePlans && applicableRatePlans.length > 0 && (
                     <div className="space-y-2">
                       <Label>Plan de Tarifa</Label>
-                      <Select value={selectedRatePlanId} onValueChange={setSelectedRatePlanId}>
+                      <Select value={selectedRatePlanId} onValueChange={(v) => { setSelectedRatePlanId(v); if (v !== "__special__") { setWalkInSpecialRateReason(""); setWalkInSpecialRateAmount(""); } }}>
                         <SelectTrigger data-testid="select-rate-plan">
                           <SelectValue placeholder="Seleccionar tarifa..." />
                         </SelectTrigger>
@@ -748,8 +758,24 @@ export default function CheckInPage() {
                               </SelectItem>
                             );
                           })}
+                          <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
                         </SelectContent>
                       </Select>
+                      {selectedRatePlanId === "__special__" && (
+                        <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-2">
+                          <div className="space-y-1.5">
+                            <Label>Tarifa por noche <span className="text-destructive">*</span></Label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                              <Input type="number" min={0} step="0.01" placeholder="0.00" value={walkInSpecialRateAmount} onChange={(e) => setWalkInSpecialRateAmount(e.target.value)} className="pl-7" data-testid="input-walkin-special-rate" />
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>Motivo <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
+                            <Textarea placeholder="Ej: Convenio verbal, cliente frecuente, cortesía gerencia..." value={walkInSpecialRateReason} onChange={(e) => setWalkInSpecialRateReason(e.target.value)} rows={2} data-testid="input-walkin-special-rate-reason" />
+                          </div>
+                        </div>
+                      )}
                       {selectedRatePlan && (() => {
                         const paxRate = getPaxRate(selectedRatePlan, numberOfGuests);
                         const isPaxSpecific = !!(numberOfGuests === 2 ? selectedRatePlan.rate2pax : numberOfGuests === 3 ? selectedRatePlan.rate3pax : numberOfGuests === 4 ? selectedRatePlan.rate4pax : selectedRatePlan.rate1pax);
@@ -821,7 +847,7 @@ export default function CheckInPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Tarifa:</span>
                     <span className="font-medium">
-                      {selectedRatePlan ? `$${fmtMoney(effectiveNightRate)}/noche` : "-"}
+                      {(selectedRatePlan || selectedRatePlanId === "__special__") ? `$${fmtMoney(effectiveNightRate)}/noche` : "-"}
                     </span>
                   </div>
                   <div className="border-t pt-3 mt-3">
