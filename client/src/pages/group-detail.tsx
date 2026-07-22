@@ -2202,7 +2202,7 @@ export default function GroupDetailPage() {
               Factura Grupal - {invoiceData?.group?.name}
             </DialogTitle>
             <DialogDescription>
-              Código: {invoiceData?.group?.code} | {invoiceData?.group?.checkInDate} - {invoiceData?.group?.checkOutDate}
+              Código: {invoiceData?.group?.code} | {fmtDate(invoiceData?.group?.checkInDate || "")} - {fmtDate(invoiceData?.group?.checkOutDate || "")}
             </DialogDescription>
           </DialogHeader>
 
@@ -2219,7 +2219,7 @@ export default function GroupDetailPage() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-muted-foreground">Período</p>
-                    <p className="font-medium">{invoiceData.group.checkInDate} - {invoiceData.group.checkOutDate}</p>
+                    <p className="font-medium">{fmtDate(invoiceData.group.checkInDate)} - {fmtDate(invoiceData.group.checkOutDate)}</p>
                   </div>
                 </div>
               </div>
