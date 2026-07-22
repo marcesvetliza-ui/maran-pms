@@ -19,13 +19,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { format, addDays, startOfDay, parseISO, isSameDay, addWeeks, subWeeks, isValid, isBefore } from "date-fns";
+import { format, addDays, subDays, startOfDay, parseISO, isSameDay, addWeeks, subWeeks, isValid, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { 
   Plus, 
   ChevronLeft, 
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Calendar,
+  CalendarSearch,
   User,
   Phone,
   Mail,
@@ -899,29 +904,38 @@ export default function EventsPage() {
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setWeekStart(subWeeks(weekStart, 1))}
-                  data-testid="button-prev-week"
-                >
-                  <ChevronLeft className="h-4 w-4" />
+                <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart(subWeeks(weekStart, 1))} title="Semana anterior" data-testid="button-prev-week">
+                  <ChevronsLeft className="h-3.5 w-3.5" />
                 </Button>
-                <span className="text-sm font-medium min-w-[180px] text-center">
-                  {format(weekStart, "d MMM", { locale: es })} - {format(addDays(weekStart, 6), "d MMM yyyy", { locale: es })}
-                </span>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setWeekStart(addWeeks(weekStart, 1))}
-                  data-testid="button-next-week"
-                >
-                  <ChevronRight className="h-4 w-4" />
+                <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart(subDays(weekStart, 1))} title="Día anterior" data-testid="button-prev-day">
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 px-3 text-xs" onClick={() => setWeekStart(startOfDay(new Date()))} data-testid="button-today">
+                  Hoy
+                </Button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 px-3 text-xs" data-testid="button-date-picker">
+                      <CalendarSearch className="h-3.5 w-3.5 mr-1" />
+                      {format(weekStart, "d MMM", { locale: es })} – {format(addDays(weekStart, 6), "d MMM yyyy", { locale: es })}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="center">
+                    <CalendarPicker
+                      mode="single"
+                      selected={weekStart}
+                      onSelect={(date) => date && setWeekStart(startOfDay(date))}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart(addDays(weekStart, 1))} title="Día siguiente" data-testid="button-next-day">
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart(addWeeks(weekStart, 1))} title="Semana siguiente" data-testid="button-next-week">
+                  <ChevronsRight className="h-3.5 w-3.5" />
                 </Button>
               </div>
-              <Button onClick={() => setWeekStart(startOfDay(new Date()))} variant="outline" data-testid="button-today">
-                Hoy
-              </Button>
               <Button
                 onClick={() => {
                   eventForm.reset();

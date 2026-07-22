@@ -15,20 +15,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { format, addDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks, isBefore } from "date-fns";
+import { format, addDays, subDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks, subWeeks, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { 
   Plus, 
   ChevronLeft, 
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Clock,
   User,
   Phone,
   Loader2,
   Calendar,
+  CalendarSearch,
   Sparkles,
   CreditCard,
   Home,
@@ -1121,20 +1126,41 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" onClick={viewMode === "daily" ? handlePreviousDay : handlePreviousWeek} data-testid="button-prev">
-                <ChevronLeft className="h-4 w-4" />
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={viewMode === "daily" ? handlePreviousWeek : () => setSelectedDate(subWeeks(selectedDate, 1))} title={viewMode === "daily" ? "Semana anterior" : "Semana anterior"} data-testid="button-prev-week">
+                <ChevronsLeft className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="outline" onClick={handleToday} data-testid="button-today">Hoy</Button>
-              <Button variant="outline" size="icon" onClick={viewMode === "daily" ? handleNextDay : handleNextWeek} data-testid="button-next">
-                <ChevronRight className="h-4 w-4" />
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={viewMode === "daily" ? handlePreviousDay : () => setSelectedDate(subDays(selectedDate, 1))} title="Día anterior" data-testid="button-prev-day">
+                <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
-              <span className="text-sm font-medium ml-2">
-                {viewMode === "daily"
-                  ? format(selectedDate, "EEEE d 'de' MMMM yyyy", { locale: es })
-                  : `${format(weekStart, "d MMM", { locale: es })} - ${format(weekEnd, "d MMM yyyy", { locale: es })}`
-                }
-              </span>
+              <Button variant="outline" size="sm" className="h-8 px-3 text-xs" onClick={handleToday} data-testid="button-today">
+                Hoy
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs" data-testid="button-date-picker">
+                    <CalendarSearch className="h-3.5 w-3.5 mr-1" />
+                    {viewMode === "daily"
+                      ? format(selectedDate, "d MMM yyyy", { locale: es })
+                      : `${format(weekStart, "d MMM", { locale: es })} – ${format(weekEnd, "d MMM yyyy", { locale: es })}`
+                    }
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="center">
+                  <CalendarPicker
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={(date) => date && setSelectedDate(startOfDay(date))}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={viewMode === "daily" ? handleNextDay : () => setSelectedDate(addDays(selectedDate, 1))} title="Día siguiente" data-testid="button-next-day">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={viewMode === "daily" ? handleNextWeek : () => setSelectedDate(addWeeks(selectedDate, 1))} title="Semana siguiente" data-testid="button-next-week">
+                <ChevronsRight className="h-3.5 w-3.5" />
+              </Button>
             </div>
 
             <div className="flex items-center gap-2">
