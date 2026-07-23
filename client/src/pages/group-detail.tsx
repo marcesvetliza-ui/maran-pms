@@ -368,8 +368,11 @@ function AssignBlockDialog({
     return rTypeId === block.roomTypeId && !["cancelled", "checked_out"].includes(r.status);
   });
   const thisBlockReservations = allActiveOfType.slice(offset, offset + block.quantity);
-  const placeholderReservations = thisBlockReservations.filter(r => r.guest?.codigo === placeholderCode);
-  const realAssignedCount = thisBlockReservations.filter(r => r.guest?.codigo !== placeholderCode).length;
+  // A reservation is a placeholder if it has no guestId (new approach) or still uses the
+  // legacy shared group guest (older reservations created before the per-room fix).
+  const isPlaceholder = (r: any) => !r.guestId || r.guest?.codigo === placeholderCode;
+  const placeholderReservations = thisBlockReservations.filter(r => isPlaceholder(r));
+  const realAssignedCount = thisBlockReservations.filter(r => !isPlaceholder(r)).length;
   const emptyCount = Math.max(0, block.quantity - thisBlockReservations.length);
 
   const [rows, setRows] = useState<AssignRow[]>(() => [
@@ -1579,15 +1582,20 @@ export default function GroupDetailPage() {
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
-                            <span>{res.guest?.lastName} {res.guest?.firstName}</span>
+                            <span>
+                              {res.guestId && res.guest?.firstName
+                                ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
+                                : (res as any).guestName || <span className="text-muted-foreground italic">Sin asignar</span>}
+                            </span>
                             <button
                               className="opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
                               title="Editar nombre del pasajero"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditingPassengerRes(res);
-                                setEditPassengerFirst(res.guest?.firstName || "");
-                                setEditPassengerLast(res.guest?.lastName || "");
+                                // Pre-fill from real guest if assigned; empty otherwise for a fresh entry
+                                setEditPassengerFirst(res.guestId ? (res.guest?.firstName || "") : "");
+                                setEditPassengerLast(res.guestId ? (res.guest?.lastName || "") : "");
                               }}
                               data-testid={`button-edit-passenger-${res.id}`}
                             >
@@ -2434,7 +2442,11 @@ export default function GroupDetailPage() {
                         <TableCell className="font-medium">{idx + 1}</TableCell>
                         <TableCell className="font-bold">{res.room?.roomNumber}</TableCell>
                         <TableCell>{getBedLabel(res)}</TableCell>
-                        <TableCell className="font-medium">{res.guest?.lastName} {res.guest?.firstName}</TableCell>
+                        <TableCell className="font-medium">
+                          {res.guestId && res.guest?.firstName
+                            ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
+                            : ((res as any).guestName || <span className="text-muted-foreground italic">Sin asignar</span>)}
+                        </TableCell>
                         <TableCell className="text-sm">
                           {res.guest?.documentNumber
                             ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}`

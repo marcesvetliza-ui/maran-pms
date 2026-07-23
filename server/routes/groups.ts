@@ -203,7 +203,6 @@ export function registerGroupsRoutes(app: Express) {
       // Auto-assign available rooms and create placeholder reservations
       const group = await storage.getGroup(req.params.groupId);
       if (group) {
-        const placeholder = await getOrCreatePlaceholderGuest(group.id, group.name);
         const checkIn = blockCheckInDate || group.checkInDate;
         const checkOut = blockCheckOutDate || group.checkOutDate;
 
@@ -229,9 +228,12 @@ export function registerGroupsRoutes(app: Express) {
           ));
           const rate = agreedRate ? String(agreedRate) : "0";
 
+          // Each placeholder reservation is INDEPENDENT — no shared guest.
+          // guestId is null until a real passenger is assigned via placeholder-reservations PATCH.
           const reservation = await storage.createReservation({
             reservationCode: `G${group.groupCode}-${room.roomNumber}`,
-            guestId: placeholder.id,
+            guestId: null as any,
+            guestName: "",
             roomTypeId: room.roomTypeId,
             roomId: room.id,
             ratePlanId: ratePlanId || null,
@@ -251,7 +253,7 @@ export function registerGroupsRoutes(app: Express) {
             notes: `Grupo: ${group.name}`,
             createdAt: new Date(),
             lastModifiedBy: null,
-          });
+          } as any);
 
           await storage.createGroupReservationLink({ groupId: group.id, reservationId: reservation.id });
           await db.update(roomsTable).set({ status: "occupied" }).where(eq(roomsTable.id, room.id));
@@ -294,7 +296,8 @@ export function registerGroupsRoutes(app: Express) {
 
         const allPlaceholders = group.reservations.filter((r: any) =>
           r.room?.roomTypeId === block.roomTypeId &&
-          r.guest?.codigo === placeholderCode &&
+          // Placeholder = no real guest assigned (null guestId) OR legacy shared placeholder guest
+          (!r.guestId || r.guest?.codigo === placeholderCode) &&
           !["cancelled", "checked_out"].includes(r.status)
         );
 
