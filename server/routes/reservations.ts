@@ -2093,25 +2093,25 @@ async function handleConfirmationPdf(req: any, res: any) {
     doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
       .text("Hotel & Spa · Paraná, Entre Ríos", margin, y);
 
-    // Right: reservation code box
+    // Right: reservation code box (includes status badge inside)
     const codeBoxW = 138;
     const codeBoxX = pageW - margin - codeBoxW;
     const codeBoxY = headerH + 16;
-    doc.roundedRect(codeBoxX, codeBoxY, codeBoxW, 44, 5)
+    doc.roundedRect(codeBoxX, codeBoxY, codeBoxW, 60, 5)
       .fillAndStroke("#f8f4ef", ORANGE);
     doc.fillColor("#888888").fontSize(7).font("Helvetica")
       .text("N° DE RESERVA", codeBoxX, codeBoxY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.5 });
     doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
-      .text(reservation.reservationCode || reservation.id, codeBoxX, codeBoxY + 19, { width: codeBoxW, align: "center" });
-    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
-      .text(`Emitida: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, codeBoxY + 33, { width: codeBoxW, align: "center" });
-
-    // Status badge
-    const badgeY = codeBoxY + 50;
-    doc.roundedRect(codeBoxX + 16, badgeY, codeBoxW - 32, 15, 7)
+      .text(reservation.reservationCode || reservation.id, codeBoxX, codeBoxY + 18, { width: codeBoxW, align: "center" });
+    // Status badge — inside the box
+    const badgeX = codeBoxX + 20;
+    const badgeW = codeBoxW - 40;
+    doc.roundedRect(badgeX, codeBoxY + 33, badgeW, 13, 6)
       .fillAndStroke("#e8f5e9", "#a5d6a7");
-    doc.fillColor("#2e7d32").fontSize(7).font("Helvetica-Bold")
-      .text("CONFIRMADA", codeBoxX + 16, badgeY + 4, { width: codeBoxW - 32, align: "center", characterSpacing: 0.5 });
+    doc.fillColor("#2e7d32").fontSize(6.5).font("Helvetica-Bold")
+      .text("CONFIRMADA", badgeX, codeBoxY + 36, { width: badgeW, align: "center", characterSpacing: 0.5 });
+    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
+      .text(`Emitida: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, codeBoxY + 49, { width: codeBoxW, align: "center" });
 
     y += 20;
 
@@ -2262,7 +2262,7 @@ async function handleConfirmationPdf(req: any, res: any) {
           margin, y, { width: contentW, align: "center" }
         );
     }
-    const _confTs = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const _confTs = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
     doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
       .text(`Generado el ${_confTs} | Maran Suites & Towers`, margin, pageH - 20, { align: "center", width: contentW });
 
