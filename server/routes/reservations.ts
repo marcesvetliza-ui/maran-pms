@@ -2115,8 +2115,8 @@ async function handleConfirmationPdf(req: any, res: any) {
 
     y += 20;
 
-    // ── SEPARATOR ─────────────────────────────────────────────────────────
-    doc.moveTo(margin, y).lineTo(margin + contentW, y)
+    // ── SEPARATOR (stops before the code box) ─────────────────────────────
+    doc.moveTo(margin, y).lineTo(codeBoxX - 10, y)
       .strokeColor("#e0e0e0").lineWidth(0.5).stroke();
     y += 12;
 
