@@ -42,6 +42,7 @@ import {
   UserPlus,
   Trash2,
   UserCheck,
+  Loader2,
   TrendingUp,
   Phone,
   AlertCircle,
@@ -222,6 +223,10 @@ export function ReservationFormDialog({
   const emptyCompanion: PendingCompanion = { firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "" };
   const [pendingCompanions, setPendingCompanions] = useState<PendingCompanion[]>([]);
   const [showCompanionForm, setShowCompanionForm] = useState(false);
+  const [pendingCompMode, setPendingCompMode] = useState<"search" | "new">("search");
+  const [pendingCompQ, setPendingCompQ] = useState("");
+  const [pendingCompHits, setPendingCompHits] = useState<{ id: string; firstName: string; lastName: string; documentNumber?: string | null }[]>([]);
+  const [pendingCompSearching, setPendingCompSearching] = useState(false);
   const [newCompForm, setNewCompForm] = useState<PendingCompanion>(emptyCompanion);
   const [isUpgrade, setIsUpgrade] = useState(!!(reservation?.isUpgrade));
   const [adjacentWarning, setAdjacentWarning] = useState<{ type: "early" | "late"; code: string; pendingValue: boolean } | null>(null);
@@ -1636,92 +1641,117 @@ export function ReservationFormDialog({
 
                 {showCompanionForm && (
                   <div className="p-3 border-t bg-muted/10 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
-                        <Input
-                          placeholder="Nombre"
-                          value={newCompForm.firstName}
-                          onChange={e => setNewCompForm(p => ({ ...p, firstName: e.target.value }))}
-                          className="h-8 text-sm"
-                          data-testid="input-new-comp-firstname"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
-                        <Input
-                          placeholder="Apellido"
-                          value={newCompForm.lastName}
-                          onChange={e => setNewCompForm(p => ({ ...p, lastName: e.target.value }))}
-                          className="h-8 text-sm"
-                          data-testid="input-new-comp-lastname"
-                        />
-                      </div>
+                    {/* Mode toggle */}
+                    <div className="flex rounded-md border overflow-hidden text-xs">
+                      <button type="button"
+                        className={`flex-1 py-1.5 transition-colors ${pendingCompMode === "search" ? "bg-primary text-primary-foreground font-medium" : "hover:bg-muted text-muted-foreground"}`}
+                        onClick={() => { setPendingCompMode("search"); setPendingCompQ(""); setPendingCompHits([]); }}
+                      >Buscar existente</button>
+                      <button type="button"
+                        className={`flex-1 py-1.5 transition-colors border-l ${pendingCompMode === "new" ? "bg-primary text-primary-foreground font-medium" : "hover:bg-muted text-muted-foreground"}`}
+                        onClick={() => { setPendingCompMode("new"); setPendingCompQ(""); setPendingCompHits([]); }}
+                      >Nuevo</button>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Tipo doc.</label>
-                        <select
-                          value={newCompForm.documentType}
-                          onChange={e => setNewCompForm(p => ({ ...p, documentType: e.target.value }))}
-                          className="w-full h-8 text-sm border rounded-md px-2 bg-background"
-                          data-testid="select-new-comp-doctype"
-                        >
-                          <option value="DNI">DNI</option>
-                          <option value="Pasaporte">Pasaporte</option>
-                          <option value="LC">LC</option>
-                          <option value="LE">LE</option>
-                          <option value="CI">CI (extranjero)</option>
-                        </select>
+
+                    {pendingCompMode === "search" ? (
+                      <div className="space-y-2">
+                        <div className="relative">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                          <Input
+                            placeholder="Buscar por nombre, apellido o DNI..."
+                            value={pendingCompQ}
+                            className="h-8 text-sm pl-8"
+                            data-testid="input-pending-comp-search"
+                            onChange={async e => {
+                              const q = e.target.value;
+                              setPendingCompQ(q);
+                              if (q.length < 2) { setPendingCompHits([]); return; }
+                              setPendingCompSearching(true);
+                              try {
+                                const r = await fetch(`/api/guests/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
+                                setPendingCompHits(await r.json() || []);
+                              } catch { setPendingCompHits([]); } finally { setPendingCompSearching(false); }
+                            }}
+                          />
+                          {pendingCompSearching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                        </div>
+                        {pendingCompQ.length >= 2 && pendingCompHits.length > 0 && (
+                          <div className="border rounded-md bg-popover shadow-md max-h-44 overflow-y-auto">
+                            {pendingCompHits.map(g => (
+                              <button key={g.id} type="button"
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex flex-col border-b last:border-0"
+                                onClick={() => {
+                                  setNewCompForm({ firstName: g.firstName, lastName: g.lastName || "", documentType: "DNI", documentNumber: g.documentNumber || "", dateOfBirth: "", nationality: "" });
+                                  setPendingCompMode("new");
+                                  setPendingCompQ(""); setPendingCompHits([]);
+                                }}
+                              >
+                                <span className="font-medium">{g.lastName} {g.firstName}</span>
+                                {g.documentNumber && <span className="text-xs text-muted-foreground">DNI {g.documentNumber}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {pendingCompQ.length >= 2 && !pendingCompSearching && pendingCompHits.length === 0 && (
+                          <p className="text-xs text-muted-foreground">Sin resultados. <button type="button" className="text-primary underline" onClick={() => setPendingCompMode("new")}>Agregar nuevo</button></p>
+                        )}
+                        {pendingCompQ.length > 0 && pendingCompQ.length < 2 && (
+                          <p className="text-xs text-muted-foreground">Escribí al menos 2 caracteres</p>
+                        )}
                       </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Nº documento</label>
-                        <Input
-                          placeholder="Número"
-                          value={newCompForm.documentNumber}
-                          onChange={e => setNewCompForm(p => ({ ...p, documentNumber: e.target.value }))}
-                          className="h-8 text-sm"
-                          data-testid="input-new-comp-docnumber"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Fecha de nacimiento</label>
-                        <Input
-                          type="date"
-                          value={newCompForm.dateOfBirth}
-                          onChange={e => setNewCompForm(p => ({ ...p, dateOfBirth: e.target.value }))}
-                          className="h-8 text-sm"
-                          data-testid="input-new-comp-dob"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</label>
-                        <NationalityCombobox
-                          value={newCompForm.nationality}
-                          onChange={(name) => setNewCompForm(p => ({ ...p, nationality: name }))}
-                        />
-                      </div>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
+                            <Input placeholder="Nombre" value={newCompForm.firstName} onChange={e => setNewCompForm(p => ({ ...p, firstName: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-firstname" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                            <Input placeholder="Apellido" value={newCompForm.lastName} onChange={e => setNewCompForm(p => ({ ...p, lastName: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-lastname" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Tipo doc.</label>
+                            <select value={newCompForm.documentType} onChange={e => setNewCompForm(p => ({ ...p, documentType: e.target.value }))} className="w-full h-8 text-sm border rounded-md px-2 bg-background" data-testid="select-new-comp-doctype">
+                              <option value="DNI">DNI</option>
+                              <option value="Pasaporte">Pasaporte</option>
+                              <option value="LC">LC</option>
+                              <option value="LE">LE</option>
+                              <option value="CI">CI (extranjero)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Nº documento</label>
+                            <Input placeholder="Número" value={newCompForm.documentNumber} onChange={e => setNewCompForm(p => ({ ...p, documentNumber: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-docnumber" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Fecha de nacimiento</label>
+                            <Input type="date" value={newCompForm.dateOfBirth} onChange={e => setNewCompForm(p => ({ ...p, dateOfBirth: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-dob" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</label>
+                            <NationalityCombobox value={newCompForm.nationality} onChange={(name) => setNewCompForm(p => ({ ...p, nationality: name }))} />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
                     <div className="flex gap-2 justify-end">
-                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowCompanionForm(false)}>
+                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => { setShowCompanionForm(false); setPendingCompQ(""); setPendingCompHits([]); setNewCompForm(emptyCompanion); setPendingCompMode("search"); }}>
                         Cancelar
                       </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="h-7 text-xs"
-                        disabled={!newCompForm.firstName || !newCompForm.lastName}
-                        onClick={() => {
-                          setPendingCompanions(prev => [...prev, { ...newCompForm }]);
-                          setNewCompForm(emptyCompanion);
-                          setShowCompanionForm(false);
-                        }}
-                        data-testid="button-save-new-comp"
-                      >
-                        Agregar
-                      </Button>
+                      {pendingCompMode === "new" && (
+                        <Button type="button" size="sm" className="h-7 text-xs" disabled={!newCompForm.firstName || !newCompForm.lastName}
+                          onClick={() => { setPendingCompanions(prev => [...prev, { ...newCompForm }]); setNewCompForm(emptyCompanion); setShowCompanionForm(false); setPendingCompMode("search"); }}
+                          data-testid="button-save-new-comp"
+                        >
+                          Agregar
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2007,7 +2037,12 @@ function ReservationDetailDialog({
   // Companions
   type CompanionForm = { firstName: string; lastName: string; documentType: string; documentNumber: string; dateOfBirth: string; nationality: string };
   const emptyComp: CompanionForm = { firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "" };
+  type GuestHit = { id: string; firstName: string; lastName: string; documentNumber?: string | null };
   const [showAddCompanion, setShowAddCompanion] = useState(false);
+  const [companionMode, setCompanionMode] = useState<"search" | "new">("search");
+  const [companionQ, setCompanionQ] = useState("");
+  const [companionHits, setCompanionHits] = useState<GuestHit[]>([]);
+  const [companionSearching, setCompanionSearching] = useState(false);
   const [newCompanion, setNewCompanion] = useState<CompanionForm>(emptyComp);
   const [editingCompanionId, setEditingCompanionId] = useState<string | null>(null);
   const [editCompanionData, setEditCompanionData] = useState<CompanionForm>(emptyComp);
@@ -2588,87 +2623,114 @@ function ReservationDetailDialog({
 
               {showAddCompanion && (
                 <div className="p-4 border-t bg-muted/10 space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
-                      <Input
-                        placeholder="Nombre"
-                        value={newCompanion.firstName}
-                        onChange={e => setNewCompanion(p => ({ ...p, firstName: e.target.value }))}
-                        data-testid="input-companion-firstname"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
-                      <Input
-                        placeholder="Apellido"
-                        value={newCompanion.lastName}
-                        onChange={e => setNewCompanion(p => ({ ...p, lastName: e.target.value }))}
-                        data-testid="input-companion-lastname"
-                        className="h-8 text-sm"
-                      />
-                    </div>
+                  {/* Mode toggle */}
+                  <div className="flex rounded-md border overflow-hidden text-xs">
+                    <button type="button"
+                      className={`flex-1 py-1.5 transition-colors ${companionMode === "search" ? "bg-primary text-primary-foreground font-medium" : "hover:bg-muted text-muted-foreground"}`}
+                      onClick={() => { setCompanionMode("search"); setCompanionQ(""); setCompanionHits([]); }}
+                    >Buscar existente</button>
+                    <button type="button"
+                      className={`flex-1 py-1.5 transition-colors border-l ${companionMode === "new" ? "bg-primary text-primary-foreground font-medium" : "hover:bg-muted text-muted-foreground"}`}
+                      onClick={() => { setCompanionMode("new"); setCompanionQ(""); setCompanionHits([]); }}
+                    >Nuevo</button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Tipo doc.</label>
-                      <select
-                        value={newCompanion.documentType}
-                        onChange={e => setNewCompanion(p => ({ ...p, documentType: e.target.value }))}
-                        className="w-full h-8 text-sm border rounded-md px-2 bg-background"
-                        data-testid="select-companion-doctype"
-                      >
-                        <option value="DNI">DNI</option>
-                        <option value="Pasaporte">Pasaporte</option>
-                        <option value="LC">LC</option>
-                        <option value="LE">LE</option>
-                        <option value="CI">CI (extranjero)</option>
-                      </select>
+
+                  {companionMode === "search" ? (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                        <Input
+                          placeholder="Buscar por nombre, apellido o DNI..."
+                          value={companionQ}
+                          className="h-8 text-sm pl-8"
+                          data-testid="input-companion-search"
+                          onChange={async e => {
+                            const q = e.target.value;
+                            setCompanionQ(q);
+                            if (q.length < 2) { setCompanionHits([]); return; }
+                            setCompanionSearching(true);
+                            try {
+                              const r = await fetch(`/api/guests/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
+                              setCompanionHits(await r.json() || []);
+                            } catch { setCompanionHits([]); } finally { setCompanionSearching(false); }
+                          }}
+                        />
+                        {companionSearching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                      </div>
+                      {companionQ.length >= 2 && companionHits.length > 0 && (
+                        <div className="border rounded-md bg-popover shadow-md max-h-44 overflow-y-auto">
+                          {companionHits.map((g: GuestHit) => (
+                            <button key={g.id} type="button"
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex flex-col border-b last:border-0"
+                              onClick={() => {
+                                setNewCompanion({ firstName: g.firstName, lastName: g.lastName || "", documentType: "DNI", documentNumber: g.documentNumber || "", dateOfBirth: "", nationality: "" });
+                                setCompanionMode("new");
+                                setCompanionQ(""); setCompanionHits([]);
+                              }}
+                            >
+                              <span className="font-medium">{g.lastName} {g.firstName}</span>
+                              {g.documentNumber && <span className="text-xs text-muted-foreground">DNI {g.documentNumber}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {companionQ.length >= 2 && !companionSearching && companionHits.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Sin resultados. <button type="button" className="text-primary underline" onClick={() => setCompanionMode("new")}>Agregar nuevo</button></p>
+                      )}
+                      {companionQ.length > 0 && companionQ.length < 2 && (
+                        <p className="text-xs text-muted-foreground">Escribí al menos 2 caracteres</p>
+                      )}
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Nº documento</label>
-                      <Input
-                        placeholder="Número"
-                        value={newCompanion.documentNumber}
-                        onChange={e => setNewCompanion(p => ({ ...p, documentNumber: e.target.value }))}
-                        data-testid="input-companion-docnumber"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Fecha de nacimiento</label>
-                      <Input
-                        type="date"
-                        value={newCompanion.dateOfBirth}
-                        onChange={e => setNewCompanion(p => ({ ...p, dateOfBirth: e.target.value }))}
-                        data-testid="input-companion-dob"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</label>
-                      <NationalityCombobox
-                        value={newCompanion.nationality}
-                        onChange={(name) => setNewCompanion(p => ({ ...p, nationality: name }))}
-                      />
-                    </div>
-                  </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
+                          <Input placeholder="Nombre" value={newCompanion.firstName} onChange={e => setNewCompanion(p => ({ ...p, firstName: e.target.value }))} data-testid="input-companion-firstname" className="h-8 text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                          <Input placeholder="Apellido" value={newCompanion.lastName} onChange={e => setNewCompanion(p => ({ ...p, lastName: e.target.value }))} data-testid="input-companion-lastname" className="h-8 text-sm" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Tipo doc.</label>
+                          <select value={newCompanion.documentType} onChange={e => setNewCompanion(p => ({ ...p, documentType: e.target.value }))} className="w-full h-8 text-sm border rounded-md px-2 bg-background" data-testid="select-companion-doctype">
+                            <option value="DNI">DNI</option>
+                            <option value="Pasaporte">Pasaporte</option>
+                            <option value="LC">LC</option>
+                            <option value="LE">LE</option>
+                            <option value="CI">CI (extranjero)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Nº documento</label>
+                          <Input placeholder="Número" value={newCompanion.documentNumber} onChange={e => setNewCompanion(p => ({ ...p, documentNumber: e.target.value }))} data-testid="input-companion-docnumber" className="h-8 text-sm" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Fecha de nacimiento</label>
+                          <Input type="date" value={newCompanion.dateOfBirth} onChange={e => setNewCompanion(p => ({ ...p, dateOfBirth: e.target.value }))} data-testid="input-companion-dob" className="h-8 text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</label>
+                          <NationalityCombobox value={newCompanion.nationality} onChange={(name) => setNewCompanion(p => ({ ...p, nationality: name }))} />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
                   <div className="flex gap-2 justify-end">
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddCompanion(false)}>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => { setShowAddCompanion(false); setCompanionQ(""); setCompanionHits([]); setNewCompanion(emptyComp); setCompanionMode("search"); }}>
                       Cancelar
                     </Button>
-                    <Button
-                      size="sm"
-                      className="h-7 text-xs"
-                      disabled={!newCompanion.firstName || !newCompanion.lastName || addCompanionMutation.isPending}
-                      onClick={() => addCompanionMutation.mutate(newCompanion)}
-                      data-testid="button-save-companion"
-                    >
-                      Guardar
-                    </Button>
+                    {companionMode === "new" && (
+                      <Button size="sm" className="h-7 text-xs" disabled={!newCompanion.firstName || !newCompanion.lastName || addCompanionMutation.isPending} onClick={() => addCompanionMutation.mutate(newCompanion)} data-testid="button-save-companion">
+                        {addCompanionMutation.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}Guardar
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
