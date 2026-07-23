@@ -135,7 +135,7 @@ export default function AdminDeudaHuespedesPage() {
   });
 
   const filtered = guests.filter(g =>
-    !search || g.guestName.toLowerCase().includes(search.toLowerCase()) ||
+    !search || (g.guestName || '').toLowerCase().includes(search.toLowerCase()) ||
     g.documentNumber?.includes(search) ||
     g.reservations.some(r => r.reservationCode.toLowerCase().includes(search.toLowerCase()) || r.roomNumber?.includes(search))
   );

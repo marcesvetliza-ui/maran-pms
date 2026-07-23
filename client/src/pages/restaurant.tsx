@@ -1904,7 +1904,7 @@ export default function RestaurantPage() {
       }
       const search = (reservationSearch || reservationSearchText).toLowerCase();
       if (search) {
-        return r.guestName.toLowerCase().includes(search) ||
+        return (r.guestName || '').toLowerCase().includes(search) ||
           (r.guestPhone && r.guestPhone.includes(search));
       }
       return true;
@@ -5265,13 +5265,13 @@ export default function RestaurantPage() {
                               onChange={e => {
                                 const val = e.target.value;
                                 setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomSearch: val, roomId: "" } : s));
-                                const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(val) || r.guestName.toLowerCase().includes(val.toLowerCase())));
+                                const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(val) || (r.guestName || '').toLowerCase().includes(val.toLowerCase())));
                                 if (matches.length === 1) setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: matches[0].reservationId, roomSearch: "" } : s));
                               }}
                               data-testid={`input-room-search-${idx}`}
                             />
                             {(split.roomSearch || "").length > 0 && (() => {
-                              const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(split.roomSearch || "") || r.guestName.toLowerCase().includes((split.roomSearch || "").toLowerCase())));
+                              const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(split.roomSearch || "") || (r.guestName || '').toLowerCase().includes((split.roomSearch || "").toLowerCase())));
                               return matches.length > 1 ? (
                                 <div className="border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
                                   {matches.map(r => (
@@ -5504,7 +5504,7 @@ export default function RestaurantPage() {
                                       if (val !== "") {
                                         const matches = inHouseRooms.filter(r =>
                                           r.reservationId &&
-                                          (r.roomNumber.includes(val) || r.guestName.toLowerCase().includes(val.toLowerCase()))
+                                          (r.roomNumber.includes(val) || (r.guestName || '').toLowerCase().includes(val.toLowerCase()))
                                         );
                                         if (matches.length === 1) {
                                           setSplitRoomIds(prev => ({ ...prev, [split.id]: matches[0].reservationId }));
@@ -5519,7 +5519,7 @@ export default function RestaurantPage() {
                                     const search = splitRoomSearchFilters[split.id] || "";
                                     const matches = inHouseRooms.filter(r =>
                                       r.reservationId &&
-                                      (r.roomNumber.includes(search) || r.guestName.toLowerCase().includes(search.toLowerCase()))
+                                      (r.roomNumber.includes(search) || (r.guestName || '').toLowerCase().includes(search.toLowerCase()))
                                     );
                                     return matches.length > 1 ? (
                                       <div className="border rounded-md bg-popover shadow-md max-h-32 overflow-y-auto">
@@ -5777,7 +5777,7 @@ export default function RestaurantPage() {
                           <Label className="text-xs text-muted-foreground">Habitación a cargar</Label>
                           <Input placeholder="Buscar por número o nombre..." value={payItemRoomSearch} onChange={e => { setPayItemRoomSearch(e.target.value); setPayItemRoomId(""); }} className="h-7 text-sm" data-testid="input-payitem-room-search" />
                           {payItemRoomSearch && (() => {
-                            const matches = inHouseRooms.filter((r: any) => r.reservationId && (r.roomNumber.includes(payItemRoomSearch) || r.guestName.toLowerCase().includes(payItemRoomSearch.toLowerCase())));
+                            const matches = inHouseRooms.filter((r: any) => r.reservationId && (r.roomNumber.includes(payItemRoomSearch) || (r.guestName || '').toLowerCase().includes(payItemRoomSearch.toLowerCase())));
                             return matches.length > 0 ? (
                               <div className="border rounded bg-popover shadow-md max-h-32 overflow-y-auto">
                                 {matches.map((r: any) => (
@@ -7080,7 +7080,7 @@ export default function RestaurantPage() {
                 if (reservationSearchText) {
                   const q = reservationSearchText.toLowerCase();
                   return (
-                    r.guestName.toLowerCase().includes(q) ||
+                    (r.guestName || '').toLowerCase().includes(q) ||
                     (r.guestPhone || "").includes(q) ||
                     (r.guestEmail || "").toLowerCase().includes(q) ||
                     r.reservationDate.includes(q)
