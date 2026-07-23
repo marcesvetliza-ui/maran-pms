@@ -943,9 +943,26 @@ export default function RestaurantPage() {
     refetchInterval: 30000,
   });
 
-  const { data: inHouseRooms = [] } = useQuery<{ roomId: string; roomNumber: string; guestName: string; reservationId: string }[]>({
+  const { data: inHouseRooms = [] } = useQuery<{
+    roomId: string; roomNumber: string; reservationId: string;
+    guest: { firstName: string; lastName: string } | null;
+  }[]>({
     queryKey: ["/api/rooms/in-house"],
   });
+
+  /** Apellido (o nombre si no hay apellido) del huésped, para mostrar en pickers */
+  const roomLabel = (r: { roomNumber: string; guest: { firstName: string; lastName: string } | null }) =>
+    `${r.roomNumber} — ${r.guest ? (r.guest.lastName || r.guest.firstName || "Sin huésped") : "Sin huésped"}`;
+
+  /** Filtra habitaciones según texto de búsqueda (número o apellido/nombre) */
+  const filterRooms = (rooms: typeof inHouseRooms, q: string) => {
+    const lq = q.toLowerCase();
+    return rooms.filter(r =>
+      r.roomNumber.includes(lq) ||
+      (r.guest?.lastName || "").toLowerCase().includes(lq) ||
+      (r.guest?.firstName || "").toLowerCase().includes(lq)
+    );
+  };
 
   const { data: reservations = [] } = useQuery<TableReservation[]>({
     queryKey: ["/api/restaurant/table-reservations"],
@@ -5259,39 +5276,39 @@ export default function RestaurantPage() {
                         .map(({ split, idx }) => (
                           <div key={`room-${split.id}`} className="space-y-2">
                             <Label className="text-xs">Habitación{closePaymentSplits.filter(s => s.method === "cuenta_habitacion").length > 1 ? ` (pago ${idx + 1})` : ""}</Label>
-                            <Input
-                              placeholder="Buscar por número o nombre..."
-                              value={split.roomSearch || ""}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomSearch: val, roomId: "" } : s));
-                                const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(val) || (r.guestName || '').toLowerCase().includes(val.toLowerCase())));
-                                if (matches.length === 1) setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: matches[0].reservationId, roomSearch: "" } : s));
-                              }}
-                              data-testid={`input-room-search-${idx}`}
-                            />
-                            {(split.roomSearch || "").length > 0 && (() => {
-                              const matches = inHouseRooms.filter(r => r.reservationId && (r.roomNumber.includes(split.roomSearch || "") || (r.guestName || '').toLowerCase().includes((split.roomSearch || "").toLowerCase())));
-                              return matches.length > 1 ? (
-                                <div className="border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
-                                  {matches.map(r => (
-                                    <button key={r.roomId} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
-                                      onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: r.reservationId, roomSearch: "" } : s))}
-                                    ><span className="font-medium">{r.roomNumber}</span> — {r.guestName}</button>
-                                  ))}
-                                </div>
-                              ) : matches.length === 0 ? <p className="text-sm text-muted-foreground">Sin resultados</p> : null;
-                            })()}
-                            {split.roomId && (() => {
+                            {split.roomId ? (() => {
                               const room = inHouseRooms.find(r => r.reservationId === split.roomId);
                               return room ? (
                                 <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm bg-accent/40" data-testid={`selected-room-${idx}`}>
-                                  <span><span className="font-medium">{room.roomNumber}</span> — {room.guestName}</span>
+                                  <span className="font-medium">{roomLabel(room)}</span>
                                   <button type="button" onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: "", roomSearch: "" } : s))} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
                                 </div>
                               ) : null;
-                            })()}
-                            {inHouseRooms.length === 0 && <p className="text-sm text-muted-foreground">No hay habitaciones ocupadas</p>}
+                            })() : (
+                              <>
+                                <Input
+                                  placeholder="Filtrar por número o apellido..."
+                                  value={split.roomSearch || ""}
+                                  onChange={e => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomSearch: e.target.value } : s))}
+                                  data-testid={`input-room-search-${idx}`}
+                                />
+                                {inHouseRooms.length === 0
+                                  ? <p className="text-sm text-muted-foreground">No hay habitaciones ocupadas</p>
+                                  : (() => {
+                                      const list = filterRooms(inHouseRooms, split.roomSearch || "");
+                                      return list.length > 0 ? (
+                                        <div className="border rounded-md bg-popover shadow-md max-h-44 overflow-y-auto">
+                                          {list.map(r => (
+                                            <button key={r.roomId} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                                              onClick={() => setClosePaymentSplits(prev => prev.map((s, i) => i === idx ? { ...s, roomId: r.reservationId, roomSearch: "" } : s))}
+                                            >{roomLabel(r)}</button>
+                                          ))}
+                                        </div>
+                                      ) : <p className="text-sm text-muted-foreground">Sin resultados</p>;
+                                    })()
+                                }
+                              </>
+                            )}
                           </div>
                         ))}
 
@@ -5494,63 +5511,47 @@ export default function RestaurantPage() {
                               {(splitPayMethods[split.id] || "efectivo") === "cuenta_habitacion" && (
                                 <div className="space-y-1 p-2 bg-muted/50 rounded-md border">
                                   <Label className="text-xs text-muted-foreground">Habitación a cargar</Label>
-                                  <Input
-                                    placeholder="Buscar por número o nombre..."
-                                    value={splitRoomSearchFilters[split.id] || ""}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: val }));
-                                      setSplitRoomIds(prev => ({ ...prev, [split.id]: "" }));
-                                      if (val !== "") {
-                                        const matches = inHouseRooms.filter(r =>
-                                          r.reservationId &&
-                                          (r.roomNumber.includes(val) || (r.guestName || '').toLowerCase().includes(val.toLowerCase()))
-                                        );
-                                        if (matches.length === 1) {
-                                          setSplitRoomIds(prev => ({ ...prev, [split.id]: matches[0].reservationId }));
-                                          setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: "" }));
-                                        }
-                                      }
-                                    }}
-                                    className="h-7 text-sm"
-                                    data-testid={`input-split-room-search-${split.splitNumber}`}
-                                  />
-                                  {(splitRoomSearchFilters[split.id] || "") !== "" && (() => {
-                                    const search = splitRoomSearchFilters[split.id] || "";
-                                    const matches = inHouseRooms.filter(r =>
-                                      r.reservationId &&
-                                      (r.roomNumber.includes(search) || (r.guestName || '').toLowerCase().includes(search.toLowerCase()))
-                                    );
-                                    return matches.length > 1 ? (
-                                      <div className="border rounded-md bg-popover shadow-md max-h-32 overflow-y-auto">
-                                        {matches.map(r => (
-                                          <button
-                                            key={r.roomId}
-                                            type="button"
-                                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-                                            onClick={() => {
-                                              setSplitRoomIds(prev => ({ ...prev, [split.id]: r.reservationId }));
-                                              setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: "" }));
-                                            }}
-                                            data-testid={`option-split-room-${r.roomNumber}`}
-                                          >
-                                            <span className="font-medium">{r.roomNumber}</span> — {r.guestName}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    ) : matches.length === 0 ? (
-                                      <p className="text-xs text-muted-foreground px-1">Sin resultados</p>
-                                    ) : null;
-                                  })()}
-                                  {splitRoomIds[split.id] && (() => {
+                                  {splitRoomIds[split.id] ? (() => {
                                     const room = inHouseRooms.find(r => r.reservationId === splitRoomIds[split.id]);
                                     return room ? (
                                       <div className="flex items-center justify-between rounded-md border px-2 py-1.5 text-sm bg-accent/40">
-                                        <span><span className="font-medium">{room.roomNumber}</span> — {room.guestName}</span>
+                                        <span className="font-medium">{roomLabel(room)}</span>
                                         <button type="button" onClick={() => { setSplitRoomIds(prev => ({ ...prev, [split.id]: "" })); setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: "" })); }} className="text-muted-foreground hover:text-foreground ml-2 text-xs">✕</button>
                                       </div>
                                     ) : null;
-                                  })()}
+                                  })() : (
+                                    <>
+                                      <Input
+                                        placeholder="Filtrar por número o apellido..."
+                                        value={splitRoomSearchFilters[split.id] || ""}
+                                        onChange={e => setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: e.target.value }))}
+                                        className="h-7 text-sm"
+                                        data-testid={`input-split-room-search-${split.splitNumber}`}
+                                      />
+                                      {inHouseRooms.length === 0
+                                        ? <p className="text-xs text-muted-foreground">No hay habitaciones ocupadas</p>
+                                        : (() => {
+                                            const list = filterRooms(inHouseRooms, splitRoomSearchFilters[split.id] || "");
+                                            return list.length > 0 ? (
+                                              <div className="border rounded-md bg-popover shadow-md max-h-36 overflow-y-auto">
+                                                {list.map(r => (
+                                                  <button
+                                                    key={r.roomId}
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                                                    onClick={() => {
+                                                      setSplitRoomIds(prev => ({ ...prev, [split.id]: r.reservationId }));
+                                                      setSplitRoomSearchFilters(prev => ({ ...prev, [split.id]: "" }));
+                                                    }}
+                                                    data-testid={`option-split-room-${r.roomNumber}`}
+                                                  >{roomLabel(r)}</button>
+                                                ))}
+                                              </div>
+                                            ) : <p className="text-xs text-muted-foreground px-1">Sin resultados</p>;
+                                          })()
+                                      }
+                                    </>
+                                  )}
                                 </div>
                               )}
                               {(() => {
@@ -5775,28 +5776,34 @@ export default function RestaurantPage() {
                       {payItemMethod === "cuenta_habitacion" && (
                         <div className="space-y-1.5 p-2.5 bg-blue-50/60 dark:bg-blue-950/20 rounded-md border border-blue-200 dark:border-blue-800">
                           <Label className="text-xs text-muted-foreground">Habitación a cargar</Label>
-                          <Input placeholder="Buscar por número o nombre..." value={payItemRoomSearch} onChange={e => { setPayItemRoomSearch(e.target.value); setPayItemRoomId(""); }} className="h-7 text-sm" data-testid="input-payitem-room-search" />
-                          {payItemRoomSearch && (() => {
-                            const matches = inHouseRooms.filter((r: any) => r.reservationId && (r.roomNumber.includes(payItemRoomSearch) || (r.guestName || '').toLowerCase().includes(payItemRoomSearch.toLowerCase())));
-                            return matches.length > 0 ? (
-                              <div className="border rounded bg-popover shadow-md max-h-32 overflow-y-auto">
-                                {matches.map((r: any) => (
-                                  <button key={r.roomId} type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors" onClick={() => { setPayItemRoomId(r.reservationId); setPayItemRoomSearch(""); }}>
-                                    <span className="font-medium">{r.roomNumber}</span> — {r.guestName}
-                                  </button>
-                                ))}
-                              </div>
-                            ) : <p className="text-xs text-muted-foreground mt-1">Sin resultados</p>;
-                          })()}
-                          {payItemRoomId && (() => {
-                            const room = inHouseRooms.find((r: any) => r.reservationId === payItemRoomId);
+                          {payItemRoomId ? (() => {
+                            const room = inHouseRooms.find(r => r.reservationId === payItemRoomId);
                             return room ? (
                               <div className="flex items-center justify-between rounded border px-2.5 py-1.5 text-sm bg-accent/40">
-                                <span><span className="font-medium">{(room as any).roomNumber}</span> — {(room as any).guestName}</span>
-                                <button type="button" onClick={() => setPayItemRoomId("")} className="text-muted-foreground hover:text-foreground text-xs ml-2">✕</button>
+                                <span className="font-medium">{roomLabel(room)}</span>
+                                <button type="button" onClick={() => { setPayItemRoomId(""); setPayItemRoomSearch(""); }} className="text-muted-foreground hover:text-foreground text-xs ml-2">✕</button>
                               </div>
                             ) : null;
-                          })()}
+                          })() : (
+                            <>
+                              <Input placeholder="Filtrar por número o apellido..." value={payItemRoomSearch} onChange={e => setPayItemRoomSearch(e.target.value)} className="h-7 text-sm" data-testid="input-payitem-room-search" />
+                              {inHouseRooms.length === 0
+                                ? <p className="text-xs text-muted-foreground mt-1">No hay habitaciones ocupadas</p>
+                                : (() => {
+                                    const list = filterRooms(inHouseRooms, payItemRoomSearch);
+                                    return list.length > 0 ? (
+                                      <div className="border rounded bg-popover shadow-md max-h-36 overflow-y-auto">
+                                        {list.map(r => (
+                                          <button key={r.roomId} type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors" onClick={() => { setPayItemRoomId(r.reservationId); setPayItemRoomSearch(""); }}>
+                                            {roomLabel(r)}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : <p className="text-xs text-muted-foreground mt-1">Sin resultados</p>;
+                                  })()
+                              }
+                            </>
+                          )}
                         </div>
                       )}
 
