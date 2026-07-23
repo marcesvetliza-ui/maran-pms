@@ -1077,8 +1077,11 @@ export default function GroupDetailPage() {
   });
 
   const updatePassengerMutation = useMutation({
-    mutationFn: ({ guestId, firstName, lastName }: { guestId: string; firstName: string; lastName: string }) =>
-      apiRequest("PATCH", `/api/guests/${guestId}`, { firstName, lastName }),
+    mutationFn: ({ reservationId, firstName, lastName }: { reservationId: string; firstName: string; lastName: string }) =>
+      apiRequest("PATCH", `/api/groups/${groupId}/placeholder-reservations/${reservationId}`, {
+        guestFirstName: firstName,
+        guestLastName: lastName,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
       toast({ title: "Nombre de pasajero actualizado" });
@@ -3060,9 +3063,9 @@ export default function GroupDetailPage() {
             <Button
               disabled={!editPassengerFirst.trim() || updatePassengerMutation.isPending}
               onClick={() => {
-                if (!editingPassengerRes?.guest?.id) return;
+                if (!editingPassengerRes?.id) return;
                 updatePassengerMutation.mutate({
-                  guestId: editingPassengerRes.guest.id,
+                  reservationId: editingPassengerRes.id,
                   firstName: editPassengerFirst.trim(),
                   lastName: editPassengerLast.trim(),
                 });
