@@ -69,7 +69,7 @@ export function setupAuth(app: Express) {
         pool,
         tableName: "sessions",
         createTableIfMissing: false,
-        ttl: 30 * 24 * 60 * 60, // 30 días en el store (segundos)
+        ttl: 8 * 60 * 60, // 8 horas en el store (segundos)
       }),
       secret: (() => {
         if (!process.env.SESSION_SECRET) {
@@ -82,12 +82,12 @@ export function setupAuth(app: Express) {
       })(),
       resave: false,
       saveUninitialized: false,
-      rolling: true, // Renueva la sesión en cada request → no expira si hay actividad
       cookie: {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
         sameSite: "lax",
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 días en ms → persiste aunque se cierre el navegador
+        // Sin maxAge → cookie de sesión → se borra al cerrar el navegador
+        // El TTL de 8h se aplica solo en el store del servidor
       },
     })
   );
