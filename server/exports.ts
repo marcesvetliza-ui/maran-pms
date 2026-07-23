@@ -79,7 +79,7 @@ function sircarLine(r: any, i: number): string {
   const cuit = (r.cuit_proveedor || "").replace(/-/g, "").padStart(11, "0");
   const fecha = formatDateSIRCAR(r.fecha_comprobante || r.fecha_retencion);
   const base = $n(r.importe_base).toFixed(2);
-  const alic = $n(r.alicuota).toFixed(2).padStart(6, " ");
+  const alic = (0).toFixed(2).padStart(6, " "); // ARCA SiCo requiere alícuota = 0
   const ret = $n(r.importe_retenido).toFixed(2);
   return `${nro},1,1,${r.nro_constancia},${cuit},${fecha},${base},${alic},${ret},004,908`;
 }

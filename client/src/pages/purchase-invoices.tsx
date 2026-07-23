@@ -237,7 +237,7 @@ function calcIvaField(neto: string, alicuota: string): Record<string, string> {
   const n = parseFloat(neto);
   const entry = IVA_MAP[alicuota];
   if (!entry || isNaN(n) || n <= 0) return { ...ALL_IVA_FIELDS };
-  return { ...ALL_IVA_FIELDS, [entry.field]: fmtMoney(n * entry.rate / 100) };
+  return { ...ALL_IVA_FIELDS, [entry.field]: (n * entry.rate / 100).toFixed(2) };
 }
 
 function InvoiceDialog({
@@ -554,7 +554,14 @@ function InvoiceDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Tipo de Comprobante</Label>
-                  <Select value={form.tipoComprobante} onValueChange={(v) => f("tipoComprobante", v)}>
+                  <Select value={form.tipoComprobante} onValueChange={(v) => {
+                    // Factura C: sin IVA, forzar alícuota 0 y limpiar campos IVA
+                    if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C") {
+                      setForm((p) => ({ ...p, tipoComprobante: v, alicuotaIva: "0", ...ALL_IVA_FIELDS }));
+                    } else {
+                      f("tipoComprobante", v);
+                    }
+                  }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
                       <SelectValue />
                     </SelectTrigger>
