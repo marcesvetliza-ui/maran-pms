@@ -154,6 +154,10 @@ export default function ReportsPage() {
   const defaults = getPresetDates("month");
   const [from, setFrom] = useState(defaults.from);
   const [to, setTo] = useState(defaults.to);
+  // "applied" state — lo que realmente usan las queries.
+  // Los presets lo actualizan al instante; el input manual requiere "Aplicar".
+  const [appliedFrom, setAppliedFrom] = useState(defaults.from);
+  const [appliedTo, setAppliedTo] = useState(defaults.to);
   const [activeTab, setActiveTab] = useState("occupancy");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -161,7 +165,16 @@ export default function ReportsPage() {
     const d = getPresetDates(preset);
     setFrom(d.from);
     setTo(d.to);
+    setAppliedFrom(d.from);
+    setAppliedTo(d.to);
   }
+
+  function applyDates() {
+    setAppliedFrom(from);
+    setAppliedTo(to);
+  }
+
+  const datesChanged = from !== appliedFrom || to !== appliedTo;
 
   const fetchReport = async (url: string) => {
     const res = await fetch(url, { credentials: "include" });
@@ -170,50 +183,50 @@ export default function ReportsPage() {
   };
 
   const occupancy = useQuery<OccupancyRow[]>({
-    queryKey: ["/api/reports/occupancy", from, to],
-    queryFn: () => fetchReport(`/api/reports/occupancy?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/occupancy", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/occupancy?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "occupancy",
   });
 
   const revenueByType = useQuery<RevenueByTypeRow[]>({
-    queryKey: ["/api/reports/revenue-by-room-type", from, to],
-    queryFn: () => fetchReport(`/api/reports/revenue-by-room-type?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/revenue-by-room-type", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/revenue-by-room-type?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "revenue-type",
   });
 
   const byChannel = useQuery<ChannelRow[]>({
-    queryKey: ["/api/reports/by-channel", from, to],
-    queryFn: () => fetchReport(`/api/reports/by-channel?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/by-channel", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/by-channel?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "channel",
   });
 
   const reservations = useQuery<ReservationRow[]>({
-    queryKey: ["/api/reports/reservations", from, to, statusFilter],
-    queryFn: () => fetchReport(`/api/reports/reservations?from=${from}&to=${to}&status=${statusFilter === "all" ? "" : statusFilter}`),
+    queryKey: ["/api/reports/reservations", appliedFrom, appliedTo, statusFilter],
+    queryFn: () => fetchReport(`/api/reports/reservations?from=${appliedFrom}&to=${appliedTo}&status=${statusFilter === "all" ? "" : statusFilter}`),
     enabled: activeTab === "reservations",
   });
 
   const payments = useQuery<PaymentsData>({
-    queryKey: ["/api/reports/payments", from, to],
-    queryFn: () => fetchReport(`/api/reports/payments?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/payments", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/payments?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "payments",
   });
 
   const topGuests = useQuery<TopGuestRow[]>({
-    queryKey: ["/api/reports/top-guests", from, to],
-    queryFn: () => fetchReport(`/api/reports/top-guests?from=${from}&to=${to}&limit=50`),
+    queryKey: ["/api/reports/top-guests", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/top-guests?from=${appliedFrom}&to=${appliedTo}&limit=50`),
     enabled: activeTab === "top-guests",
   });
 
   const housekeeping = useQuery<HousekeepingData>({
-    queryKey: ["/api/reports/housekeeping", from, to],
-    queryFn: () => fetchReport(`/api/reports/housekeeping?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/housekeeping", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/housekeeping?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "housekeeping",
   });
 
   const restaurant = useQuery<RestaurantData>({
-    queryKey: ["/api/reports/restaurant", from, to],
-    queryFn: () => fetchReport(`/api/reports/restaurant?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/restaurant", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/restaurant?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "restaurant",
   });
 
@@ -221,8 +234,8 @@ export default function ReportsPage() {
   type BillingData = { payments: BillingPaymentRow[]; summary: { totalPayments: number; totalAmount: number; guestTotal: number; companyTotal: number; byMethod: Record<string, { count: number; total: number }> } };
 
   const billing = useQuery<BillingData>({
-    queryKey: ["/api/reports/billing", from, to],
-    queryFn: () => fetchReport(`/api/reports/billing?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/billing", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/billing?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "billing",
   });
 
@@ -230,8 +243,8 @@ export default function ReportsPage() {
   type ArrDepData = { arrivals: ArrDepRow[]; departures: ArrDepRow[] };
 
   const arrDep = useQuery<ArrDepData>({
-    queryKey: ["/api/reports/arrivals-departures", from, to],
-    queryFn: () => fetchReport(`/api/reports/arrivals-departures?from=${from}&to=${to}`),
+    queryKey: ["/api/reports/arrivals-departures", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/arrivals-departures?from=${appliedFrom}&to=${appliedTo}`),
     enabled: activeTab === "arrivals-departures",
   });
 
@@ -506,6 +519,14 @@ export default function ReportsPage() {
                 className="w-auto"
                 data-testid="input-date-to"
               />
+              <Button
+                size="sm"
+                onClick={applyDates}
+                disabled={!datesChanged}
+                data-testid="button-apply-dates"
+              >
+                Aplicar
+              </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <Button variant="outline" size="sm" onClick={handleExportCSV} data-testid="button-export-csv">
