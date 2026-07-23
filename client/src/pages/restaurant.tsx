@@ -2073,8 +2073,8 @@ export default function RestaurantPage() {
         item.alicuotaIva = "no_gravado";
         item.subtotalNeto = base; item.subtotal = base;
       } else if (!isFA) {
-        if (item.alicuotaIva === "21") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.21)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = parseFloat(fmtMoney(base / 1.105)); item.subtotal = base; }
+        if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
+        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
         else { item.subtotalNeto = base; item.subtotal = base; }
       } else {
         if (item.alicuotaIva === "21" || item.alicuotaIva === "10.5") {
@@ -2101,8 +2101,8 @@ export default function RestaurantPage() {
         }
         return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
       }
-      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat(fmtMoney(base / 1.21)), subtotal: base };
-      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: parseFloat(fmtMoney(base / 1.105)), subtotal: base };
+      if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: Number((base / 1.21).toFixed(2)), subtotal: base };
+      if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: Number((base / 1.105).toFixed(2)), subtotal: base };
       return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
     }));
   }

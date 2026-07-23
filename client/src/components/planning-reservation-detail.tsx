@@ -587,9 +587,9 @@ export function ReservationDetailModal({
                         </div>
                         {retencionMonto && parseFloat(retencionMonto) > 0 && (checkoutPayAmount || balance > 0) && (
                           <div className="text-xs text-amber-800 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-900/30 rounded p-2">
-                            <span className="font-medium">Neto:</span> ${parseFloat(checkoutPayAmount || fmtMoney(balance)).toFixed(2)} &nbsp;
+                            <span className="font-medium">Neto:</span> ${(checkoutPayAmount ? parseFloat(checkoutPayAmount) : balance).toFixed(2)} &nbsp;
                             <span className="font-medium">+ Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"}:</span> ${fmtMoney(retencionMonto)} &nbsp;
-                            <span className="font-semibold">= Total cubierto: ${(parseFloat(checkoutPayAmount || fmtMoney(balance)) + parseFloat(retencionMonto)).toFixed(2)}</span>
+                            <span className="font-semibold">= Total cubierto: ${((checkoutPayAmount ? parseFloat(checkoutPayAmount) : balance) + parseFloat(retencionMonto)).toFixed(2)}</span>
                           </div>
                         )}
                       </div>
@@ -599,8 +599,8 @@ export function ReservationDetailModal({
                       <Button variant="outline" size="sm" onClick={() => setCheckoutStep(1)}>Atrás</Button>
                       {balance > 0 && (
                         <Button size="sm" onClick={() => {
-                          const netAmount = checkoutPayAmount || fmtMoney(balance);
-                          if (!netAmount || parseFloat(netAmount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
+                          const netAmount = checkoutPayAmount ? parseFloat(checkoutPayAmount) : balance;
+                          if (!netAmount || netAmount <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
                           if (checkoutPaymentMethod === "cuenta_corriente" && checkoutBillingTarget === "company" && !checkoutCompanyId && !reservation.companyId) {
                             toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
                           }
@@ -608,8 +608,8 @@ export function ReservationDetailModal({
                             toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
                           }
                           const retMonto = showRetencion && retencionMonto && parseFloat(retencionMonto) > 0 ? parseFloat(retencionMonto) : 0;
-                          const grossAmount = (parseFloat(netAmount) + retMonto).toFixed(2);
-                          const notes = retMonto > 0 ? JSON.stringify({ retencion: { tipo: retencionTipo, monto: retMonto, neto: parseFloat(netAmount) } }) : null;
+                          const grossAmount = (netAmount + retMonto).toFixed(2);
+                          const notes = retMonto > 0 ? JSON.stringify({ retencion: { tipo: retencionTipo, monto: retMonto, neto: netAmount } }) : null;
                           addPaymentMutation.mutate({
                             amount: grossAmount,
                             method: checkoutPaymentMethod,

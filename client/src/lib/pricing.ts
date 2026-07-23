@@ -6,7 +6,7 @@ export function calcNeto(precioConIva: number): number {
 
 export function calcIva21(precioConIva: number): number {
   const neto = calcNeto(precioConIva);
-  return parseFloat(fmtMoney(precioConIva - neto));
+  return Number((precioConIva - neto).toFixed(2));
 }
 
 export function desglosarIva(precioConIva: number): {
@@ -16,7 +16,7 @@ export function desglosarIva(precioConIva: number): {
   alicuota: "21";
 } {
   const neto = calcNeto(precioConIva);
-  const iva = parseFloat(fmtMoney(precioConIva - neto));
+  const iva = Number((precioConIva - neto).toFixed(2));
   return { total: precioConIva, neto, iva, alicuota: "21" };
 }
 
@@ -35,7 +35,7 @@ export function prepararItemsParaARCA(items: {
   return items.map((item) => {
     const totalConIva = item.precioUnitarioConIva * item.cantidad;
     const { neto, total } = desglosarIva(totalConIva);
-    const precioUnitarioNeto = parseFloat(fmtMoney(neto / item.cantidad));
+    const precioUnitarioNeto = Number((neto / item.cantidad).toFixed(2));
     return {
       descripcion: item.descripcion,
       cantidad: item.cantidad,
