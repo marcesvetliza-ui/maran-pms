@@ -1,0 +1,21 @@
+Esto es algo que me compartió el programador que está viendo el sistema, decime que entendes vos, como seria la orden que debo darle a Replit para seguir con el tema de pagos - anticipos.
+
+Pagos / Anticipos
+
+El sistema solo permite Registrar Pago con un comprobante no electrónico. Esta bien pero no tan bien debido a que está integrado con la facturación electrónica, emitir facturas electrónicas por adelantos suele ser el comportamiento esperado porque evita diferencias entre:
+la caja
+la contabilidad
+y los comprobantes electrónicos emitidos
+
+Por regla general, si registras un pago sin emitir la factura correspondiente y al momento del check out emites la factura por los cargos - anticipo = total es evasión, justo  lo que estás haciendo ahora.
+ayer
+hoy
+
+Los anticipos sin emitir factura era en la época de las impresoras fiscales, el emitir una factura sin poder entregar el recibo correspondiente era ilegal, no se podía retener el recibo y no era legal enviarlo por un medio electrónico, entonces lo que se hacía era registraba el adelanto para luego, al momento de facturar, se facturaba por el total de los cargos y se registraba como forma de pago el monto del adelanto, contablemente un lío pero era la única forma de hacerlo legal 100%. 
+Desde que se puede emitir factura electrónica esto se dejó de hacer, salvo que tu sistema pms tenga impresora fiscal o el módulo de facturación electrónica tenga un costo adicional en la implementación y mensual, o como el pms Cloudbeds que requiere integración con un proveedor de facturación electrónica externo
+Sabiendo esto, esta parte del sistema esta mal o no tan bien, tenes full integración con arca por ende debes poder facturar electrónicamente si queres registrar adelantos, caso contrario tenes que modificar Facturar Saldo porque no debe de restar los adelantos, debes agregar una forma de pago automática que lleve el monto del adelanto y el que factura pueda poner la diferencia según las formas de pago en que te abonen, esa forma de pago debe de restar en la caja sino siempre va a ver diferencias porque el monto de la factura emitida no se corresponde con el dinero ingresado en ese turno. Tambien tenes que modificar la caja porque el ingreso del adelanto no está bien registrado, aunque no se nota bien la imagen, aca no dice que es por el comprobante de adelanto, por lo cual no se va a poder hacer una auditoría para saber cuánto dinero entró por adelantos
+
+Recomiendo:
+Solamente facturar electrónicamente los adelantos, para no tener que modificar tanto, caso contrario tenes que hacer mil ajustes
+
+Si te pagan con un medio electrónico, tarjeta/transferencia/qr que sea como hoy, factura electrónica
