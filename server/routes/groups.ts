@@ -345,7 +345,12 @@ export function registerGroupsRoutes(app: Express) {
         ? existingGuest
         : await storage.createGuest({ firstName, lastName });
 
-      const updates: Record<string, any> = { guestId: realGuest.id };
+      // También actualizar el campo guestName denormalizado en la reserva,
+      // que usan el planning y otras vistas directamente (sin join al guest)
+      const updates: Record<string, any> = {
+        guestId: realGuest.id,
+        guestName: `${lastName} ${firstName}`.trim(),
+      };
       let oldRoomId: string | null = null;
       let newRoomId: string | null = null;
 
