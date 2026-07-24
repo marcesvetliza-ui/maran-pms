@@ -1145,7 +1145,7 @@ export default function GroupDetailPage() {
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};text-align:center;">${idx + 1}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-weight:bold;">${res.room?.roomNumber || "-"}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${getBedLabel(res)}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.guest?.lastName || ""} ${res.guest?.firstName || ""}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.guest?.codigo?.startsWith("GROUP-") ? "" : ((res.guest?.lastName || "") + " " + (res.guest?.firstName || "")).trim()}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${fmtDate(res.checkInDate)}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${lateCheckout ? `${fmtDate(res.checkOutDate)} <span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : fmtDate(res.checkOutDate)}</td>
@@ -1589,9 +1589,9 @@ export default function GroupDetailPage() {
                         <TableCell>
                           <div className="flex items-center gap-1.5">
                             <span>
-                              {res.guestId && res.guest?.firstName
+                              {res.guestId && res.guest?.firstName && !res.guest?.codigo?.startsWith("GROUP-")
                                 ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
-                                : (res as any).guestName || <span className="text-muted-foreground italic">Sin asignar</span>}
+                                : <span className="text-muted-foreground italic">Sin asignar</span>}
                             </span>
                             <button
                               className="opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
@@ -1599,9 +1599,10 @@ export default function GroupDetailPage() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditingPassengerRes(res);
-                                // Pre-fill from real guest if assigned; empty otherwise for a fresh entry
-                                setEditPassengerFirst(res.guestId ? (res.guest?.firstName || "") : "");
-                                setEditPassengerLast(res.guestId ? (res.guest?.lastName || "") : "");
+                                // Pre-fill only from real (non-placeholder) guests
+                                const isRealGuest = res.guestId && !res.guest?.codigo?.startsWith("GROUP-");
+                                setEditPassengerFirst(isRealGuest ? (res.guest?.firstName || "") : "");
+                                setEditPassengerLast(isRealGuest ? (res.guest?.lastName || "") : "");
                               }}
                               data-testid={`button-edit-passenger-${res.id}`}
                             >
@@ -2449,9 +2450,9 @@ export default function GroupDetailPage() {
                         <TableCell className="font-bold">{res.room?.roomNumber}</TableCell>
                         <TableCell>{getBedLabel(res)}</TableCell>
                         <TableCell className="font-medium">
-                          {res.guestId && res.guest?.firstName
+                          {res.guestId && res.guest?.firstName && !res.guest?.codigo?.startsWith("GROUP-")
                             ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
-                            : ((res as any).guestName || <span className="text-muted-foreground italic">Sin asignar</span>)}
+                            : <span className="text-muted-foreground italic">Sin asignar</span>}
                         </TableCell>
                         <TableCell className="text-sm">
                           {res.guest?.documentNumber
