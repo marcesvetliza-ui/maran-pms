@@ -1869,6 +1869,7 @@ function ReservationDetailDialog({
   const [coCompanyId, setCoCompanyId] = useState("");
   const [coAgencyId, setCoAgencyId] = useState("");
   const [coShowFacturar, setCoShowFacturar] = useState(false);
+  const coPendingPaymentIdRef = useRef<string>("");
   const [coPendingInvoice, setCoPendingInvoice] = useState(false);
   const [showFacturarPrompt, setShowFacturarPrompt] = useState(false);
   const [coIsFacturarSolo, setCoIsFacturarSolo] = useState(false);
@@ -1876,6 +1877,7 @@ function ReservationDetailDialog({
   const [uninvoicedWarningAction, setUninvoicedWarningAction] = useState<"facturar" | "checkout" | null>(null);
 
   const openCheckoutWizard = () => {
+    coPendingPaymentIdRef.current = "";
     setCoPayAmount("");
     setCoReceiptType("cierre_habitacion");
     setCoIsFacturarSolo(false);
@@ -1899,6 +1901,7 @@ function ReservationDetailDialog({
   };
 
   const openFacturarSolo = () => {
+    coPendingPaymentIdRef.current = "";
     setCoPayAmount("");
     setCoReceiptType("cierre_habitacion");
     setCoIsFacturarSolo(true);
@@ -1983,9 +1986,17 @@ function ReservationDetailDialog({
   const coAddPaymentMutation = useMutation({
     mutationFn: async (data: { amount: string; method: string; receiptType: string; billingTarget: string; companyId?: string; agencyId?: string }) => {
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-      return apiRequest("POST", "/api/payments", { ...data, reservationId: reservation.id, date: today });
+      const res = await apiRequest("POST", "/api/payments", { ...data, reservationId: reservation.id, date: today });
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
+      // Only track payment ID for ARCA receipt types that will open the invoice dialog
+      const isArca = ["factura_a", "factura_b", "factura_c"].includes(variables.receiptType);
+      if (isArca && data?.id) {
+        coPendingPaymentIdRef.current = String(data.id);
+      } else {
+        coPendingPaymentIdRef.current = "";
+      }
       refetchCharges();
       refetchPayments();
       queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] });
@@ -2481,7 +2492,7 @@ function ReservationDetailDialog({
   const balance = totalToPay - totalPayments;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { setCoWizardStep(0); setCoIsFacturarSolo(false); } onOpenChange(o); }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { setCoWizardStep(0); setCoIsFacturarSolo(false); coPendingPaymentIdRef.current = ""; } onOpenChange(o); }}>
       <DialogContent className="w-[95vw] max-w-[680px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -4401,10 +4412,11 @@ function ReservationDetailDialog({
         return (
           <EmitirFacturaDialog
             open={coShowFacturar}
-            onClose={() => setCoShowFacturar(false)}
+            onClose={() => { setCoShowFacturar(false); coPendingPaymentIdRef.current = ""; }}
             config={billingConfig}
             initialValues={initialValues}
-            onSuccess={() => { setFacturaEmitida(true); setCoShowFacturar(false); }}
+            paymentId={coPendingPaymentIdRef.current || undefined}
+            onSuccess={() => { setFacturaEmitida(true); setCoShowFacturar(false); coPendingPaymentIdRef.current = ""; }}
             cashArea="recepcion"
           />
         );
