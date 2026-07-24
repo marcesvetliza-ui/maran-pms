@@ -11,14 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy manifests first for better layer caching
 COPY package*.json ./
 
-# Force development mode so npm installs devDeps (tsx, vite, etc.)
-# Railway injects NODE_ENV=production which would skip them otherwise
-ENV NODE_ENV=development
-RUN npm install --include=dev --legacy-peer-deps
+# --production=false forces devDep installation regardless of NODE_ENV
+RUN npm install --production=false --legacy-peer-deps
 
 # Copy source and build
+# Call tsx directly to avoid PATH issues with npm run in Railway's environment
 COPY . .
-RUN npm run build
+RUN ./node_modules/.bin/tsx script/build.ts
 
 # ── Stage 2: production ──────────────────────────────────────────────────────
 FROM node:20-slim AS production
