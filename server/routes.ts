@@ -729,7 +729,7 @@ export async function registerRoutes(
   });
 
   // Audit Logs
-  app.get("/api/admin/audit-logs", async (req, res) => {
+  app.get("/api/admin/audit-logs", requireRole(["admin", "manager"]), async (req, res) => {
     try {
       const module = req.query.module as string | undefined;
       const userId = req.query.userId as string | undefined;

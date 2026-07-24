@@ -837,7 +837,8 @@ function NightAuditTab() {
 export default function AdministrationPage() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const isAdminOnly = user?.role === "admin";
+  const [activeTab, setActiveTab] = useState(isAdminOnly ? "dashboard" : "audit");
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [isSettingDialogOpen, setIsSettingDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
@@ -1112,9 +1113,18 @@ export default function AdministrationPage() {
     upsertSettingMutation.mutate(data);
   };
 
-  const filteredLogs = filterModule === "all"
-    ? auditLogs
-    : auditLogs.filter((log) => log.module === filterModule);
+  const [filterFiscalAlerts, setFilterFiscalAlerts] = useState(false);
+
+  const isFiscalAlert = (log: AuditLog) =>
+    typeof log.description === "string" && log.description.startsWith("ALERTA FISCAL");
+
+  const fiscalAlertCount = auditLogs.filter(isFiscalAlert).length;
+
+  const filteredLogs = auditLogs.filter((log) => {
+    if (filterFiscalAlerts) return isFiscalAlert(log);
+    if (filterModule !== "all") return log.module === filterModule;
+    return true;
+  });
 
   const uniqueModules = Array.from(new Set(auditLogs.map((l) => l.module).filter((m): m is string => !!m && typeof m === "string")));
 
@@ -1160,30 +1170,45 @@ export default function AdministrationPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="flex-wrap">
-          <TabsTrigger value="dashboard" data-testid="tab-admin-dashboard">
-            <Activity className="w-4 h-4 mr-2" />
-            Panel
-          </TabsTrigger>
-          <TabsTrigger value="users" data-testid="tab-admin-users">
-            <Users className="w-4 h-4 mr-2" />
-            Usuarios
-          </TabsTrigger>
-          <TabsTrigger value="settings" data-testid="tab-admin-settings">
-            <Settings className="w-4 h-4 mr-2" />
-            Configuracion
-          </TabsTrigger>
-          <TabsTrigger value="bed-types" data-testid="tab-admin-bed-types">
-            <Bed className="w-4 h-4 mr-2" />
-            Tipos de Camaje
-          </TabsTrigger>
+          {isAdminOnly && (
+            <TabsTrigger value="dashboard" data-testid="tab-admin-dashboard">
+              <Activity className="w-4 h-4 mr-2" />
+              Panel
+            </TabsTrigger>
+          )}
+          {isAdminOnly && (
+            <TabsTrigger value="users" data-testid="tab-admin-users">
+              <Users className="w-4 h-4 mr-2" />
+              Usuarios
+            </TabsTrigger>
+          )}
+          {isAdminOnly && (
+            <TabsTrigger value="settings" data-testid="tab-admin-settings">
+              <Settings className="w-4 h-4 mr-2" />
+              Configuracion
+            </TabsTrigger>
+          )}
+          {isAdminOnly && (
+            <TabsTrigger value="bed-types" data-testid="tab-admin-bed-types">
+              <Bed className="w-4 h-4 mr-2" />
+              Tipos de Camaje
+            </TabsTrigger>
+          )}
           <TabsTrigger value="audit" data-testid="tab-admin-audit">
             <History className="w-4 h-4 mr-2" />
             Auditoria
+            {fiscalAlertCount > 0 && !isAdminOnly && (
+              <Badge variant="destructive" className="ml-1 text-xs px-1.5 py-0">
+                {fiscalAlertCount}
+              </Badge>
+            )}
           </TabsTrigger>
-          <TabsTrigger value="cash-config" data-testid="tab-admin-cash-config">
-            <Wallet className="w-4 h-4 mr-2" />
-            Cajas
-          </TabsTrigger>
+          {isAdminOnly && (
+            <TabsTrigger value="cash-config" data-testid="tab-admin-cash-config">
+              <Wallet className="w-4 h-4 mr-2" />
+              Cajas
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-4">
@@ -1576,20 +1601,63 @@ export default function AdministrationPage() {
         <TabsContent value="audit" className="space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <h2 className="text-lg font-semibold">Registro de Auditoria</h2>
-            <Select value={filterModule} onValueChange={setFilterModule}>
-              <SelectTrigger className="w-48" data-testid="select-audit-filter">
-                <SelectValue placeholder="Filtrar por modulo" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los modulos</SelectItem>
-                {uniqueModules.map((mod) => (
-                  <SelectItem key={mod} value={mod}>
-                    {mod.charAt(0).toUpperCase() + mod.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant={filterFiscalAlerts ? "destructive" : "outline"}
+                size="sm"
+                onClick={() => {
+                  setFilterFiscalAlerts(!filterFiscalAlerts);
+                  if (!filterFiscalAlerts) setFilterModule("all");
+                }}
+                data-testid="btn-filter-fiscal-alerts"
+              >
+                <AlertTriangle className="w-4 h-4 mr-1" />
+                Alertas Fiscales
+                {fiscalAlertCount > 0 && (
+                  <Badge variant={filterFiscalAlerts ? "outline" : "destructive"} className="ml-1 text-xs px-1.5 py-0">
+                    {fiscalAlertCount}
+                  </Badge>
+                )}
+              </Button>
+              <Select
+                value={filterModule}
+                onValueChange={(v) => {
+                  setFilterModule(v);
+                  setFilterFiscalAlerts(false);
+                }}
+              >
+                <SelectTrigger className="w-48" data-testid="select-audit-filter">
+                  <SelectValue placeholder="Filtrar por modulo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los modulos</SelectItem>
+                  {uniqueModules.map((mod) => (
+                    <SelectItem key={mod} value={mod}>
+                      {mod.charAt(0).toUpperCase() + mod.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
+          {fiscalAlertCount > 0 && !filterFiscalAlerts && (
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                <span className="font-semibold">
+                  {fiscalAlertCount} Alerta{fiscalAlertCount !== 1 ? "s" : ""} Fiscal{fiscalAlertCount !== 1 ? "es" : ""} pendiente{fiscalAlertCount !== 1 ? "s" : ""}
+                </span>
+                {" — "}Se anularon pagos con facturas electrónicas vinculadas sin emitir Nota de Crédito. Requiere revisión del responsable fiscal.{" "}
+                <button
+                  className="underline font-medium"
+                  onClick={() => setFilterFiscalAlerts(true)}
+                >
+                  Ver alertas
+                </button>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardContent className="pt-6">
@@ -1613,17 +1681,32 @@ export default function AdministrationPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredLogs.map((log) => (
-                      <TableRow key={log.id} data-testid={`row-audit-${log.id}`}>
+                    {filteredLogs.map((log) => {
+                      const isAlert = isFiscalAlert(log);
+                      return (
+                      <TableRow
+                        key={log.id}
+                        data-testid={`row-audit-${log.id}`}
+                        className={isAlert ? "bg-destructive/10 border-l-4 border-l-destructive" : undefined}
+                      >
                         <TableCell className="text-muted-foreground whitespace-nowrap">
                           {format(new Date(log.timestamp), "dd/MM/yyyy HH:mm:ss", { locale: es })}
                         </TableCell>
                         <TableCell className="font-medium">{log.userName || "Sistema"}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{actionLabels[log.action] || log.action}</Badge>
+                          {isAlert ? (
+                            <Badge variant="destructive" className="flex items-center gap-1 w-fit">
+                              <AlertTriangle className="w-3 h-3" />
+                              Alerta Fiscal
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline">{actionLabels[log.action] || log.action}</Badge>
+                          )}
                         </TableCell>
                         <TableCell className="capitalize">{log.module}</TableCell>
-                        <TableCell>{log.description}</TableCell>
+                        <TableCell className={isAlert ? "font-medium text-destructive" : undefined}>
+                          {log.description}
+                        </TableCell>
                         <TableCell className="text-muted-foreground max-w-xs truncate">
                           {log.details || "-"}
                         </TableCell>
@@ -1631,7 +1714,8 @@ export default function AdministrationPage() {
                           {log.ipAddress || "-"}
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                     {filteredLogs.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center text-muted-foreground py-8">

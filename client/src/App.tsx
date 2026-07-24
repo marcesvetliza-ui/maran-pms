@@ -173,12 +173,13 @@ function getRoleHomePage(role: string): string {
 function AdminRoute({ component: Component }: { component: React.ComponentType }) {
   const { user } = useAuth();
   const [, navigate] = useLocation();
+  const allowed = user?.role === "admin" || user?.role === "manager";
   useEffect(() => {
-    if (user && user.role !== "admin") {
+    if (user && !allowed) {
       navigate(getRoleHomePage(user.role));
     }
-  }, [user, navigate]);
-  if (!user || user.role !== "admin") return null;
+  }, [user, allowed, navigate]);
+  if (!user || !allowed) return null;
   return <Component />;
 }
 

@@ -2276,13 +2276,23 @@ function ReservationDetailDialog({
 
   const anularPaymentMutation = useMutation({
     mutationFn: async ({ id, motivo }: { id: string; motivo: string }) => {
-      return apiRequest("PATCH", `/api/payments/${id}/anular`, { motivoAnulacion: motivo });
+      const res = await apiRequest("PATCH", `/api/payments/${id}/anular`, { motivoAnulacion: motivo });
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       refetchPayments();
       setAnularTarget(null);
       setMotivoAnulacion("");
-      toast({ title: "Pago anulado", description: "El pago ha sido anulado del registro." });
+      if (data?.notaCreditoGenerada === false) {
+        toast({
+          title: "⚠️ Alerta Fiscal",
+          description: "El pago fue anulado pero la factura electrónica vinculada NO fue compensada con una Nota de Crédito. Este caso quedó registrado en el log de auditoría. Se requiere acción del responsable fiscal.",
+          variant: "destructive",
+          duration: 12000,
+        });
+      } else {
+        toast({ title: "Pago anulado", description: "El pago ha sido anulado del registro." });
+      }
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error?.message || "No se pudo anular el pago", variant: "destructive" });
