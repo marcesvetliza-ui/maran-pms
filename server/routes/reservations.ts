@@ -1908,6 +1908,17 @@ export function registerReservationsRoutes(app: Express) {
           `Pago anulado: $${pay.amount} (${pay.method}) — ${motivoAnulacion}`,
           { entityType: "payment", entityId: req.params.id }
         );
+
+        // Flag in audit log when the payment had an AFIP invoice ref but no NC was generated
+        if (pay.invoice_ref && !notaCreditoGenerada) {
+          try {
+            await audit(req, "update", "payments",
+              `ALERTA FISCAL: pago anulado con factura electrónica vinculada sin Nota de Crédito — invoiceRef presente — ${motivoAnulacion}`,
+              { entityType: "payment", entityId: req.params.id, details: { invoiceRef: pay.invoice_ref } }
+            );
+          } catch (e) { console.warn("[anular-pago] audit-fiscal-warning failed (non-fatal):", e); }
+        }
+
         return res.json({ ...updated.rows[0], notaCreditoGenerada });
       }
 

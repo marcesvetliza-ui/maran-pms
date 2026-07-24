@@ -2010,6 +2010,7 @@ function ReservationDetailDialog({
   const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [anularEmitirNC, setAnularEmitirNC] = useState(false);
+  const [anularSinNCPending, setAnularSinNCPending] = useState(false);
   const [invoicingPaymentId, setInvoicingPaymentId] = useState<string | null>(null);
   const [showAdvanceFacturar, setShowAdvanceFacturar] = useState(false);
   const [ncForInvoiceId, setNcForInvoiceId] = useState<number | null>(null);
@@ -3933,7 +3934,12 @@ function ReservationDetailDialog({
                         size="icon" 
                         variant="ghost" 
                         className="h-6 w-6"
-                        onClick={() => { setAnularTarget({ type: "pago", id: payment.id }); setMotivoAnulacion(""); setAnularEmitirNC(false); }}
+                        onClick={() => {
+                          const inv = (() => { try { return (payment as any).invoiceRef ? JSON.parse((payment as any).invoiceRef) : null; } catch { return null; } })();
+                          setAnularTarget({ type: "pago", id: payment.id });
+                          setMotivoAnulacion("");
+                          setAnularEmitirNC(!!inv); // auto-check NC when payment has invoice
+                        }}
                         title="Anular pago"
                         data-testid={`button-anular-payment-${payment.id}`}
                       >
@@ -4719,6 +4725,11 @@ function ReservationDetailDialog({
                   if (anularTarget.type === "cargo") {
                     anularChargeMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
                   } else {
+                    // If payment has an invoice but NC is not checked, require explicit second confirmation
+                    if (anularInvoiceRef && !anularEmitirNC) {
+                      setAnularSinNCPending(true);
+                      return;
+                    }
                     anularPaymentMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion }, {
                       onSuccess: () => {
                         if (anularEmitirNC && anularInvoiceRef?.id) {
@@ -4737,6 +4748,56 @@ function ReservationDetailDialog({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        );
+      })()}
+
+      {/* Confirmación extra: anular pago con factura electrónica sin emitir NC */}
+      {(() => {
+        // Recover anularInvoiceRef in this scope for the alert dialog actions
+        const _anularPayment = anularTarget?.type === "pago" ? payments?.find((p: any) => p.id === anularTarget.id) : null;
+        const _anularInvoiceRef = (() => { try { return (_anularPayment as any)?.invoiceRef ? JSON.parse((_anularPayment as any).invoiceRef) : null; } catch { return null; } })();
+        return (
+          <AlertDialog open={anularSinNCPending} onOpenChange={(o) => { if (!o) setAnularSinNCPending(false); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                  <AlertTriangle className="h-5 w-5" />
+                  ¿Anular sin Nota de Crédito?
+                </AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-2 text-sm">
+                    <p>Este anticipo tiene una factura electrónica emitida:</p>
+                    {_anularInvoiceRef && (
+                      <p className="font-medium text-foreground">
+                        {_anularInvoiceRef.tipo_comprobante} {String(_anularInvoiceRef.punto_venta ?? "").padStart(4, "0")}-{String(_anularInvoiceRef.numero ?? "").padStart(8, "0")}
+                        {_anularInvoiceRef.cae ? ` — CAE: ${_anularInvoiceRef.cae}` : ""}
+                      </p>
+                    )}
+                    <p className="text-destructive font-medium">
+                      Si continúa sin emitir una Nota de Crédito, el comprobante quedará activo en AFIP sin su contrapartida, generando una inconsistencia fiscal.
+                    </p>
+                    <p>Se recomienda volver y marcar "Emitir Nota de Crédito al anular".</p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setAnularSinNCPending(false)}>
+                  Volver (emitir NC)
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    setAnularSinNCPending(false);
+                    if (!anularTarget) return;
+                    anularPaymentMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
+                  }}
+                  data-testid="button-confirm-anular-sin-nc"
+                >
+                  Confirmar sin NC (riesgo fiscal)
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         );
       })()}
 
