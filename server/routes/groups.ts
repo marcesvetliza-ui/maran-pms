@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
 import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks } from "@shared/schema";
-import { eq, and, ilike } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
@@ -339,15 +339,10 @@ export function registerGroupsRoutes(app: Express) {
       const firstName = guestFirstName.trim();
       const lastName = (guestLastName || "").trim();
 
-      // Find or create real guest — never reuse a placeholder guest
-      const placeholderPrefix = "GROUP-";
-      const [existingGuest] = await db.select().from(guestsTable).where(
-        and(ilike(guestsTable.firstName, firstName), ilike(guestsTable.lastName, lastName))
-      ).limit(1);
-
-      const realGuest = (existingGuest && !existingGuest.codigo?.startsWith(placeholderPrefix))
-        ? existingGuest
-        : await storage.createGuest({ firstName, lastName });
+      // Always create a fresh guest per reservation — never reuse by name.
+      // Reusing a guest by name-match means two rooms share the same guestId;
+      // subsequent edits to one room appear to "replicate" to the other.
+      const realGuest = await storage.createGuest({ firstName, lastName } as any);
 
       // También actualizar el campo guestName denormalizado en la reserva,
       // que usan el planning y otras vistas directamente (sin join al guest)

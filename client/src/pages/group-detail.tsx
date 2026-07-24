@@ -1591,7 +1591,7 @@ export default function GroupDetailPage() {
                             <span>
                               {res.guestId && res.guest?.firstName && !res.guest?.codigo?.startsWith("GROUP-")
                                 ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
-                                : <span className="text-muted-foreground italic">Sin asignar</span>}
+                                : (res as any).guestName || <span className="text-muted-foreground italic">{group?.name || "Sin asignar"}</span>}
                             </span>
                             <button
                               className="opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
@@ -2452,7 +2452,7 @@ export default function GroupDetailPage() {
                         <TableCell className="font-medium">
                           {res.guestId && res.guest?.firstName && !res.guest?.codigo?.startsWith("GROUP-")
                             ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
-                            : <span className="text-muted-foreground italic">Sin asignar</span>}
+                            : (res as any).guestName || <span className="text-muted-foreground italic">{group?.name || "Sin asignar"}</span>}
                         </TableCell>
                         <TableCell className="text-sm">
                           {res.guest?.documentNumber
