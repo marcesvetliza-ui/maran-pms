@@ -11,9 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy manifests first for better layer caching
 COPY package*.json ./
 
-# Install everything (devDeps needed for the build step)
-# npm install is more memory-efficient than npm ci on constrained containers
-RUN npm install --legacy-peer-deps
+# Force development mode so npm installs devDeps (tsx, vite, etc.)
+# Railway injects NODE_ENV=production which would skip them otherwise
+ENV NODE_ENV=development
+RUN npm install --include=dev --legacy-peer-deps
 
 # Copy source and build
 COPY . .
