@@ -120,6 +120,7 @@ export default function CheckOutPage() {
   const [showRetencion, setShowRetencion] = useState(false);
   const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
   const [retencionMonto, setRetencionMonto] = useState("");
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
 
   const handleToggleItem = (id: string, amount: number) => {
     const next = new Set(selectedItemIds);
@@ -297,13 +298,6 @@ export default function CheckOutPage() {
       });
       setCheckoutComplete(true);
       setWizardStep(3);
-      if (pendingFacturaTipoRef.current) {
-        setFacturaInitialValues({
-          ...buildFacturaInitialValues(),
-        });
-        setShowFacturar(true);
-        pendingFacturaTipoRef.current = "";
-      }
     },
     onError: async (error: any) => {
       let message = "No se pudo realizar el check-out. Intente nuevamente.";
@@ -397,13 +391,23 @@ export default function CheckOutPage() {
     setRetencionTipo("iibb");
   };
 
-  const cancelWizard = () => {
+  const doCancel = () => {
     setSelectedReservation(null);
     setWizardStep(0);
     setCheckoutComplete(false);
     setFinalSummary(null);
     pendingFacturaTipoRef.current = "";
     setReceiptTypeForFreeCheckout("cierre_habitacion");
+    setCancelConfirmOpen(false);
+  };
+
+  const cancelWizard = () => {
+    // Steps 2 and 3 before checkout completes: ask for confirmation first
+    if (!checkoutComplete && wizardStep >= 2) {
+      setCancelConfirmOpen(true);
+      return;
+    }
+    doCancel();
   };
 
   const todayDisplay = new Date().toLocaleDateString("es-ES", {
@@ -717,7 +721,6 @@ export default function CheckOutPage() {
                           <SelectItem value="ticket">Ticket</SelectItem>
                           <SelectItem value="factura_a">Factura A</SelectItem>
                           <SelectItem value="factura_b">Factura B</SelectItem>
-                          <SelectItem value="factura_c">Factura C</SelectItem>
                           <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
                         </SelectContent>
                       </Select>
@@ -1112,7 +1115,11 @@ export default function CheckOutPage() {
                     variant="destructive"
                     onClick={() => {
                       setDebtWarningDialog(false);
-                      selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+                      if (pendingFacturaTipoRef.current) {
+                        setWizardStep(3);
+                      } else {
+                        selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+                      }
                     }}
                     data-testid="button-confirm-checkout-with-debt"
                   >
@@ -1130,8 +1137,13 @@ export default function CheckOutPage() {
                 onClick={() => {
                   if (isEarlyCheckout) { setEarlyCheckoutDialog(true); return; }
                   if (isHistorical && balance > 0.01) { setDebtWarningDialog(true); return; }
-                  if (balance <= 0.01 && ["factura_a", "factura_b", "factura_c"].includes(receiptTypeForFreeCheckout)) {
+                  if (balance <= 0.01 && ["factura_a", "factura_b"].includes(receiptTypeForFreeCheckout)) {
                     pendingFacturaTipoRef.current = receiptTypeForFreeCheckout;
+                  }
+                  // Fiscal receipt: go to invoice step first — checkout happens only after invoice is emitted
+                  if (pendingFacturaTipoRef.current) {
+                    setWizardStep(3);
+                    return;
                   }
                   selectedReservation && checkOutMutation.mutate(selectedReservation.id);
                 }}
@@ -1143,6 +1155,48 @@ export default function CheckOutPage() {
                 {checkOutMutation.isPending ? (
                   <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
                 ) : isHistorical ? "Cerrar Habitación Histórica" : isEarlyCheckout ? "Confirmar salida anticipada" : "Confirmar Check-out"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3 — pre-checkout: invoice must be emitted before checkout is committed */}
+        {wizardStep === 3 && !checkoutComplete && (
+          <div className="grid gap-4">
+            <Card className="border-blue-200 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800">
+              <CardContent className="flex flex-col items-center py-8 gap-3 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40">
+                  <Receipt className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400">
+                  Paso final: emitir comprobante fiscal
+                </h3>
+                <p className="text-sm text-muted-foreground max-w-sm">
+                  Seleccionaste una factura electrónica. El check-out y la liberación de la habitación se registrarán{" "}
+                  <strong>una vez emitido el comprobante</strong>. Si cancelás aquí, la habitación queda ocupada sin cambios.
+                </p>
+                <div className="mt-1">
+                  <Badge variant="secondary" className="text-sm">
+                    {pendingFacturaTipoRef.current === "factura_a" ? "Factura A" : "Factura B"}
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+            <div className="flex justify-between">
+              <Button variant="outline" onClick={() => setWizardStep(2)} data-testid="button-back-to-payment">
+                <ChevronLeft className="h-4 w-4 mr-1" /> Volver al pago
+              </Button>
+              <Button
+                onClick={() => {
+                  setFacturaInitialValues(buildFacturaInitialValues());
+                  setShowFacturar(true);
+                }}
+                data-testid="button-emit-and-checkout"
+              >
+                <Receipt className="h-4 w-4 mr-2" />
+                Emitir{" "}
+                {pendingFacturaTipoRef.current === "factura_a" ? "Factura A" : "Factura B"}{" "}
+                y confirmar check-out
               </Button>
             </div>
           </div>
@@ -1236,10 +1290,39 @@ export default function CheckOutPage() {
           </div>
         )}
       </div>
+      {/* Cancel mid-checkout confirmation */}
+      <Dialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+              <AlertCircle className="h-5 w-5" /> ¿Salir sin completar el check-out?
+            </DialogTitle>
+            <DialogDescription>
+              Si salís ahora no se registrará ningún cambio. La habitación permanecerá ocupada y no se tomará ningún pago de cierre.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelConfirmOpen(false)}>
+              Continuar el proceso
+            </Button>
+            <Button variant="destructive" onClick={doCancel} data-testid="button-confirm-cancel-wizard">
+              Salir sin confirmar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {showFacturar && (
         <EmitirFacturaDialog
           open={showFacturar}
           onClose={() => setShowFacturar(false)}
+          onSuccess={() => {
+            // Only trigger checkout when invoice was emitted as part of the checkout flow
+            if (!checkoutComplete) {
+              pendingFacturaTipoRef.current = "";
+              selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+            }
+          }}
           config={billingConfig}
           initialValues={facturaInitialValues}
           requiresEmission={true}
@@ -1535,7 +1618,11 @@ export default function CheckOutPage() {
             <Button
               onClick={() => {
                 setEarlyCheckoutDialog(false);
-                selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+                if (pendingFacturaTipoRef.current) {
+                  setWizardStep(3);
+                } else {
+                  selectedReservation && checkOutMutation.mutate(selectedReservation.id);
+                }
               }}
               disabled={checkOutMutation.isPending}
               data-testid="button-confirm-early-checkout"
