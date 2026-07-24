@@ -264,6 +264,7 @@ export default function SpaPage() {
   const [chargeQuantity, setChargeQuantity] = useState("1");
   const [chargeType, setChargeType] = useState("service");
   const [receiptType, setReceiptType] = useState("");
+  const [folioRoomChargeId, setFolioRoomChargeId] = useState("");
   const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
   const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
@@ -602,6 +603,7 @@ export default function SpaPage() {
       setIsFolioOpen(false);
       setSelectedAppointment(null);
       setReceiptType("");
+      setFolioRoomChargeId("");
     },
     onError: (error: Error) => {
       toast({ title: error.message, variant: "destructive" });
@@ -836,6 +838,11 @@ export default function SpaPage() {
   const handleOpenFolio = () => {
     setSelectedAppointment(selectedAppointment);
     setIsFolioOpen(true);
+    // Pre-fill room charge with the appointment's linked reservation, if any
+    if (selectedAppointment?.reservationId) {
+      setFolioRoomChargeId(selectedAppointment.reservationId);
+      setReceiptType("cargo_habitacion");
+    }
   };
 
   const getAppointmentForSlot = (cabinId: string, slotTime: string): SpaAppointment | null => {
@@ -2244,27 +2251,72 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     {selectedAccount.payments.some(p => p.method === "room_charge") ? (
                       <p className="text-sm text-muted-foreground text-center">Cargo a habitación. Se emitirá Voucher automáticamente.</p>
                     ) : (
-                      <div>
-                        <label className="text-sm font-medium">Comprobante</label>
-                        <Select value={receiptType} onValueChange={setReceiptType}>
-                          <SelectTrigger data-testid="select-receipt-type">
-                            <SelectValue placeholder="Seleccionar comprobante" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="cierre_spa">Cierre de SPA</SelectItem>
-                            <SelectItem value="factura_a">Factura A</SelectItem>
-                            <SelectItem value="factura_b">Factura B</SelectItem>
-                          </SelectContent>
-                        </Select>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-sm font-medium">Comprobante</label>
+                          <Select value={receiptType} onValueChange={(v) => { setReceiptType(v); if (v !== "cargo_habitacion") setFolioRoomChargeId(""); }}>
+                            <SelectTrigger data-testid="select-receipt-type">
+                              <SelectValue placeholder="Seleccionar comprobante" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cierre_spa">Cierre de SPA</SelectItem>
+                              <SelectItem value="factura_a">Factura A</SelectItem>
+                              <SelectItem value="factura_b">Factura B</SelectItem>
+                              <SelectItem value="cargo_habitacion">Cargo a Habitación</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {receiptType === "cargo_habitacion" && (
+                          <div>
+                            <label className="text-sm font-medium">Habitación</label>
+                            <Select
+                              value={folioRoomChargeId}
+                              onValueChange={setFolioRoomChargeId}
+                            >
+                              <SelectTrigger data-testid="select-folio-room">
+                                <SelectValue placeholder="Seleccionar habitación" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {checkedInReservations
+                                  .filter(res => res.id)
+                                  .sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0"))
+                                  .map((res) => (
+                                    <SelectItem key={res.id} value={res.id}>
+                                      Hab. {res.room?.roomNumber} — {res.guest?.lastName} {res.guest?.firstName}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
                       </div>
                     )}
                     <Button
                       className="w-full"
-                      disabled={accountBalance > 0 || (!receiptType && !selectedAccount.payments.some(p => p.method === "room_charge")) || closeAccountMutation.isPending}
-                      onClick={() => closeAccountMutation.mutate({
-                        accountId: selectedAccount.id,
-                        receiptType: selectedAccount.payments.some(p => p.method === "room_charge") ? "cierre_spa" : receiptType,
-                      })}
+                      disabled={
+                        (receiptType !== "cargo_habitacion" && accountBalance > 0) ||
+                        (!receiptType && !selectedAccount.payments.some(p => p.method === "room_charge")) ||
+                        (receiptType === "cargo_habitacion" && !folioRoomChargeId) ||
+                        closeAccountMutation.isPending ||
+                        addPaymentMutation.isPending
+                      }
+                      onClick={() => {
+                        if (receiptType === "cargo_habitacion") {
+                          // Register room charge for full balance, onSuccess chains to closeAccount
+                          addPaymentMutation.mutate({
+                            accountId: selectedAccount.id,
+                            amount: accountBalance.toString(),
+                            method: "room_charge",
+                            isAdvance: false,
+                            reservationId: folioRoomChargeId,
+                          });
+                        } else {
+                          closeAccountMutation.mutate({
+                            accountId: selectedAccount.id,
+                            receiptType: selectedAccount.payments.some(p => p.method === "room_charge") ? "cierre_spa" : receiptType,
+                          });
+                        }
+                      }}
                       data-testid="button-close-folio"
                     >
                       {closeAccountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
