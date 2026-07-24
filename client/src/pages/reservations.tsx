@@ -49,7 +49,7 @@ import {
   Clock,
   Undo2,
 } from "lucide-react";
-import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
+import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
 import { Button } from "@/components/ui/button";
@@ -2008,6 +2008,10 @@ function ReservationDetailDialog({
   const [bulkTransferNote, setBulkTransferNote] = useState("");
   const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
+  const [anularEmitirNC, setAnularEmitirNC] = useState(false);
+  const [invoicingPaymentId, setInvoicingPaymentId] = useState<string | null>(null);
+  const [showAdvanceFacturar, setShowAdvanceFacturar] = useState(false);
+  const [ncForInvoiceId, setNcForInvoiceId] = useState<number | null>(null);
   const [restaurantVoucherOrderNum, setRestaurantVoucherOrderNum] = useState<string | null>(null);
   const [newCharge, setNewCharge] = useState({
     description: "",
@@ -2282,6 +2286,22 @@ function ReservationDetailDialog({
     },
   });
 
+  const linkPaymentInvoiceMutation = useMutation({
+    mutationFn: async ({ paymentId, invoiceData }: { paymentId: string; invoiceData: any }) => {
+      const res = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData });
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchPayments();
+      setInvoicingPaymentId(null);
+      setShowAdvanceFacturar(false);
+      toast({ title: "Factura vinculada", description: "La factura electrónica fue vinculada al anticipo." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error vinculando factura", description: error?.message, variant: "destructive" });
+    },
+  });
+
   const transferChargeMutation = useMutation({
     mutationFn: async ({ chargeId, targetReservationId }: { chargeId: string; targetReservationId: string }) => {
       return apiRequest("POST", `/api/charges/${chargeId}/transfer`, { targetReservationId });
@@ -2389,9 +2409,10 @@ function ReservationDetailDialog({
     }
 
     let successCount = 0;
+    let lastPaymentId: string | null = null;
     for (const row of validRows) {
       try {
-        await addPaymentMutation.mutateAsync({
+        const res = await addPaymentMutation.mutateAsync({
           amount: row.amount,
           method: row.method as PaymentMethod,
           reference: row.reference || undefined,
@@ -2402,6 +2423,11 @@ function ReservationDetailDialog({
           ...(row.companyId ? { companyId: row.companyId } : {}),
           ...(row.agencyId ? { agencyId: row.agencyId } : {}),
         } as any);
+        // Capture the created payment's ID so we can optionally link an invoice
+        try {
+          const saved = await (res as any).clone().json();
+          if (saved?.id) lastPaymentId = saved.id;
+        } catch { /* ignore */ }
         successCount++;
       } catch {
         if (successCount > 0) {
@@ -2412,6 +2438,10 @@ function ReservationDetailDialog({
     }
     setShowAddPayment(false);
     setPaymentRows([{ amount: "", method: "efectivo", reference: "", billingTarget: "guest" }]);
+    // Only offer invoice linking when a single advance was registered (clear intent)
+    if (successCount === 1 && lastPaymentId) {
+      setInvoicingPaymentId(lastPaymentId);
+    }
   };
 
   const categoryLabels: Record<string, string> = {
@@ -2474,7 +2504,12 @@ function ReservationDetailDialog({
 
             {/* Step 1: Resumen */}
             {coWizardStep === 1 && (() => {
-              const totalPaymentsAmt = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+              const activePayments = payments?.filter((p: any) => p.status !== "anulado") || [];
+              const invoicedPayments = activePayments.filter((p: any) => !!p.invoiceRef);
+              const nonInvoicedPayments = activePayments.filter((p: any) => !p.invoiceRef);
+              const invoicedAmt = invoicedPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+              const nonInvoicedAmt = nonInvoicedPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+              const totalPaymentsAmt = invoicedAmt + nonInvoicedAmt;
               const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
               const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
               const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
@@ -2519,10 +2554,30 @@ function ReservationDetailDialog({
                       ))}
                     </div>
                     <div className="divide-y border-t bg-muted/20">
-                      <div className="flex justify-between items-center px-3 py-2 text-sm text-green-600 dark:text-green-400">
-                        <span>Pagado</span>
-                        <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                      </div>
+                      {invoicedAmt > 0 && (
+                        <div className="flex justify-between items-center px-3 py-1.5 text-xs text-green-600 dark:text-green-400">
+                          <span className="flex items-center gap-1"><FileText className="h-3 w-3" />Anticipos facturados</span>
+                          <span>-${invoicedAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      {nonInvoicedAmt > 0 && (
+                        <div className="flex justify-between items-center px-3 py-1.5 text-xs text-green-600 dark:text-green-400">
+                          <span>Anticipos s/factura</span>
+                          <span>-${nonInvoicedAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      {totalPaymentsAmt > 0 && invoicedAmt > 0 && nonInvoicedAmt > 0 && (
+                        <div className="flex justify-between items-center px-3 py-1.5 text-sm text-green-600 dark:text-green-400 font-medium">
+                          <span>Total pagado</span>
+                          <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      {totalPaymentsAmt > 0 && !(invoicedAmt > 0 && nonInvoicedAmt > 0) && (
+                        <div className="flex justify-between items-center px-3 py-2 text-sm text-green-600 dark:text-green-400">
+                          <span>Pagado</span>
+                          <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-center px-3 py-2 font-bold text-sm">
                         <span>Saldo</span>
                         <span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
@@ -2541,15 +2596,33 @@ function ReservationDetailDialog({
 
             {/* Step 2: Pago + Comprobante */}
             {coWizardStep === 2 && (() => {
-              const totalPayments = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+              const activePayments2 = payments?.filter((p: any) => p.status !== "anulado") || [];
+              const invoicedPayments2 = activePayments2.filter((p: any) => !!p.invoiceRef);
+              const nonInvoicedPayments2 = activePayments2.filter((p: any) => !p.invoiceRef);
+              const invoicedAmt2 = invoicedPayments2.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+              const nonInvoicedAmt2 = nonInvoicedPayments2.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+              const totalPaymentsAll = invoicedAmt2 + nonInvoicedAmt2;
               const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
               const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
               const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
               const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
               const totalAmount = subtotalRoom + totalChargesAmt;
-              const balance = totalAmount - totalPayments;
+              // Invoiced advances are already settled via their own ARCA invoice; 
+              // non-invoiced ones will be covered by the checkout invoice.
+              // Balance to collect NOW = totalAmount - all active payments
+              const balance = totalAmount - totalPaymentsAll;
               return (
                 <div className="space-y-3">
+                  {nonInvoicedAmt2 > 0 && (
+                    <div className="p-2 bg-green-50/80 dark:bg-green-950/20 border border-green-200 dark:border-green-700 rounded-md text-xs text-green-800 dark:text-green-300">
+                      <span className="font-medium">Anticipos s/factura:</span> ${nonInvoicedAmt2.toLocaleString("es-AR", { minimumFractionDigits: 2 })} — incluidos en el comprobante de salida
+                    </div>
+                  )}
+                  {invoicedAmt2 > 0 && (
+                    <div className="p-2 bg-blue-50/80 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-700 rounded-md text-xs text-blue-800 dark:text-blue-300">
+                      <span className="font-medium flex items-center gap-1"><FileText className="h-3 w-3" />Anticipos facturados:</span> ${invoicedAmt2.toLocaleString("es-AR", { minimumFractionDigits: 2 })} — ya cubiertos por su propia factura
+                    </div>
+                  )}
                   {balance > 0 && (
                     <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
                       Saldo pendiente: <span className="font-bold">${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
@@ -3829,11 +3902,20 @@ function ReservationDetailDialog({
               <div className="divide-y max-h-[120px] overflow-y-auto">
                 {payments?.map((payment) => {
                   const isAnulado = (payment as any).status === "anulado";
+                  const invoiceRef = (() => { try { return (payment as any).invoiceRef ? JSON.parse((payment as any).invoiceRef) : null; } catch { return null; } })();
+                  const invoiceBadgeText = invoiceRef
+                    ? `${invoiceRef.tipo_comprobante ?? "FAC"} ${String(invoiceRef.punto_venta ?? "").padStart(4, "0")}-${String(invoiceRef.numero ?? "").padStart(8, "0")}`
+                    : null;
                   return (
                   <div key={payment.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`payment-row-${payment.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline" className="text-xs">{paymentMethodLabels[payment.method]}</Badge>
                       {isAnulado && <Badge variant="destructive" className="text-xs">ANULADO</Badge>}
+                      {invoiceBadgeText && !isAnulado && (
+                        <Badge variant="secondary" className="text-xs text-blue-700 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
+                          <FileText className="h-2.5 w-2.5 mr-1" />{invoiceBadgeText}
+                        </Badge>
+                      )}
                       {(payment as any).billingTarget === "company" && (
                         <Badge variant="secondary" className="text-xs">Empresa</Badge>
                       )}
@@ -3847,7 +3929,7 @@ function ReservationDetailDialog({
                         size="icon" 
                         variant="ghost" 
                         className="h-6 w-6"
-                        onClick={() => { setAnularTarget({ type: "pago", id: payment.id }); setMotivoAnulacion(""); }}
+                        onClick={() => { setAnularTarget({ type: "pago", id: payment.id }); setMotivoAnulacion(""); setAnularEmitirNC(false); }}
                         title="Anular pago"
                         data-testid={`button-anular-payment-${payment.id}`}
                       >
@@ -3864,6 +3946,47 @@ function ReservationDetailDialog({
                   </div>
                 )}
               </div>
+
+              {/* Prompt to emit invoice for a just-registered advance */}
+              {invoicingPaymentId && (() => {
+                const p = payments?.find((x: any) => x.id === invoicingPaymentId);
+                const g = reservation.guest;
+                const advanceInitial: EmitirFacturaInitialValues = {
+                  razonSocial: g ? `${g.lastName} ${g.firstName}` : "",
+                  cuit: g?.cuit || undefined,
+                  dni: g?.documentNumber || undefined,
+                  items: p ? [{ descripcion: `Anticipo — Reserva ${reservation.reservationCode}`, precioUnitario: parseFloat(p.amount) }] : [],
+                };
+                return (
+                  <div className="p-3 border-t bg-blue-50/60 dark:bg-blue-950/20 flex items-start gap-3">
+                    <FileText className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-blue-800 dark:text-blue-300">Anticipo registrado</p>
+                      <p className="text-xs text-blue-700 dark:text-blue-400">¿Emitir factura electrónica por este anticipo?</p>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setInvoicingPaymentId(null)}>Omitir</Button>
+                      <Button size="sm" className="h-7 text-xs" onClick={() => setShowAdvanceFacturar(true)}>Emitir</Button>
+                    </div>
+                    {showAdvanceFacturar && (
+                      <EmitirFacturaDialog
+                        open={showAdvanceFacturar}
+                        onClose={() => setShowAdvanceFacturar(false)}
+                        config={billingConfig}
+                        initialValues={advanceInitial}
+                        onSuccess={(invoiceData) => {
+                          if (invoicingPaymentId && invoiceData) {
+                            linkPaymentInvoiceMutation.mutate({ paymentId: invoicingPaymentId, invoiceData });
+                          } else {
+                            setInvoicingPaymentId(null);
+                          }
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="flex justify-between p-3 border-t text-sm font-medium">
                 <span>Total Pagado</span>
                 <span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span>
@@ -4408,52 +4531,95 @@ function ReservationDetailDialog({
       </Dialog>
 
       {/* Anular Cargo / Pago Dialog */}
-      <Dialog open={anularTarget !== null} onOpenChange={(open) => {
-        if (!open) { setAnularTarget(null); setMotivoAnulacion(""); }
-      }}>
-        <DialogContent className="w-[95vw] max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              Anular {anularTarget?.type === "cargo" ? "Cargo" : "Pago"}
-            </DialogTitle>
-            <DialogDescription>
-              Esta acción anula el registro. Seguirá visible en el folio con estado ANULADO y no afectará los totales.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <Label htmlFor="motivo-anulacion">Motivo de anulación (opcional)</Label>
-            <Textarea
-              id="motivo-anulacion"
-              placeholder="Ej: Error de carga, duplicado..."
-              value={motivoAnulacion}
-              onChange={(e) => setMotivoAnulacion(e.target.value)}
-              rows={3}
-              data-testid="input-motivo-anulacion"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setAnularTarget(null); setMotivoAnulacion(""); }}>
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (!anularTarget) return;
-                if (anularTarget.type === "cargo") {
-                  anularChargeMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
-                } else {
-                  anularPaymentMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
-                }
-              }}
-              disabled={anularChargeMutation.isPending || anularPaymentMutation.isPending}
-              data-testid="button-confirm-anular"
-            >
-              {(anularChargeMutation.isPending || anularPaymentMutation.isPending) ? "Anulando..." : "Confirmar Anulación"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {(() => {
+        const anularPayment = anularTarget?.type === "pago"
+          ? payments?.find((p: any) => p.id === anularTarget.id)
+          : null;
+        const anularInvoiceRef = (() => {
+          try { return (anularPayment as any)?.invoiceRef ? JSON.parse((anularPayment as any).invoiceRef) : null; } catch { return null; }
+        })();
+        return (
+        <Dialog open={anularTarget !== null} onOpenChange={(open) => {
+          if (!open) { setAnularTarget(null); setMotivoAnulacion(""); setAnularEmitirNC(false); }
+        }}>
+          <DialogContent className="w-[95vw] max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+                Anular {anularTarget?.type === "cargo" ? "Cargo" : "Pago"}
+              </DialogTitle>
+              <DialogDescription>
+                Esta acción anula el registro. Seguirá visible en el folio con estado ANULADO y no afectará los totales.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              {anularInvoiceRef && (
+                <div className="p-2.5 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-300 space-y-2">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <FileText className="h-3.5 w-3.5" />
+                    Este anticipo tiene factura electrónica vinculada
+                  </div>
+                  <p className="text-amber-700 dark:text-amber-400">
+                    {anularInvoiceRef.tipo_comprobante} {String(anularInvoiceRef.punto_venta ?? "").padStart(4, "0")}-{String(anularInvoiceRef.numero ?? "").padStart(8, "0")}
+                    {anularInvoiceRef.cae ? ` — CAE: ${anularInvoiceRef.cae}` : ""}
+                  </p>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={anularEmitirNC}
+                      onChange={(e) => setAnularEmitirNC(e.target.checked)}
+                      className="rounded border-amber-400"
+                    />
+                    <span>Emitir Nota de Crédito al anular</span>
+                  </label>
+                </div>
+              )}
+              <Label htmlFor="motivo-anulacion">Motivo de anulación (opcional)</Label>
+              <Textarea
+                id="motivo-anulacion"
+                placeholder="Ej: Error de carga, duplicado..."
+                value={motivoAnulacion}
+                onChange={(e) => setMotivoAnulacion(e.target.value)}
+                rows={3}
+                data-testid="input-motivo-anulacion"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setAnularTarget(null); setMotivoAnulacion(""); setAnularEmitirNC(false); }}>
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (!anularTarget) return;
+                  if (anularTarget.type === "cargo") {
+                    anularChargeMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
+                  } else {
+                    anularPaymentMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion }, {
+                      onSuccess: () => {
+                        if (anularEmitirNC && anularInvoiceRef?.id) {
+                          setNcForInvoiceId(anularInvoiceRef.id);
+                          setAnularEmitirNC(false);
+                        }
+                      },
+                    });
+                  }
+                }}
+                disabled={anularChargeMutation.isPending || anularPaymentMutation.isPending}
+                data-testid="button-confirm-anular"
+              >
+                {(anularChargeMutation.isPending || anularPaymentMutation.isPending) ? "Anulando..." : "Confirmar Anulación"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        );
+      })()}
+
+      {/* Nota de Crédito para anticipo anulado */}
+      {ncForInvoiceId !== null && (
+        <NotaCreditoDialog invoiceId={ncForInvoiceId} onClose={() => setNcForInvoiceId(null)} />
+      )}
 
       {/* Factura desde folio */}
       {showFacturar && (() => {

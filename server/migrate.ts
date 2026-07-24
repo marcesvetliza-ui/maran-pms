@@ -926,5 +926,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`UPDATE rate_plans SET currency = 'ARS' WHERE currency IS NULL OR currency = '' OR currency != 'ARS'`)
   );
 
+  // invoice_ref en payments (anticipo con factura electrónica vinculada)
+  await withTimeout("payments.invoice_ref", T, () =>
+    db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

@@ -308,7 +308,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   onClose: () => void;
   config: any;
   initialValues?: EmitirFacturaInitialValues;
-  onSuccess?: () => void;
+  onSuccess?: (invoiceData?: any) => void;
   allowedTipos?: Array<string>;
   cashArea?: string;
   requiresEmission?: boolean;
@@ -491,7 +491,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}`,
       });
       setEmitted(true);
-      onSuccess?.();
+      onSuccess?.(data);
       onClose(); resetForm();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
     },

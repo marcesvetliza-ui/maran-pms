@@ -1900,6 +1900,23 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Vincular resultado de factura electrónica a un pago/anticipo
+  app.patch("/api/payments/:id/invoice", requireAuth, async (req, res) => {
+    try {
+      const { invoiceData } = req.body;
+      if (!invoiceData) return res.status(400).json({ error: "invoiceData requerido" });
+      const payResult = await db.execute(sql`SELECT id FROM payments WHERE id = ${req.params.id}`);
+      if (!payResult.rows?.[0]) return res.status(404).json({ error: "Pago no encontrado" });
+      const updated = await db.execute(sql`
+        UPDATE payments SET invoice_ref = ${JSON.stringify(invoiceData)}
+        WHERE id = ${req.params.id} RETURNING *
+      `);
+      res.json(updated.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.delete("/api/payments/:id", async (req, res) => {
     console.warn(`[DEPRECADO] DELETE /api/payments/${req.params.id} — usar PATCH /anular`);
     try {
