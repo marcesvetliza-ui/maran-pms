@@ -547,7 +547,6 @@ export function ReservationDetailModal({
                           <SelectItem value="ticket">Ticket</SelectItem>
                           <SelectItem value="factura_a">Factura A</SelectItem>
                           <SelectItem value="factura_b">Factura B</SelectItem>
-                          <SelectItem value="factura_c">Factura C</SelectItem>
                           <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
                         </SelectContent>
                       </Select>
@@ -619,7 +618,7 @@ export function ReservationDetailModal({
                             agencyId: checkoutBillingTarget === "agency" ? (checkoutAgencyId || reservation.agencyId || undefined) : undefined,
                             ...(notes ? { notes } : {}),
                           }, { onSuccess: () => {
-                            if (["factura_a", "factura_b", "factura_c"].includes(checkoutReceiptType)) {
+                            if (["factura_a", "factura_b"].includes(checkoutReceiptType)) {
                               checkoutPendingInvoiceRef.current = true;
                             }
                             setCheckoutStep(3);
@@ -630,7 +629,7 @@ export function ReservationDetailModal({
                       )}
                       <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => {
                         checkoutReceiptTypeRef.current = checkoutReceiptType;
-                        checkoutPendingInvoiceRef.current = ["factura_a", "factura_b", "factura_c"].includes(checkoutReceiptType);
+                        checkoutPendingInvoiceRef.current = ["factura_a", "factura_b"].includes(checkoutReceiptType);
                         setCheckoutStep(3);
                       }} data-testid="button-checkout-skip-pay">{balance > 0 ? "Omitir pago" : "Siguiente"}</Button>
                     </div>
@@ -649,7 +648,7 @@ export function ReservationDetailModal({
                     <Button variant="outline" size="sm" onClick={() => setCheckoutStep(2)}>Atrás</Button>
                     <Button variant="destructive" size="sm" onClick={() => {
                       checkoutReceiptTypeRef.current = checkoutReceiptType;
-                      checkoutPendingInvoiceRef.current = ["factura_a", "factura_b", "factura_c"].includes(checkoutReceiptType);
+                      checkoutPendingInvoiceRef.current = ["factura_a", "factura_b"].includes(checkoutReceiptType);
                       if (checkoutPendingInvoiceRef.current && reservation) {
                         const g = reservation.guest as any;
                         const comp = (reservation as any).company;
@@ -657,23 +656,32 @@ export function ReservationDetailModal({
                         const nights = reservation.nights || 1;
                         const roomNum = reservation.room?.roomNumber || "";
                         const activeCharges = (reservation.charges ?? []).filter((c: any) => (c as any).status !== "anulado");
+                        // Anticipos: invoiced ones excluded (have their own invoice); non-invoiced reduce the total.
+                        const activePayments = (reservation.payments ?? []).filter((p: any) => p.status === "active");
+                        const uninvoicedAdvances = activePayments.filter((p: any) => !p.invoiceRef);
+                        const checkIn = reservation.checkInDate || "";
+                        const checkOut = reservation.checkOutDate || "";
                         checkoutFacturaInitialRef.current = {
                           razonSocial: comp?.razonSocial || comp?.name || ag?.razonSocial || ag?.nombreFantasia ||
                             (g ? `${g.lastName || ""} ${g.firstName || ""}`.trim() : undefined),
-                          cuit: comp?.cuilCuit || ag?.cuilCuit || g?.cuilCuit || undefined,
+                          cuit: (comp?.cuilCuit || ag?.cuilCuit || g?.cuilCuit || "").replace(/-/g, "") || undefined,
                           dni: (!comp && !ag) ? (g?.documentNumber || undefined) : undefined,
                           condicionIva: comp?.condicionIva || ag?.condicionIva || undefined,
                           domicilio: comp?.direccion || comp?.domicilio || ag?.direccion || ag?.domicilio || undefined,
                           items: [
                             {
-                              descripcion: `Alojamiento Hab. ${roomNum} (${nights} noche${nights !== 1 ? "s" : ""})`,
+                              descripcion: `Alojamiento Hab. ${roomNum} — ${checkIn} al ${checkOut} (${nights} noche${nights !== 1 ? "s" : ""})`,
                               precioUnitario: parseFloat(reservation.totalRoomAmount || "0"),
                             },
                             ...activeCharges.map((c: any) => ({
                               descripcion: c.description || "Cargo adicional",
                               precioUnitario: parseFloat(c.amount),
                             })),
-                          ],
+                            ...uninvoicedAdvances.map((p: any) => ({
+                              descripcion: `Anticipo / Seña (${p.date || ""})`,
+                              precioUnitario: -Math.abs(parseFloat(p.amount)),
+                            })),
+                          ].filter(it => it.precioUnitario !== 0),
                         };
                       }
                       checkOutMutation.mutate();

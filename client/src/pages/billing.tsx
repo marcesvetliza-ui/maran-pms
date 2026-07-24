@@ -408,7 +408,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     }
     items.forEach((it, i) => {
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
-      if (it.precioUnitario <= 0) errs[`precio_${i}`] = "Precio debe ser mayor a 0";
+      if (it.precioUnitario === 0) errs[`precio_${i}`] = "Precio debe ser distinto de 0";
     });
     if (cashArea && cashFormaPago === "cuenta_corriente" && !ccEntityId) {
       errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : "una agencia"}`;
@@ -765,7 +765,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             {isFA ? (
               <div className="space-y-1">
                 <Label className="text-xs">CUIT *</Label>
-                <Input value={cuit} onChange={e => { setCuit(e.target.value); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="20-12345678-9" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
+                <Input value={cuit} onChange={e => { setCuit(e.target.value.replace(/-/g, "")); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="20-12345678-9" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
                 {fieldErrors.cuit && <p className="text-xs text-red-500">{fieldErrors.cuit}</p>}
               </div>
             ) : (
@@ -806,7 +806,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                   <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
                   <div className="col-span-2 space-y-1">
                     <Label className="text-xs">P. Unit.</Label>
-                    <Input type="number" min="0" step="0.01" value={item.precioUnitario || ""} onChange={e => { updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0); if (fieldErrors[`precio_${idx}`]) setFieldErrors(p => ({ ...p, [`precio_${idx}`]: "" })); }} placeholder="0.00" className={fieldErrors[`precio_${idx}`] ? "border-red-500" : ""} />
+                    <Input type="number" step="0.01" value={item.precioUnitario || ""} onChange={e => { updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0); if (fieldErrors[`precio_${idx}`]) setFieldErrors(p => ({ ...p, [`precio_${idx}`]: "" })); }} placeholder="0.00" className={fieldErrors[`precio_${idx}`] ? "border-red-500" : ""} />
                     {fieldErrors[`precio_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`precio_${idx}`]}</p>}
                   </div>
                   <div className="col-span-2 space-y-1">
