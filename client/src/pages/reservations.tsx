@@ -3918,6 +3918,11 @@ function ReservationDetailDialog({
                           <FileText className="h-2.5 w-2.5 mr-1" />{invoiceBadgeText}
                         </Badge>
                       )}
+                      {!invoiceBadgeText && !isAnulado && (
+                        <Badge variant="outline" className="text-xs text-amber-700 border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-700">
+                          <AlertCircle className="h-2.5 w-2.5 mr-1" />Sin factura
+                        </Badge>
+                      )}
                       {(payment as any).billingTarget === "company" && (
                         <Badge variant="secondary" className="text-xs">Empresa</Badge>
                       )}

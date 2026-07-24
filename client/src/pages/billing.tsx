@@ -3,6 +3,7 @@ import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
   FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
@@ -494,13 +495,61 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       setEmitted(true);
       // Automatically link the emitted invoice to the payment if paymentId was provided
       if (paymentId) {
-        try {
+        const tryLink = async () => {
           const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: data });
           if (linkRes.ok) {
             queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+            return true;
+          }
+          return false;
+        };
+        try {
+          const linked = await tryLink();
+          if (!linked) {
+            toast({
+              title: "Factura emitida — vínculo con el pago falló",
+              description: "La factura fue generada correctamente pero no pudo vincularse al pago. Puede reintentar o vincularlo manualmente.",
+              variant: "destructive",
+              action: (
+                <ToastAction
+                  altText="Reintentar"
+                  onClick={async () => {
+                    try {
+                      const ok = await tryLink();
+                      if (ok) toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al pago." });
+                      else toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
+                    } catch {
+                      toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
+                    }
+                  }}
+                >
+                  Reintentar
+                </ToastAction>
+              ),
+            });
           }
         } catch {
-          // Non-blocking: invoice was emitted; linking failure is logged silently
+          toast({
+            title: "Factura emitida — vínculo con el pago falló",
+            description: "La factura fue generada correctamente pero no pudo vincularse al pago. Puede reintentar o vincularlo manualmente.",
+            variant: "destructive",
+            action: (
+              <ToastAction
+                altText="Reintentar"
+                onClick={async () => {
+                  try {
+                    const ok = await tryLink();
+                    if (ok) toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al pago." });
+                    else toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
+                  } catch {
+                    toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
+                  }
+                }}
+              >
+                Reintentar
+              </ToastAction>
+            ),
+          });
         }
       }
       onSuccess?.(data);
