@@ -658,7 +658,7 @@ export function ReservationDetailModal({
                         const activeCharges = (reservation.charges ?? []).filter((c: any) => (c as any).status !== "anulado");
                         // Anticipos: invoiced ones excluded (have their own invoice); non-invoiced reduce the total.
                         const activePayments = (reservation.payments ?? []).filter((p: any) => p.status === "active");
-                        const uninvoicedAdvances = activePayments.filter((p: any) => !p.invoiceRef);
+                        const uninvoicedAdvances = activePayments.filter((p: any) => !p.invoiceRef && (p.isAdvance === "true" || p.isAdvance === true));
                         const checkIn = reservation.checkInDate || "";
                         const checkOut = reservation.checkOutDate || "";
                         checkoutFacturaInitialRef.current = {
