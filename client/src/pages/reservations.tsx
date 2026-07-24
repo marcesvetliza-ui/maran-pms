@@ -1872,6 +1872,8 @@ function ReservationDetailDialog({
   const [coPendingInvoice, setCoPendingInvoice] = useState(false);
   const [showFacturarPrompt, setShowFacturarPrompt] = useState(false);
   const [coIsFacturarSolo, setCoIsFacturarSolo] = useState(false);
+  const [showUninvoicedWarning, setShowUninvoicedWarning] = useState(false);
+  const [uninvoicedWarningAction, setUninvoicedWarningAction] = useState<"facturar" | "checkout" | null>(null);
 
   const openCheckoutWizard = () => {
     setCoPayAmount("");
@@ -4025,7 +4027,15 @@ function ReservationDetailDialog({
                     <Button
                       size="sm"
                       className="w-full"
-                      onClick={() => setShowFacturarPrompt(true)}
+                      onClick={() => {
+                        const uninvoiced = (payments || []).filter((p: any) => p.status !== "anulado" && !p.invoiceRef);
+                        if (uninvoiced.length > 0) {
+                          setUninvoicedWarningAction("facturar");
+                          setShowUninvoicedWarning(true);
+                        } else {
+                          setShowFacturarPrompt(true);
+                        }
+                      }}
                       data-testid="button-facturar-folio"
                     >
                       <FileText className="h-4 w-4 mr-1" />
@@ -4183,7 +4193,15 @@ function ReservationDetailDialog({
               <Button
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
-                onClick={openCheckoutWizard}
+                onClick={() => {
+                  const uninvoiced = (payments || []).filter((p: any) => p.status !== "anulado" && !p.invoiceRef);
+                  if (uninvoiced.length > 0) {
+                    setUninvoicedWarningAction("checkout");
+                    setShowUninvoicedWarning(true);
+                  } else {
+                    openCheckoutWizard();
+                  }
+                }}
                 data-testid="button-early-checkout"
               >
                 <LogOut className="h-4 w-4 mr-2" />
@@ -4209,6 +4227,45 @@ function ReservationDetailDialog({
           </Button>
         </DialogFooter>}
       </DialogContent>
+
+      {/* Warning: anticipos sin factura */}
+      <AlertDialog open={showUninvoicedWarning} onOpenChange={(open) => { if (!open) setShowUninvoicedWarning(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Anticipos sin factura emitida
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  {(() => {
+                    const count = (payments || []).filter((p: any) => p.status !== "anulado" && !p.invoiceRef).length;
+                    return `${count} anticipo${count !== 1 ? "s" : ""} registrado${count !== 1 ? "s" : ""} sin factura electrónica emitida.`;
+                  })()}
+                </p>
+                <p className="text-sm">¿Desea volver para emitirlas antes de continuar, o continuar de todas formas?</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowUninvoicedWarning(false)} data-testid="button-uninvoiced-back">
+              Volver
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => {
+                setShowUninvoicedWarning(false);
+                if (uninvoicedWarningAction === "facturar") setShowFacturarPrompt(true);
+                else if (uninvoicedWarningAction === "checkout") openCheckoutWizard();
+              }}
+              data-testid="button-uninvoiced-proceed"
+            >
+              Continuar de todas formas
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Prompt: ¿Hacer check-out también? */}
       <Dialog open={showFacturarPrompt} onOpenChange={(open) => { if (!open) setShowFacturarPrompt(false); }}>
@@ -5042,6 +5099,8 @@ export default function ReservationsPage() {
   const [retroCheckInDialogOpen, setRetroCheckInDialogOpen] = useState(false);
   const [retroCheckInMotivo, setRetroCheckInMotivo] = useState("");
   const [pendingCheckInId, setPendingCheckInId] = useState<string | null>(null);
+  const [listCheckoutWarningResId, setListCheckoutWarningResId] = useState<string | null>(null);
+  const [listCheckoutWarningCount, setListCheckoutWarningCount] = useState(0);
 
   const { data: webPendingReservations = [], refetch: refetchWeb } = useQuery<any[]>({
     queryKey: ["/api/admin/booking-engine/reservations"],
@@ -5922,7 +5981,21 @@ export default function ReservationsPage() {
                           )}
                           {reservation.status === "checked_in" && (
                             <DropdownMenuItem
-                              onClick={() => updateStatusMutation.mutate({ id: reservation.id, status: "checked_out" })}
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(`/api/reservations/${reservation.id}/payments?includeAnulados=true`, { credentials: "include" });
+                                  const pmts = res.ok ? await res.json() : [];
+                                  const uninvoiced = Array.isArray(pmts) ? pmts.filter((p: any) => p.status !== "anulado" && !p.invoiceRef) : [];
+                                  if (uninvoiced.length > 0) {
+                                    setListCheckoutWarningCount(uninvoiced.length);
+                                    setListCheckoutWarningResId(reservation.id);
+                                  } else {
+                                    updateStatusMutation.mutate({ id: reservation.id, status: "checked_out" });
+                                  }
+                                } catch {
+                                  updateStatusMutation.mutate({ id: reservation.id, status: "checked_out" });
+                                }
+                              }}
                             >
                               <LogOut className="mr-2 h-4 w-4 text-orange-600" />
                               Hacer Check-out
@@ -6142,6 +6215,42 @@ export default function ReservationsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Warning: anticipos sin factura (checkout desde lista) */}
+      <AlertDialog open={!!listCheckoutWarningResId} onOpenChange={(open) => { if (!open) setListCheckoutWarningResId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Anticipos sin factura emitida
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  {listCheckoutWarningCount} anticipo{listCheckoutWarningCount !== 1 ? "s" : ""} registrado{listCheckoutWarningCount !== 1 ? "s" : ""} sin factura electrónica emitida.
+                </p>
+                <p className="text-sm">¿Desea abrir el detalle para emitirlas antes de continuar, o hacer el check-out de todas formas?</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setListCheckoutWarningResId(null)} data-testid="button-list-uninvoiced-back">
+              Volver
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => {
+                const resId = listCheckoutWarningResId;
+                setListCheckoutWarningResId(null);
+                if (resId) updateStatusMutation.mutate({ id: resId, status: "checked_out" });
+              }}
+              data-testid="button-list-uninvoiced-proceed"
+            >
+              Continuar de todas formas
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Check-in retroactivo dialog */}
       <Dialog open={retroCheckInDialogOpen} onOpenChange={(open) => { setRetroCheckInDialogOpen(open); if (!open) { setRetroCheckInMotivo(""); setPendingCheckInId(null); } }}>
