@@ -931,5 +931,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
   );
 
+  // invoice_ref en group_payments y event_payments (misma funcionalidad para grupos y eventos)
+  await withTimeout("group_payments.invoice_ref", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
+  );
+  await withTimeout("event_payments.invoice_ref", T, () =>
+    db.execute(sql`ALTER TABLE event_payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

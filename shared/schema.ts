@@ -604,6 +604,7 @@ export const groupPayments = pgTable("group_payments", {
   distributionDetail: jsonb("distribution_detail"),
   receivedBy: varchar("received_by"),
   notes: text("notes"),
+  invoiceRef: text("invoice_ref"), // JSON-encoded ARCA invoice result when this advance has a linked factura
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -781,6 +782,7 @@ export const eventPayments = pgTable("event_payments", {
   status: text("status").notNull().default("active"),
   motivoAnulacion: text("motivo_anulacion"),
   anuladoAt: timestamp("anulado_at"),
+  invoiceRef: text("invoice_ref"), // JSON-encoded ARCA invoice result when this advance has a linked factura
 });
 
 export const insertEventPaymentSchema = createInsertSchema(eventPayments).omit({ id: true });

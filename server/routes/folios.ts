@@ -425,6 +425,12 @@ export function registerFolioRoutes(app: Express) {
 
       // Build invoice map: folio_movement.sourceId (payment id) -> invoice badge text
       let paymentInvoiceMap: Record<string, string> | undefined;
+      const buildBadge = (invoiceRef: string): string | null => {
+        try {
+          const ref = JSON.parse(invoiceRef);
+          return `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4,"0")}-${String(ref.numero ?? "").padStart(8,"0")}`;
+        } catch { return null; }
+      };
       if (entityType === "reservation") {
         try {
           const { db } = await import("../db");
@@ -436,14 +442,43 @@ export function registerFolioRoutes(app: Express) {
           if (rows.rows && rows.rows.length > 0) {
             paymentInvoiceMap = {};
             for (const row of rows.rows as any[]) {
-              try {
-                const ref = JSON.parse(row.invoice_ref);
-                const badge = `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4,"0")}-${String(ref.numero ?? "").padStart(8,"0")}`;
-                paymentInvoiceMap[row.id] = badge;
-              } catch { /* skip malformed */ }
+              const badge = buildBadge(row.invoice_ref as string);
+              if (badge) paymentInvoiceMap[row.id as string] = badge;
             }
           }
-        } catch (e) { console.error("[folio-pdf] invoice map:", e); }
+        } catch (e) { console.error("[folio-pdf] invoice map reservation:", e); }
+      } else if (entityType === "group") {
+        try {
+          const { db } = await import("../db");
+          const { sql } = await import("drizzle-orm");
+          const rows = await db.execute(sql`
+            SELECT id, invoice_ref FROM group_payments
+            WHERE group_id = ${entityId} AND invoice_ref IS NOT NULL
+          `);
+          if (rows.rows && rows.rows.length > 0) {
+            paymentInvoiceMap = {};
+            for (const row of rows.rows as any[]) {
+              const badge = buildBadge(row.invoice_ref as string);
+              if (badge) paymentInvoiceMap[row.id as string] = badge;
+            }
+          }
+        } catch (e) { console.error("[folio-pdf] invoice map group:", e); }
+      } else if (entityType === "event") {
+        try {
+          const { db } = await import("../db");
+          const { sql } = await import("drizzle-orm");
+          const rows = await db.execute(sql`
+            SELECT id, invoice_ref FROM event_payments
+            WHERE event_id = ${entityId} AND invoice_ref IS NOT NULL
+          `);
+          if (rows.rows && rows.rows.length > 0) {
+            paymentInvoiceMap = {};
+            for (const row of rows.rows as any[]) {
+              const badge = buildBadge(row.invoice_ref as string);
+              if (badge) paymentInvoiceMap[row.id as string] = badge;
+            }
+          }
+        } catch (e) { console.error("[folio-pdf] invoice map event:", e); }
       }
 
       const pdf = await genFolioPDF(folio, entityLabel, paymentInvoiceMap);
