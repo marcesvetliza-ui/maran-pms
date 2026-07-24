@@ -115,6 +115,7 @@ export default function CheckOutPage() {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [showFacturar, setShowFacturar] = useState(false);
   const pendingFacturaTipoRef = useRef("");
+  const pendingPaymentIdRef = useRef<string>("");
   const [facturaInitialValues, setFacturaInitialValues] = useState<EmitirFacturaInitialValues | undefined>(undefined);
   const [receiptTypeForFreeCheckout, setReceiptTypeForFreeCheckout] = useState("cierre_habitacion");
   const [showRetencion, setShowRetencion] = useState(false);
@@ -189,7 +190,7 @@ export default function CheckOutPage() {
 
   const addPaymentMutation = useMutation({
     mutationFn: async (data: { amount: string; method: PaymentMethod; reference: string; receiptType: string; billingTarget: "guest" | "company" | "agency"; companyId?: string; agencyId?: string; notes?: string | null }) => {
-      return apiRequest("POST", "/api/payments", {
+      const res = await apiRequest("POST", "/api/payments", {
         reservationId: selectedReservation!.id,
         amount: data.amount,
         method: data.method,
@@ -201,10 +202,12 @@ export default function CheckOutPage() {
         companyId: data.companyId || null,
         agencyId: data.agencyId || null,
       });
+      return res.json();
     },
-    onSuccess: (_, vars) => {
+    onSuccess: (data, vars) => {
       if (["factura_a", "factura_b", "factura_c"].includes(vars.receiptType)) {
         pendingFacturaTipoRef.current = vars.receiptType;
+        pendingPaymentIdRef.current = String(data?.id ?? "");
       }
       refetchFolio();
       setPaymentAmount("");
@@ -369,6 +372,7 @@ export default function CheckOutPage() {
     setCheckoutComplete(false);
     setFinalSummary(null);
     pendingFacturaTipoRef.current = "";
+    pendingPaymentIdRef.current = "";
     setReceiptTypeForFreeCheckout("cierre_habitacion");
     if (reservation.companyId) {
       setPaymentBillingTarget("company");
@@ -397,6 +401,7 @@ export default function CheckOutPage() {
     setCheckoutComplete(false);
     setFinalSummary(null);
     pendingFacturaTipoRef.current = "";
+    pendingPaymentIdRef.current = "";
     setReceiptTypeForFreeCheckout("cierre_habitacion");
     setCancelConfirmOpen(false);
   };
@@ -1320,12 +1325,14 @@ export default function CheckOutPage() {
             // Only trigger checkout when invoice was emitted as part of the checkout flow
             if (!checkoutComplete) {
               pendingFacturaTipoRef.current = "";
+              pendingPaymentIdRef.current = "";
               selectedReservation && checkOutMutation.mutate(selectedReservation.id);
             }
           }}
           config={billingConfig}
           initialValues={facturaInitialValues}
           requiresEmission={true}
+          paymentId={pendingPaymentIdRef.current || undefined}
         />
       )}
       </>
