@@ -330,13 +330,25 @@ export function registerRoomsRoutes(app: Express) {
 
   app.get("/api/rooms/available", async (req, res) => {
     try {
-      const { checkIn, checkOut, roomTypeId } = req.query as { checkIn?: string; checkOut?: string; roomTypeId?: string };
+      const { checkIn, checkOut, roomTypeId, groupId } = req.query as { checkIn?: string; checkOut?: string; roomTypeId?: string; groupId?: string };
       if (!checkIn || !checkOut) {
         return res.status(400).json({ error: "checkIn and checkOut son requeridos" });
       }
       const rooms = await storage.getRooms();
       const allReservations = await storage.getReservations();
       const maintenanceBlocks = await storage.getMaintenanceBlocks();
+
+      // When called from a group passenger-assignment dialog, exclude that group's
+      // own placeholder reservations from the conflict check — they are reserved FOR
+      // the group and should appear as valid room options for passenger assignment.
+      let groupReservationIds = new Set<string>();
+      if (groupId) {
+        const { db } = await import("../db");
+        const { groupReservationLinks } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, groupId));
+        groupReservationIds = new Set(links.map((l: any) => l.reservationId));
+      }
 
       let filtered = rooms.filter(r => r.status !== "blocked");
       if (roomTypeId) {
@@ -348,6 +360,8 @@ export function registerRoomsRoutes(app: Express) {
         const resConflict = allReservations.find(res => {
           if (!activeStatuses.includes(res.status)) return false;
           if (res.roomId !== room.id) return false;
+          // Skip this group's own placeholder reservations — not a conflict for its own assignment
+          if (groupReservationIds.has(res.id)) return false;
           return res.checkInDate < (checkOut as string) && res.checkOutDate > (checkIn as string);
         });
         if (resConflict) return false;

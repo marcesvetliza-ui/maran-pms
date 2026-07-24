@@ -229,10 +229,11 @@ export function registerGroupsRoutes(app: Express) {
           const rate = agreedRate ? String(agreedRate) : "0";
 
           // Each placeholder reservation is INDEPENDENT — no shared guest.
-          // guestId is null until a real passenger is assigned via placeholder-reservations PATCH.
+          // Use the group's placeholder guest so guestId is never null (schema constraint).
+          const placeholderGuest = await getOrCreatePlaceholderGuest(group.id, group.name);
           const reservation = await storage.createReservation({
             reservationCode: `G${group.groupCode}-${room.roomNumber}`,
-            guestId: null as any,
+            guestId: placeholderGuest.id,
             guestName: "",
             roomTypeId: room.roomTypeId,
             roomId: room.id,

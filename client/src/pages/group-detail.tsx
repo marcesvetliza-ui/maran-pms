@@ -393,12 +393,13 @@ function AssignBlockDialog({
   ]);
 
   const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
-    queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId],
+    queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId, group.id],
     queryFn: async () => {
       const params = new URLSearchParams({
         checkIn: defaultCheckIn,
         checkOut: defaultCheckOut,
         roomTypeId: block.roomTypeId,
+        groupId: group.id,
       });
       const res = await fetch(`/api/rooms/available?${params}`);
       if (!res.ok) throw new Error("Error al cargar habitaciones");
