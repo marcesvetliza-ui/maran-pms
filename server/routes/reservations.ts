@@ -1517,11 +1517,11 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  // Bulk transfer charges + accommodation to another reservation
+  // Bulk transfer charges + accommodation + advances to another reservation
   app.post("/api/reservations/:id/bulk-transfer", requireAuth, async (req, res) => {
     try {
       const sourceId = req.params.id;
-      const { targetReservationId, chargeIds = [], includeAccommodation = false, transferNote = "" } = req.body;
+      const { targetReservationId, chargeIds = [], includeAccommodation = false, transferNote = "", paymentIds = [] } = req.body;
       const operator = (req as any).user?.username || "Sistema";
 
       if (!targetReservationId) return res.status(400).json({ error: "Se requiere reserva destino" });
@@ -1538,14 +1538,15 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-      const sourceRoom = sourceRes.room?.number || sourceRes.roomId || "?";
+      const sourceRoom = sourceRes.room?.roomNumber || sourceRes.roomId || "?";
       const sourceGuest = sourceRes.guest ? `${sourceRes.guest.firstName} ${sourceRes.guest.lastName}` : "Huésped";
-      const targetRoom = targetRes.room?.number || targetRes.roomId || "?";
+      const targetRoom = targetRes.room?.roomNumber || targetRes.roomId || "?";
       const targetGuest = targetRes.guest ? `${targetRes.guest.firstName} ${targetRes.guest.lastName}` : "Huésped";
       const noteRef = transferNote ? ` — ${transferNote}` : "";
 
       let chargesTransferred = 0;
       let accommodationTransferred = false;
+      let paymentsTransferred = 0;
 
       // Move selected extra charges to target reservation
       for (const chargeId of chargeIds) {
@@ -1589,10 +1590,25 @@ export function registerReservationsRoutes(app: Express) {
         accommodationTransferred = true;
       }
 
+      // Transfer selected advances/payments to target reservation
+      for (const paymentId of paymentIds) {
+        const payResult = await db.execute(sql`SELECT * FROM payments WHERE id = ${paymentId}`);
+        const pay = payResult.rows?.[0] as any;
+        if (!pay || pay.reservation_id !== sourceId || pay.status !== "active") continue;
+        await db.execute(sql`
+          UPDATE payments
+          SET reservation_id = ${targetReservationId},
+              notes = COALESCE(notes, '') || ${` [Transf. desde Hab.${sourceRoom} – ${sourceGuest}${noteRef}]`}
+          WHERE id = ${paymentId}
+        `);
+        paymentsTransferred++;
+      }
+
       // Add note to source reservation
       const sourceNoteText = [
         includeAccommodation && accommodationTransferred ? `Alojamiento ($${sourceRes.totalRoomAmount})` : null,
         chargesTransferred > 0 ? `${chargesTransferred} cargo(s) extra` : null,
+        paymentsTransferred > 0 ? `${paymentsTransferred} anticipo(s)` : null,
       ].filter(Boolean).join(" y ");
 
       if (sourceNoteText) {
@@ -1607,6 +1623,7 @@ export function registerReservationsRoutes(app: Express) {
         success: true,
         chargesTransferred,
         accommodationTransferred,
+        paymentsTransferred,
         targetReservationId,
       });
     } catch (error) {

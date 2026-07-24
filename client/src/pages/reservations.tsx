@@ -2005,6 +2005,7 @@ function ReservationDetailDialog({
   const [bulkTargetReservationId, setBulkTargetReservationId] = useState<string>("");
   const [bulkSelectedChargeIds, setBulkSelectedChargeIds] = useState<Set<string>>(new Set());
   const [bulkIncludeAccommodation, setBulkIncludeAccommodation] = useState(false);
+  const [bulkSelectedPaymentIds, setBulkSelectedPaymentIds] = useState<Set<string>>(new Set());
   const [bulkTransferNote, setBulkTransferNote] = useState("");
   const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
@@ -2318,8 +2319,9 @@ function ReservationDetailDialog({
   });
 
   const bulkTransferMutation = useMutation({
-    mutationFn: async (data: { targetReservationId: string; chargeIds: string[]; includeAccommodation: boolean; transferNote: string }) => {
-      return apiRequest("POST", `/api/reservations/${reservation.id}/bulk-transfer`, data);
+    mutationFn: async (data: { targetReservationId: string; chargeIds: string[]; includeAccommodation: boolean; transferNote: string; paymentIds: string[] }) => {
+      const res = await apiRequest("POST", `/api/reservations/${reservation.id}/bulk-transfer`, data);
+      return res.json();
     },
     onSuccess: (data: any) => {
       refetchCharges();
@@ -2329,10 +2331,12 @@ function ReservationDetailDialog({
       setBulkTargetReservationId("");
       setBulkSelectedChargeIds(new Set());
       setBulkIncludeAccommodation(false);
+      setBulkSelectedPaymentIds(new Set());
       setBulkTransferNote("");
       const parts = [];
       if (data.accommodationTransferred) parts.push("alojamiento");
       if (data.chargesTransferred > 0) parts.push(`${data.chargesTransferred} cargo(s) extra`);
+      if (data.paymentsTransferred > 0) parts.push(`${data.paymentsTransferred} anticipo(s)`);
       toast({ title: "Transferencia realizada", description: `Se transfirió: ${parts.join(" y ")}.` });
     },
     onError: (err: any) => {
@@ -4378,21 +4382,24 @@ function ReservationDetailDialog({
           setBulkTargetReservationId("");
           setBulkSelectedChargeIds(new Set());
           setBulkIncludeAccommodation(false);
+          setBulkSelectedPaymentIds(new Set());
           setBulkTransferNote("");
         }
       }}>
-        <DialogContent className="w-[95vw] max-w-[520px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
-          <DialogHeader>
+        <DialogContent className="w-[95vw] max-w-[520px] flex flex-col max-h-[85dvh] overflow-hidden p-0 gap-0">
+          {/* ── Sticky header ── */}
+          <DialogHeader className="px-6 pt-6 pb-4 shrink-0 border-b">
             <DialogTitle className="flex items-center gap-2">
               <ArrowRightLeft className="h-5 w-5 text-blue-600" />
               Transferir folio a otra habitación
             </DialogTitle>
             <DialogDescription>
-              Seleccioná qué cargos querés pasar a otra reserva. El saldo de esta quedará en $0 para los ítems transferidos.
+              Seleccioná los cargos y/o anticipos que querés mover a otra reserva.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          {/* ── Scrollable content ── */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
             {/* Destination reservation */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Reserva destino</label>
@@ -4414,87 +4421,190 @@ function ReservationDetailDialog({
               </Select>
             </div>
 
-            {/* Accommodation line */}
-            <div className="border rounded-lg divide-y">
-              <div className="flex items-center gap-3 p-3">
-                <input
-                  type="checkbox"
-                  id="bulk-accommodation"
-                  className="h-4 w-4 rounded border-gray-300"
-                  checked={bulkIncludeAccommodation}
-                  onChange={(e) => setBulkIncludeAccommodation(e.target.checked)}
-                  data-testid="checkbox-include-accommodation"
-                />
-                <label htmlFor="bulk-accommodation" className="flex-1 flex justify-between items-center cursor-pointer text-sm">
-                  <span className="font-medium">Alojamiento</span>
-                  <span className="font-semibold tabular-nums">
-                    ${Number(reservation.totalRoomAmount || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                  </span>
-                </label>
-              </div>
-
-              {/* Active extra charges */}
-              {activeConsumptionCharges.length === 0 ? (
-                <div className="p-3 text-sm text-muted-foreground text-center">Sin consumos adicionales</div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-3 p-2 bg-muted/30">
-                    <input
-                      type="checkbox"
-                      id="bulk-all-charges"
-                      className="h-4 w-4 rounded border-gray-300"
-                      checked={bulkSelectedChargeIds.size === activeConsumptionCharges.length && activeConsumptionCharges.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setBulkSelectedChargeIds(new Set(activeConsumptionCharges.map(c => c.id)));
-                        } else {
-                          setBulkSelectedChargeIds(new Set());
-                        }
-                      }}
-                    />
-                    <label htmlFor="bulk-all-charges" className="text-xs text-muted-foreground cursor-pointer">
-                      Seleccionar todos los consumos
-                    </label>
-                  </div>
-                  {activeConsumptionCharges.map((charge) => (
-                    <div key={charge.id} className="flex items-center gap-3 p-3">
+            {/* ── Cargos section ── */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Cargos</label>
+              <div className="border rounded-lg divide-y">
+                <div className="flex items-center gap-3 p-3">
+                  <input
+                    type="checkbox"
+                    id="bulk-accommodation"
+                    className="h-4 w-4 rounded border-gray-300 shrink-0"
+                    checked={bulkIncludeAccommodation}
+                    onChange={(e) => setBulkIncludeAccommodation(e.target.checked)}
+                    data-testid="checkbox-include-accommodation"
+                  />
+                  <label htmlFor="bulk-accommodation" className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                    <span className="font-medium">Alojamiento</span>
+                    <span className="font-semibold tabular-nums shrink-0">
+                      ${Number(reservation.totalRoomAmount || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </span>
+                  </label>
+                </div>
+                {activeConsumptionCharges.length === 0 ? (
+                  <div className="p-3 text-sm text-muted-foreground text-center">Sin consumos adicionales</div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3 p-2 bg-muted/30">
                       <input
                         type="checkbox"
-                        id={`bulk-charge-${charge.id}`}
-                        className="h-4 w-4 rounded border-gray-300"
-                        checked={bulkSelectedChargeIds.has(charge.id)}
+                        id="bulk-all-charges"
+                        className="h-4 w-4 rounded border-gray-300 shrink-0"
+                        checked={bulkSelectedChargeIds.size === activeConsumptionCharges.length && activeConsumptionCharges.length > 0}
                         onChange={(e) => {
-                          const next = new Set(bulkSelectedChargeIds);
-                          if (e.target.checked) next.add(charge.id);
-                          else next.delete(charge.id);
-                          setBulkSelectedChargeIds(next);
+                          if (e.target.checked) setBulkSelectedChargeIds(new Set(activeConsumptionCharges.map(c => c.id)));
+                          else setBulkSelectedChargeIds(new Set());
                         }}
-                        data-testid={`checkbox-charge-${charge.id}`}
                       />
-                      <label htmlFor={`bulk-charge-${charge.id}`} className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
-                        <span className="truncate">{charge.description}</span>
-                        <span className="font-medium tabular-nums shrink-0">${Number(charge.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      <label htmlFor="bulk-all-charges" className="text-xs text-muted-foreground cursor-pointer">
+                        Seleccionar todos los consumos
                       </label>
                     </div>
-                  ))}
-                </>
-              )}
+                    {activeConsumptionCharges.map((charge) => (
+                      <div key={charge.id} className="flex items-center gap-3 p-3">
+                        <input
+                          type="checkbox"
+                          id={`bulk-charge-${charge.id}`}
+                          className="h-4 w-4 rounded border-gray-300 shrink-0"
+                          checked={bulkSelectedChargeIds.has(charge.id)}
+                          onChange={(e) => {
+                            const next = new Set(bulkSelectedChargeIds);
+                            if (e.target.checked) next.add(charge.id);
+                            else next.delete(charge.id);
+                            setBulkSelectedChargeIds(next);
+                          }}
+                          data-testid={`checkbox-charge-${charge.id}`}
+                        />
+                        <label htmlFor={`bulk-charge-${charge.id}`} className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                          <span className="truncate">{charge.description}</span>
+                          <span className="font-medium tabular-nums shrink-0">${Number(charge.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </label>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
             </div>
 
-            {/* Total to transfer */}
-            {(bulkIncludeAccommodation || bulkSelectedChargeIds.size > 0) && (
-              <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800 text-sm font-semibold">
-                <span className="text-blue-800 dark:text-blue-300">Total a transferir</span>
-                <span className="text-blue-900 dark:text-blue-200 tabular-nums">
-                  ${(
-                    (bulkIncludeAccommodation ? Number(reservation.totalRoomAmount || 0) : 0) +
-                    activeConsumptionCharges
-                      .filter(c => bulkSelectedChargeIds.has(c.id))
-                      .reduce((sum, c) => sum + Number(c.amount), 0)
-                  ).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-            )}
+            {/* ── Anticipos / Pagos section ── */}
+            {(() => {
+              const activePaymentsForBulk = payments?.filter((p: any) => p.status !== "anulado") || [];
+              if (activePaymentsForBulk.length === 0) return null;
+              return (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Anticipos / Pagos</label>
+                  <div className="border rounded-lg divide-y">
+                    {activePaymentsForBulk.length > 1 && (
+                      <div className="flex items-center gap-3 p-2 bg-muted/30">
+                        <input
+                          type="checkbox"
+                          id="bulk-all-payments"
+                          className="h-4 w-4 rounded border-gray-300 shrink-0"
+                          checked={bulkSelectedPaymentIds.size === activePaymentsForBulk.length}
+                          onChange={(e) => {
+                            if (e.target.checked) setBulkSelectedPaymentIds(new Set(activePaymentsForBulk.map((p: any) => p.id)));
+                            else setBulkSelectedPaymentIds(new Set());
+                          }}
+                        />
+                        <label htmlFor="bulk-all-payments" className="text-xs text-muted-foreground cursor-pointer">
+                          Seleccionar todos los anticipos
+                        </label>
+                      </div>
+                    )}
+                    {activePaymentsForBulk.map((p: any) => {
+                      const invoiceRef = (() => { try { return p.invoiceRef ? JSON.parse(p.invoiceRef) : null; } catch { return null; } })();
+                      return (
+                        <div key={p.id} className="flex items-center gap-3 p-3">
+                          <input
+                            type="checkbox"
+                            id={`bulk-payment-${p.id}`}
+                            className="h-4 w-4 rounded border-gray-300 shrink-0"
+                            checked={bulkSelectedPaymentIds.has(p.id)}
+                            onChange={(e) => {
+                              const next = new Set(bulkSelectedPaymentIds);
+                              if (e.target.checked) next.add(p.id);
+                              else next.delete(p.id);
+                              setBulkSelectedPaymentIds(next);
+                            }}
+                          />
+                          <label htmlFor={`bulk-payment-${p.id}`} className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                            <span className="truncate flex items-center gap-1.5">
+                              <span>{paymentMethodLabels[p.method as PaymentMethod] || p.method}</span>
+                              {invoiceRef && (
+                                <Badge variant="secondary" className="text-xs py-0 text-blue-700 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
+                                  <FileText className="h-2.5 w-2.5 mr-1" />
+                                  {invoiceRef.tipo_comprobante}
+                                </Badge>
+                              )}
+                              <span className="text-muted-foreground text-xs">({formatDateAR(p.date)})</span>
+                            </span>
+                            <span className="font-medium tabular-nums text-green-600 shrink-0">${Number(p.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── Balance preview ── */}
+            {(bulkIncludeAccommodation || bulkSelectedChargeIds.size > 0 || bulkSelectedPaymentIds.size > 0) && (() => {
+              const activePaymentsForBulk = payments?.filter((p: any) => p.status !== "anulado") || [];
+              const accommodationAmt = Number(reservation.totalRoomAmount || 0);
+              const selectedChargesAmt = activeConsumptionCharges
+                .filter(c => bulkSelectedChargeIds.has(c.id))
+                .reduce((sum, c) => sum + Number(c.amount), 0);
+              const selectedPaymentsAmt = activePaymentsForBulk
+                .filter((p: any) => bulkSelectedPaymentIds.has(p.id))
+                .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+
+              const transferredCharges = (bulkIncludeAccommodation ? accommodationAmt : 0) + selectedChargesAmt;
+              const transferredPayments = selectedPaymentsAmt;
+
+              // Source result after transfer
+              const srcRemainingCharges = totalToPay - transferredCharges;
+              const srcRemainingPayments = totalPayments - transferredPayments;
+              const srcResultBalance = srcRemainingCharges - srcRemainingPayments;
+
+              // Net transferred to destination (may be negative = transferring a credit)
+              const netToTarget = transferredCharges - transferredPayments;
+
+              const srcNegative = srcResultBalance < -0.01;
+              const targetNegative = netToTarget < -0.01;
+
+              return (
+                <div className="rounded-lg border divide-y text-sm">
+                  <div className="px-3 py-2 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Resultado de la transferencia
+                  </div>
+                  <div className="px-3 py-2.5 flex justify-between items-center gap-2">
+                    <span className="text-muted-foreground">Esta reserva quedará con saldo</span>
+                    <span className={`font-semibold tabular-nums ${srcNegative ? "text-amber-600" : srcResultBalance === 0 ? "text-green-600" : ""}`}>
+                      ${srcResultBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      {srcNegative && " ⚠"}
+                    </span>
+                  </div>
+                  <div className="px-3 py-2.5 flex justify-between items-center gap-2">
+                    <span className="text-muted-foreground">Se agrega al destino (neto)</span>
+                    <span className={`font-semibold tabular-nums ${targetNegative ? "text-amber-600" : ""}`}>
+                      ${netToTarget.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      {targetNegative && " ⚠"}
+                    </span>
+                  </div>
+                  {srcNegative && (
+                    <div className="px-3 py-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20">
+                      ⚠ Esta reserva quedaría en crédito (saldo negativo). Considerá transferir también los anticipos correspondientes.
+                    </div>
+                  )}
+                  {targetNegative && (
+                    <div className="px-3 py-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20">
+                      ⚠ Se transfiere más anticipo que cargos — el destino quedaría en crédito.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Optional note */}
             <div className="space-y-1">
@@ -4508,7 +4618,8 @@ function ReservationDetailDialog({
             </div>
           </div>
 
-          <DialogFooter>
+          {/* ── Sticky footer ── */}
+          <DialogFooter className="px-6 py-4 border-t bg-background shrink-0">
             <Button variant="outline" onClick={() => setShowBulkTransfer(false)}>Cancelar</Button>
             <Button
               onClick={() => bulkTransferMutation.mutate({
@@ -4516,10 +4627,11 @@ function ReservationDetailDialog({
                 chargeIds: Array.from(bulkSelectedChargeIds),
                 includeAccommodation: bulkIncludeAccommodation,
                 transferNote: bulkTransferNote,
+                paymentIds: Array.from(bulkSelectedPaymentIds),
               })}
               disabled={
                 !bulkTargetReservationId ||
-                (!bulkIncludeAccommodation && bulkSelectedChargeIds.size === 0) ||
+                (!bulkIncludeAccommodation && bulkSelectedChargeIds.size === 0 && bulkSelectedPaymentIds.size === 0) ||
                 bulkTransferMutation.isPending
               }
               data-testid="button-confirm-bulk-transfer"
