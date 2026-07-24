@@ -573,6 +573,8 @@ function AssignBlockDialog({
                     <Input
                       placeholder="Nombre"
                       value={row.firstName}
+                      name={`passenger-firstname-${index}`}
+                      autoComplete="off"
                       onChange={(e) => {
                         const updated = [...rows];
                         updated[index] = { ...updated[index], firstName: e.target.value };
@@ -584,6 +586,8 @@ function AssignBlockDialog({
                     <Input
                       placeholder="Apellido"
                       value={row.lastName}
+                      name={`passenger-lastname-${index}`}
+                      autoComplete="off"
                       onChange={(e) => {
                         const updated = [...rows];
                         updated[index] = { ...updated[index], lastName: e.target.value };
