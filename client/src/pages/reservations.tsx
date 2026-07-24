@@ -2434,24 +2434,283 @@ function ReservationDetailDialog({
   const balance = totalToPay - totalPayments;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { setCoWizardStep(0); setCoIsFacturarSolo(false); } onOpenChange(o); }}>
       <DialogContent className="w-[95vw] max-w-[680px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            Reserva {reservation.reservationCode}
-            <ReservationStatusBadge status={reservation.status} />
+            {coWizardStep > 0
+              ? (coIsFacturarSolo
+                  ? <><FileText className="h-5 w-5 text-blue-500" />Facturar Saldo — Hab. {reservation.room?.roomNumber}</>
+                  : <><LogOut className="h-5 w-5 text-orange-500" />Check-out — Hab. {reservation.room?.roomNumber}</>)
+              : <>Reserva {reservation.reservationCode}<ReservationStatusBadge status={reservation.status} /></>
+            }
           </DialogTitle>
-          <DialogDescription>Detalle de la reservación</DialogDescription>
+          <DialogDescription>
+            {coWizardStep > 0
+              ? <>{reservation.guest?.lastName} {reservation.guest?.firstName} · {reservation.reservationCode}</>
+              : "Detalle de la reservación"
+            }
+          </DialogDescription>
         </DialogHeader>
 
-        {isLocked && (
+        {/* ── Checkout / Facturar wizard (inline, replaces normal content) ── */}
+        {coWizardStep > 0 && (
+          <div className="space-y-4 py-1">
+            {/* Step indicator */}
+            {coIsFacturarSolo ? (
+              <p className="text-xs text-muted-foreground text-center">Pago y comprobante</p>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  {[1,2,3].map(s => (
+                    <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= coWizardStep ? "bg-primary" : "bg-muted"}`} />
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground text-center -mt-2">
+                  Paso {coWizardStep} de 3: {coWizardStep === 1 ? "Resumen de cuenta" : coWizardStep === 2 ? "Pago y comprobante" : "Confirmar check-out"}
+                </p>
+              </>
+            )}
+
+            {/* Step 1: Resumen */}
+            {coWizardStep === 1 && (() => {
+              const totalPaymentsAmt = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+              const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+              const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
+              const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
+              const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
+              const totalAmount = subtotalRoom + totalChargesAmt;
+              const balance = totalAmount - totalPaymentsAmt;
+              const activeCharges = consumptionCharges.filter((c: any) => c.status !== "anulado");
+              return (
+                <div className="space-y-3">
+                  <div className="rounded-md border overflow-hidden text-sm">
+                    <div className="px-3 py-1.5 bg-muted/60 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Cargos</div>
+                    <div className="divide-y max-h-64 overflow-y-auto">
+                      <div className="flex justify-between items-start px-3 py-2">
+                        <div>
+                          <div>Habitación {reservation.room?.roomNumber}</div>
+                          <div className="text-xs text-muted-foreground">{reservation.nights} noche{reservation.nights !== 1 ? "s" : ""} × ${parseFloat(reservation.finalRatePerNight || "0").toLocaleString("es-AR", { minimumFractionDigits: 0 })}/noche</div>
+                        </div>
+                        <span className="font-medium shrink-0">${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      {earlyChg > 0 && (
+                        <div className="flex justify-between items-center px-3 py-2 text-amber-600 dark:text-amber-400">
+                          <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
+                          <span className="shrink-0">${fmtMoney(earlyChg)}</span>
+                        </div>
+                      )}
+                      {lateChg > 0 && (
+                        <div className="flex justify-between items-center px-3 py-2 text-amber-600 dark:text-amber-400">
+                          <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
+                          <span className="shrink-0">${fmtMoney(lateChg)}</span>
+                        </div>
+                      )}
+                      {activeCharges.map((c: any) => (
+                        <div key={c.id} className="flex justify-between items-start px-3 py-2 gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline" className="text-xs py-0 shrink-0">{categoryLabels[c.category] || c.category}</Badge>
+                              <span className="truncate text-muted-foreground">{c.description}</span>
+                            </div>
+                          </div>
+                          <span className="shrink-0">${parseFloat(c.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="divide-y border-t bg-muted/20">
+                      <div className="flex justify-between items-center px-3 py-2 text-sm text-green-600 dark:text-green-400">
+                        <span>Pagado</span>
+                        <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between items-center px-3 py-2 font-bold text-sm">
+                        <span>Saldo</span>
+                        <span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setCoWizardStep(0)}>Cancelar</Button>
+                    <Button size="sm" onClick={() => setCoWizardStep(2)} data-testid="button-co-step1-next">
+                      Siguiente →
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Step 2: Pago + Comprobante */}
+            {coWizardStep === 2 && (() => {
+              const totalPayments = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
+              const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+              const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
+              const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
+              const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
+              const totalAmount = subtotalRoom + totalChargesAmt;
+              const balance = totalAmount - totalPayments;
+              return (
+                <div className="space-y-3">
+                  {balance > 0 && (
+                    <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
+                      Saldo pendiente: <span className="font-bold">${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {balance > 0 && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Monto</Label>
+                        <Input type="number" min={0} step="0.01" value={coPayAmount || String(balance.toFixed(2))} onChange={(e) => setCoPayAmount(e.target.value)} data-testid="input-co-amount" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Método de pago</Label>
+                        <Select value={coPayMethod} onValueChange={setCoPayMethod}>
+                          <SelectTrigger data-testid="select-co-method"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="efectivo">Efectivo</SelectItem>
+                            <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                            <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                            <SelectItem value="transferencia">Transferencia</SelectItem>
+                            <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                            <SelectItem value="cuenta_corriente">Cta. Corriente</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                  {balance > 0 && coPayMethod === "cuenta_corriente" && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Facturar a</Label>
+                        <Select value={coBillingTarget} onValueChange={(v) => { setCoBillingTarget(v as "guest" | "company" | "agency"); setCoCompanyId(""); setCoAgencyId(""); }}>
+                          <SelectTrigger data-testid="select-co-billing"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="guest">Huésped</SelectItem>
+                            <SelectItem value="company">Empresa</SelectItem>
+                            <SelectItem value="agency">Agencia</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {coBillingTarget === "company" && (
+                        <div className="space-y-1">
+                          <Label className="text-xs">Empresa</Label>
+                          <Select value={coCompanyId} onValueChange={setCoCompanyId}>
+                            <SelectTrigger data-testid="select-co-company"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                            <SelectContent>
+                              {companiesForCC.filter((c: any) => c.id).map((c: any) => (
+                                <SelectItem key={c.id} value={c.id}>{(c as any).razonSocial || (c as any).nombreFantasia || c.id}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {coBillingTarget === "agency" && (
+                        <div className="space-y-1">
+                          <Label className="text-xs">Agencia</Label>
+                          <Select value={coAgencyId} onValueChange={setCoAgencyId}>
+                            <SelectTrigger data-testid="select-co-agency"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                            <SelectContent>
+                              {agenciesForCC.filter((a: any) => a.id).map((a: any) => (
+                                <SelectItem key={a.id} value={a.id}>{(a as any).razonSocial || (a as any).nombreFantasia || a.id}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tipo de comprobante</Label>
+                    <Select value={coReceiptType} onValueChange={setCoReceiptType}>
+                      <SelectTrigger data-testid="select-co-receipt"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
+                        <SelectItem value="ticket">Ticket</SelectItem>
+                        <SelectItem value="factura_a">Factura A</SelectItem>
+                        <SelectItem value="factura_b">Factura B</SelectItem>
+                        <SelectItem value="factura_c">Factura C</SelectItem>
+                        <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { if (coIsFacturarSolo) { setCoWizardStep(0); setCoIsFacturarSolo(false); } else setCoWizardStep(1); }}>Atrás</Button>
+                    {balance > 0 && (
+                      <Button size="sm" onClick={() => {
+                        const amount = coPayAmount || balance.toFixed(2);
+                        if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
+                        if (coPayMethod === "cuenta_corriente" && coBillingTarget === "company" && !coCompanyId && !reservation.companyId) {
+                          toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
+                        }
+                        if (coPayMethod === "cuenta_corriente" && coBillingTarget === "agency" && !coAgencyId && !reservation.agencyId) {
+                          toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
+                        }
+                        const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
+                        coAddPaymentMutation.mutate({
+                          amount,
+                          method: coPayMethod,
+                          receiptType: coReceiptType,
+                          billingTarget: coBillingTarget,
+                          companyId: coBillingTarget === "company" ? (coCompanyId || reservation.companyId || undefined) : undefined,
+                          agencyId: coBillingTarget === "agency" ? (coAgencyId || reservation.agencyId || undefined) : undefined,
+                        }, { onSuccess: () => {
+                          if (coIsFacturarSolo) {
+                            setCoWizardStep(0);
+                            setCoIsFacturarSolo(false);
+                            if (isArca) setCoShowFacturar(true);
+                          } else {
+                            if (isArca) setCoPendingInvoice(true);
+                            setCoWizardStep(3);
+                          }
+                        } });
+                      }} disabled={coAddPaymentMutation.isPending} data-testid="button-co-pay">
+                        {coAddPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
+                      </Button>
+                    )}
+                    <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => {
+                      if (coIsFacturarSolo) {
+                        const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
+                        setCoWizardStep(0);
+                        setCoIsFacturarSolo(false);
+                        if (isArca) setCoShowFacturar(true);
+                      } else {
+                        setCoWizardStep(3);
+                      }
+                    }} data-testid="button-co-skip">
+                      {balance > 0 ? "Omitir pago" : "Siguiente"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Step 3: Confirmar checkout */}
+            {coWizardStep === 3 && (
+              <div className="space-y-3">
+                <div className="p-3 bg-muted/50 rounded-md text-sm space-y-1">
+                  <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.lastName} {reservation.guest?.firstName}</span>.</p>
+                  <p>Habitación <span className="font-bold">{reservation.room?.roomNumber}</span> quedará en estado <Badge variant="outline" className="text-orange-700">Sucia</Badge>.</p>
+                  <p>Se creará una tarea de limpieza en Housekeeping.</p>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setCoWizardStep(2)}>Atrás</Button>
+                  <Button variant="destructive" size="sm" onClick={() => checkoutProperMutation.mutate()} disabled={checkoutProperMutation.isPending} data-testid="button-co-confirm">
+                    {checkoutProperMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Normal dialog content (hidden while wizard is active) ── */}
+        {coWizardStep === 0 && isLocked && (
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md text-sm text-amber-700 dark:text-amber-300" data-testid="banner-locked-reservation">
             <Lock className="h-4 w-4 shrink-0" />
             <span>Reserva cerrada — no se puede modificar (solo lectura)</span>
           </div>
         )}
 
-        <Tabs defaultValue="datos" className="w-full">
+        {coWizardStep === 0 && <Tabs defaultValue="datos" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
             <TabsTrigger value="folio" data-testid="tab-folio">Folio</TabsTrigger>
@@ -3765,9 +4024,9 @@ function ReservationDetailDialog({
               </div>
             )}
           </TabsContent>
-        </Tabs>
+        </Tabs>}
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        {coWizardStep === 0 && <DialogFooter className="gap-2 sm:justify-between">
           <div className="flex gap-2 flex-wrap">
             <Button
               variant="outline"
@@ -3818,10 +4077,9 @@ function ReservationDetailDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cerrar
           </Button>
-        </DialogFooter>
+        </DialogFooter>}
       </DialogContent>
 
-      {/* Checkout Wizard Dialog */}
       {/* Prompt: ¿Hacer check-out también? */}
       <Dialog open={showFacturarPrompt} onOpenChange={(open) => { if (!open) setShowFacturarPrompt(false); }}>
         <DialogContent className="max-w-sm">
@@ -3846,260 +4104,6 @@ function ReservationDetailDialog({
               Cancelar
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={coWizardStep > 0} onOpenChange={(open) => { if (!open) { setCoWizardStep(0); setCoIsFacturarSolo(false); } }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {coIsFacturarSolo
-                ? <><FileText className="h-5 w-5 text-blue-500" />Facturar Saldo — Hab. {reservation.room?.roomNumber}</>
-                : <><LogOut className="h-5 w-5 text-orange-500" />Check-out — Hab. {reservation.room?.roomNumber}</>
-              }
-            </DialogTitle>
-            <DialogDescription>
-              {reservation.guest?.lastName} {reservation.guest?.firstName} · {reservation.reservationCode}
-            </DialogDescription>
-          </DialogHeader>
-
-          {/* Step indicator */}
-          {coIsFacturarSolo ? (
-            <p className="text-xs text-muted-foreground text-center">Pago y comprobante</p>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                {[1,2,3].map(s => (
-                  <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= coWizardStep ? "bg-primary" : "bg-muted"}`} />
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground text-center -mt-2">
-                Paso {coWizardStep} de 3: {coWizardStep === 1 ? "Resumen de cuenta" : coWizardStep === 2 ? "Pago y comprobante" : "Confirmar check-out"}
-              </p>
-            </>
-          )}
-
-          {/* Step 1: Resumen */}
-          {coWizardStep === 1 && (() => {
-            const totalPaymentsAmt = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
-            const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-            const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
-            const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
-            const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
-            const totalAmount = subtotalRoom + totalChargesAmt;
-            const balance = totalAmount - totalPaymentsAmt;
-            const activeCharges = consumptionCharges.filter((c: any) => c.status !== "anulado");
-            return (
-              <div className="space-y-3">
-                <div className="p-3 bg-muted/50 rounded-md space-y-1 text-sm max-h-64 overflow-y-auto">
-                  <div className="flex justify-between font-medium pb-1 border-b">
-                    <span>Habitación ({reservation.nights} noche{reservation.nights !== 1 ? "s" : ""})</span>
-                    <span>${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  {earlyChg > 0 && (
-                    <div className="flex justify-between text-amber-600 dark:text-amber-400">
-                      <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
-                      <span>${fmtMoney(earlyChg)}</span>
-                    </div>
-                  )}
-                  {lateChg > 0 && (
-                    <div className="flex justify-between text-amber-600 dark:text-amber-400">
-                      <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
-                      <span>${fmtMoney(lateChg)}</span>
-                    </div>
-                  )}
-                  {activeCharges.length > 0 && (
-                    <div className="pt-1 border-t space-y-0.5">
-                      {activeCharges.map((c: any) => (
-                        <div key={c.id} className="flex justify-between gap-2">
-                          <span className="flex items-center gap-1 min-w-0">
-                            <Badge variant="outline" className="text-xs py-0 shrink-0">{categoryLabels[c.category] || c.category}</Badge>
-                            <span className="truncate text-muted-foreground">{c.description}</span>
-                          </span>
-                          <span className="shrink-0">${parseFloat(c.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex justify-between border-t pt-1 text-green-600">
-                    <span>Pagado</span>
-                    <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between font-bold border-t pt-1">
-                    <span>Saldo pendiente</span>
-                    <span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setCoWizardStep(0)}>Cancelar</Button>
-                  <Button size="sm" onClick={() => setCoWizardStep(2)} data-testid="button-co-step1-next">
-                    Siguiente →
-                  </Button>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Step 2: Pago + Comprobante */}
-          {coWizardStep === 2 && (() => {
-            const totalPayments = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
-            const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-            const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
-            const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
-            const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
-            const totalAmount = subtotalRoom + totalChargesAmt;
-            const balance = totalAmount - totalPayments;
-            return (
-              <div className="space-y-3">
-                {balance > 0 && (
-                  <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
-                    Saldo pendiente: <span className="font-bold">${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                {balance > 0 && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Monto</Label>
-                      <Input type="number" min={0} step="0.01" value={coPayAmount || String(balance.toFixed(2))} onChange={(e) => setCoPayAmount(e.target.value)} data-testid="input-co-amount" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Método de pago</Label>
-                      <Select value={coPayMethod} onValueChange={setCoPayMethod}>
-                        <SelectTrigger data-testid="select-co-method"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="efectivo">Efectivo</SelectItem>
-                          <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                          <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                          <SelectItem value="transferencia">Transferencia</SelectItem>
-                          <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                          <SelectItem value="cuenta_corriente">Cta. Corriente</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-                {balance > 0 && coPayMethod === "cuenta_corriente" && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Facturar a</Label>
-                      <Select value={coBillingTarget} onValueChange={(v) => { setCoBillingTarget(v as "guest" | "company" | "agency"); setCoCompanyId(""); setCoAgencyId(""); }}>
-                        <SelectTrigger data-testid="select-co-billing"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="guest">Huésped</SelectItem>
-                          <SelectItem value="company">Empresa</SelectItem>
-                          <SelectItem value="agency">Agencia</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {coBillingTarget === "company" && (
-                      <div className="space-y-1">
-                        <Label className="text-xs">Empresa</Label>
-                        <Select value={coCompanyId} onValueChange={setCoCompanyId}>
-                          <SelectTrigger data-testid="select-co-company"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
-                          <SelectContent>
-                            {companiesForCC.filter((c: any) => c.id).map((c: any) => (
-                              <SelectItem key={c.id} value={c.id}>{(c as any).razonSocial || (c as any).nombreFantasia || c.id}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    {coBillingTarget === "agency" && (
-                      <div className="space-y-1">
-                        <Label className="text-xs">Agencia</Label>
-                        <Select value={coAgencyId} onValueChange={setCoAgencyId}>
-                          <SelectTrigger data-testid="select-co-agency"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
-                          <SelectContent>
-                            {agenciesForCC.filter((a: any) => a.id).map((a: any) => (
-                              <SelectItem key={a.id} value={a.id}>{(a as any).razonSocial || (a as any).nombreFantasia || a.id}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className="space-y-1">
-                  <Label className="text-xs">Tipo de comprobante</Label>
-                  <Select value={coReceiptType} onValueChange={setCoReceiptType}>
-                    <SelectTrigger data-testid="select-co-receipt"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
-                      <SelectItem value="ticket">Ticket</SelectItem>
-                      <SelectItem value="factura_a">Factura A</SelectItem>
-                      <SelectItem value="factura_b">Factura B</SelectItem>
-                      <SelectItem value="factura_c">Factura C</SelectItem>
-                      <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => { if (coIsFacturarSolo) { setCoWizardStep(0); setCoIsFacturarSolo(false); } else setCoWizardStep(1); }}>Atrás</Button>
-                  {balance > 0 && (
-                    <Button size="sm" onClick={() => {
-                      const amount = coPayAmount || balance.toFixed(2);
-                      if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
-                      if (coPayMethod === "cuenta_corriente" && coBillingTarget === "company" && !coCompanyId && !reservation.companyId) {
-                        toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
-                      }
-                      if (coPayMethod === "cuenta_corriente" && coBillingTarget === "agency" && !coAgencyId && !reservation.agencyId) {
-                        toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
-                      }
-                      const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
-                      coAddPaymentMutation.mutate({
-                        amount,
-                        method: coPayMethod,
-                        receiptType: coReceiptType,
-                        billingTarget: coBillingTarget,
-                        companyId: coBillingTarget === "company" ? (coCompanyId || reservation.companyId || undefined) : undefined,
-                        agencyId: coBillingTarget === "agency" ? (coAgencyId || reservation.agencyId || undefined) : undefined,
-                      }, { onSuccess: () => {
-                        if (coIsFacturarSolo) {
-                          setCoWizardStep(0);
-                          setCoIsFacturarSolo(false);
-                          if (isArca) setCoShowFacturar(true);
-                        } else {
-                          if (isArca) setCoPendingInvoice(true);
-                          setCoWizardStep(3);
-                        }
-                      } });
-                    }} disabled={coAddPaymentMutation.isPending} data-testid="button-co-pay">
-                      {coAddPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
-                    </Button>
-                  )}
-                  <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => {
-                    if (coIsFacturarSolo) {
-                      const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
-                      setCoWizardStep(0);
-                      setCoIsFacturarSolo(false);
-                      if (isArca) setCoShowFacturar(true);
-                    } else {
-                      setCoWizardStep(3);
-                    }
-                  }} data-testid="button-co-skip">
-                    {balance > 0 ? "Omitir pago" : "Siguiente"}
-                  </Button>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Step 3: Confirmar checkout */}
-          {coWizardStep === 3 && (
-            <div className="space-y-3">
-              <div className="p-3 bg-muted/50 rounded-md text-sm space-y-1">
-                <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.lastName} {reservation.guest?.firstName}</span>.</p>
-                <p>Habitación <span className="font-bold">{reservation.room?.roomNumber}</span> quedará en estado <Badge variant="outline" className="text-orange-700">Sucia</Badge>.</p>
-                <p>Se creará una tarea de limpieza en Housekeeping.</p>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setCoWizardStep(2)}>Atrás</Button>
-                <Button variant="destructive" size="sm" onClick={() => checkoutProperMutation.mutate()} disabled={checkoutProperMutation.isPending} data-testid="button-co-confirm">
-                  {checkoutProperMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
-                </Button>
-              </div>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 
