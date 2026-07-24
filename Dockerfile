@@ -3,21 +3,23 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install system deps needed by pdfkit / canvas native modules
+# System deps for native modules (pdfkit, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy manifests first for better layer caching
+# Install tsx globally so it's always in PATH regardless of devDep resolution
+RUN npm install -g tsx
+
 COPY package*.json ./
 
-# --production=false forces devDep installation regardless of NODE_ENV
-RUN npm install --production=false --legacy-peer-deps
+# Install all project deps. --ignore-scripts avoids hanging postinstall hooks.
+RUN npm install --legacy-peer-deps --ignore-scripts
 
-# Copy source and build
-# Call tsx directly to avoid PATH issues with npm run in Railway's environment
 COPY . .
-RUN ./node_modules/.bin/tsx script/build.ts
+
+# Build using the globally-installed tsx
+RUN tsx script/build.ts
 
 # ── Stage 2: production ──────────────────────────────────────────────────────
 FROM node:20-slim AS production
@@ -30,10 +32,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY package*.json ./
 
-# Only production deps — much lighter install, avoids OOM
-RUN npm install --omit=dev --legacy-peer-deps
+# Production deps only — much lighter, avoids OOM
+RUN npm install --omit=dev --legacy-peer-deps --ignore-scripts
 
-# Copy the compiled output from the builder stage
+# Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
 
 ENV NODE_ENV=production
