@@ -2288,21 +2288,6 @@ function ReservationDetailDialog({
     },
   });
 
-  const linkPaymentInvoiceMutation = useMutation({
-    mutationFn: async ({ paymentId, invoiceData }: { paymentId: string; invoiceData: any }) => {
-      const res = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData });
-      return res.json();
-    },
-    onSuccess: () => {
-      refetchPayments();
-      setInvoicingPaymentId(null);
-      setShowAdvanceFacturar(false);
-      toast({ title: "Factura vinculada", description: "La factura electrónica fue vinculada al anticipo." });
-    },
-    onError: (error: any) => {
-      toast({ title: "Error vinculando factura", description: error?.message, variant: "destructive" });
-    },
-  });
 
   const transferChargeMutation = useMutation({
     mutationFn: async ({ chargeId, targetReservationId }: { chargeId: string; targetReservationId: string }) => {
@@ -3984,12 +3969,12 @@ function ReservationDetailDialog({
                         onClose={() => setShowAdvanceFacturar(false)}
                         config={billingConfig}
                         initialValues={advanceInitial}
-                        onSuccess={(invoiceData) => {
-                          if (invoicingPaymentId && invoiceData) {
-                            linkPaymentInvoiceMutation.mutate({ paymentId: invoicingPaymentId, invoiceData });
-                          } else {
-                            setInvoicingPaymentId(null);
-                          }
+                        paymentId={invoicingPaymentId || undefined}
+                        onSuccess={() => {
+                          refetchPayments();
+                          setInvoicingPaymentId(null);
+                          setShowAdvanceFacturar(false);
+                          toast({ title: "Factura vinculada", description: "La factura electrónica fue vinculada al anticipo." });
                         }}
                       />
                     )}

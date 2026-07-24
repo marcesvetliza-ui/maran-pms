@@ -303,7 +303,7 @@ export type EmitirFacturaInitialValues = {
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -312,6 +312,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   allowedTipos?: Array<string>;
   cashArea?: string;
   requiresEmission?: boolean;
+  paymentId?: string;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB", "FC"];
@@ -491,6 +492,17 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}`,
       });
       setEmitted(true);
+      // Automatically link the emitted invoice to the payment if paymentId was provided
+      if (paymentId) {
+        try {
+          const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: data });
+          if (linkRes.ok) {
+            queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+          }
+        } catch {
+          // Non-blocking: invoice was emitted; linking failure is logged silently
+        }
+      }
       onSuccess?.(data);
       onClose(); resetForm();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
