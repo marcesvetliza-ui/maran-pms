@@ -511,13 +511,17 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             onSuccess?.(data);
             onClose(); resetForm();
           } else {
-            // Link failed — keep dialog open and show inline error banner
+            // Link failed — persist the flag so the payment can be found and re-linked later
             setLinkError(true);
+            try { await apiRequest("PATCH", `/api/payments/${paymentId}/invoice-link-failed`, { invoiceData: data }); } catch {}
+            queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
           }
         } catch {
-          // Network error — keep dialog open and show inline error banner
+          // Network error — persist the flag so the payment can be found and re-linked later
           setLinkPending(false);
           setLinkError(true);
+          try { await apiRequest("PATCH", `/api/payments/${paymentId}/invoice-link-failed`, { invoiceData: data }); } catch {}
+          queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
         }
       } else {
         onSuccess?.(data);

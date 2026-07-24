@@ -1936,7 +1936,28 @@ export function registerReservationsRoutes(app: Express) {
       const payResult = await db.execute(sql`SELECT id FROM payments WHERE id = ${req.params.id}`);
       if (!payResult.rows?.[0]) return res.status(404).json({ error: "Pago no encontrado" });
       const updated = await db.execute(sql`
-        UPDATE payments SET invoice_ref = ${JSON.stringify(invoiceData)}
+        UPDATE payments
+        SET invoice_ref = ${JSON.stringify(invoiceData)},
+            invoice_link_failed = false
+        WHERE id = ${req.params.id} RETURNING *
+      `);
+      res.json(updated.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Marcar vínculo de factura como fallido (y guardar datos de la factura para reintento posterior)
+  app.patch("/api/payments/:id/invoice-link-failed", requireAuth, async (req, res) => {
+    try {
+      const { invoiceData } = req.body;
+      const payResult = await db.execute(sql`SELECT id FROM payments WHERE id = ${req.params.id}`);
+      if (!payResult.rows?.[0]) return res.status(404).json({ error: "Pago no encontrado" });
+      // Store invoice data (so the re-link action can use it later) and mark as failed
+      const updated = await db.execute(sql`
+        UPDATE payments
+        SET invoice_link_failed = true
+            ${invoiceData ? sql`, invoice_ref = ${JSON.stringify(invoiceData)}` : sql``}
         WHERE id = ${req.params.id} RETURNING *
       `);
       res.json(updated.rows[0]);

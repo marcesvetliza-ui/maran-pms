@@ -939,5 +939,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE event_payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
   );
 
+  // invoice_link_failed: persistent flag so unlinked invoices can be found after toast disappears
+  await withTimeout("payments.invoice_link_failed", T, () =>
+    db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_link_failed boolean NOT NULL DEFAULT false`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

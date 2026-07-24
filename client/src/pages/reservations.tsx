@@ -2301,6 +2301,21 @@ function ReservationDetailDialog({
   });
 
 
+  const relinkInvoiceMutation = useMutation({
+    mutationFn: async ({ paymentId, invoiceData }: { paymentId: string; invoiceData: any }) => {
+      const res = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData });
+      if (!res.ok) throw new Error("Re-vínculo fallido");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchPayments();
+      toast({ title: "Factura vinculada", description: "La factura quedó vinculada al pago correctamente." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo vincular la factura. Intente nuevamente.", variant: "destructive" });
+    },
+  });
+
   const transferChargeMutation = useMutation({
     mutationFn: async ({ chargeId, targetReservationId }: { chargeId: string; targetReservationId: string }) => {
       return apiRequest("POST", `/api/charges/${chargeId}/transfer`, { targetReservationId });
@@ -3901,24 +3916,36 @@ function ReservationDetailDialog({
                 </div>
               )}
 
+              {payments?.some((p: any) => p.invoiceLinkFailed) && (
+                <div className="flex items-start gap-2 p-2 mx-0 mb-1 rounded-md bg-orange-50 border border-orange-300 dark:bg-orange-950/30 dark:border-orange-700 text-xs text-orange-800 dark:text-orange-300" data-testid="invoice-link-failed-banner">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-orange-600" />
+                  <span>Hay <strong>{payments.filter((p: any) => p.invoiceLinkFailed).length}</strong> pago(s) con factura emitida pero no vinculada. Usá «Re-vincular» para corregirlo.</span>
+                </div>
+              )}
               <div className="divide-y max-h-[120px] overflow-y-auto">
                 {payments?.map((payment) => {
                   const isAnulado = (payment as any).status === "anulado";
+                  const linkFailed = !!(payment as any).invoiceLinkFailed;
                   const invoiceRef = (() => { try { return (payment as any).invoiceRef ? JSON.parse((payment as any).invoiceRef) : null; } catch { return null; } })();
-                  const invoiceBadgeText = invoiceRef
+                  const invoiceBadgeText = invoiceRef && !linkFailed
                     ? `${invoiceRef.tipo_comprobante ?? "FAC"} ${String(invoiceRef.punto_venta ?? "").padStart(4, "0")}-${String(invoiceRef.numero ?? "").padStart(8, "0")}`
                     : null;
                   return (
-                  <div key={payment.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`payment-row-${payment.id}`}>
+                  <div key={payment.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""} ${linkFailed && !isAnulado ? "bg-orange-50/50 dark:bg-orange-950/10" : ""}`} data-testid={`payment-row-${payment.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline" className="text-xs">{paymentMethodLabels[payment.method]}</Badge>
                       {isAnulado && <Badge variant="destructive" className="text-xs">ANULADO</Badge>}
+                      {linkFailed && !isAnulado && (
+                        <Badge variant="outline" className="text-xs text-orange-700 border-orange-400 bg-orange-50 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-600">
+                          <AlertTriangle className="h-2.5 w-2.5 mr-1" />Vínculo pendiente
+                        </Badge>
+                      )}
                       {invoiceBadgeText && !isAnulado && (
                         <Badge variant="secondary" className="text-xs text-blue-700 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
                           <FileText className="h-2.5 w-2.5 mr-1" />{invoiceBadgeText}
                         </Badge>
                       )}
-                      {!invoiceBadgeText && !isAnulado && (
+                      {!invoiceBadgeText && !linkFailed && !isAnulado && (
                         <Badge variant="outline" className="text-xs text-amber-700 border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-700">
                           <AlertCircle className="h-2.5 w-2.5 mr-1" />Sin factura
                         </Badge>
@@ -3931,6 +3958,19 @@ function ReservationDetailDialog({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className={`font-medium ${isAnulado ? "line-through text-muted-foreground" : "text-green-600"}`}>${fmtMoney(payment.amount)}</span>
+                      {linkFailed && !isAnulado && invoiceRef && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-xs px-2 border-orange-400 text-orange-700 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-600"
+                          disabled={relinkInvoiceMutation.isPending}
+                          onClick={() => relinkInvoiceMutation.mutate({ paymentId: payment.id, invoiceData: invoiceRef })}
+                          title="Re-vincular factura a este pago"
+                          data-testid={`button-relink-payment-${payment.id}`}
+                        >
+                          <Undo2 className="h-3 w-3 mr-1" />Re-vincular
+                        </Button>
+                      )}
                       {!isLocked && !isAnulado && (
                       <Button 
                         size="icon" 

@@ -326,6 +326,7 @@ export const payments = pgTable("payments", {
   motivoAnulacion: text("motivo_anulacion"),
   anuladoAt: timestamp("anulado_at"),
   invoiceRef: text("invoice_ref"), // JSON-encoded ARCA invoice result when this advance has a linked factura
+  invoiceLinkFailed: boolean("invoice_link_failed").default(false), // true when invoice was emitted but linking failed
 });
 
 export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true });
