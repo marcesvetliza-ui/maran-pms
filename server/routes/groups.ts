@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
 import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
@@ -330,55 +330,91 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: "El nombre del pasajero es requerido" });
       }
 
-      const group = await storage.getGroup(groupId);
-      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
-
-      const reservation = group.reservations.find((r: any) => r.id === reservationId);
-      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
-
       const firstName = guestFirstName.trim();
       const lastName = (guestLastName || "").trim();
+
+      // Verify the reservation exists and belongs to this group
+      const [link] = await db
+        .select()
+        .from(groupReservationLinks)
+        .where(
+          and(
+            eq(groupReservationLinks.groupId, groupId),
+            eq(groupReservationLinks.reservationId, reservationId)
+          )
+        )
+        .limit(1);
+      if (!link) {
+        console.error(`[passenger-assign] Reserva ${reservationId} no pertenece al grupo ${groupId}`);
+        return res.status(404).json({ error: "Reserva no encontrada en este grupo" });
+      }
 
       // Always create a fresh guest per reservation — never reuse by name.
       // Reusing a guest by name-match means two rooms share the same guestId;
       // subsequent edits to one room appear to "replicate" to the other.
-      const realGuest = await storage.createGuest({ firstName, lastName } as any);
+      const [newGuest] = await db.insert(guestsTable).values({
+        firstName,
+        lastName,
+        segment: "LEISURE",
+        sexo: "no_especifica",
+      } as any).returning();
 
-      // También actualizar el campo guestName denormalizado en la reserva,
-      // que usan el planning y otras vistas directamente (sin join al guest)
-      const updates: Record<string, any> = {
-        guestId: realGuest.id,
-        guestName: `${lastName} ${firstName}`.trim(),
-      };
+      if (!newGuest?.id) throw new Error("No se pudo crear el registro del huésped");
+
+      const guestName = `${lastName} ${firstName}`.trim();
+
+      // Handle optional room change
       let oldRoomId: string | null = null;
       let newRoomId: string | null = null;
+      const reservationUpdates: Record<string, any> = {
+        guestId: newGuest.id,
+        guestName,
+      };
 
-      // Handle optional room change — collect changes but apply room status AFTER reservation update
-      if (roomId && roomId !== reservation.roomId) {
-        const hasConflict = await storage.checkOverbooking(roomId, reservation.checkInDate, reservation.checkOutDate, reservationId);
-        if (hasConflict) {
-          return res.status(400).json({ error: "La habitación ya tiene una reserva en esas fechas" });
+      if (roomId) {
+        const [currentRes] = await db
+          .select()
+          .from(reservationsTable)
+          .where(eq(reservationsTable.id, reservationId))
+          .limit(1);
+
+        if (currentRes && roomId !== currentRes.roomId) {
+          const hasConflict = await storage.checkOverbooking(roomId, currentRes.checkInDate, currentRes.checkOutDate, reservationId);
+          if (hasConflict) {
+            return res.status(400).json({ error: "La habitación ya tiene una reserva en esas fechas" });
+          }
+          const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
+          if (!newRoom) return res.status(404).json({ error: "Habitación no encontrada" });
+          reservationUpdates.roomId = roomId;
+          reservationUpdates.roomTypeId = newRoom.roomTypeId;
+          oldRoomId = currentRes.roomId || null;
+          newRoomId = roomId;
         }
-        const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
-        if (!newRoom) return res.status(404).json({ error: "Habitación no encontrada" });
-        updates.roomId = roomId;
-        updates.roomTypeId = newRoom.roomTypeId;
-        oldRoomId = reservation.roomId || null;
-        newRoomId = roomId;
       }
 
-      const updated = await storage.updateReservation(reservationId, updates);
+      // Direct DB update — bypass storage layer to avoid silent failures
+      const [updated] = await db
+        .update(reservationsTable)
+        .set(reservationUpdates)
+        .where(eq(reservationsTable.id, reservationId))
+        .returning();
+
+      if (!updated) {
+        console.error(`[passenger-assign] updateReservation devolvió vacío para ID ${reservationId}`);
+        return res.status(500).json({ error: "No se pudo actualizar la reserva" });
+      }
+
+      console.log(`[passenger-assign] OK: reserva ${reservationId} → guest ${newGuest.id} "${guestName}"`);
 
       // Apply room status changes only after the reservation update succeeds
       if (newRoomId) {
-        if (oldRoomId) {
-          await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, oldRoomId));
-        }
+        if (oldRoomId) await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, oldRoomId));
         await db.update(roomsTable).set({ status: "occupied" }).where(eq(roomsTable.id, newRoomId));
       }
 
       res.json(updated);
     } catch (error: any) {
+      console.error("[passenger-assign] Error:", error?.message);
       res.status(500).json({ error: error?.message || "Error al asignar pasajero" });
     }
   });
