@@ -334,6 +334,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [showConfirm, setShowConfirm] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const [emitted, setEmitted] = useState(false);
+  const [linkPending, setLinkPending] = useState(false);
+  const [linkError, setLinkError] = useState(false);
+  const [linkRetrying, setLinkRetrying] = useState(false);
+  const [emittedInvoiceData, setEmittedInvoiceData] = useState<any>(null);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
@@ -493,68 +497,32 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}`,
       });
       setEmitted(true);
+      setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
+
       // Automatically link the emitted invoice to the payment if paymentId was provided
       if (paymentId) {
-        const tryLink = async () => {
+        setEmittedInvoiceData(data);
+        setLinkPending(true);
+        try {
           const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: data });
+          setLinkPending(false);
           if (linkRes.ok) {
             queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
-            return true;
-          }
-          return false;
-        };
-        try {
-          const linked = await tryLink();
-          if (!linked) {
-            toast({
-              title: "Factura emitida — vínculo con el pago falló",
-              description: "La factura fue generada correctamente pero no pudo vincularse al pago. Puede reintentar o vincularlo manualmente.",
-              variant: "destructive",
-              action: (
-                <ToastAction
-                  altText="Reintentar"
-                  onClick={async () => {
-                    try {
-                      const ok = await tryLink();
-                      if (ok) toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al pago." });
-                      else toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
-                    } catch {
-                      toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
-                    }
-                  }}
-                >
-                  Reintentar
-                </ToastAction>
-              ),
-            });
+            onSuccess?.(data);
+            onClose(); resetForm();
+          } else {
+            // Link failed — keep dialog open and show inline error banner
+            setLinkError(true);
           }
         } catch {
-          toast({
-            title: "Factura emitida — vínculo con el pago falló",
-            description: "La factura fue generada correctamente pero no pudo vincularse al pago. Puede reintentar o vincularlo manualmente.",
-            variant: "destructive",
-            action: (
-              <ToastAction
-                altText="Reintentar"
-                onClick={async () => {
-                  try {
-                    const ok = await tryLink();
-                    if (ok) toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al pago." });
-                    else toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
-                  } catch {
-                    toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Revise el panel de pagos.", variant: "destructive" });
-                  }
-                }}
-              >
-                Reintentar
-              </ToastAction>
-            ),
-          });
+          // Network error — keep dialog open and show inline error banner
+          setLinkPending(false);
+          setLinkError(true);
         }
+      } else {
+        onSuccess?.(data);
+        onClose(); resetForm();
       }
-      onSuccess?.(data);
-      onClose(); resetForm();
-      setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -565,6 +533,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
     setEntitySearch(""); setShowEntityDropdown(false); setFieldErrors({});
     setShowConfirm(false); setShowCloseWarning(false); setEmitted(false);
+    setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
   }
 
   const isFA = tipo === "FA";
@@ -573,10 +542,34 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const ambiente: AmbienteMode = config?.arcaAmbiente ?? "ficticio";
 
   function handleClose() {
+    if (linkPending || linkError) {
+      // Linking in progress or link failed — don't allow silent close
+      return;
+    }
     if (requiresEmission && !emitted) {
       setShowCloseWarning(true);
     } else {
       onClose(); resetForm();
+    }
+  }
+
+  async function handleRetryLink() {
+    if (!paymentId || !emittedInvoiceData) return;
+    setLinkRetrying(true);
+    try {
+      const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: emittedInvoiceData });
+      if (linkRes.ok) {
+        queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+        toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al pago." });
+        onSuccess?.(emittedInvoiceData);
+        onClose(); resetForm();
+      } else {
+        toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Intente nuevamente.", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Reintento fallido", description: "Error de red. Intente nuevamente.", variant: "destructive" });
+    } finally {
+      setLinkRetrying(false);
     }
   }
 
@@ -609,9 +602,76 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     <>
     <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{linkPending ? "Vinculando factura al pago…" : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
 
-        {showConfirm ? (
+        {linkPending ? (
+          <div className="space-y-4 py-2">
+            {/* Invoice emitted — link request in progress */}
+            <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 shrink-0" />
+              <div className="text-sm">
+                <p className="font-semibold text-green-800 dark:text-green-300">Factura emitida correctamente</p>
+                {emittedInvoiceData && (
+                  <p className="text-green-700 dark:text-green-400 text-xs mt-0.5">
+                    {emittedInvoiceData.tipo_comprobante} {padNum(emittedInvoiceData.punto_venta, 4)}-{padNum(emittedInvoiceData.numero, 8)}
+                    {emittedInvoiceData.cae ? ` — CAE: ${emittedInvoiceData.cae}` : ""}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex items-center gap-3">
+              <RefreshCw className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
+              <div className="text-sm">
+                <p className="font-semibold text-blue-800 dark:text-blue-300">Vinculando al registro de pago…</p>
+                <p className="text-blue-700 dark:text-blue-400 text-xs mt-0.5">Por favor espere. No cierre este diálogo.</p>
+              </div>
+            </div>
+          </div>
+        ) : linkError && emittedInvoiceData ? (
+          <div className="space-y-4 py-2">
+            {/* Success: invoice was emitted */}
+            <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 shrink-0" />
+              <div className="text-sm">
+                <p className="font-semibold text-green-800 dark:text-green-300">Factura emitida correctamente</p>
+                <p className="text-green-700 dark:text-green-400 text-xs mt-0.5">
+                  {emittedInvoiceData.tipo_comprobante} {padNum(emittedInvoiceData.punto_venta, 4)}-{padNum(emittedInvoiceData.numero, 8)}
+                  {emittedInvoiceData.cae ? ` — CAE: ${emittedInvoiceData.cae}` : ""}
+                </p>
+              </div>
+            </div>
+
+            {/* Error: link to payment failed */}
+            <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+              <div className="text-sm flex-1">
+                <p className="font-semibold text-red-800 dark:text-red-300">No se pudo vincular la factura al pago</p>
+                <p className="text-red-700 dark:text-red-400 text-xs mt-1">
+                  La factura fue generada correctamente en ARCA, pero ocurrió un error al asociarla al registro de pago.
+                  Puede reintentar ahora o cerrar y vincularlo manualmente desde el panel de pagos.
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button
+                variant="outline"
+                onClick={() => { onClose(); resetForm(); }}
+                data-testid="btn-cerrar-sin-vincular"
+              >
+                Cerrar sin vincular
+              </Button>
+              <Button
+                onClick={handleRetryLink}
+                disabled={linkRetrying}
+                data-testid="btn-reintentar-vinculo"
+              >
+                <RefreshCw className={`w-4 h-4 mr-1 ${linkRetrying ? "animate-spin" : ""}`} />
+                {linkRetrying ? "Reintentando..." : "Reintentar vínculo"}
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : showConfirm ? (
           <div className="space-y-4">
             <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2">
