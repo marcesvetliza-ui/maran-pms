@@ -4069,15 +4069,22 @@ function ReservationDetailDialog({
                 isAnulado: c.status === "anulado",
                 id: `cargo-${c.id}`,
               }));
-              const paymentItems = (payments || []).map((p: any) => ({
-                sortDate: new Date(p.paymentDate || p.date || p.createdAt || 0).getTime(),
-                dateLabel: (() => { const d = new Date(p.paymentDate || p.date || p.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
-                type: "pago" as const,
-                label: p.reference || p.notes || p.paymentMethod || "Pago",
-                amount: parseFloat(p.amount || "0"),
-                isAnulado: (p as any).status === "anulado",
-                id: `pago-${p.id}`,
-              }));
+              const paymentItems = (payments || []).map((p: any) => {
+                const invRef = (() => { try { return p.invoiceRef ? JSON.parse(p.invoiceRef) : null; } catch { return null; } })();
+                const invBadge = invRef
+                  ? `${invRef.tipo_comprobante ?? "FAC"} ${String(invRef.punto_venta ?? "").padStart(4,"0")}-${String(invRef.numero ?? "").padStart(8,"0")}`
+                  : null;
+                return {
+                  sortDate: new Date(p.paymentDate || p.date || p.createdAt || 0).getTime(),
+                  dateLabel: (() => { const d = new Date(p.paymentDate || p.date || p.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                  type: "pago" as const,
+                  label: p.reference || p.notes || p.paymentMethod || "Pago",
+                  invBadge,
+                  amount: parseFloat(p.amount || "0"),
+                  isAnulado: (p as any).status === "anulado",
+                  id: `pago-${p.id}`,
+                };
+              });
               const invoiceItems = folioInvoices.map((f: any) => ({
                 sortDate: new Date((f.fecha_emision || "") + "T12:00:00").getTime(),
                 dateLabel: (() => { const d = new Date((f.fecha_emision || "") + "T12:00:00"); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
@@ -4109,6 +4116,11 @@ function ReservationDetailDialog({
                         <span className="text-muted-foreground shrink-0 w-14">{item.dateLabel}</span>
                         <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4">{labelMap[item.type]}</Badge>
                         <span className="flex-1 truncate">{item.label}</span>
+                        {(item as any).invBadge && !item.isAnulado && (
+                          <Badge variant="secondary" className="text-[10px] shrink-0 px-1 py-0 h-4 text-blue-700 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
+                            <FileText className="h-2.5 w-2.5 mr-0.5" />{(item as any).invBadge}
+                          </Badge>
+                        )}
                         <span className={`font-medium shrink-0 ${amtColor[item.type]}`}>
                           {item.type === "pago" ? "−" : ""}${item.amount.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>

@@ -47,7 +47,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   room_charge: "Cargo a Habitación",
 };
 
-function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<Buffer> {
+function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInvoiceMap?: Record<string, string>): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 0, size: "A4" });
     const chunks: Buffer[] = [];
@@ -181,8 +181,12 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string): Promise<B
         const payLabel = m.paymentMethod ? (PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod) : "—";
         doc.fillColor(MUTED)
            .text(payLabel, COL.method + 4, y + 5, { width: 100 });
-        const desc = m.description && m.description.length > 28 ? m.description.slice(0, 28) + "…" : (m.description || "—");
-        doc.fillColor(DARK)
+        const invText = (paymentInvoiceMap && m.sourceId) ? paymentInvoiceMap[m.sourceId] : null;
+        const rawDesc = m.description || "—";
+        const desc = invText
+          ? (rawDesc.length > 14 ? rawDesc.slice(0, 14) + "… " : rawDesc + " ") + invText
+          : (rawDesc.length > 28 ? rawDesc.slice(0, 28) + "…" : rawDesc);
+        doc.fillColor(invText ? "#1a4f8a" : DARK)
            .text(desc, COL.desc + 4, y + 5, { width: 98 });
         doc.font("Helvetica-Bold").fontSize(8)
            .fillColor(isDebit ? red : green)
@@ -419,7 +423,30 @@ export function registerFolioRoutes(app: Express) {
         }
       } catch { /* non-critical */ }
 
-      const pdf = await genFolioPDF(folio, entityLabel);
+      // Build invoice map: folio_movement.sourceId (payment id) -> invoice badge text
+      let paymentInvoiceMap: Record<string, string> | undefined;
+      if (entityType === "reservation") {
+        try {
+          const { db } = await import("../db");
+          const { sql } = await import("drizzle-orm");
+          const rows = await db.execute(sql`
+            SELECT id, invoice_ref FROM payments
+            WHERE reservation_id = ${entityId} AND invoice_ref IS NOT NULL
+          `);
+          if (rows.rows && rows.rows.length > 0) {
+            paymentInvoiceMap = {};
+            for (const row of rows.rows as any[]) {
+              try {
+                const ref = JSON.parse(row.invoice_ref);
+                const badge = `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4,"0")}-${String(ref.numero ?? "").padStart(8,"0")}`;
+                paymentInvoiceMap[row.id] = badge;
+              } catch { /* skip malformed */ }
+            }
+          }
+        } catch (e) { console.error("[folio-pdf] invoice map:", e); }
+      }
+
+      const pdf = await genFolioPDF(folio, entityLabel, paymentInvoiceMap);
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="folio-${folio.codigo}.pdf"`);
       res.send(pdf);
