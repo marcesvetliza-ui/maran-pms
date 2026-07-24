@@ -556,6 +556,7 @@ function AssignBlockDialog({
                       <SelectContent>
                         {roomOptions
                           .filter(r => r.id && (!otherChosenRoomIds.includes(r.id) || r.id === row.roomId))
+                          .sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber))
                           .map((room) => (
                             <SelectItem key={room.id} value={room.id}>
                               Hab. {room.roomNumber} — Piso {room.floor}
