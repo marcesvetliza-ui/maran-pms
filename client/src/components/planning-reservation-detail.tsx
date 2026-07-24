@@ -764,6 +764,21 @@ export function ReservationDetailModal({
                 </div>
                 <Badge variant={statusBadge?.variant}>{statusBadge?.label}</Badge>
               </div>
+              {(reservation.companyId || reservation.agencyId) && (() => {
+                const linkedCompany = reservation.companyId ? companies.find((c: any) => c.id === reservation.companyId) : null;
+                const linkedAgency = reservation.agencyId ? agencies.find((a: any) => a.id === reservation.agencyId) : null;
+                const entity = linkedCompany || linkedAgency;
+                const entityName = entity ? (entity.razonSocial || entity.nombreFantasia || "—") : null;
+                return entityName ? (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="font-medium text-foreground">{entityName}</span>
+                    <Badge variant="outline" className="text-[10px] py-0">
+                      {linkedCompany ? "Empresa" : "Agencia"}
+                    </Badge>
+                  </div>
+                ) : null;
+              })()}
               <Separator />
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="space-y-1">
@@ -793,18 +808,40 @@ export function ReservationDetailModal({
                 </div>
               </div>
               <Separator />
-              <div className="flex items-center justify-between bg-muted/50 rounded-md p-3">
-                <div>
-                  <div className="text-sm text-muted-foreground">Total Habitacion</div>
-                  <div className="font-semibold">${fmtMoney(reservation.totalRoomAmount || 0)}</div>
-                </div>
-                {totalCharges > 0 && (
-                  <div className="text-right">
-                    <div className="text-sm text-muted-foreground">Cargos extras</div>
-                    <div className="font-semibold">${totalCharges.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              {(() => {
+                const totalRoom = parseFloat(reservation.totalRoomAmount || "0");
+                const totalAdvances = (reservation.payments ?? [])
+                  .filter((p: any) => p.status === "active")
+                  .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+                const totalToInvoice = totalRoom + totalCharges - totalAdvances;
+                return (
+                  <div className="bg-muted/50 rounded-md p-3 space-y-2">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Total Habitación</div>
+                        <div className="font-semibold text-sm">${fmtMoney(totalRoom)}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-muted-foreground">Cargos extras</div>
+                        <div className="font-semibold text-sm">${fmtMoney(totalCharges)}</div>
+                      </div>
+                      {totalAdvances > 0 && (
+                        <div>
+                          <div className="text-xs text-muted-foreground">Anticipos</div>
+                          <div className="font-semibold text-sm text-green-600 dark:text-green-400">−${fmtMoney(totalAdvances)}</div>
+                        </div>
+                      )}
+                      <div className={totalAdvances > 0 ? "text-right" : "col-span-2 text-right"}>
+                        <div className="text-xs text-muted-foreground">Total a facturar</div>
+                        <div className={`font-bold text-base ${totalToInvoice <= 0 ? "text-green-600 dark:text-green-400" : "text-foreground"}`}>
+                          ${fmtMoney(Math.max(0, totalToInvoice))}
+                          {totalToInvoice <= 0 && <span className="text-xs font-normal ml-1 opacity-70">saldado</span>}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
+                );
+              })()}
               {reservation.notes && (
                 <div className="text-sm bg-muted/30 rounded-md p-3">
                   <div className="text-muted-foreground mb-1">Notas:</div>

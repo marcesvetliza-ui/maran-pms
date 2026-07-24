@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
+import { ReservationDetailModal } from "@/components/planning-reservation-detail";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   DoorOpen,
@@ -413,7 +415,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   CONGRESS: "Congreso", OTHER: "Otro",
 };
 
-function OcupadaCard({ item }: { item: any }) {
+function OcupadaCard({ item, onOpen }: { item: any; onOpen?: () => void }) {
   const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const checkOutToday = item.checkOut === todayStr;
   const checkOutTomorrow = item.nightsRemaining === 1;
@@ -559,6 +561,15 @@ function OcupadaCard({ item }: { item: any }) {
             )}
           </div>
         )}
+
+        {/* Acción */}
+        {onOpen && (
+          <div className="border-t pt-2">
+            <Button variant="outline" size="sm" className="w-full text-xs" onClick={onOpen}>
+              <Eye className="h-3.5 w-3.5 mr-1.5" />Ver detalle
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -638,6 +649,8 @@ function ArrivingCard({ item }: { item: any }) {
 }
 
 function OcupadasView() {
+  const [, navigate] = useLocation();
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { data: inHouse = [], isLoading, refetch, isFetching } = useQuery<any[]>({
     queryKey: ["/api/rooms/in-house"],
@@ -756,7 +769,7 @@ function OcupadasView() {
           )}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filtered.map(item => (
-              <OcupadaCard key={item.reservationId} item={item} />
+              <OcupadaCard key={item.reservationId} item={item} onOpen={() => setDetailId(item.reservationId)} />
             ))}
           </div>
         </>
@@ -792,6 +805,13 @@ function OcupadasView() {
           Sin llegadas para "<span className="font-medium">{search}</span>"
         </div>
       )}
+
+      <ReservationDetailModal
+        open={!!detailId}
+        onOpenChange={(o) => { if (!o) setDetailId(null); }}
+        reservationId={detailId}
+        onNavigate={navigate}
+      />
     </div>
   );
 }
