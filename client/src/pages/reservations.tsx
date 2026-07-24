@@ -1870,10 +1870,13 @@ function ReservationDetailDialog({
   const [coAgencyId, setCoAgencyId] = useState("");
   const [coShowFacturar, setCoShowFacturar] = useState(false);
   const [coPendingInvoice, setCoPendingInvoice] = useState(false);
+  const [showFacturarPrompt, setShowFacturarPrompt] = useState(false);
+  const [coIsFacturarSolo, setCoIsFacturarSolo] = useState(false);
 
   const openCheckoutWizard = () => {
     setCoPayAmount("");
     setCoReceiptType("cierre_habitacion");
+    setCoIsFacturarSolo(false);
     if (reservation.companyId) {
       setCoPayMethod("cuenta_corriente");
       setCoBillingTarget("company");
@@ -1891,6 +1894,29 @@ function ReservationDetailDialog({
       setCoAgencyId("");
     }
     setCoWizardStep(1);
+  };
+
+  const openFacturarSolo = () => {
+    setCoPayAmount("");
+    setCoReceiptType("cierre_habitacion");
+    setCoIsFacturarSolo(true);
+    if (reservation.companyId) {
+      setCoPayMethod("cuenta_corriente");
+      setCoBillingTarget("company");
+      setCoCompanyId(reservation.companyId);
+      setCoAgencyId("");
+    } else if (reservation.agencyId) {
+      setCoPayMethod("cuenta_corriente");
+      setCoBillingTarget("agency");
+      setCoAgencyId(reservation.agencyId);
+      setCoCompanyId("");
+    } else {
+      setCoPayMethod("efectivo");
+      setCoBillingTarget("guest");
+      setCoCompanyId("");
+      setCoAgencyId("");
+    }
+    setCoWizardStep(2);
   };
 
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean; allowRecurring: boolean }[]>({
@@ -3619,29 +3645,10 @@ function ReservationDetailDialog({
                 </div>
                 {balance > 0.01 && !showAddPayment && !isLocked && (
                   <div className="flex flex-col gap-2 mt-2">
-                    <Button 
-                      size="sm" 
-                      className="w-full" 
-                      onClick={() => {
-                        setNewPayment({ amount: String(balance.toFixed(2)), method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
-                        setPaymentRows([{ amount: String(balance.toFixed(2)), method: "efectivo", reference: "", billingTarget: "guest" }]);
-                        setShowAddPayment(true);
-                      }}
-                      data-testid="button-pay-balance"
-                    >
-                      <DollarSign className="h-4 w-4 mr-1" />
-                      Pagar Saldo Pendiente (${fmtMoney(balance)})
-                    </Button>
                     <Button
                       size="sm"
-                      variant="outline"
-                      className="w-full border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300"
-                      onClick={() => {
-                        if (facturaEmitida) {
-                          if (!window.confirm("Ya se emitió una factura para esta reserva en esta sesión. ¿Desea emitir otra igualmente?")) return;
-                        }
-                        setShowFacturar(true);
-                      }}
+                      className="w-full"
+                      onClick={() => setShowFacturarPrompt(true)}
                       data-testid="button-facturar-folio"
                     >
                       <FileText className="h-4 w-4 mr-1" />
@@ -3815,12 +3822,41 @@ function ReservationDetailDialog({
       </DialogContent>
 
       {/* Checkout Wizard Dialog */}
-      <Dialog open={coWizardStep > 0} onOpenChange={(open) => { if (!open) setCoWizardStep(0); }}>
+      {/* Prompt: ¿Hacer check-out también? */}
+      <Dialog open={showFacturarPrompt} onOpenChange={(open) => { if (!open) setShowFacturarPrompt(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-500" />
+              Facturar Saldo — Hab. {reservation.room?.roomNumber}
+            </DialogTitle>
+            <DialogDescription>
+              {reservation.guest?.lastName} {reservation.guest?.firstName} · {reservation.reservationCode}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">¿Desea realizar el check-out al mismo tiempo?</p>
+          <div className="flex flex-col gap-2">
+            <Button className="w-full" onClick={() => { setShowFacturarPrompt(false); openCheckoutWizard(); }} data-testid="button-facturar-con-checkout">
+              <LogOut className="h-4 w-4 mr-2" /> Sí, facturar y hacer check-out
+            </Button>
+            <Button variant="outline" className="w-full" onClick={() => { setShowFacturarPrompt(false); openFacturarSolo(); }} data-testid="button-facturar-sin-checkout">
+              <FileText className="h-4 w-4 mr-2" /> No, solo facturar
+            </Button>
+            <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => setShowFacturarPrompt(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={coWizardStep > 0} onOpenChange={(open) => { if (!open) { setCoWizardStep(0); setCoIsFacturarSolo(false); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <LogOut className="h-5 w-5 text-orange-500" />
-              Check-out — Hab. {reservation.room?.roomNumber}
+              {coIsFacturarSolo
+                ? <><FileText className="h-5 w-5 text-blue-500" />Facturar Saldo — Hab. {reservation.room?.roomNumber}</>
+                : <><LogOut className="h-5 w-5 text-orange-500" />Check-out — Hab. {reservation.room?.roomNumber}</>
+              }
             </DialogTitle>
             <DialogDescription>
               {reservation.guest?.lastName} {reservation.guest?.firstName} · {reservation.reservationCode}
@@ -3828,14 +3864,20 @@ function ReservationDetailDialog({
           </DialogHeader>
 
           {/* Step indicator */}
-          <div className="flex items-center gap-2">
-            {[1,2,3].map(s => (
-              <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= coWizardStep ? "bg-primary" : "bg-muted"}`} />
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground text-center -mt-2">
-            Paso {coWizardStep} de 3: {coWizardStep === 1 ? "Resumen de cuenta" : coWizardStep === 2 ? "Pago y comprobante" : "Confirmar check-out"}
-          </p>
+          {coIsFacturarSolo ? (
+            <p className="text-xs text-muted-foreground text-center">Pago y comprobante</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                {[1,2,3].map(s => (
+                  <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= coWizardStep ? "bg-primary" : "bg-muted"}`} />
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground text-center -mt-2">
+                Paso {coWizardStep} de 3: {coWizardStep === 1 ? "Resumen de cuenta" : coWizardStep === 2 ? "Pago y comprobante" : "Confirmar check-out"}
+              </p>
+            </>
+          )}
 
           {/* Step 1: Resumen */}
           {coWizardStep === 1 && (() => {
@@ -3992,10 +4034,10 @@ function ReservationDetailDialog({
                   </Select>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setCoWizardStep(1)}>Atrás</Button>
+                  <Button variant="outline" size="sm" onClick={() => { if (coIsFacturarSolo) { setCoWizardStep(0); setCoIsFacturarSolo(false); } else setCoWizardStep(1); }}>Atrás</Button>
                   {balance > 0 && (
                     <Button size="sm" onClick={() => {
-                      const amount = coPayAmount || fmtMoney(balance);
+                      const amount = coPayAmount || balance.toFixed(2);
                       if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
                       if (coPayMethod === "cuenta_corriente" && coBillingTarget === "company" && !coCompanyId && !reservation.companyId) {
                         toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
@@ -4003,6 +4045,7 @@ function ReservationDetailDialog({
                       if (coPayMethod === "cuenta_corriente" && coBillingTarget === "agency" && !coAgencyId && !reservation.agencyId) {
                         toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
                       }
+                      const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
                       coAddPaymentMutation.mutate({
                         amount,
                         method: coPayMethod,
@@ -4011,16 +4054,29 @@ function ReservationDetailDialog({
                         companyId: coBillingTarget === "company" ? (coCompanyId || reservation.companyId || undefined) : undefined,
                         agencyId: coBillingTarget === "agency" ? (coAgencyId || reservation.agencyId || undefined) : undefined,
                       }, { onSuccess: () => {
-                        if (["factura_a", "factura_b", "factura_c"].includes(coReceiptType)) {
-                          setCoPendingInvoice(true);
+                        if (coIsFacturarSolo) {
+                          setCoWizardStep(0);
+                          setCoIsFacturarSolo(false);
+                          if (isArca) setCoShowFacturar(true);
+                        } else {
+                          if (isArca) setCoPendingInvoice(true);
+                          setCoWizardStep(3);
                         }
-                        setCoWizardStep(3);
                       } });
                     }} disabled={coAddPaymentMutation.isPending} data-testid="button-co-pay">
                       {coAddPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
                     </Button>
                   )}
-                  <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => setCoWizardStep(3)} data-testid="button-co-skip">
+                  <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => {
+                    if (coIsFacturarSolo) {
+                      const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
+                      setCoWizardStep(0);
+                      setCoIsFacturarSolo(false);
+                      if (isArca) setCoShowFacturar(true);
+                    } else {
+                      setCoWizardStep(3);
+                    }
+                  }} data-testid="button-co-skip">
                     {balance > 0 ? "Omitir pago" : "Siguiente"}
                   </Button>
                 </div>
