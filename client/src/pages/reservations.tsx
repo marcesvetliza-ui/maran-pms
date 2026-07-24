@@ -3850,7 +3850,7 @@ function ReservationDetailDialog({
       </Dialog>
 
       <Dialog open={coWizardStep > 0} onOpenChange={(open) => { if (!open) { setCoWizardStep(0); setCoIsFacturarSolo(false); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {coIsFacturarSolo
@@ -3933,7 +3933,7 @@ function ReservationDetailDialog({
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => setCoWizardStep(0)}>Cancelar</Button>
                   <Button size="sm" onClick={() => setCoWizardStep(2)} data-testid="button-co-step1-next">
-                    {balance > 0 ? "Registrar Pago" : "Siguiente"}
+                    Siguiente →
                   </Button>
                 </div>
               </div>
