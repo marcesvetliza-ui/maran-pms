@@ -233,6 +233,52 @@ const IVA_MAP: Record<string, { field: string; rate: number }> = {
 
 const ALL_IVA_FIELDS = { montoIva5: "", montoIva25: "", montoIva105: "", montoIva21: "", montoIva27: "" };
 
+type NetoLine = { neto: string; alicuota: string };
+const emptyNetoLine = (): NetoLine => ({ neto: "", alicuota: "21" });
+
+function calcFromLines(lines: NetoLine[]): Record<string, string> {
+  const ivaTotals: Record<string, number> = {};
+  let netoTotal = 0;
+  for (const line of lines) {
+    const n = parseFloat(line.neto) || 0;
+    netoTotal += n;
+    const entry = IVA_MAP[line.alicuota];
+    if (entry && n > 0) {
+      ivaTotals[entry.field] = (ivaTotals[entry.field] || 0) + n * entry.rate / 100;
+    }
+  }
+  return {
+    montoNeto: netoTotal > 0 ? netoTotal.toFixed(2) : "",
+    montoIva5:   ivaTotals.montoIva5   ? ivaTotals.montoIva5.toFixed(2)   : "",
+    montoIva25:  ivaTotals.montoIva25  ? ivaTotals.montoIva25.toFixed(2)  : "",
+    montoIva105: ivaTotals.montoIva105 ? ivaTotals.montoIva105.toFixed(2) : "",
+    montoIva21:  ivaTotals.montoIva21  ? ivaTotals.montoIva21.toFixed(2)  : "",
+    montoIva27:  ivaTotals.montoIva27  ? ivaTotals.montoIva27.toFixed(2)  : "",
+  };
+}
+
+function linesFromInvoice(inv: Invoice): NetoLine[] {
+  const result: NetoLine[] = [];
+  const pairs: Array<{ alicuota: string; field: string; rate: number }> = [
+    { alicuota: "5",    field: "montoIva5",   rate: 0.05 },
+    { alicuota: "10.5", field: "montoIva105", rate: 0.105 },
+    { alicuota: "21",   field: "montoIva21",  rate: 0.21 },
+    { alicuota: "25",   field: "montoIva25",  rate: 0.025 },
+    { alicuota: "27",   field: "montoIva27",  rate: 0.27 },
+  ];
+  for (const { alicuota, field, rate } of pairs) {
+    const iva = parseFloat((inv as any)[field] || "0");
+    if (iva > 0.001) {
+      result.push({ neto: (iva / rate).toFixed(2), alicuota });
+    }
+  }
+  if (result.length === 0) {
+    const neto = parseFloat(inv.montoNeto || "0");
+    result.push({ neto: neto > 0 ? String(neto) : "", alicuota: "21" });
+  }
+  return result;
+}
+
 function calcIvaField(neto: string, alicuota: string): Record<string, string> {
   const n = parseFloat(neto);
   const entry = IVA_MAP[alicuota];
@@ -262,6 +308,23 @@ function InvoiceDialog({
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
+  const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
+
+  const updateNetoLine = (i: number, field: keyof NetoLine, val: string) => {
+    setNetoLines(prev => {
+      const updated = prev.map((l, j) => j === i ? { ...l, [field]: val } : l);
+      setForm(p => ({ ...p, ...calcFromLines(updated) }));
+      return updated;
+    });
+  };
+  const addNetoLine = () => setNetoLines(prev => [...prev, emptyNetoLine()]);
+  const removeNetoLine = (i: number) => {
+    setNetoLines(prev => {
+      const updated = prev.filter((_, j) => j !== i);
+      setForm(p => ({ ...p, ...calcFromLines(updated) }));
+      return updated;
+    });
+  };
 
   const isEditing = !!editingInvoice;
 
@@ -302,9 +365,11 @@ function InvoiceDialog({
         centroCosto: editingInvoice.centroCosto || "",
         observaciones: editingInvoice.observaciones || "",
       });
+      setNetoLines(linesFromInvoice(editingInvoice));
       setStep(1);
     } else if (open && !editingInvoice) {
       setForm(emptyForm());
+      setNetoLines([emptyNetoLine()]);
       setStep(0);
     }
   }, [open, editingInvoice]);
@@ -384,7 +449,7 @@ function InvoiceDialog({
     );
   }, [form]);
 
-  const resetDialog = () => { onClose(); setForm(emptyForm()); setStep(0); setInvItems([]); };
+  const resetDialog = () => { onClose(); setForm(emptyForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); };
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
@@ -474,7 +539,22 @@ function InvoiceDialog({
         : "El asiento contable fue generado automáticamente.";
       toast({ title: "Comprobante registrado", description: desc });
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      // apiRequest throws "STATUS: {json body}" — extract JSON to get the server message
+      const raw = e.message || "";
+      const jsonStart = raw.indexOf("{");
+      let description = raw;
+      if (jsonStart >= 0) {
+        try { description = JSON.parse(raw.substring(jsonStart)).error || raw; } catch {}
+      }
+      const isDuplicate = raw.startsWith("409");
+      toast({
+        title: isDuplicate ? "Comprobante duplicado" : "Error al registrar comprobante",
+        description,
+        variant: "destructive",
+        duration: isDuplicate ? 8000 : 5000,
+      });
+    },
   });
 
   const patchMut = useMutation({
@@ -700,44 +780,124 @@ function InvoiceDialog({
           {/* STEP 1: Montos */}
           {step === 1 && (
             <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Neto Gravado {isResumen && <span className="text-xs text-muted-foreground">(base para IVA)</span>}</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={form.montoNeto}
-                    onChange={(e) => {
-                      const neto = e.target.value;
-                      setForm((p) => ({ ...p, montoNeto: neto, ...calcIvaField(neto, p.alicuotaIva) }));
-                    }}
-                    data-testid="input-monto-neto"
-                  />
-                </div>
-                <div>
-                  <Label>Alícuota IVA</Label>
-                  <Select
-                    value={form.alicuotaIva}
-                    onValueChange={(v) => {
-                      setForm((p) => ({ ...p, alicuotaIva: v, ...calcIvaField(p.montoNeto, v) }));
-                    }}
+              {/* ── Netos gravados — multi-línea ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">
+                    Netos Gravados
+                    {isResumen && <span className="ml-1 text-xs font-normal text-muted-foreground">(base para IVA)</span>}
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={addNetoLine}
+                    data-testid="btn-add-neto-line"
                   >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">0%</SelectItem>
-                      <SelectItem value="5">5%</SelectItem>
-                      <SelectItem value="10.5">10.5%</SelectItem>
-                      <SelectItem value="21">21%</SelectItem>
-                      <SelectItem value="25">2.5%</SelectItem>
-                      <SelectItem value="27">27%</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <Plus className="h-3 w-3" /> Agregar línea
+                  </Button>
                 </div>
-                <div><Label>IVA 21%</Label><Input type="number" step="0.01" value={form.montoIva21} onChange={(e) => f("montoIva21", e.target.value)} data-testid="input-iva21" /></div>
-                <div><Label>IVA 10.5%</Label><Input type="number" step="0.01" value={form.montoIva105} onChange={(e) => f("montoIva105", e.target.value)} data-testid="input-iva105" /></div>
-                <div><Label>IVA 27%</Label><Input type="number" step="0.01" value={form.montoIva27} onChange={(e) => f("montoIva27", e.target.value)} data-testid="input-iva27" /></div>
-                <div><Label>IVA 5%</Label><Input type="number" step="0.01" value={form.montoIva5} onChange={(e) => f("montoIva5", e.target.value)} data-testid="input-iva5" /></div>
-                <div><Label>IVA 2.5%</Label><Input type="number" step="0.01" value={form.montoIva25} onChange={(e) => f("montoIva25", e.target.value)} data-testid="input-iva25" /></div>
+
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Neto gravado $</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Alícuota IVA</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground text-xs">IVA calculado $</th>
+                        <th className="w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {netoLines.map((line, i) => {
+                        const n = parseFloat(line.neto) || 0;
+                        const entry = IVA_MAP[line.alicuota];
+                        const ivaCalc = entry && n > 0 ? n * entry.rate / 100 : 0;
+                        return (
+                          <tr key={i} className="bg-background">
+                            <td className="px-2 py-1.5">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="0.00"
+                                value={line.neto}
+                                onChange={e => updateNetoLine(i, "neto", e.target.value)}
+                                className="h-8 text-sm"
+                                data-testid={`input-neto-line-${i}`}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <Select
+                                value={line.alicuota}
+                                onValueChange={v => updateNetoLine(i, "alicuota", v)}
+                              >
+                                <SelectTrigger className="h-8 text-sm" data-testid={`select-alicuota-line-${i}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="5">5%</SelectItem>
+                                  <SelectItem value="10.5">10.5%</SelectItem>
+                                  <SelectItem value="21">21%</SelectItem>
+                                  <SelectItem value="25">2.5%</SelectItem>
+                                  <SelectItem value="27">27%</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="px-3 py-1.5 text-right font-mono text-sm text-muted-foreground whitespace-nowrap">
+                              {ivaCalc > 0 ? `$${fmt(ivaCalc)}` : "—"}
+                            </td>
+                            <td className="px-1 py-1.5 text-center">
+                              {netoLines.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeNetoLine(i)}
+                                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 mx-auto"
+                                  data-testid={`btn-remove-neto-line-${i}`}
+                                  title="Quitar línea"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="border-t bg-muted/30">
+                      <tr>
+                        <td colSpan={2} className="px-3 py-2 text-xs text-muted-foreground">
+                          Total neto: <span className="font-bold text-foreground font-mono">${fmt(form.montoNeto || "0")}</span>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-right text-muted-foreground">
+                          Total IVA: <span className="font-bold text-foreground font-mono">
+                            ${fmt($n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoIva105) + $n(form.montoIva21) + $n(form.montoIva27))}
+                          </span>
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* IVA desagregado — solo se muestra si hay importes */}
+                {($n(form.montoIva21) > 0 || $n(form.montoIva105) > 0 || $n(form.montoIva27) > 0 || $n(form.montoIva5) > 0 || $n(form.montoIva25) > 0) && (
+                  <div className="rounded-md bg-blue-50 border border-blue-100 dark:bg-blue-950/20 dark:border-blue-900 px-3 py-2 space-y-1">
+                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400">IVA desagregado por alícuota</p>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
+                      {$n(form.montoIva21)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 21%</span><span className="font-mono font-medium">${fmt(form.montoIva21)}</span></div>}
+                      {$n(form.montoIva105) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 10.5%</span><span className="font-mono font-medium">${fmt(form.montoIva105)}</span></div>}
+                      {$n(form.montoIva27)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 27%</span><span className="font-mono font-medium">${fmt(form.montoIva27)}</span></div>}
+                      {$n(form.montoIva5)   > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 5%</span><span className="font-mono font-medium">${fmt(form.montoIva5)}</span></div>}
+                      {$n(form.montoIva25)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 2.5%</span><span className="font-mono font-medium">${fmt(form.montoIva25)}</span></div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Otros conceptos ── */}
+              <div className="grid grid-cols-2 gap-3">
                 <div><Label>Exento</Label><Input type="number" step="0.01" value={form.montoExento} onChange={(e) => f("montoExento", e.target.value)} data-testid="input-exento" /></div>
                 <div><Label>No Gravado</Label><Input type="number" step="0.01" value={form.montoNoGravado} onChange={(e) => f("montoNoGravado", e.target.value)} data-testid="input-no-gravado" /></div>
                 <div><Label>Imp. Internos</Label><Input type="number" step="0.01" value={form.impuestosInternos} onChange={(e) => f("impuestosInternos", e.target.value)} data-testid="input-imp-internos" /></div>

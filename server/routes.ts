@@ -2732,6 +2732,37 @@ export async function registerRoutes(
     try {
       const body = req.body;
 
+      // ── Prevenir comprobantes duplicados ──────────────────────────────────
+      if (body.numeroComprobante) {
+        const dupCheck = await db.execute(sql`
+          SELECT id, numero_comprobante_ext, numero_comprobante
+          FROM purchase_invoices
+          WHERE tipo_comprobante = ${body.tipoComprobante}
+            AND numero_comprobante = ${body.numeroComprobante}
+            AND (
+              CASE
+                WHEN ${body.supplierId ? String(body.supplierId) : null}::int IS NOT NULL
+                  THEN supplier_id = ${body.supplierId ? parseInt(body.supplierId) : null}
+                ELSE (proveedor_cuit IS NOT NULL AND proveedor_cuit = ${body.proveedorCuit || null})
+              END
+            )
+            AND (
+              (${body.puntoVenta || null} IS NULL AND punto_venta IS NULL)
+              OR punto_venta = ${body.puntoVenta || null}
+            )
+          LIMIT 1
+        `);
+        if (dupCheck.rows.length > 0) {
+          const dup = dupCheck.rows[0] as any;
+          const ref = dup.numero_comprobante_ext || dup.numero_comprobante;
+          return res.status(409).json({
+            error: `El comprobante ${ref} ya fue registrado anteriormente (ID #${dup.id}). No se permiten duplicados.`,
+            existingId: dup.id,
+          });
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       // Calcular montoTotal
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal =
