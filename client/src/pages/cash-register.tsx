@@ -429,7 +429,7 @@ ${anulSection}
 
 function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin" || user?.role === "manager";
+  const isAdmin = ["admin", "manager", "jefe_recepcion", "resp_administracion"].includes(user?.role ?? "");
   const { toast } = useToast();
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
   const [closeShiftDialog, setCloseShiftDialog] = useState(false);
@@ -442,7 +442,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const { data: allUsers = [] } = useQuery<UserBasic[]>({ queryKey: ["/api/staff/users"] });
   const AREA_TO_ROLE: Record<string, string> = { reception: "reception", restaurant: "restaurant", spa: "spa", events: "events" };
   const areaRole = AREA_TO_ROLE[area] ?? area;
-  const relevantUsers = allUsers.filter(u => u.role === areaRole || u.role === "admin" || u.role === "manager");
+  const relevantUsers = allUsers.filter(u => u.role === areaRole || u.role === "admin" || u.role === "manager" || u.role === "jefe_recepcion" || u.role === "resp_administracion");
   const getDisplayName = (u: UserBasic) => u.fullName || u.username;
   const [openNotes, setOpenNotes] = useState("");
   const [turnoTipoOpen, setTurnoTipoOpen] = useState("tarde");
