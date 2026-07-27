@@ -49,6 +49,7 @@ import {
   ChefHat,
   Store,
   Gift,
+  CreditCard,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -97,6 +98,7 @@ const INVENTARIO_ROLES  = ["admin","manager","ama_de_llaves","spa","resp_deposit
 const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping","restaurant","events","reception","jefe_recepcion","comercial"];
 const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","jefe_recepcion","comercial"];
 const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","jefe_recepcion"];
+const CC_ROLES          = ["admin","manager","resp_administracion","jefe_recepcion","comercial"];
 const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","jefe_recepcion","comercial"];
 
@@ -172,8 +174,9 @@ const menuSections = [
   {
     titulo: "Administración",
     items: [
-      { label: "Administración", icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
-      { label: "Caja",           icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
+      { label: "Administración",     icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
+      { label: "Cuentas Corrientes", icon: CreditCard, href: "/admin/cuentas", roles: CC_ROLES },
+      { label: "Caja",               icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
     ],
   },
 
