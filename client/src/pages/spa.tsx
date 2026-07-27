@@ -88,6 +88,7 @@ type SpaClientType = {
   email: string | null;
   notes: string | null;
   createdAt: string;
+  condicionVentaPredeterminada?: string | null;
 };
 
 type SpaAppointment = {

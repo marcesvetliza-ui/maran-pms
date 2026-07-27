@@ -242,6 +242,7 @@ export function GuestFormDialog({
     vehiculoMarca: g?.vehiculoMarca || "",
     vehiculoModelo: g?.vehiculoModelo || "",
     vehiculoColor: g?.vehiculoColor || "",
+    condicionVentaPredeterminada: (g as any)?.condicionVentaPredeterminada || "contado",
   });
 
   const [formData, setFormData] = useState<Partial<InsertGuest>>(() => buildFormData(guest));
@@ -437,6 +438,21 @@ export function GuestFormDialog({
                     </SelectContent>
                   </Select>
                 </div>
+
+              {/* Condición de venta — jurídica */}
+              <div className="grid gap-2">
+                <Label>Condición de Venta Predeterminada</Label>
+                <Select value={(formData as any).condicionVentaPredeterminada || "contado"} onValueChange={(v) => setFormData({ ...formData, condicionVentaPredeterminada: v } as any)}>
+                  <SelectTrigger data-testid="select-condicion-venta-juridica"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contado">Contado</SelectItem>
+                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    <SelectItem value="30_dias">30 días</SelectItem>
+                    <SelectItem value="60_dias">60 días</SelectItem>
+                    <SelectItem value="90_dias">90 días</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -619,6 +635,21 @@ export function GuestFormDialog({
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              {/* Condición de venta — física */}
+              <div className="grid gap-2">
+                <Label>Condición de Venta Predeterminada</Label>
+                <Select value={(formData as any).condicionVentaPredeterminada || "contado"} onValueChange={(v) => setFormData({ ...formData, condicionVentaPredeterminada: v } as any)}>
+                  <SelectTrigger data-testid="select-condicion-venta-fisica"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contado">Contado</SelectItem>
+                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    <SelectItem value="30_dias">30 días</SelectItem>
+                    <SelectItem value="60_dias">60 días</SelectItem>
+                    <SelectItem value="90_dias">90 días</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Estado Civil */}

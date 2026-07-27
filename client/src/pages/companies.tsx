@@ -210,6 +210,7 @@ export default function CompaniesPage() {
       contactPhone: "",
       creditLimit: "0",
       paymentTermDays: 30,
+      condicionVentaPredeterminada: "contado",
       notes: "",
     },
   });
@@ -293,6 +294,7 @@ export default function CompaniesPage() {
       contactPhone: company.contactPhone || "",
       creditLimit: company.creditLimit || "0",
       paymentTermDays: company.paymentTermDays || 30,
+      condicionVentaPredeterminada: (company as any).condicionVentaPredeterminada || "contado",
       notes: company.notes || "",
     });
     setShowForm(true);
@@ -324,6 +326,7 @@ export default function CompaniesPage() {
       contactPhone: "",
       creditLimit: "0",
       paymentTermDays: 30,
+      condicionVentaPredeterminada: "contado",
       notes: "",
     });
     setShowForm(true);
@@ -601,6 +604,26 @@ export default function CompaniesPage() {
                     </FormItem>
                   )} />
                 </div>
+                <FormField control={form.control} name="condicionVentaPredeterminada" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Condición de Venta Predeterminada</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value ?? "contado"}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-company-condicion-venta">
+                          <SelectValue placeholder="Seleccionar condición..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="contado">Contado</SelectItem>
+                        <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                        <SelectItem value="30_dias">30 días</SelectItem>
+                        <SelectItem value="60_dias">60 días</SelectItem>
+                        <SelectItem value="90_dias">90 días</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
               </div>
 
               <FormField control={form.control} name="notes" render={({ field }) => (
