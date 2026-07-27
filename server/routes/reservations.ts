@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
@@ -2027,6 +2027,39 @@ export function registerReservationsRoutes(app: Express) {
       res.json({ ok: true });
     } catch {
       res.status(500).json({ error: "Error deleting companion" });
+    }
+  });
+
+  // Promote companion → create a guest profile and link it via guestId
+  app.post("/api/reservations/:id/companions/:companionId/promote", requireAuth, async (req, res) => {
+    try {
+      const [companion] = await db.select().from(reservationCompanions).where(eq(reservationCompanions.id, req.params.companionId));
+      if (!companion) return res.status(404).json({ error: "Acompañante no encontrado" });
+      if (companion.guestId) return res.status(400).json({ error: "El acompañante ya tiene perfil vinculado" });
+
+      const docType = companion.documentType?.toLowerCase();
+      const normalized = ["dni","cuit","cuil","passport","cedula","lc","le","other"].includes(docType || "") ? docType : "dni";
+
+      const [newGuest] = await db.insert(guests).values({
+        firstName: companion.firstName,
+        lastName: companion.lastName,
+        documentType: normalized || "dni",
+        documentNumber: companion.documentNumber || "",
+        nationality: companion.nationality || "Argentina",
+        dateOfBirth: companion.dateOfBirth || null,
+        segment: "LEISURE",
+        vatCondition: "consumidor_final",
+        condicionVentaPredeterminada: "contado",
+      } as any).returning();
+
+      const [updated] = await db.update(reservationCompanions)
+        .set({ guestId: newGuest.id })
+        .where(eq(reservationCompanions.id, req.params.companionId))
+        .returning();
+
+      res.json({ companion: updated, guest: newGuest });
+    } catch (e: any) {
+      res.status(500).json({ error: "Error al crear perfil: " + e.message });
     }
   });
 

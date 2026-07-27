@@ -944,5 +944,22 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_link_failed boolean NOT NULL DEFAULT false`)
   );
 
+  // guest_id FK on reservation_companions — link companions to CRM guest profiles
+  await withTimeout("reservation_companions.guest_id", T, () =>
+    db.execute(sql`
+      ALTER TABLE reservation_companions ADD COLUMN IF NOT EXISTS guest_id varchar;
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_name = 'reservation_companions_guest_id_guests_id_fk'
+        ) THEN
+          ALTER TABLE reservation_companions
+            ADD CONSTRAINT reservation_companions_guest_id_guests_id_fk
+            FOREIGN KEY (guest_id) REFERENCES guests(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

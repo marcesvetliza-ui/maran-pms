@@ -2666,6 +2666,7 @@ export const reservationCompanions = pgTable("reservation_companions", {
   documentNumber: varchar("document_number", { length: 50 }),
   dateOfBirth: date("date_of_birth"),
   nationality: varchar("nationality", { length: 100 }),
+  guestId: varchar("guest_id").references(() => guests.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

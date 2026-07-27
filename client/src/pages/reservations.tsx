@@ -43,6 +43,7 @@ import {
   Trash2,
   UserCheck,
   Loader2,
+  Link2,
   TrendingUp,
   Phone,
   AlertCircle,
@@ -219,8 +220,8 @@ export function ReservationFormDialog({
   const [resChargeCategory, setResChargeCategory] = useState("otros");
   const [hasVoucher, setHasVoucher] = useState(!!(reservation?.voucherCode || reservation?.voucherNotes));
 
-  type PendingCompanion = { firstName: string; lastName: string; documentType: string; documentNumber: string; dateOfBirth: string; nationality: string };
-  const emptyCompanion: PendingCompanion = { firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "" };
+  type PendingCompanion = { firstName: string; lastName: string; documentType: string; documentNumber: string; dateOfBirth: string; nationality: string; guestId?: string | null };
+  const emptyCompanion: PendingCompanion = { firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "", guestId: null };
   const [pendingCompanions, setPendingCompanions] = useState<PendingCompanion[]>([]);
   const [showCompanionForm, setShowCompanionForm] = useState(false);
   const [pendingCompMode, setPendingCompMode] = useState<"search" | "new">("search");
@@ -1681,13 +1682,23 @@ export function ReservationFormDialog({
                               <button key={g.id} type="button"
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex flex-col border-b last:border-0"
                                 onClick={() => {
-                                  setNewCompForm({ firstName: g.firstName, lastName: g.lastName || "", documentType: "DNI", documentNumber: g.documentNumber || "", dateOfBirth: "", nationality: "" });
-                                  setPendingCompMode("new");
+                                  setPendingCompanions(prev => [...prev, {
+                                    firstName: g.firstName,
+                                    lastName: g.lastName || "",
+                                    documentType: "DNI",
+                                    documentNumber: g.documentNumber || "",
+                                    dateOfBirth: "",
+                                    nationality: "",
+                                    guestId: g.id,
+                                  }]);
                                   setPendingCompQ(""); setPendingCompHits([]);
+                                  setShowCompanionForm(false);
+                                  setPendingCompMode("search");
                                 }}
                               >
                                 <span className="font-medium">{g.lastName} {g.firstName}</span>
                                 {g.documentNumber && <span className="text-xs text-muted-foreground">DNI {g.documentNumber}</span>}
+                                <span className="text-xs text-green-600 font-medium">← Vincular al CRM</span>
                               </button>
                             ))}
                           </div>
@@ -2080,8 +2091,8 @@ function ReservationDetailDialog({
   const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
 
   // Companions
-  type CompanionForm = { firstName: string; lastName: string; documentType: string; documentNumber: string; dateOfBirth: string; nationality: string };
-  const emptyComp: CompanionForm = { firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "" };
+  type CompanionForm = { firstName: string; lastName: string; documentType: string; documentNumber: string; dateOfBirth: string; nationality: string; guestId?: string | null };
+  const emptyComp: CompanionForm = { firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "", guestId: null };
   type GuestHit = { id: string; firstName: string; lastName: string; documentNumber?: string | null };
   const [showAddCompanion, setShowAddCompanion] = useState(false);
   const [companionMode, setCompanionMode] = useState<"search" | "new">("search");
@@ -2131,6 +2142,18 @@ function ReservationDetailDialog({
       refetchCompanions();
       toast({ title: "Acompañante eliminado" });
     },
+  });
+
+  const promoteCompanionMutation = useMutation({
+    mutationFn: async (companionId: string) => {
+      const res = await apiRequest("POST", `/api/reservations/${reservation.id}/companions/${companionId}/promote`, {});
+      return res.json();
+    },
+    onSuccess: (data) => {
+      refetchCompanions();
+      toast({ title: `Perfil creado: ${data?.guest?.firstName} ${data?.guest?.lastName}` });
+    },
+    onError: () => toast({ title: "Error al crear perfil de huésped", variant: "destructive" }),
   });
 
   // Fetch active reservations for transfer target selection
@@ -3049,13 +3072,21 @@ function ReservationDetailDialog({
                             <button key={g.id} type="button"
                               className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex flex-col border-b last:border-0"
                               onClick={() => {
-                                setNewCompanion({ firstName: g.firstName, lastName: g.lastName || "", documentType: "DNI", documentNumber: g.documentNumber || "", dateOfBirth: "", nationality: "" });
-                                setCompanionMode("new");
+                                addCompanionMutation.mutate({
+                                  firstName: g.firstName,
+                                  lastName: g.lastName || "",
+                                  documentType: "DNI",
+                                  documentNumber: g.documentNumber || "",
+                                  dateOfBirth: "",
+                                  nationality: "",
+                                  guestId: g.id,
+                                });
                                 setCompanionQ(""); setCompanionHits([]);
                               }}
                             >
                               <span className="font-medium">{g.lastName} {g.firstName}</span>
                               {g.documentNumber && <span className="text-xs text-muted-foreground">DNI {g.documentNumber}</span>}
+                              <span className="text-xs text-green-600 font-medium">← Vincular al CRM</span>
                             </button>
                           ))}
                         </div>
@@ -3235,6 +3266,23 @@ function ReservationDetailDialog({
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
+                            {c.guestId ? (
+                              <Badge variant="secondary" className="text-xs gap-1 text-green-700 bg-green-50 border-green-200 hover:bg-green-100 cursor-default" title="Perfil de huésped vinculado al CRM">
+                                <Link2 className="h-3 w-3" /> En CRM
+                              </Badge>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs text-muted-foreground gap-1"
+                                onClick={() => promoteCompanionMutation.mutate(c.id)}
+                                disabled={promoteCompanionMutation.isPending}
+                                title="Crear perfil de huésped en el CRM"
+                                data-testid={`button-promote-companion-${c.id}`}
+                              >
+                                <UserPlus className="h-3 w-3" /> Crear perfil
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
