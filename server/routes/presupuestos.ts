@@ -1115,12 +1115,12 @@ export function registerPresupuestosRoutes(app: Express) {
 
       if (area === "recepcion" || area === "grupos") {
         if (area === "grupos") {
-          // Portada diseñada: foto edificio + colores de marca + año/título
-          const coverYear = pres.fechaEmision
-            ? new Date(pres.fechaEmision).getFullYear()
-            : new Date().getFullYear();
-          drawGruposPortada(doc, coverYear);
-          doc.addPage();
+          // Portada: imagen A4 directa
+          const portadaPath = path.join(process.cwd(), "server", "assets", "grupos-portada.jpg");
+          if (fs.existsSync(portadaPath)) {
+            doc.image(portadaPath, 0, 0, { width: 595, height: 842 });
+            doc.addPage();
+          }
         }
         // Página de presentación del hotel + datos del presupuesto
         generateHockeyPdf(doc, pres, items, conditions);
