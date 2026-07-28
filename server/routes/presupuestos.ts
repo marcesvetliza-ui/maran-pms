@@ -140,6 +140,95 @@ function drawBankData(doc: any, W: number, H: number, margin: number, imgPath: s
   return y + 8;
 }
 
+// ── Grupos cover page ─────────────────────────────────────────────────────────
+
+function drawGruposPortada(doc: any, year: number) {
+  const W = 595, H = 842;
+  const MAROON = "#7B1D3A";
+  const ACCENT  = "#CFA882";   // sandy/peach accent shapes
+  const DOT     = "#BBBBBB";
+
+  // Background – very light gray
+  doc.rect(0, 0, W, H).fill("#ECECEC");
+
+  // ── White header area ─────────────────────────────────────────────────────
+  doc.rect(0, 0, W, 98).fill("#FFFFFF");
+
+  // Logo PNG (hotel-logo.png already has the full mark + wordmark)
+  const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, 30, 14, { height: 66 });
+  } else {
+    // Fallback text logo
+    doc.fillColor(MAROON).fontSize(20).font("Helvetica-Bold")
+       .text("MARAN SUITES & Towers", 30, 36);
+  }
+
+  // Thin separator under header
+  doc.rect(0, 98, W, 1).fill("#CCCCCC");
+
+  // ── Peach accent – top right ──────────────────────────────────────────────
+  doc.roundedRect(W - 74, 58, 52, 108, 14).fill(ACCENT);
+
+  // ── Dot grid – top right (above photo) ───────────────────────────────────
+  for (let r = 0; r < 5; r++)
+    for (let c = 0; c < 6; c++)
+      doc.circle(W - 175 + c * 12, 108 + r * 12, 1.5).fill(DOT);
+
+  // ── Hotel photo – rounded, clipped ───────────────────────────────────────
+  const pX = 26, pY = 108, pW = W - 52, pH = 440, pR = 18;
+  // Subtle shadow
+  doc.roundedRect(pX + 4, pY + 4, pW, pH, pR).fill("#C0C0C0");
+  // Clip and draw
+  doc.save();
+  doc.roundedRect(pX, pY, pW, pH, pR).clip();
+  const coverPath = path.join(process.cwd(), "server", "assets", "grupos-cover.jpg");
+  if (fs.existsSync(coverPath)) {
+    doc.image(coverPath, pX, pY, { width: pW, height: pH });
+  } else {
+    doc.rect(pX, pY, pW, pH).fill("#888888");
+  }
+  doc.restore();
+
+  // ── Peach accent – bottom right of photo ─────────────────────────────────
+  doc.roundedRect(W - 66, pY + pH - 90, 48, 105, 13).fill(ACCENT);
+
+  // ── Dot grid – bottom left ────────────────────────────────────────────────
+  for (let r = 0; r < 5; r++)
+    for (let c = 0; c < 6; c++)
+      doc.circle(30 + c * 12, pY + pH + 28 + r * 12, 1.5).fill(DOT);
+
+  // ── Bottom text block ─────────────────────────────────────────────────────
+  const bY = pY + pH + 26;
+
+  doc.fillColor(MAROON).fontSize(56).font("Helvetica-Bold")
+     .text(String(year), 34, bY);
+
+  // Orange rule
+  doc.rect(34, bY + 68, 190, 2.5).fill("#C9956A");
+
+  doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
+     .text("PRESUPUESTO COMERCIAL", 34, bY + 78, { characterSpacing: 2.2 });
+
+  // Sustainability badge (simplified, right side)
+  const bX = W - 142, bBY = bY + 6;
+  doc.roundedRect(bX, bBY, 108, 80, 54).stroke("#888888").lineWidth(0.8);
+  doc.fillColor("#2E7D32").fontSize(6.5).font("Helvetica-Bold")
+     .text("CERTIFICACIÓN EN", bX, bBY + 10, { width: 108, align: "center", characterSpacing: 0.5 });
+  doc.fillColor("#2E7D32").fontSize(6).font("Helvetica")
+     .text("SUSTENTABILIDAD", bX, bBY + 20, { width: 108, align: "center", characterSpacing: 0.5 });
+  doc.rect(bX + 12, bBY + 42, 84, 20).fill("#2B2B2B");
+  doc.fillColor("#FFFFFF").fontSize(11).font("Helvetica-Bold")
+     .text("PLATA", bX, bBY + 47, { width: 108, align: "center" });
+  doc.fillColor("#2E7D32").fontSize(5.5).font("Helvetica")
+     .text("HOTELES más VERDES", bX, bBY + 66, { width: 108, align: "center" });
+
+  // ── Footer bar ────────────────────────────────────────────────────────────
+  doc.rect(0, H - 38, W, 38).fill(MAROON);
+  doc.fillColor("#FFFFFF").fontSize(10).font("Helvetica")
+     .text("MARAN.COM.AR  |  f  ig", 0, H - 24, { width: W, align: "center" });
+}
+
 // ── Hockey-style PDF (grupos / recepcion) ────────────────────────────────────
 
 function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string | null) {
@@ -1025,9 +1114,15 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.pipe(res);
 
       if (area === "recepcion" || area === "grupos") {
-        // Para grupos y recepción la portada ES la página de presentación del hotel
-        // (Maran Suites & Towers, UBICACIÓN, ALOJAMIENTO, SERVICIOS INCLUIDOS)
-        // No se agrega foto previa — generateHockeyPdf la genera como página 1
+        if (area === "grupos") {
+          // Portada diseñada: foto edificio + colores de marca + año/título
+          const coverYear = pres.fechaEmision
+            ? new Date(pres.fechaEmision).getFullYear()
+            : new Date().getFullYear();
+          drawGruposPortada(doc, coverYear);
+          doc.addPage();
+        }
+        // Página de presentación del hotel + datos del presupuesto
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
         // Portada full-bleed para eventos
