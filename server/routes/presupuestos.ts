@@ -541,22 +541,10 @@ const SPA_LIGHT  = "#f0f7f9";
 
 function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842;
-  const coverPath = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
   const page2Path = path.join(process.cwd(), "server", "assets", "spa-page2.jpg");
 
-  // ── PAGE 1: Cover — imagen full-bleed, sin texto superpuesto ──────────────
-  if (fs.existsSync(coverPath)) {
-    doc.image(coverPath, 0, 0, { width: W, height: H });
-  } else {
-    // Fallback cover
-    doc.rect(0, 0, W, H).fill(SPA_CREAM);
-    doc.rect(0, 0, W, 8).fill(SPA_TEAL);
-    doc.rect(0, H - 8, W, 8).fill(SPA_TEAL);
-    doc.fillColor(SPA_NAVY).fontSize(36).font("Helvetica-Bold").text("SPA", 0, H / 2 - 20, { width: W, align: "center" });
-    doc.fillColor(SPA_TEAL).fontSize(12).font("Helvetica").text("MARAN SUITES & TOWERS", 0, H / 2 + 22, { width: W, align: "center" });
-  }
-
   // ── PAGE 2+: Mix — foto SPA a la derecha, contenido limpio a la izquierda ──
+  // (La portada full-bleed spa-cover.jpg es aplicada por el route handler antes de llamar esta función)
   // La imagen spa-page2.jpg se usa como fondo; cubrimos el lado izquierdo con
   // un rect crema para tapar su texto impreso. Foto queda visible en x>368.
   const M = 30;       // margen izquierdo
@@ -1037,26 +1025,38 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.pipe(res);
 
       if (area === "recepcion" || area === "grupos") {
-        // Portada full-bleed antes del contenido (recepcion y grupos)
-        const recepCover = path.join(process.cwd(), "server", "assets", "recep-cover.jpg");
-        console.log("[PDF] recep-cover path:", recepCover, "exists:", fs.existsSync(recepCover));
-        if (fs.existsSync(recepCover)) {
-          doc.image(recepCover, 0, 0, { width: 595, height: 842 });
+        // Portada full-bleed antes del contenido: grupos tiene su propia portada
+        const coverFile = area === "grupos" ? "grupos-cover.jpg" : "recep-cover.jpg";
+        const areaCover = path.join(process.cwd(), "server", "assets", coverFile);
+        if (fs.existsSync(areaCover)) {
+          doc.image(areaCover, 0, 0, { width: 595, height: 842 });
           doc.addPage();
         }
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
+        // Portada full-bleed para eventos
+        const eventosCover = path.join(process.cwd(), "server", "assets", "eventos-cover.jpg");
+        if (fs.existsSync(eventosCover)) {
+          doc.image(eventosCover, 0, 0, { width: 595, height: 842 });
+          doc.addPage();
+        }
         generateEventosPdf(doc, pres, items, conditions);
       } else if (area === "spa") {
+        // Portada full-bleed para spa, luego contenido spa branded
+        const spaCover = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
+        if (fs.existsSync(spaCover)) {
+          doc.image(spaCover, 0, 0, { width: 595, height: 842 });
+          doc.addPage();
+        }
         generateSpaPdf(doc, pres, items, conditions);
       } else if (area === "restaurant") {
-        // Portada Justo full-bleed, luego contenido con ítems
+        // Portada Justo full-bleed, luego catálogo de servicios
         const restaurantCover = path.join(process.cwd(), "server", "assets", "restaurant-cover.jpg");
         if (fs.existsSync(restaurantCover)) {
           doc.image(restaurantCover, 0, 0, { width: 595, height: 842 });
           doc.addPage();
         }
-        generateHockeyPdf(doc, pres, items, conditions);
+        generateCatalogSimplePdf(doc, pres, catalogItems, conditions, area);
       } else {
         generateGeneralPdf(doc, pres, items, conditions);
       }
