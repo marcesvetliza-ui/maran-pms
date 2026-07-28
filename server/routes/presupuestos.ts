@@ -1025,13 +1025,9 @@ export function registerPresupuestosRoutes(app: Express) {
       doc.pipe(res);
 
       if (area === "recepcion" || area === "grupos") {
-        // Portada full-bleed antes del contenido: grupos tiene su propia portada
-        const coverFile = area === "grupos" ? "grupos-cover.jpg" : "recep-cover.jpg";
-        const areaCover = path.join(process.cwd(), "server", "assets", coverFile);
-        if (fs.existsSync(areaCover)) {
-          doc.image(areaCover, 0, 0, { width: 595, height: 842 });
-          doc.addPage();
-        }
+        // Para grupos y recepción la portada ES la página de presentación del hotel
+        // (Maran Suites & Towers, UBICACIÓN, ALOJAMIENTO, SERVICIOS INCLUIDOS)
+        // No se agrega foto previa — generateHockeyPdf la genera como página 1
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
         // Portada full-bleed para eventos
