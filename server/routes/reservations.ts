@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
+import { assetPath } from "../utils/assetPath";
 import { storage } from "../db-storage";
 import { db } from "../db";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
@@ -2170,7 +2171,7 @@ async function handleConfirmationPdf(req: any, res: any) {
     // area, and footer with the white Maran logo. We use it as a full-page background
     // so all branding elements appear correctly without needing to draw them manually.
     const headerH = 165;
-    const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+    const headerImgPath = assetPath("confirmacion-header.jpg");
     if (fs.existsSync(headerImgPath)) {
       doc.image(headerImgPath, 0, 0, { width: pageW, height: pageH });
     } else {

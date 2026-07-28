@@ -2,6 +2,7 @@ import type { Express } from "express";
 import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
+import { assetPath } from "../utils/assetPath";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import type { FolioEntityType, FolioStatus, FolioWithMovements } from "@shared/schema";
@@ -84,7 +85,7 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
 
     // ── HEADER IMAGE (mismo que presupuestos) ────────────────────────────
     const headerH = 148;
-    const headerImgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+    const headerImgPath = assetPath("confirmacion-header.jpg");
     if (fs.existsSync(headerImgPath)) {
       doc.image(headerImgPath, 0, 0, { width: pageW, height: headerH, cover: [pageW, headerH] });
     } else {
@@ -243,7 +244,7 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
     // ── FOOTER (mismo que presupuestos) ───────────────────────────────────
     const footerY = pageH - 72;
     doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
-    const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+    const logoPath = assetPath("hotel-logo.png");
     if (fs.existsSync(logoPath)) {
       doc.image(logoPath, margin, footerY + 14, { width: 95 });
     }

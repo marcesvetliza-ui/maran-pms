@@ -19,3 +19,4 @@
 - [Silent non-array query crash](silent-non-array-query-crash.md) — raw fetch() queryFn without res.ok check turns error responses into crashing non-array data; `= []` default only guards undefined, not this case.
 - [Auth testing quirks](auth-testing-quirks.md) — system_users table + bcryptjs (not bcrypt) hashes; generate test-login hashes via code_execution sandbox, not DB/testing-subagent.
 - [Production migration gap](production-migration-gap.md) — Railway skips Drizzle's baseline migrate(); schema.ts/migrations-folder changes must ALSO be added as idempotent SQL in migrate.ts's incremental block or the table/column won't exist in prod.
+- [Server assets in production](server-assets-production.md) — build.ts deletes dist/ and never copied server/assets/; added copyDir step + assetPath() util that uses __dirname in prod vs process.cwd() in dev.

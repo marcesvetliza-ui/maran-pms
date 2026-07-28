@@ -35,11 +35,30 @@ const allowlist = [
   "zod-validation-error",
 ];
 
+async function copyDir(src: string, dest: string) {
+  await mkdir(dest, { recursive: true });
+  const entries = await readdir(src);
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry);
+    const destPath = path.join(dest, entry);
+    const info = await stat(srcPath);
+    if (info.isDirectory()) {
+      await copyDir(srcPath, destPath);
+    } else {
+      const data = await import("fs/promises").then(m => m.readFile(srcPath));
+      await writeFile(destPath, data);
+    }
+  }
+}
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
   await viteBuild();
+
+  console.log("copying server assets...");
+  await copyDir("server/assets", "dist/server/assets");
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));

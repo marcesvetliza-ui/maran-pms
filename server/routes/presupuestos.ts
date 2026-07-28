@@ -6,6 +6,7 @@ import { presupuestos, presupuestoItems, quoteCatalogItems, quoteConditions } fr
 import { requireAuth } from "../auth";
 import { eq, desc, like, and, asc } from "drizzle-orm";
 import PDFDocument from "pdfkit";
+import { assetPath } from "../utils/assetPath";
 
 const HOTEL_NAME = "Maran Suites & Towers";
 const HOTEL_TAGLINE = "Hotel & Spa · Paraná, Entre Ríos";
@@ -155,7 +156,7 @@ function drawGruposPortada(doc: any, year: number) {
   doc.rect(0, 0, W, 98).fill("#FFFFFF");
 
   // Logo PNG (hotel-logo.png already has the full mark + wordmark)
-  const logoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+  const logoPath = assetPath("hotel-logo.png");
   if (fs.existsSync(logoPath)) {
     doc.image(logoPath, 30, 14, { height: 66 });
   } else {
@@ -182,7 +183,7 @@ function drawGruposPortada(doc: any, year: number) {
   // Clip and draw
   doc.save();
   doc.roundedRect(pX, pY, pW, pH, pR).clip();
-  const coverPath = path.join(process.cwd(), "server", "assets", "grupos-cover.jpg");
+  const coverPath = assetPath("grupos-cover.jpg");
   if (fs.existsSync(coverPath)) {
     doc.image(coverPath, pX, pY, { width: pW, height: pH });
   } else {
@@ -233,7 +234,7 @@ function drawGruposPortada(doc: any, year: number) {
 
 function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842, M = 40;
-  const imgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+  const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
   const contentW = W - M * 2;
 
@@ -417,7 +418,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
 
 function generateEventosPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842, M = 40;
-  const imgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+  const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
   const contentW = W - M * 2;
 
@@ -630,7 +631,7 @@ const SPA_LIGHT  = "#f0f7f9";
 
 function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842;
-  const page2Path = path.join(process.cwd(), "server", "assets", "spa-page2.jpg");
+  const page2Path = assetPath("spa-page2.jpg");
 
   // ── PAGE 2+: Mix — foto SPA a la derecha, contenido limpio a la izquierda ──
   // (La portada full-bleed spa-cover.jpg es aplicada por el route handler antes de llamar esta función)
@@ -799,7 +800,7 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
 
 function generateCatalogSimplePdf(doc: any, pres: any, catalogItems: any[], conditions: string | null, area: string) {
   const W = 595, H = 842, M = 40;
-  const imgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+  const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
   const contentW = W - M * 2;
 
@@ -881,7 +882,7 @@ function generateCatalogSimplePdf(doc: any, pres: any, catalogItems: any[], cond
 
 function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842, M = 40;
-  const imgPath = path.join(process.cwd(), "server", "assets", "confirmacion-header.jpg");
+  const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
   const contentW = W - M * 2;
 
@@ -1116,7 +1117,7 @@ export function registerPresupuestosRoutes(app: Express) {
       if (area === "recepcion" || area === "grupos") {
         if (area === "grupos") {
           // Portada: imagen A4 directa
-          const portadaPath = path.join(process.cwd(), "server", "assets", "grupos-portada.jpg");
+          const portadaPath = assetPath("grupos-portada.jpg");
           if (fs.existsSync(portadaPath)) {
             doc.image(portadaPath, 0, 0, { width: 595, height: 842 });
             doc.addPage();
@@ -1126,7 +1127,7 @@ export function registerPresupuestosRoutes(app: Express) {
         generateHockeyPdf(doc, pres, items, conditions);
       } else if (area === "eventos") {
         // Portada full-bleed para eventos
-        const eventosCover = path.join(process.cwd(), "server", "assets", "eventos-cover.jpg");
+        const eventosCover = assetPath("eventos-cover.jpg");
         if (fs.existsSync(eventosCover)) {
           doc.image(eventosCover, 0, 0, { width: 595, height: 842 });
           doc.addPage();
@@ -1134,7 +1135,7 @@ export function registerPresupuestosRoutes(app: Express) {
         generateEventosPdf(doc, pres, items, conditions);
       } else if (area === "spa") {
         // Portada full-bleed para spa, luego contenido spa branded
-        const spaCover = path.join(process.cwd(), "server", "assets", "spa-cover.jpg");
+        const spaCover = assetPath("spa-cover.jpg");
         if (fs.existsSync(spaCover)) {
           doc.image(spaCover, 0, 0, { width: 595, height: 842 });
           doc.addPage();
@@ -1142,7 +1143,7 @@ export function registerPresupuestosRoutes(app: Express) {
         generateSpaPdf(doc, pres, items, conditions);
       } else if (area === "restaurant") {
         // Portada Justo full-bleed, luego catálogo de servicios
-        const restaurantCover = path.join(process.cwd(), "server", "assets", "restaurant-cover.jpg");
+        const restaurantCover = assetPath("restaurant-cover.jpg");
         if (fs.existsSync(restaurantCover)) {
           doc.image(restaurantCover, 0, 0, { width: 595, height: 842 });
           doc.addPage();
