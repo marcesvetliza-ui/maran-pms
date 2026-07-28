@@ -10,8 +10,8 @@ import PDFDocument from "pdfkit";
 const HOTEL_NAME = "Maran Suites & Towers";
 const HOTEL_TAGLINE = "Hotel & Spa · Paraná, Entre Ríos";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
-const HOTEL_PHONE = "+54 (0343) 503-8070";
-const HOTEL_EMAIL = "eventos@maransuites.com.ar";
+const HOTEL_PHONE = "+54 9 343 5103636";
+const HOTEL_EMAIL = "comercial@maransuites.com.ar";
 const HOTEL_WEB = "www.maransuites.com.ar";
 
 const BANK_DATA = [
@@ -175,17 +175,13 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
 
   presText("ALOJAMIENTO", 9, NAVY, true, 4);
   presText(
-    "Nuestro hotel cuenta con 46 elegantes habitaciones y 20 suites, planteadas para satisfacer las distintas necesidades en comodidad y categoría. Todas ellas están estratégicamente diseñadas para disfrutar de la luminosidad natural del entorno. Tanto el mobiliario como la tecnología aseguran una placentera estadía.",
-    8.5, DARK, false, 14
-  );
-  presText(
-    "Nuestro espacio de Paraná Coworking le permitirá trabajar en un entorno compartido sin ocuparse de aspectos como mantenimiento, internet, limpieza o servicios.",
+    "Nuestro hotel cuenta con 66 habitaciones, planteadas para satisfacer las distintas necesidades en comodidad y categoría. Todas ellas están estratégicamente diseñadas para disfrutar de la luminosidad natural del entorno. Tanto el mobiliario como la tecnología aseguran una placentera estadía.",
     8.5, DARK, false, 14
   );
 
   presText("SERVICIOS INCLUIDOS", 9, NAVY, true, 4);
   const features = [
-    "• Desayuno buffet completo",
+    "• Desayuno buffet servido en Justo Restaurante",
     "• Acceso a piscina al aire libre y gimnasio (con turno previo)",
     "• Wi-Fi de alta velocidad en todas las instalaciones",
     "• Estacionamiento (consultar disponibilidad y tarifas)",
