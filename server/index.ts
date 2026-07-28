@@ -77,6 +77,12 @@ app.use(express.urlencoded({ extended: false }));
 
 setupAuth(app);
 
+// Diagnóstico temporal de assets (público, sin auth)
+import { assetPathDiagnostic } from "./utils/assetPath";
+app.get("/api/debug/assets", (_req, res) => {
+  res.json(assetPathDiagnostic());
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
