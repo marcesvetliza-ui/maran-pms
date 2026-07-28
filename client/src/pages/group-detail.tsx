@@ -1125,6 +1125,9 @@ export default function GroupDetailPage() {
   (bedTypesList || []).forEach(bt => { bedTypeMap[bt.id] = bt.name; });
 
   const getBedLabel = (res: any) => {
+    // Primero: tipo de camaje elegido al hacer/editar la reserva
+    if (res.bedTypeNotes) return res.bedTypeNotes;
+    // Fallback: tipo de cama por defecto de la habitación
     const btId = res.room?.bedTypeId;
     if (btId && bedTypeMap[btId]) return bedTypeMap[btId];
     return "-";
