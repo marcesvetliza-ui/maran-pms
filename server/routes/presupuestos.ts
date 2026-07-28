@@ -1116,10 +1116,15 @@ export function registerPresupuestosRoutes(app: Express) {
 
       if (area === "recepcion" || area === "grupos") {
         if (area === "grupos") {
-          // Portada: imagen A4 directa
           const portadaPath = assetPath("grupos-portada.jpg");
           if (fs.existsSync(portadaPath)) {
             doc.image(portadaPath, 0, 0, { width: 595, height: 842 });
+            doc.addPage();
+          }
+        } else if (area === "recepcion") {
+          const recepPortada = assetPath("recep-portada.jpg");
+          if (fs.existsSync(recepPortada)) {
+            doc.image(recepPortada, 0, 0, { width: 595, height: 842 });
             doc.addPage();
           }
         }
@@ -1134,11 +1139,10 @@ export function registerPresupuestosRoutes(app: Express) {
         }
         generateEventosPdf(doc, pres, items, conditions);
       } else if (area === "spa") {
-        // Portada full-bleed para spa, luego contenido spa branded
+        // Portada full-bleed para spa — NO addPage() aquí, generateSpaPdf lo hace internamente
         const spaCover = assetPath("spa-cover.jpg");
         if (fs.existsSync(spaCover)) {
           doc.image(spaCover, 0, 0, { width: 595, height: 842 });
-          doc.addPage();
         }
         generateSpaPdf(doc, pres, items, conditions);
       } else if (area === "restaurant") {
