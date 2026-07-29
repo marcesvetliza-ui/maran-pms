@@ -265,6 +265,12 @@ export default function InventoryPage() {
   const [internosTo, setInternosTo] = useState(today);
   const [expandedMovId, setExpandedMovId] = useState<string | null>(null);
 
+  // Filters for movements tab
+  const [movFrom, setMovFrom] = useState("");
+  const [movTo, setMovTo] = useState("");
+  const [movTypeFilter, setMovTypeFilter] = useState("all");
+  const [movItemSearch, setMovItemSearch] = useState("");
+
   const { data: categories = [] } = useQuery<ItemCategory[]>({
     queryKey: ["/api/inventory/categories"],
   });
@@ -961,69 +967,129 @@ ${(movement.items || []).map(i => `    <tr>
         </TabsContent>
 
         <TabsContent value="movements" className="space-y-4">
-          {movements.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <History className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Sin movimientos</h3>
-                <p className="text-muted-foreground">Los movimientos de stock aparecerán aquí</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="border rounded-md overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-muted/50">
-                  <tr className="text-left">
-                    <th className="p-3 font-medium">Fecha</th>
-                    <th className="p-3 font-medium">Articulo</th>
-                    <th className="p-3 font-medium">Tipo</th>
-                    <th className="p-3 font-medium text-right">Cantidad</th>
-                    <th className="p-3 font-medium text-right">Stock Anterior</th>
-                    <th className="p-3 font-medium text-right">Stock Nuevo</th>
-                    <th className="p-3 font-medium">Notas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {movements.slice(0, 50).map((movement) => (
-                    <tr key={movement.id} className="border-t" data-testid={`movement-${movement.id}`}>
-                      <td className="p-3 text-sm">
-                        {new Date(movement.createdAt).toLocaleString("es-AR", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                      <td className="p-3">
-                        {movement.item?.name || "N/A"}
-                      </td>
-                      <td className="p-3">
-                        <Badge
-                          variant={movement.movementType === "entrada" ? "default" : "secondary"}
-                        >
-                          {movementTypeLabels[movement.movementType]}
-                        </Badge>
-                      </td>
-                      <td className="p-3 text-right font-mono">
-                        <span className={movement.movementType === "entrada" ? "text-green-600" : "text-red-600"}>
-                          {movement.movementType === "entrada" ? "+" : "-"}{movement.quantity}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right font-mono text-muted-foreground">
-                        {movement.previousStock}
-                      </td>
-                      <td className="p-3 text-right font-mono">
-                        {movement.newStock}
-                      </td>
-                      <td className="p-3 text-sm text-muted-foreground truncate max-w-48">
-                        {movement.notes || "-"}
-                      </td>
+          {/* Filters */}
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex items-center gap-1">
+                  <Label className="text-sm whitespace-nowrap">Desde:</Label>
+                  <Input type="date" value={movFrom} onChange={e => setMovFrom(e.target.value)} className="w-36 h-8 text-sm" />
+                </div>
+                <div className="flex items-center gap-1">
+                  <Label className="text-sm whitespace-nowrap">Hasta:</Label>
+                  <Input type="date" value={movTo} onChange={e => setMovTo(e.target.value)} className="w-36 h-8 text-sm" />
+                </div>
+                <div className="flex items-center gap-1">
+                  <Label className="text-sm whitespace-nowrap">Tipo:</Label>
+                  <Select value={movTypeFilter} onValueChange={setMovTypeFilter}>
+                    <SelectTrigger className="w-36 h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="entrada">Entrada</SelectItem>
+                      <SelectItem value="salida">Salida</SelectItem>
+                      <SelectItem value="consumo">Consumo</SelectItem>
+                      <SelectItem value="ajuste">Ajuste</SelectItem>
+                      <SelectItem value="transferencia">Transferencia</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-1 flex-1 min-w-40">
+                  <Label className="text-sm whitespace-nowrap">Artículo:</Label>
+                  <Input
+                    value={movItemSearch}
+                    onChange={e => setMovItemSearch(e.target.value)}
+                    placeholder="Buscar artículo..."
+                    className="h-8 text-sm"
+                  />
+                </div>
+                {(movFrom || movTo || movTypeFilter !== "all" || movItemSearch) && (
+                  <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setMovFrom(""); setMovTo(""); setMovTypeFilter("all"); setMovItemSearch(""); }}>
+                    <X className="h-3 w-3 mr-1" />Limpiar
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Table */}
+          {(() => {
+            const filtered = movements.filter(m => {
+              if (movTypeFilter !== "all" && m.movementType !== movTypeFilter) return false;
+              if (movItemSearch && !(m.item?.name || "").toLowerCase().includes(movItemSearch.toLowerCase())) return false;
+              if (movFrom) {
+                const d = new Date(m.createdAt);
+                const from = new Date(movFrom + "T00:00:00");
+                if (d < from) return false;
+              }
+              if (movTo) {
+                const d = new Date(m.createdAt);
+                const to = new Date(movTo + "T23:59:59");
+                if (d > to) return false;
+              }
+              return true;
+            });
+
+            if (filtered.length === 0) {
+              return (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                    <History className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">{movements.length === 0 ? "Sin movimientos" : "Sin resultados"}</h3>
+                    <p className="text-muted-foreground">{movements.length === 0 ? "Los movimientos de stock aparecerán aquí" : "Probá cambiando los filtros"}</p>
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            return (
+              <div className="border rounded-md overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 bg-muted/30 text-xs text-muted-foreground border-b">
+                  <span>{filtered.length} movimiento{filtered.length !== 1 ? "s" : ""}{filtered.length < movements.length ? ` de ${movements.length}` : ""}</span>
+                </div>
+                <table className="w-full">
+                  <thead className="bg-muted/50">
+                    <tr className="text-left">
+                      <th className="p-3 font-medium">Fecha</th>
+                      <th className="p-3 font-medium">Artículo</th>
+                      <th className="p-3 font-medium">Tipo</th>
+                      <th className="p-3 font-medium text-right">Cantidad</th>
+                      <th className="p-3 font-medium text-right">Stock Ant.</th>
+                      <th className="p-3 font-medium text-right">Stock Nuevo</th>
+                      <th className="p-3 font-medium">Notas</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody>
+                    {filtered.slice(0, 200).map((movement) => (
+                      <tr key={movement.id} className="border-t" data-testid={`movement-${movement.id}`}>
+                        <td className="p-3 text-sm">
+                          {new Date(movement.createdAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        </td>
+                        <td className="p-3 font-medium text-sm">{movement.item?.name || "N/A"}</td>
+                        <td className="p-3">
+                          <Badge variant={movement.movementType === "entrada" ? "default" : "secondary"}>
+                            {movementTypeLabels[movement.movementType]}
+                          </Badge>
+                        </td>
+                        <td className="p-3 text-right font-mono text-sm">
+                          <span className={movement.movementType === "entrada" ? "text-green-600" : "text-orange-600"}>
+                            {movement.movementType === "entrada" ? "+" : "-"}{movement.quantity}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono text-sm text-muted-foreground">{movement.previousStock}</td>
+                        <td className="p-3 text-right font-mono text-sm">{movement.newStock}</td>
+                        <td className="p-3 text-sm text-muted-foreground truncate max-w-48">{movement.notes || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filtered.length > 200 && (
+                  <div className="px-3 py-2 text-center text-xs text-muted-foreground border-t">
+                    Mostrando 200 de {filtered.length}. Usá los filtros para acotar.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="suppliers" className="space-y-4">

@@ -54,6 +54,7 @@ import {
   PartyPopper,
   Wrench,
   Package,
+  ShoppingCart,
 } from "lucide-react";
 
 const COLORS = [
@@ -323,6 +324,28 @@ export default function ReportsPage() {
     enabled: activeTab === "restaurant-cmv",
   });
 
+  type RestaurantMozoData = {
+    resumen: { totalVentas: number; totalOrdenes: number; totalCubiertos: number; ticketPromedio: number };
+    porMozo: { mozo: string; revenue: number; ordenes: number; cubiertos: number; ticketPromedio: number; pct: number }[];
+  };
+  const restaurantMozoReport = useQuery<RestaurantMozoData>({
+    queryKey: ["/api/restaurant/reports/sales-stats-mozo", periodo],
+    queryFn: () => fetchReport(`/api/restaurant/reports/sales-stats?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "restaurant-mozo",
+  });
+
+  type RestaurantFoodCostData = {
+    foodOnlyCostPct: number; beverageCostPct: number; globalCostPct: number;
+    ventasFood: number; ventasBeverage: number;
+    costoFood: number; costoBeverage: number;
+    byDish: { nombre: string; costoTotal: number; ventasTotal: number; foodCostPct: number; tieneReceta: boolean; isBeverage: boolean }[];
+  };
+  const restaurantFoodCostReport = useQuery<RestaurantFoodCostData>({
+    queryKey: ["/api/restaurant/reports/food-cost-tab", periodo],
+    queryFn: () => fetchReport(`/api/restaurant/reports/food-cost?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "restaurant-foodcost",
+  });
+
   type HousekeepingProductivityData = {
     porCamarera: { camarera: string; totalTareas: number; completadas: number; minutosPromedio: number }[];
     porTipoTarea: { tipo: string; cantidad: number }[];
@@ -346,7 +369,7 @@ export default function ReportsPage() {
 
   const AREA_TABS: Record<string, { label: string; tabs: string[] }> = {
     hoteleria: { label: "Hotelería", tabs: ["occupancy", "revenue-type", "channel", "reservations", "arrivals-departures", "pending-balances", "top-guests", "forecast"] },
-    restaurant: { label: "Restaurant", tabs: ["restaurant", "restaurant-cmv"] },
+    restaurant: { label: "Restaurant", tabs: ["restaurant", "restaurant-cmv", "restaurant-mozo", "restaurant-foodcost"] },
     spa: { label: "Spa", tabs: ["spa"] },
     eventos: { label: "Eventos", tabs: ["events"] },
     operaciones: { label: "Operaciones", tabs: ["housekeeping", "housekeeping-productivity", "maintenance", "inventory"] },
@@ -602,6 +625,14 @@ export default function ReportsPage() {
             <TabsTrigger value="restaurant-cmv" data-testid="tab-restaurant-cmv">
               <UtensilsCrossed className="h-4 w-4 mr-1" />
               Costo de Comida (CMV)
+            </TabsTrigger>
+            <TabsTrigger value="restaurant-mozo" data-testid="tab-restaurant-mozo">
+              <Users className="h-4 w-4 mr-1" />
+              Ventas por Mozo
+            </TabsTrigger>
+            <TabsTrigger value="restaurant-foodcost" data-testid="tab-restaurant-foodcost">
+              <ShoppingCart className="h-4 w-4 mr-1" />
+              Food & Beverage Cost
             </TabsTrigger>
           </TabsList>
         )}
@@ -1276,6 +1307,130 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+        </TabsContent>
+
+        {/* ── Ventas por Mozo ── */}
+        <TabsContent value="restaurant-mozo" className="space-y-4 mt-4">
+          {restaurantMozoReport.isLoading ? <LoadingSkeleton /> : restaurantMozoReport.data ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: "Ventas totales",  value: formatARS(restaurantMozoReport.data.resumen.totalVentas) },
+                  { label: "Órdenes",         value: String(restaurantMozoReport.data.resumen.totalOrdenes) },
+                  { label: "Cubiertos",       value: String(restaurantMozoReport.data.resumen.totalCubiertos) },
+                  { label: "Ticket promedio", value: formatARS(restaurantMozoReport.data.resumen.ticketPromedio) },
+                ].map(k => (
+                  <Card key={k.label}><CardContent className="p-4"><p className="text-xs text-muted-foreground">{k.label}</p><p className="text-xl font-bold">{k.value}</p></CardContent></Card>
+                ))}
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Ranking por Mozo</CardTitle></CardHeader>
+                <CardContent>
+                  {restaurantMozoReport.data.porMozo.length === 0 ? (
+                    <p className="text-muted-foreground text-center py-6 text-sm">Sin datos de mozos para el período (las órdenes deben tener mozo asignado)</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>#</TableHead><TableHead>Mozo</TableHead>
+                          <TableHead className="text-right">Órdenes</TableHead>
+                          <TableHead className="text-right">Cubiertos</TableHead>
+                          <TableHead className="text-right">Ticket Prom.</TableHead>
+                          <TableHead className="text-right">Facturación</TableHead>
+                          <TableHead className="text-right">% Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {restaurantMozoReport.data.porMozo.map((row, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-muted-foreground font-medium">{i + 1}</TableCell>
+                            <TableCell className="font-medium">{row.mozo}</TableCell>
+                            <TableCell className="text-right">{row.ordenes}</TableCell>
+                            <TableCell className="text-right">{row.cubiertos}</TableCell>
+                            <TableCell className="text-right">{formatARS(row.ticketPromedio)}</TableCell>
+                            <TableCell className="text-right font-semibold">{formatARS(row.revenue)}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <div className="w-16 bg-muted rounded-full h-1.5 hidden md:block">
+                                  <div className="bg-primary h-1.5 rounded-full" style={{ width: `${Math.min(row.pct, 100)}%` }} />
+                                </div>
+                                <span className="text-muted-foreground text-sm">{row.pct.toFixed(1)}%</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          ) : <p className="text-muted-foreground text-center py-8">Sin datos para el período seleccionado</p>}
+        </TabsContent>
+
+        {/* ── Food & Beverage Cost ── */}
+        <TabsContent value="restaurant-foodcost" className="space-y-4 mt-4">
+          {restaurantFoodCostReport.isLoading ? <LoadingSkeleton /> : restaurantFoodCostReport.data ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {[
+                  { label: "Food Cost % (comidas)",    value: `${(restaurantFoodCostReport.data.foodOnlyCostPct ?? 0).toFixed(1)}%`, hi: (restaurantFoodCostReport.data.foodOnlyCostPct ?? 0) > 35 },
+                  { label: "Beverage Cost % (bebidas)",value: `${(restaurantFoodCostReport.data.beverageCostPct ?? 0).toFixed(1)}%`, hi: (restaurantFoodCostReport.data.beverageCostPct ?? 0) > 30 },
+                  { label: "Food Cost % Global",       value: `${(restaurantFoodCostReport.data.globalCostPct ?? 0).toFixed(1)}%`, hi: false },
+                  { label: "Ventas Comidas",  value: formatARS(restaurantFoodCostReport.data.ventasFood ?? 0), hi: false },
+                  { label: "Ventas Bebidas",  value: formatARS(restaurantFoodCostReport.data.ventasBeverage ?? 0), hi: false },
+                  { label: "Costo Total",     value: formatARS((restaurantFoodCostReport.data.costoFood ?? 0) + (restaurantFoodCostReport.data.costoBeverage ?? 0)), hi: false },
+                ].map(k => (
+                  <Card key={k.label}><CardContent className="p-4">
+                    <p className="text-xs text-muted-foreground">{k.label}</p>
+                    <p className={`text-xl font-bold ${k.hi ? "text-red-600" : ""}`}>{k.value}</p>
+                  </CardContent></Card>
+                ))}
+              </div>
+              <Card>
+                <CardHeader><CardTitle>Desglose por Plato</CardTitle></CardHeader>
+                <CardContent>
+                  {(!restaurantFoodCostReport.data.byDish || restaurantFoodCostReport.data.byDish.length === 0) ? (
+                    <p className="text-muted-foreground text-center py-6 text-sm">Sin datos (requiere recetas con costos cargados)</p>
+                  ) : (
+                    <div className="overflow-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Plato</TableHead><TableHead>Tipo</TableHead>
+                            <TableHead className="text-right">Ventas</TableHead>
+                            <TableHead className="text-right">Costo</TableHead>
+                            <TableHead className="text-right">Food Cost %</TableHead>
+                            <TableHead>Receta</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {restaurantFoodCostReport.data.byDish.map((r, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="font-medium">{r.nombre}</TableCell>
+                              <TableCell>
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full ${r.isBeverage ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+                                  {r.isBeverage ? "Bebida" : "Comida"}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">{formatARS(r.ventasTotal ?? 0)}</TableCell>
+                              <TableCell className="text-right">{formatARS(r.costoTotal ?? 0)}</TableCell>
+                              <TableCell className="text-right">
+                                <span className={(r.foodCostPct ?? 0) > 35 ? "text-red-600 font-semibold" : "text-green-600"}>
+                                  {(r.foodCostPct ?? 0).toFixed(1)}%
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{r.tieneReceta ? "✓" : "—"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          ) : <p className="text-muted-foreground text-center py-8">Sin datos para el período seleccionado</p>}
         </TabsContent>
 
         <TabsContent value="billing" className="space-y-4 mt-4">
