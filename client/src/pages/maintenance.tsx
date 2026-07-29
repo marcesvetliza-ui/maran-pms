@@ -348,6 +348,9 @@ function PreventiveTab() {
                         <span className="flex items-center gap-1">
                           <CheckCheck className="h-3 w-3 text-green-600" />
                           Última vez: {new Date(task.last_done_at + "T00:00:00").toLocaleDateString("es-AR")}
+                          {task.last_overdue_days > 0 && (
+                            <span className="text-orange-500 font-medium">({task.last_overdue_days}d tarde)</span>
+                          )}
                         </span>
                       )}
                       {task.assigned_to && (
@@ -445,6 +448,20 @@ function PreventiveTab() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">
+            {doneTask && doneTask.next_due_at < today && (() => {
+              const dueD = new Date(doneTask.next_due_at + "T00:00:00");
+              const todayD = new Date(today + "T00:00:00");
+              const days = Math.floor((todayD.getTime() - dueD.getTime()) / 86400000);
+              return (
+                <div className="flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-800 p-3 text-sm text-orange-800 dark:text-orange-300">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    Esta tarea venció hace <strong>{days} día{days !== 1 ? "s" : ""}</strong> ({new Date(doneTask.next_due_at + "T00:00:00").toLocaleDateString("es-AR")}).
+                    Se registrará la demora y la próxima fecha se calculará desde hoy.
+                  </span>
+                </div>
+              );
+            })()}
             <div className="space-y-1">
               <Label className="text-sm">Observaciones (opcional)</Label>
               <Textarea value={doneNotes} onChange={e => setDoneNotes(e.target.value)} placeholder="Ej: Todo en orden, sin novedades" rows={3} data-testid="input-done-notes" />

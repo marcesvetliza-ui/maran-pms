@@ -731,6 +731,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // ── preventive_tasks: registro de demora ─────────────────────────────────
+  await withTimeout("preventive_tasks.last_overdue_days", T, () =>
+    db.execute(sql`ALTER TABLE preventive_tasks ADD COLUMN IF NOT EXISTS last_overdue_days integer`)
+  );
+
   // ── Unificación platos/inventario ────────────────────────────────────────
   await withTimeout("inventory_items.item_kind", T, () =>
     db.execute(sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS item_kind text NOT NULL DEFAULT 'venta_directa'`)

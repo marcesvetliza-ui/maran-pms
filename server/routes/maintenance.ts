@@ -319,9 +319,16 @@ export function registerMaintenanceRoutes(app: Express) {
       const freqDays = parseInt(String(task.frequency_days || 30));
       const nextMs = Date.now() + freqDays * 86400000;
       const nextDate = new Date(nextMs).toISOString().split("T")[0];
+
+      // Calcular días de demora (positivo = llegó tarde, 0 = a tiempo o adelantado)
+      const dueDate = new Date(String(task.next_due_at) + "T00:00:00");
+      const todayDate = new Date(today + "T00:00:00");
+      const overdueDays = Math.max(0, Math.floor((todayDate.getTime() - dueDate.getTime()) / 86400000));
+
       const result = await db.execute(sql`
         UPDATE preventive_tasks SET
           last_done_at = ${today},
+          last_overdue_days = ${overdueDays},
           next_due_at = ${nextDate},
           notes = CASE WHEN ${doneNotes || null} IS NOT NULL THEN ${doneNotes || null} ELSE notes END,
           updated_at = now()
