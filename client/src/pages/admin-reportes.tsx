@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, startOfMonth, endOfMonth } from "date-fns";
-import * as XLSX from "xlsx";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
@@ -64,7 +63,8 @@ function KpiCard({ title, value, delta, unit = "" }: { title: string; value: str
   );
 }
 
-function exportXLSX(filename: string, sheets: { name: string; data: Record<string, unknown>[] }[]) {
+async function exportXLSX(filename: string, sheets: { name: string; data: Record<string, unknown>[] }[]) {
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
   for (const sheet of sheets) {
     const ws = XLSX.utils.json_to_sheet(sheet.data);
