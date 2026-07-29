@@ -54,3 +54,9 @@ id = "6VInX0jo16CZE4HdsU8Ap"
 uri = "file://attached_assets/Respuesta_Colobig_ImplementacionGastronomica_Julio2026.pdf"
 type = "pdf"
 title = "Respuesta Colobig — Implementación Gastronómica Julio 2026"
+
+[[outputs]]
+id = "_c7gIHlg2Sbm66XtHxLUh"
+uri = "file://test-confirmacion.pdf"
+type = "pdf"
+title = "Confirmación Evento - Test"
