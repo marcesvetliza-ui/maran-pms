@@ -3219,6 +3219,24 @@ export async function registerRoutes(
         incidenciasCriticas = incidents.filter(i => i.severity === "critica").length;
       } catch { /* tabla puede no existir */ }
 
+      // 7b. Mantenimiento preventivo — vencidas + por vencer esta semana
+      const sevenDaysLater = new Date(today);
+      sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
+      const weekEnd = sevenDaysLater.toISOString().split("T")[0];
+      let mantenimientoVencidas: any[] = [];
+      let mantenimientoEstaSemana: any[] = [];
+      try {
+        const preventiveTasks = await db.execute(sql`
+          SELECT id, name, next_due_at, assigned_to, frequency_days, last_overdue_days
+          FROM preventive_tasks
+          WHERE active = true AND next_due_at <= ${weekEnd}
+          ORDER BY next_due_at ASC
+        `);
+        const allTasks = preventiveTasks.rows as any[];
+        mantenimientoVencidas      = allTasks.filter(t => t.next_due_at <  today);
+        mantenimientoEstaSemana    = allTasks.filter(t => t.next_due_at >= today);
+      } catch { /* tabla puede no existir */ }
+
       // 8. Recaudación del día por área — única query con filtro de fecha
       const movimientosHoy = await db.execute(sql`
         SELECT area, amount, movement_type
@@ -3280,6 +3298,11 @@ export async function registerRoutes(
           totalTareas: tareasHoy.length,
         },
         incidencias: { abiertas: incidenciasAbiertas, criticas: incidenciasCriticas },
+        mantenimiento: {
+          vencidas:    mantenimientoVencidas.length,
+          estaSemana:  mantenimientoEstaSemana.length,
+          tareas:      [...mantenimientoVencidas, ...mantenimientoEstaSemana].slice(0, 5),
+        },
         eventos: { total: eventosHoy.length, items: eventosHoy },
       });
     } catch (error) {

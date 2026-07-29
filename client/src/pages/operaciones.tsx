@@ -9,6 +9,7 @@ import {
   LogIn, LogOut, CreditCard, Building2,
   CheckCircle, AlertTriangle, RefreshCw,
   Wallet, ClipboardCheck, PartyPopper, Clock,
+  ShieldCheck, Wrench, Calendar,
 } from "lucide-react";
 
 const AREA_LABEL: Record<string, string> = {
@@ -265,45 +266,64 @@ export default function OperacionesPage() {
               </CardContent>
             </Card>
 
-            {/* Incidencias */}
+            {/* Mantenimiento preventivo */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  Incidencias abiertas
+                  <Wrench className="h-4 w-4" />
+                  Mantenimiento
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {(data?.incidencias?.abiertas ?? 0) === 0 ? (
+                {(data?.mantenimiento?.vencidas ?? 0) === 0 && (data?.mantenimiento?.estaSemana ?? 0) === 0 ? (
                   <div className="flex items-center gap-2 text-green-600">
-                    <CheckCircle className="h-4 w-4" />
-                    <span className="text-sm">Sin incidencias activas</span>
+                    <ShieldCheck className="h-4 w-4" />
+                    <span className="text-sm">Todo al día esta semana</span>
                   </div>
                 ) : (
                   <>
                     <div className="flex items-center gap-3">
-                      <div className="text-3xl font-bold text-orange-600">
-                        {data?.incidencias?.abiertas}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        {data?.incidencias?.abiertas === 1 ? "incidencia abierta" : "incidencias abiertas"}
-                      </div>
+                      {(data?.mantenimiento?.vencidas ?? 0) > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-2xl font-bold text-red-600">{data.mantenimiento.vencidas}</div>
+                          <div className="text-xs text-red-600 leading-tight">vencida{data.mantenimiento.vencidas !== 1 ? "s" : ""}</div>
+                        </div>
+                      )}
+                      {(data?.mantenimiento?.vencidas ?? 0) > 0 && (data?.mantenimiento?.estaSemana ?? 0) > 0 && (
+                        <div className="w-px h-6 bg-border" />
+                      )}
+                      {(data?.mantenimiento?.estaSemana ?? 0) > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-2xl font-bold text-yellow-600">{data.mantenimiento.estaSemana}</div>
+                          <div className="text-xs text-yellow-600 leading-tight">esta<br />semana</div>
+                        </div>
+                      )}
                     </div>
-                    {(data?.incidencias?.criticas ?? 0) > 0 && (
-                      <div className="flex items-center gap-2 p-2 bg-red-50 dark:bg-red-900/20 rounded-md">
-                        <AlertTriangle className="h-4 w-4 text-red-600" />
-                        <span className="text-sm text-red-600 font-medium">
-                          {data?.incidencias?.criticas} crítica{data?.incidencias?.criticas > 1 ? "s" : ""}
-                        </span>
+                    {(data?.mantenimiento?.tareas ?? []).length > 0 && (
+                      <div className="space-y-1.5">
+                        {data.mantenimiento.tareas.map((t: any) => {
+                          const isOverdue = t.next_due_at < new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          return (
+                            <div key={t.id} className={`flex items-center justify-between gap-2 text-xs rounded px-2 py-1 ${isOverdue ? "bg-red-50 dark:bg-red-900/20" : "bg-yellow-50 dark:bg-yellow-900/20"}`}>
+                              <span className={`truncate font-medium ${isOverdue ? "text-red-700 dark:text-red-300" : "text-yellow-700 dark:text-yellow-300"}`}>
+                                {t.name}
+                              </span>
+                              <span className={`shrink-0 flex items-center gap-1 ${isOverdue ? "text-red-600" : "text-yellow-600"}`}>
+                                <Calendar className="h-3 w-3" />
+                                {new Date(t.next_due_at + "T00:00:00").toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </>
                 )}
                 <Button
                   variant="outline" size="sm" className="w-full"
-                  onClick={() => navigate("/administration")}
+                  onClick={() => navigate("/maintenance")}
                 >
-                  Ver bitácora
+                  Ver mantenimiento
                 </Button>
               </CardContent>
             </Card>
