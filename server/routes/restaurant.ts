@@ -1979,6 +1979,118 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  // ── Mermas totalizadas ─────────────────────────────────────────────────────
+  app.get("/api/restaurant/reports/mermas", requireAuth, async (req, res) => {
+    try {
+      const { periodo } = req.query as { periodo?: string };
+      let from: Date, to: Date;
+      if (periodo) {
+        const [mm, yyyy] = periodo.split("/");
+        from = new Date(parseInt(yyyy), parseInt(mm) - 1, 1);
+        to   = new Date(parseInt(yyyy), parseInt(mm), 0, 23, 59, 59);
+      } else {
+        const now = new Date();
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+        to   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      }
+
+      // 1. Órdenes cerradas en el período
+      const orders = await db.select({ id: restaurantOrders.id })
+        .from(restaurantOrders)
+        .where(and(
+          eq(restaurantOrders.status, "closed"),
+          gte(restaurantOrders.closedAt, from),
+          lte(restaurantOrders.closedAt, to),
+        ));
+
+      if (orders.length === 0) {
+        return res.json({ periodo, items: [], totalMermaCosto: 0 });
+      }
+
+      const orderIds = orders.map(o => o.id);
+
+      // 2. Items de esas órdenes (no cancelados)
+      const soldItems = await db.select({
+        menuItemId: orderItems.menuItemId,
+        quantity:   orderItems.quantity,
+      }).from(orderItems).where(and(
+        inArray(orderItems.orderId, orderIds),
+        not(inArray(orderItems.status, ["cancelled", "voided"])),
+      ));
+
+      // 3. Recetas
+      const allRecipes = await db.select({ id: recipes.id, menuItemId: recipes.menuItemId }).from(recipes);
+      const recipeMap  = new Map(allRecipes.map(r => [r.menuItemId, r.id]));
+
+      // 4. Ingredientes con merma
+      const allIngredients = await db.select({
+        recipeId:      recipeIngredients.recipeId,
+        ingredientName: recipeIngredients.ingredientName,
+        inventoryItemId: recipeIngredients.inventoryItemId,
+        quantity:      recipeIngredients.quantity,
+        unit:          recipeIngredients.unit,
+        unitCost:      recipeIngredients.unitCost,
+        merma:         recipeIngredients.merma,
+      }).from(recipeIngredients);
+
+      // Agrupar por ingrediente → { merma%, total_neto, total_merma, costo_merma, platos }
+      type MermaRow = {
+        ingredientName: string;
+        unit: string;
+        mermaPct: number;
+        totalNeto: number;   // qty que entra limpia al plato
+        totalMerma: number;  // qty desperdiciada
+        costoMerma: number;
+        platosCount: number;
+      };
+      const mermaMap = new Map<string, MermaRow>();
+
+      for (const soldItem of soldItems) {
+        const mid      = soldItem.menuItemId ?? "";
+        const recipeId = recipeMap.get(mid);
+        if (!recipeId) continue;
+
+        const qtySold = parseFloat(String(soldItem.quantity));
+        const ings    = allIngredients.filter(i => i.recipeId === recipeId && parseFloat(String(i.merma ?? 0)) > 0);
+
+        for (const ing of ings) {
+          const mermaPct = parseFloat(String(ing.merma ?? 0));
+          const netUnit  = parseFloat(String(ing.quantity));
+          const grossUnit = mermaPct > 0 ? netUnit / (1 - mermaPct / 100) : netUnit;
+          const mermaUnit = grossUnit - netUnit;
+          const costUnit  = parseFloat(String(ing.unitCost ?? 0));
+
+          const key = ing.inventoryItemId || ing.ingredientName;
+          if (!mermaMap.has(key)) {
+            mermaMap.set(key, {
+              ingredientName: ing.ingredientName,
+              unit:           ing.unit,
+              mermaPct,
+              totalNeto:   0,
+              totalMerma:  0,
+              costoMerma:  0,
+              platosCount: 0,
+            });
+          }
+          const row = mermaMap.get(key)!;
+          row.totalNeto   += netUnit  * qtySold;
+          row.totalMerma  += mermaUnit * qtySold;
+          row.costoMerma  += mermaUnit * qtySold * costUnit;
+          row.platosCount += qtySold;
+        }
+      }
+
+      const items = Array.from(mermaMap.values())
+        .sort((a, b) => b.costoMerma - a.costoMerma);
+
+      const totalMermaCosto = items.reduce((s, r) => s + r.costoMerma, 0);
+
+      res.json({ periodo, items, totalMermaCosto });
+    } catch (error: any) {
+      res.status(500).json({ error: "Error generando reporte de mermas", detail: error?.message });
+    }
+  });
+
   // Advances for a table (used by close dialog to auto-apply credit)
   app.get("/api/restaurant/tables/:tableId/advances", requireAuth, async (req, res) => {
     try {

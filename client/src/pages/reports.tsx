@@ -346,6 +346,14 @@ export default function ReportsPage() {
     enabled: activeTab === "restaurant-foodcost",
   });
 
+  type MermaItem = { ingredientName: string; unit: string; mermaPct: number; totalNeto: number; totalMerma: number; costoMerma: number; platosCount: number };
+  type MermasData = { periodo: string; items: MermaItem[]; totalMermaCosto: number };
+  const mermasReport = useQuery<MermasData>({
+    queryKey: ["/api/restaurant/reports/mermas", periodo],
+    queryFn: () => fetchReport(`/api/restaurant/reports/mermas?periodo=${encodeURIComponent(periodo)}`),
+    enabled: activeTab === "restaurant-foodcost",
+  });
+
   type HousekeepingProductivityData = {
     porCamarera: { camarera: string; totalTareas: number; completadas: number; minutosPromedio: number }[];
     porTipoTarea: { tipo: string; cantidad: number }[];
@@ -1426,6 +1434,62 @@ export default function ReportsPage() {
                         </TableBody>
                       </Table>
                     </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* ── Mermas totalizadas ── */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Mermas Totalizadas del Período</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Cantidad desperdiciada teórica según la merma configurada en cada receta × unidades vendidas
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {mermasReport.isLoading ? (
+                    <LoadingSkeleton />
+                  ) : mermasReport.data && mermasReport.data.items.length > 0 ? (
+                    <>
+                      <div className="mb-4 flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">Costo total de merma estimado:</span>
+                        <span className="text-lg font-bold text-orange-600">{formatARS(mermasReport.data.totalMermaCosto)}</span>
+                      </div>
+                      <div className="overflow-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Ingrediente</TableHead>
+                              <TableHead className="text-right">Merma %</TableHead>
+                              <TableHead className="text-right">Cant. Neta</TableHead>
+                              <TableHead className="text-right">Merma</TableHead>
+                              <TableHead className="text-right">Costo Merma</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {mermasReport.data.items.map((row, i) => (
+                              <TableRow key={i}>
+                                <TableCell className="font-medium">{row.ingredientName}</TableCell>
+                                <TableCell className="text-right text-muted-foreground">{row.mermaPct.toFixed(1)}%</TableCell>
+                                <TableCell className="text-right font-mono text-sm">
+                                  {row.totalNeto.toFixed(3)} {row.unit}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-sm text-orange-600">
+                                  {row.totalMerma.toFixed(3)} {row.unit}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold text-orange-600">
+                                  {formatARS(row.costoMerma)}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground text-center py-6 text-sm">
+                      Sin mermas en el período (requiere recetas con % de merma configurado)
+                    </p>
                   )}
                 </CardContent>
               </Card>
