@@ -1,0 +1,137 @@
+[builder 8/8] RUN tsx script/build.ts
+
+building client...
+
+vite v7.3.0 building client environment for production...
+
+transforming...
+
+Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+
+✓ 2533 modules transformed.
+
+✗ Build failed in 4.55s
+
+[vite]: Rollup failed to resolve import "xlsx" from "/app/client/src/pages/admin-reportes.tsx".
+This is most likely unintended because it can break your application at runtime.
+If you do want to externalize this module explicitly add it to
+`build.rollupOptions.external`
+    at viteLog (/app/node_modules/vite/dist/node/chunks/config.js:33634:57)
+    at <anonymous> (/app/node_modules/vite/dist/node/chunks/config.js:33668:73)
+    at onwarn (/app/node_modules/@vitejs/plugin-react/dist/index.js:90:7)
+    at <anonymous> (/app/node_modules/vite/dist/node/chunks/config.js:33668:28)
+    at onRollupLog (/app/node_modules/vite/dist/node/chunks/config.js:33663:63)
+    at onLog (/app/node_modules/vite/dist/node/chunks/config.js:33466:4)
+    at <anonymous> (/app/node_modules/rollup/dist/es/shared/node-entry.js:21004:32)
+    at Object.logger (/app/node_modules/rollup/dist/es/shared/node-entry.js:22891:9)
+    at ModuleLoader.handleInvalidResolvedId (/app/node_modules/rollup/dist/es/shared/node-entry.js:21635:26)
+    at ModuleLoader.resolveDynamicImport (/app/node_modules/rollup/dist/es/shared/node-entry.js:21693:58) {
+  watchFiles: [
+    '/app/client/index.html',
+    '/app/client/src/main.tsx',
+    '/app/package.json',
+    '/app/node_modules/react/jsx-runtime.js',
+    '/app/node_modules/react-dom/client.js',
+    '/app/node_modules/react/index.js',
+    '/app/node_modules/@sentry/react/build/esm/index.js',
+    '/app/client/src/App.tsx',
+    '/app/client/src/index.css',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/index.js',
+    '/app/node_modules/@sentry/react/build/esm/sdk.js',
+    '/app/node_modules/@sentry/react/build/esm/error.js',
+    '/app/node_modules/@sentry/react/build/esm/errorboundary.js',
+    '/app/node_modules/@sentry/react/build/esm/redux.js',
+    '/app/node_modules/@sentry/react/build/esm/reactrouterv3.js',
+    '/app/node_modules/@sentry/react/build/esm/profiler.js',
+    '/app/node_modules/@sentry/react/build/esm/tanstackrouter.js',
+    '/app/node_modules/@sentry/react/build/esm/reactrouter.js',
+    '/app/node_modules/@sentry/react/build/esm/reactrouterv6.js',
+    '/app/node_modules/react/cjs/react-jsx-runtime.production.min.js',
+    '/app/node_modules/@sentry/react/build/esm/reactrouterv7.js',
+    '/app/node_modules/react/cjs/react.production.min.js',
+    '/app/node_modules/react-dom/index.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/feedbackAsync.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/feedbackSync.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/helpers.js',
+    '/app/node_modules/@sentry/core/build/esm/browser.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/transports/fetch.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/client.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/profiling/index.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/userfeedback.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/sdk.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/stack-parsers.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/eventbuilder.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/report-dialog.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/httpcontext.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/globalhandlers.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/linkederrors.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/browserapierrors.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/browsersession.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/reportingobserver.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/contextlines.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/httpclient.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/graphqlClient.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/view-hierarchy.js',
+    '/app/node_modules/@sentry-internal/replay-canvas/build/npm/esm/index.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/tracing/request.js',
+    '/app/node_modules/@sentry-internal/feedback/build/npm/esm/index.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/tracing/browserTracingIntegration.js',
+    '/app/node_modules/@sentry-internal/browser-utils/build/esm/index.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/tracing/setActiveSpan.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/tracing/reportPageLoaded.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/utils/lazyLoadIntegration.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/spanstreaming.js',
+    '/app/node_modules/@sentry-internal/replay/build/npm/esm/index.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/breadcrumbs.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/profiling/integration.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/transports/offline.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/culturecontext.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/featureFlags/openfeature/integration.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/featureFlags/launchdarkly/integration.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/featureFlags/statsig/integration.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/diagnose-sdk.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/spotlight.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/featureFlags/growthbook/integration.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/featureFlags/unleash/integration.js',
+    '/app/node_modules/@sentry/react/build/esm/debug-build.js',
+    '/app/node_modules/@sentry/browser/build/npm/esm/prod/integrations/webWorker.js',
+    '/app/node_modules/@sentry/react/build/esm/constants.js',
+    '/app/node_modules/@sentry/react/build/esm/hoist-non-react-statics.js',
+    '/app/node_modules/@sentry/core/build/esm/index.js',
+    '/app/node_modules/@sentry/react/build/esm/reactrouter-compat-utils/instrumentation.js',
+    '/app/node_modules/react-dom/cjs/react-dom.production.min.js',
+    '/app/client/src/hooks/use-toast.ts',
+    '/app/client/src/lib/argentina-geo.ts',
+    '/app/client/src/lib/pricing.ts',
+    '/app/client/src/lib/queryClient.ts',
+    '/app/client/src/lib/utils.ts',
+    '/app/client/src/test/setup.ts',
+    '/app/client/src/components/FolioViewer.tsx',
+    '/app/client/src/components/app-sidebar.tsx',
+    '/app/client/src/components/cc-payment-dialog.tsx',
+    '/app/client/src/components/emitir-comprobante-button.tsx',
+    '/app/client/src/components/entity-selector.tsx',
+    '/app/client/src/components/error-boundary.tsx',
+    '/app/client/src/components/guest-search-combobox.tsx',
+    '/app/client/src/components/help-chat.tsx',
+    '/app/client/src/components/planning-dialogs.tsx',
+    '/app/client/src/components/planning-filters-panel.tsx',
+    '/app/client/src/components/planning-quick-reservation.tsx',
+    '/app/client/src/components/planning-reservation-detail.tsx',
+    '/app/client/src/components/planning-room-popover.tsx',
+    '/app/client/src/components/provincia-ciudad-select.tsx',
+    '/app/client/src/components/theme-provider.tsx',
+    '/app/client/src/components/theme-toggle.tsx',
+    '/app/client/src/components/ui/accordion.tsx',
+    '/app/client/src/components/ui/alert-dialog.tsx',
+    '/app/client/src/components/ui/alert.tsx',
+    '/app/client/src/components/ui/aspect-ratio.tsx',
+    '/app/client/src/components/ui/avatar.tsx',
+    ... 2475 more items
+  ]
+}

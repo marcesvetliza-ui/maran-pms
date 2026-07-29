@@ -63,20 +63,35 @@ function KpiCard({ title, value, delta, unit = "" }: { title: string; value: str
   );
 }
 
-async function exportXLSX(filename: string, sheets: { name: string; data: Record<string, unknown>[] }[]) {
-  const XLSX = await import("xlsx");
-  const wb = XLSX.utils.book_new();
+function exportCSV(filename: string, sheets: { name: string; data: Record<string, unknown>[] }[]) {
+  const lines: string[] = [];
   for (const sheet of sheets) {
-    const ws = XLSX.utils.json_to_sheet(sheet.data);
-    XLSX.utils.book_append_sheet(wb, ws, sheet.name);
+    if (sheet.data.length === 0) continue;
+    lines.push(`### ${sheet.name} ###`);
+    const headers = Object.keys(sheet.data[0]);
+    lines.push(headers.join(","));
+    for (const row of sheet.data) {
+      lines.push(headers.map(h => {
+        const val = String(row[h] ?? "");
+        return val.includes(",") || val.includes('"') || val.includes("\n")
+          ? `"${val.replace(/"/g, '""')}"` : val;
+      }).join(","));
+    }
+    lines.push("");
   }
-  XLSX.writeFile(wb, filename);
+  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.replace(".xlsx", ".csv");
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function ExportXLSXButton({ onClick }: { onClick: () => void }) {
   return (
     <Button variant="outline" size="sm" onClick={onClick}>
-      <Download className="w-3.5 h-3.5 mr-1" /> Excel
+      <Download className="w-3.5 h-3.5 mr-1" /> CSV
     </Button>
   );
 }
@@ -874,7 +889,7 @@ function VentasRestaurantReport() {
   const porHora:         any[] = data?.porHora           ?? [];
   const porMozo:         any[] = data?.porMozo           ?? [];
 
-  const handleExport = () => exportXLSX(`ventas-restaurant-${periodo.replace("/", "-")}.xlsx`, [
+  const handleExport = () => exportCSV(`ventas-restaurant-${periodo.replace("/", "-")}.xlsx`, [
     { name: "Resumen", data: [{ Periodo: periodo, Ventas: r.totalVentas, Ordenes: r.totalOrdenes, Cubiertos: r.totalCubiertos, TicketPromedio: r.ticketPromedio }] },
     { name: "Por Plato", data: topPlatos.map((d: any) => ({ Plato: d.nombre, Unidades: d.cantidad, Facturacion: d.revenue, PctTotal: d.pctRevenue })) },
     { name: "Por Mozo",  data: porMozo.map((d: any) => ({ Mozo: d.mozo, Ordenes: d.ordenes, Cubiertos: d.cubiertos, TicketPromedio: d.ticketPromedio, Facturacion: d.revenue, PctTotal: d.pct })) },
@@ -1215,7 +1230,7 @@ function FoodCostReport() {
     foodCostPct: parseFloat(d.foodCostPct.toFixed(1)),
   }));
 
-  const handleExport = () => exportXLSX(`food-cost-${periodo.replace("/", "-")}.xlsx`, [
+  const handleExport = () => exportCSV(`food-cost-${periodo.replace("/", "-")}.xlsx`, [
     { name: "Resumen", data: [{
         Periodo: periodo,
         TotalVentas: resumen.totalVentas,
@@ -1465,7 +1480,7 @@ function DesviosReport() {
   const handleExport = () => {
     const r2     = data?.resumen ?? {};
     const todos2: any[] = data?.desvios ?? [];
-    exportXLSX(`desvios-${periodo.replace("/", "-")}.xlsx`, [
+    exportCSV(`desvios-${periodo.replace("/", "-")}.xlsx`, [
       { name: "Resumen", data: [{
           Periodo: periodo, Ingredientes: r2.totalIngredientes, ConDesvio: r2.conDesvio,
           CostoTeorico: r2.costoTeoricoTotal, CostoReal: r2.costoRealTotal, DesvioNeto: r2.desvioTotal,
