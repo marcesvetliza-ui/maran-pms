@@ -49,6 +49,8 @@ import {
   AlertCircle,
   Clock,
   Undo2,
+  Heart,
+  AlertTriangle,
 } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -435,6 +437,14 @@ export function ReservationFormDialog({
     queryKey: ["/api/packages/active"],
   });
 
+  // Preferencias del huésped seleccionado (solo lectura, para mostrarlo en el form)
+  const selectedGuestIdForPrefs = formData.guestId;
+  const { data: selectedGuestPrefs } = useQuery<any[]>({
+    queryKey: ["/api/guests", selectedGuestIdForPrefs, "preferences"],
+    queryFn: () => fetch(`/api/guests/${selectedGuestIdForPrefs}/preferences`).then(r => r.json()),
+    enabled: !!selectedGuestIdForPrefs,
+  });
+
   const { data: generatedCode } = useQuery<{ code: string }>({
     queryKey: ["/api/reservations/generate-code"],
     enabled: !isEditing && !formData.reservationCode,
@@ -468,6 +478,26 @@ export function ReservationFormDialog({
 
   const handleRoomTypeChange = (roomTypeId: string) => {
     setSelectedRoomTypeId(roomTypeId);
+    // Si hay un paquete activo, recalcular precio para el nuevo tipo de habitación
+    if (selectedPackageId && activePackages) {
+      const pkg = activePackages.find(p => p.id === selectedPackageId);
+      if (pkg) {
+        const roomPrice = pkg.roomPrices?.find((rp: any) => rp.roomTypeId === roomTypeId);
+        const totalPrice = parseFloat(roomPrice ? roomPrice.price : pkg.basePrice);
+        const nights = Number(formData.nights) || pkg.nights || 1;
+        const ratePerNight = (totalPrice / nights).toFixed(2);
+        setFormData({
+          ...formData,
+          roomTypeId,
+          roomId: "",
+          ratePlanId: "",
+          baseRatePerNight: ratePerNight,
+          finalRatePerNight: ratePerNight,
+          totalRoomAmount: totalPrice.toFixed(2),
+        });
+        return;
+      }
+    }
     setFormData({ 
       ...formData, 
       roomTypeId, 
@@ -740,6 +770,38 @@ export function ReservationFormDialog({
               }}
               cardClassName={sectionCardClass(!!selectedGuest, !isEditing)}
             />
+
+            {/* Preferencias del huésped — visible en el form al seleccionar */}
+            {(() => {
+              const activePrefs = (selectedGuestPrefs || []).filter((p: any) => p.isActive !== false);
+              if (!formData.guestId || activePrefs.length === 0) return null;
+              const criticalPrefs = activePrefs.filter((p: any) => p.priority === "critical");
+              return (
+                <div className={`p-3 rounded-lg border ${criticalPrefs.length > 0 ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30" : "border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30"}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    {criticalPrefs.length > 0
+                      ? <AlertTriangle className="h-4 w-4 text-red-500" />
+                      : <Heart className="h-4 w-4 text-orange-500" />}
+                    <span className="font-medium text-sm">
+                      Preferencias del huésped ({activePrefs.length})
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {activePrefs.map((pref: any) => (
+                      <div key={pref.id} className="flex items-center gap-2 text-sm">
+                        <Badge variant="outline" className={`text-xs ${
+                          pref.priority === "critical" ? "border-red-400 text-red-700 dark:text-red-300" :
+                          pref.priority === "high"     ? "border-orange-400 text-orange-700 dark:text-orange-300" : ""
+                        }`}>
+                          {pref.priority === "critical" ? "Crítica" : pref.priority === "high" ? "Alta" : pref.priority === "low" ? "Baja" : "Normal"}
+                        </Badge>
+                        <span>{pref.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <CompanySelector
               selectedCompany={selectedCompany}
@@ -1024,11 +1086,13 @@ export function ReservationFormDialog({
                     setSelectedPackageId(val);
                     const pkg = activePackages.find(p => p.id === val);
                     if (pkg) {
+                      // Buscar precio específico para el tipo de habitación seleccionado
+                      const roomPrice = pkg.roomPrices?.find((rp: any) => rp.roomTypeId === selectedRoomTypeId);
+                      const effectiveBasePrice = roomPrice ? roomPrice.price : pkg.basePrice;
                       if (isEditing) {
                         // En edición: solo actualiza precio y notas, NO cambia fechas
                         const currentNights = Number(formData.nights) || 1;
-                        const totalPrice = parseFloat(pkg.basePrice);
-                        const ratePerNight = (totalPrice / currentNights).toFixed(2);
+                        const totalPrice = parseFloat(effectiveBasePrice);
                         setFormData(prev => ({
                           ...prev,
                           baseRatePerNight: ratePerNight,
@@ -1047,7 +1111,7 @@ export function ReservationFormDialog({
                         const d = new Date(checkIn + "T12:00:00");
                         d.setDate(d.getDate() + nights);
                         const newCheckOut = toArgentinaDateStr(d);
-                        const totalPrice = parseFloat(pkg.basePrice);
+                        const totalPrice = parseFloat(effectiveBasePrice);
                         const ratePerNight = (totalPrice / nights).toFixed(2);
                         setFormData(prev => ({
                           ...prev,
@@ -1081,15 +1145,20 @@ export function ReservationFormDialog({
                 {selectedPackageId && (() => {
                   const pkg = activePackages.find(p => p.id === selectedPackageId);
                   if (!pkg) return null;
+                  const roomPrice = pkg.roomPrices?.find((rp: any) => rp.roomTypeId === selectedRoomTypeId);
+                  const effectivePrice = roomPrice ? roomPrice.price : pkg.basePrice;
                   return (
                     <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 px-3 py-2">
                       <Gift className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <span className="text-xs font-semibold text-green-800 dark:text-green-300">{pkg.name}</span>
                         <span className="text-xs text-green-700 dark:text-green-400 ml-1">· {pkg.nights} noche{pkg.nights !== 1 ? "s" : ""}</span>
+                        {roomPrice && (
+                          <span className="text-xs text-green-600 dark:text-green-500 ml-1">· precio por categoría</span>
+                        )}
                       </div>
                       <span className="text-sm font-bold text-green-800 dark:text-green-300 whitespace-nowrap">
-                        ${Number(pkg.basePrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        ${Number(effectivePrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                       </span>
                     </div>
                   );

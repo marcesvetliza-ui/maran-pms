@@ -178,6 +178,7 @@ export function registerPublicBookingRoutes(app: Express) {
     documentNumber: z.string().optional(),
     nationality: z.string().optional(),
     notes: z.string().optional(),
+  bedPreference: z.string().optional(),
     paymentMethod: z.string().default("hotel"), // "hotel" = pay at hotel
   });
 
@@ -274,6 +275,7 @@ export function registerPublicBookingRoutes(app: Express) {
         baseRatePerNight: pricePerNight.toFixed(2),
         finalRatePerNight: pricePerNight.toFixed(2),
         notes: data.notes || null,
+        bedTypeNotes: data.bedPreference || null,
         createdAt: new Date(),
       } as any).returning();
 

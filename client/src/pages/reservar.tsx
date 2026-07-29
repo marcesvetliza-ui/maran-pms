@@ -234,6 +234,7 @@ export default function ReservarPage() {
   const [docType,   setDocType]   = useState("DNI");
   const [docNum,    setDocNum]    = useState("");
   const [notes,     setNotes]     = useState("");
+  const [bedPreference, setBedPreference] = useState("");
 
   const [confirmationData, setConfirmationData] = useState<any>(null);
 
@@ -284,7 +285,7 @@ export default function ReservarPage() {
       ratePlanId: selectedRoomType.ratePlanId,
       firstName, lastName, email, phone,
       documentType: docType, documentNumber: docNum,
-      notes, paymentMethod: "hotel",
+      notes, bedPreference: bedPreference || undefined, paymentMethod: "hotel",
     });
   }
 
@@ -562,6 +563,43 @@ export default function ReservarPage() {
               <Label className="text-sm font-['Montserrat']">Número</Label>
               <Input value={docNum} onChange={e => setDocNum(e.target.value)}
                 placeholder="12345678" className="font-['Montserrat']" data-testid="input-docnum" />
+            </div>
+          </div>
+
+          {/* ── Preferencia de camaje ─────────────────────────────── */}
+          <div className="space-y-2">
+            <Label className="text-sm font-['Montserrat'] flex items-center gap-1">
+              <BedDouble className="h-3.5 w-3.5" />
+              Preferencia de camaje <span className="text-gray-400 font-normal">(opcional)</span>
+            </Label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { value: "Doble matrimonial",          icon: "🛏️",  desc: "1 cama doble" },
+                { value: "Camas separadas",             icon: "🛏 🛏", desc: "2 camas individuales" },
+                { value: "Cama grande + camas chicas",  icon: "🛏️➕", desc: "1 doble + individuales" },
+                { value: "Tres camas separadas",        icon: "🛏🛏🛏", desc: "3 camas individuales" },
+              ] as const).map(opt => {
+                const selected = bedPreference === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setBedPreference(selected ? "" : opt.value)}
+                    className="rounded-xl border-2 p-3 text-left transition-all"
+                    style={{
+                      borderColor: selected ? BRAND : "#e5e7eb",
+                      background:  selected ? CREAM  : "white",
+                    }}
+                  >
+                    <div className="text-lg leading-none mb-1">{opt.icon}</div>
+                    <div className="text-xs font-semibold font-['Montserrat'] leading-tight"
+                         style={{ color: selected ? BRAND : "#374151" }}>
+                      {opt.value}
+                    </div>
+                    <div className="text-[10px] text-gray-400 font-['Montserrat'] mt-0.5">{opt.desc}</div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
