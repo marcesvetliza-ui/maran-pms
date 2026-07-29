@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { db, pool } from "../db";
-import { guests, reservations } from "../../shared/schema";
-import { eq, and, inArray, gte, sql } from "drizzle-orm";
+import { guests, reservations, roomTypes as roomTypesTable } from "../../shared/schema";
+import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
 
 export function registerGuestsRoutes(app: Express) {
   // Companies
@@ -525,6 +525,36 @@ export function registerGuestsRoutes(app: Express) {
     } catch (error) {
       console.error("Error fetching account movements report:", error);
       res.status(500).json({ error: "Error fetching report" });
+    }
+  });
+
+  // ── INDEC statistical report ──────────────────────────────────────────────
+  app.get("/api/reports/indec", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from?: string; to?: string };
+      const conditions: any[] = [
+        sql`${reservations.status} = 'checked_out'`,
+      ];
+      if (from) conditions.push(gte(reservations.checkOutDate, from));
+      if (to)   conditions.push(lte(reservations.checkOutDate, to));
+
+      const rows = await db
+        .select({
+          nights:            reservations.nights,
+          nationality:       guests.nationality,
+          roomTypeName:      roomTypesTable.name,
+          finalRatePerNight: reservations.finalRatePerNight,
+          baseRatePerNight:  reservations.baseRatePerNight,
+        })
+        .from(reservations)
+        .leftJoin(guests,         eq(reservations.guestId,   guests.id))
+        .leftJoin(roomTypesTable, eq(reservations.roomTypeId, roomTypesTable.id))
+        .where(and(...conditions));
+
+      res.json(rows);
+    } catch (error) {
+      console.error("Error fetching INDEC report:", error);
+      res.status(500).json({ error: "Error al generar reporte INDEC" });
     }
   });
 

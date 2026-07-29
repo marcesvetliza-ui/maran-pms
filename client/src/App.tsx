@@ -74,6 +74,7 @@ const SurveyPage = lazy(() => import("@/pages/survey"));
 const HelpChat = lazy(() => import("@/components/help-chat"));
 const MozoPage = lazy(() => import("@/pages/mozo"));
 const RecetasCostosPage = lazy(() => import("@/pages/recetas-costos"));
+const AdminIndecPage = lazy(() => import("@/pages/admin-indec"));
 
 interface AuthUser {
   id: string;
@@ -238,6 +239,7 @@ function Router() {
         <Route path="/admin/booking-engine" component={AdminBookingPage} />
         <Route path="/email-config" component={EmailConfigPage} />
         <Route path="/admin/countries" component={CountriesAbmPage} />
+        <Route path="/admin/indec" component={AdminIndecPage} />
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
         <Route path="/mozo" component={MozoPage} />

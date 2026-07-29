@@ -174,9 +174,10 @@ const menuSections = [
   {
     titulo: "Administración",
     items: [
-      { label: "Administración",     icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
-      { label: "Cuentas Corrientes", icon: CreditCard, href: "/admin/cuentas", roles: CC_ROLES },
-      { label: "Caja",               icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
+      { label: "Administración",     icon: Calculator,    href: "/admin",         roles: ADMIN_MOD_ROLES },
+      { label: "Cuentas Corrientes", icon: CreditCard,    href: "/admin/cuentas", roles: CC_ROLES },
+      { label: "Caja",               icon: Landmark,      href: "/cash-register", roles: CAJA_ROLES },
+      { label: "Reportes INDEC",     icon: ClipboardList, href: "/admin/indec",   roles: ADMIN_MOD_ROLES },
     ],
   },
 

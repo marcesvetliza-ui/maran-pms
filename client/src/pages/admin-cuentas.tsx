@@ -1355,15 +1355,40 @@ export default function AdminCuentasPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="pt-4 text-center">
+              <CardContent className="pt-4">
                 <div className="flex items-center justify-center gap-1 mb-1">
                   <TrendingDown className="h-3.5 w-3.5 text-green-500" />
                   <p className="text-xs text-muted-foreground">Pagos</p>
                 </div>
-                <p className="text-xl font-bold text-green-600">
+                <p className="text-xl font-bold text-green-600 text-center">
                   ${Math.abs(reportePayments.reduce((s, m) => s + parseFloat(m.amount), 0)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                 </p>
-                <p className="text-[11px] text-muted-foreground">{reportePayments.length} movimiento(s)</p>
+                <p className="text-[11px] text-muted-foreground text-center mb-2">{reportePayments.length} movimiento(s)</p>
+                {/* Desglose por forma de pago */}
+                {reportePayments.length > 0 && (() => {
+                  const pmLabels: Record<string, string> = {
+                    efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia",
+                    cheque: "Cheque", cuenta_corriente: "Cta. Corriente",
+                    compensacion: "Compensación", debito: "Débito",
+                  };
+                  const byMethod: Record<string, number> = {};
+                  reportePayments.forEach(m => {
+                    const k = m.paymentMethod || "otros";
+                    byMethod[k] = (byMethod[k] || 0) + Math.abs(parseFloat(m.amount));
+                  });
+                  return (
+                    <div className="border-t pt-2 space-y-1">
+                      {Object.entries(byMethod).map(([k, v]) => (
+                        <div key={k} className="flex justify-between items-center text-[11px]">
+                          <span className="text-muted-foreground">{pmLabels[k] ?? k}</span>
+                          <span className="font-medium tabular-nums text-green-700 dark:text-green-400">
+                            ${v.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
             <Card className="bg-muted/30">
@@ -1393,32 +1418,52 @@ export default function AdminCuentasPage() {
           </div>
         ) : (
           <div className="space-y-2">
-            {reporteMovements.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-start justify-between p-3 rounded-lg border bg-background gap-3"
-                data-testid={`row-movimiento-${m.id}`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {m.entityTypeName}
-                    </Badge>
-                    <span className="font-medium text-sm truncate">{m.entityName}</span>
+            {(() => {
+              const pmLabels: Record<string, string> = {
+                efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia",
+                cheque: "Cheque", cuenta_corriente: "Cta. Corriente",
+                compensacion: "Compensación", debito: "Débito",
+              };
+              return reporteMovements.map((m) => {
+                const isPago = parseFloat(m.amount) < 0;
+                return (
+                  <div
+                    key={m.id}
+                    className="flex items-start justify-between p-3 rounded-lg border bg-background gap-3"
+                    data-testid={`row-movimiento-${m.id}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <Badge variant="outline" className="text-[10px] shrink-0">
+                          {m.entityTypeName}
+                        </Badge>
+                        <span className="font-medium text-sm truncate">{m.entityName}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">{m.description}</p>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="text-[11px] text-muted-foreground">{m.date}</span>
+                        {isPago && m.paymentMethod && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] px-1.5 py-0 h-4 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-0"
+                          >
+                            {pmLabels[m.paymentMethod] ?? m.paymentMethod}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`font-bold text-sm ${parseFloat(m.amount) > 0 ? "text-red-600" : "text-green-600"}`}>
+                        {parseFloat(m.amount) > 0 ? "+" : ""}${parseFloat(m.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {parseFloat(m.amount) > 0 ? "Cargo" : "Pago"}
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">{m.description}</p>
-                  <p className="text-[11px] text-muted-foreground">{m.date}</p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className={`font-bold text-sm ${parseFloat(m.amount) > 0 ? "text-red-600" : "text-green-600"}`}>
-                    {parseFloat(m.amount) > 0 ? "+" : ""}${parseFloat(m.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {parseFloat(m.amount) > 0 ? "Cargo" : "Pago"}
-                  </p>
-                </div>
-              </div>
-            ))}
+                );
+              });
+            })()}
           </div>
         )}
       </div>

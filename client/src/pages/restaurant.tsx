@@ -5033,9 +5033,12 @@ export default function RestaurantPage() {
                       if (!g.cuilCuit && !g.documentNumber) return false;
                       const q = closeBillingClientSearch.toLowerCase();
                       const fullName = `${g.firstName} ${g.lastName || ""}`.toLowerCase();
+                      const digitsOnly = closeBillingClientSearch.replace(/\D/g, "");
                       return fullName.includes(q) || (g.lastName || "").toLowerCase().includes(q)
                         || (g.cuilCuit || "").replace(/-/g,"").includes(closeBillingClientSearch.replace(/-/g,""))
-                        || (g.documentNumber || "").includes(closeBillingClientSearch.replace(/\D/g,""));
+                        // Only compare document number if the search term actually contains digits
+                        // (otherwise digitsOnly="" which matches every string via .includes(""))
+                        || (digitsOnly.length > 0 && (g.documentNumber || "").includes(digitsOnly));
                     }).slice(0, 4).map(g => ({
                       id: g.id,
                       name: `${g.lastName || ""} ${g.firstName || ""}`.toUpperCase().trim() || g.firstName,
