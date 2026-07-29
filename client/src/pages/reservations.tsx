@@ -50,7 +50,6 @@ import {
   Clock,
   Undo2,
   Heart,
-  AlertTriangle,
 } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
