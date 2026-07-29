@@ -1210,7 +1210,7 @@ export type UnitType = "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquet
 // Clasificación del artículo: materia prima (se usa como ingrediente de recetas),
 // venta directa (se vende tal cual, ej. agua embotellada) o plato (espejo de un
 // menu_item del restaurante, generado y mantenido automáticamente por el sistema).
-export type ItemKind = "materia_prima" | "venta_directa" | "plato";
+export type ItemKind = "materia_prima" | "venta_directa" | "plato" | "activo_fijo";
 
 export const inventoryItems = pgTable("inventory_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

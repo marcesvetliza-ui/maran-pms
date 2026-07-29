@@ -85,7 +85,7 @@ type InventoryItem = {
   currentStock: number;
   location: string | null;
   isActive: string | null;
-  itemKind?: "materia_prima" | "venta_directa" | "plato" | null;
+  itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | null;
   category?: ItemCategory;
   supplier?: Supplier;
 };
@@ -847,6 +847,7 @@ ${(movement.items || []).map(i => `    <tr>
                 <SelectItem value="materia_prima">Materia Prima</SelectItem>
                 <SelectItem value="venta_directa">Venta Directa</SelectItem>
                 <SelectItem value="plato">Plato</SelectItem>
+                <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -896,7 +897,7 @@ ${(movement.items || []).map(i => `    <tr>
                               className="text-[10px]"
                               data-testid={`badge-kind-${item.id}`}
                             >
-                              {(item as any).itemKind === "materia_prima" ? "Materia Prima" : (item as any).itemKind === "plato" ? "Plato" : "Venta Directa"}
+                              {(item as any).itemKind === "materia_prima" ? "Materia Prima" : (item as any).itemKind === "plato" ? "Plato" : (item as any).itemKind === "activo_fijo" ? "Activo Fijo" : "Venta Directa"}
                             </Badge>
                           )}
                           {(item as any).isActive === "false" && (
@@ -2277,6 +2278,7 @@ function NewItemForm({
           <SelectContent>
             <SelectItem value="materia_prima">Materia Prima (insumo para recetas)</SelectItem>
             <SelectItem value="venta_directa">Venta Directa (se vende tal cual)</SelectItem>
+            <SelectItem value="activo_fijo">Activo Fijo (bien de uso / equipamiento)</SelectItem>
           </SelectContent>
         </Select>
       </div>
