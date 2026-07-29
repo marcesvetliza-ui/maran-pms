@@ -1922,7 +1922,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                       <SelectTrigger data-testid="select-im-recipe"><SelectValue placeholder="Seleccionar receta..." /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">— Elegir receta —</SelectItem>
-                        {allRecipes.filter(r => r.id).map(r => (
+                        {allRecipes.filter(r => r.id).sort((a, b) => (a.name || a.menuItem?.name || "").localeCompare(b.name || b.menuItem?.name || "", "es")).map(r => (
                           <SelectItem key={r.id} value={r.id}>
                             {r.name || r.menuItem?.name || `Receta ${r.id.slice(0, 6)}`}
                           </SelectItem>
