@@ -274,147 +274,156 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
 
     const pageW    = 595;
     const pageH    = 842;
-    const margin   = 40;
+    const margin   = 44;
     const contentW = pageW - margin * 2;
 
-    // ── HEADER ───────────────────────────────────────────────────────────────
-    const stripeEnd = pdfBrandedHeader(doc, pageW, "CONFIRMACIÓN DE EVENTO");
-    const titleY = stripeEnd + 14;
+    // ── BACKGROUND TEMPLATE ──────────────────────────────────────────────────
+    // Usar la imagen institucional como fondo A4 completo (encabezado foto ciudad
+    // + pie con logo y beneficios). El contenido se superpone en el área blanca.
+    const bgPath = path.join(process.cwd(), "server", "assets", "confirmacion-evento-bg.jpg");
+    if (fs.existsSync(bgPath)) {
+      doc.image(bgPath, 0, 0, { width: pageW, height: pageH });
+    } else {
+      // Fallback: fondo blanco con franja naranja superior
+      doc.rect(0, 0, pageW, 170).fill(NAVY);
+      doc.rect(0, 170, pageW, 5).fill(ORANGE);
+    }
 
+    // El área blanca del template comienza ~185pt desde arriba y termina ~700pt.
+    // Dejamos un poco de padding interno.
+    let y = 188;
+
+    // ── TÍTULO + CÓDIGO ───────────────────────────────────────────────────────
+    // Label sutil "CONFIRMACIÓN DE EVENTO"
     doc.fillColor("#888888").fontSize(7).font("Helvetica")
-      .text("CONFIRMACIÓN DE EVENTO", margin, titleY, { characterSpacing: 2 });
-    doc.fillColor("#1a1a1a").fontSize(17).font("Helvetica-Bold")
-      .text(HOTEL_NAME, margin, titleY + 11, { width: 300 });
-    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
-      .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 33);
+      .text("CONFIRMACIÓN DE EVENTO", margin, y, { characterSpacing: 2 });
+    y += 13;
 
-    // Code box
-    const codeBoxW = 138;
+    // Nombre del evento a la izquierda, código a la derecha
+    const codeBoxW = 130;
     const codeBoxX = pageW - margin - codeBoxW;
-    doc.roundedRect(codeBoxX, titleY, codeBoxW, 44, 5).fillAndStroke("#f8f4ef", ORANGE);
-    doc.fillColor("#888888").fontSize(7).font("Helvetica")
-      .text("CÓDIGO DE EVENTO", codeBoxX, titleY + 7, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
-    doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
-      .text(event.eventCode, codeBoxX, titleY + 19, { width: codeBoxW, align: "center" });
-    doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
-      .text(`Emitida: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, titleY + 33, { width: codeBoxW, align: "center" });
-    // Status badge
-    doc.roundedRect(codeBoxX + 16, titleY + 50, codeBoxW - 32, 15, 7).fillAndStroke("#e8f5e9", "#a5d6a7");
-    doc.fillColor("#2e7d32").fontSize(7).font("Helvetica-Bold")
-      .text("CONFIRMADO", codeBoxX + 16, titleY + 54, { width: codeBoxW - 32, align: "center", characterSpacing: 0.5 });
 
-    let y = titleY + 74;
-    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
-    y += 12;
+    doc.fillColor("#1a1a1a").fontSize(14).font("Helvetica-Bold")
+      .text(event.name, margin, y, { width: codeBoxX - margin - 8 });
+    const nameH = doc.heightOfString(event.name, { width: codeBoxX - margin - 8, fontSize: 14 });
 
-    // ── EVENT NAME BLOCK ─────────────────────────────────────────────────────
-    doc.fillColor("#1a1a1a").fontSize(15).font("Helvetica-Bold").text(event.name, margin, y, { width: contentW - 160 });
-    y += 20;
-    doc.fillColor("#666666").fontSize(9).font("Helvetica")
-      .text(`${eventTypeLabel(event.eventType)}  ·  Cód. ${event.eventCode}`, margin, y);
-    y += 16;
-    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
-    y += 12;
+    // Caja código
+    doc.roundedRect(codeBoxX, y - 2, codeBoxW, 42, 5).fillAndStroke("#f8f4ef", ORANGE);
+    doc.fillColor("#888888").fontSize(6.5).font("Helvetica")
+      .text("CÓDIGO", codeBoxX, y + 5, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
+    doc.fillColor("#333333").fontSize(12).font("Helvetica-Bold")
+      .text(event.eventCode, codeBoxX, y + 15, { width: codeBoxW, align: "center" });
+    doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
+      .text(new Date().toLocaleDateString("es-AR"), codeBoxX, y + 30, { width: codeBoxW, align: "center" });
+
+    y += Math.max(nameH + 4, 44);
+
+    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
+      .text(`${eventTypeLabel(event.eventType)}  ·  ${fmtDate(event.startDate)}${event.startDate !== event.endDate ? ` al ${fmtDate(event.endDate)}` : ""}`, margin, y);
+    y += 14;
+
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#d0d0d0").lineWidth(0.5).stroke();
+    y += 10;
 
     // ── KEY DATA GRID ────────────────────────────────────────────────────────
     const gridCells: { label: string; value: string }[] = [
-      { label: "SALÓN",     value: event.eventRoom?.name || "—" },
-      { label: "FECHA",     value: event.startDate === event.endDate ? fmtDate(event.startDate) : `${fmtDate(event.startDate)} al ${fmtDate(event.endDate)}` },
-      { label: "HORARIO",   value: event.startTime ? `${event.startTime}${event.endTime ? ` — ${event.endTime}` : ""}` : "—" },
-      { label: "ASISTENTES",value: desglosarAsistentes(event) },
+      { label: "SALÓN",      value: event.eventRoom?.name || "—" },
+      { label: "FECHA",      value: event.startDate === event.endDate ? fmtDate(event.startDate) : `${fmtDate(event.startDate)} — ${fmtDate(event.endDate)}` },
+      { label: "HORARIO",    value: event.startTime ? `${event.startTime}${event.endTime ? ` — ${event.endTime}` : ""}` : "—" },
+      { label: "ASISTENTES", value: desglosarAsistentes(event) },
     ];
     const cellW = contentW / gridCells.length;
-    const gridH = 44;
-    doc.roundedRect(margin, y, contentW, gridH, 6).fillAndStroke("#ffffff", "#dddddd");
+    const gridH = 42;
+    doc.roundedRect(margin, y, contentW, gridH, 5).fillAndStroke("#ffffff", "#dddddd");
     gridCells.forEach((cell, i) => {
       const cx = margin + i * cellW;
       if (i > 0) doc.moveTo(cx, y + 7).lineTo(cx, y + gridH - 7).strokeColor("#dddddd").lineWidth(0.5).stroke();
-      doc.fillColor("#999999").fontSize(7).font("Helvetica-Bold")
-        .text(cell.label, cx + 4, y + 9, { width: cellW - 8, align: "center", characterSpacing: 0.3 });
-      doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold")
-        .text(cell.value, cx + 4, y + 24, { width: cellW - 8, align: "center" });
+      doc.fillColor("#999999").fontSize(6.5).font("Helvetica-Bold")
+        .text(cell.label, cx + 4, y + 8, { width: cellW - 8, align: "center", characterSpacing: 0.3 });
+      doc.fillColor(NAVY).fontSize(9.5).font("Helvetica-Bold")
+        .text(cell.value, cx + 4, y + 22, { width: cellW - 8, align: "center" });
     });
-    y += gridH + 12;
+    y += gridH + 10;
 
     // ── CONTACT BOX ──────────────────────────────────────────────────────────
-    const contactBoxH = 56;
-    doc.roundedRect(margin, y, contentW, contactBoxH, 6).fillAndStroke("#f8f9fa", "#eeeeee");
-    doc.fillColor("#888888").fontSize(7).font("Helvetica-Bold")
-      .text("DATOS DE CONTACTO", margin + 12, y + 10, { characterSpacing: 1 });
-    doc.moveTo(margin + 12, y + 21).lineTo(margin + 12 + 100, y + 21).strokeColor(ORANGE).lineWidth(2).stroke();
+    const contactBoxH = 50;
+    doc.roundedRect(margin, y, contentW, contactBoxH, 5).fillAndStroke("#f8f9fa", "#eeeeee");
+    doc.fillColor("#888888").fontSize(6.5).font("Helvetica-Bold")
+      .text("DATOS DE CONTACTO", margin + 12, y + 9, { characterSpacing: 1 });
+    doc.moveTo(margin + 12, y + 19).lineTo(margin + 12 + 90, y + 19).strokeColor(ORANGE).lineWidth(2).stroke();
 
     const colA = margin + 12;
     const colB = margin + 12 + contentW / 2;
-    doc.fillColor("#1a1a1a").fontSize(11).font("Helvetica-Bold")
-      .text(event.contactName, colA, y + 27, { width: contentW / 2 - 20 });
+    doc.fillColor("#1a1a1a").fontSize(10.5).font("Helvetica-Bold")
+      .text(event.contactName, colA, y + 25, { width: contentW / 2 - 20 });
     if (event.contactPhone)
-      doc.fillColor("#555555").fontSize(9).font("Helvetica")
-        .text(`Tel: ${event.contactPhone}`, colA, y + 42, { width: contentW / 2 - 20 });
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text(`Tel: ${event.contactPhone}`, colA, y + 38, { width: contentW / 2 - 20 });
     if (event.contactEmail)
-      doc.fillColor("#555555").fontSize(9).font("Helvetica")
-        .text(event.contactEmail, colB, y + 27, { width: contentW / 2 - 20 });
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text(event.contactEmail, colB, y + 25, { width: contentW / 2 - 20 });
     if (event.company)
-      doc.fillColor("#555555").fontSize(9).font("Helvetica")
-        .text(`Empresa: ${(event.company as any).name || "—"}`, colB, y + 42, { width: contentW / 2 - 20 });
-    y += contactBoxH + 12;
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text(`Empresa: ${(event.company as any).razonSocial || (event.company as any).name || "—"}`, colB, y + 38, { width: contentW / 2 - 20 });
+    y += contactBoxH + 10;
 
     // ── SERVICIOS CON PRECIOS ─────────────────────────────────────────────────
     if (event.charges && event.charges.length > 0) {
-      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold").text("Detalle de servicios", margin, y);
-      doc.fillColor("#888888").fontSize(8).font("Helvetica")
-        .text("Precios con IVA (21%) incluido", margin, y + 14);
-      y += 28;
+      doc.fillColor(NAVY).fontSize(10.5).font("Helvetica-Bold").text("Detalle de servicios", margin, y);
+      doc.fillColor("#888888").fontSize(7.5).font("Helvetica")
+        .text("Precios con IVA (21%) incluido", margin + 160, y + 2);
+      y += 16;
 
       // Table header
-      doc.roundedRect(margin, y, contentW, 20, 4).fill(NAVY);
-      doc.fillColor("white").fontSize(8).font("Helvetica-Bold");
-      const thY = y + 6;
-      doc.text("Descripción",  margin + 8,         thY, { width: 260 });
-      doc.text("Cant.",        margin + 8,         thY, { width: contentW * 0.55, align: "right" });
-      doc.text("P. Unit.",     margin + 8,         thY, { width: contentW * 0.75, align: "right" });
-      doc.text("Total",        margin + 8,         thY, { width: contentW - 8,   align: "right" });
-      y += 22;
+      doc.roundedRect(margin, y, contentW, 18, 3).fill(NAVY);
+      doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
+      const thY = y + 5;
+      doc.text("Descripción",  margin + 8,       thY, { width: 260 });
+      doc.text("Cant.",        margin + 8,       thY, { width: contentW * 0.55, align: "right" });
+      doc.text("P. Unit.",     margin + 8,       thY, { width: contentW * 0.75, align: "right" });
+      doc.text("Total",        margin + 8,       thY, { width: contentW - 8,   align: "right" });
+      y += 20;
 
       let totalConIva = 0;
       for (const charge of event.charges) {
         const total = parseFloat(String(charge.totalAmount) || "0");
         totalConIva += total;
-        const rh = Math.max(20, doc.heightOfString(charge.description, { width: 260 }) + 8);
+        const rh = Math.max(18, doc.heightOfString(charge.description, { width: 260 }) + 6);
         doc.rect(margin, y, contentW, rh).fill("#fafafa").stroke("#e8e8e8");
-        doc.fillColor("#1a1a1a").fontSize(9).font("Helvetica")
-          .text(charge.description, margin + 8, y + 5, { width: 260 });
-        doc.text(String(charge.quantity),               margin + 8, y + 5, { width: contentW * 0.55, align: "right" });
-        doc.text(`$ ${fmtMoney(charge.unitPrice)}`,     margin + 8, y + 5, { width: contentW * 0.75, align: "right" });
+        doc.fillColor("#1a1a1a").fontSize(8.5).font("Helvetica")
+          .text(charge.description, margin + 8, y + 4, { width: 260 });
+        doc.text(String(charge.quantity),             margin + 8, y + 4, { width: contentW * 0.55, align: "right" });
+        doc.text(`$ ${fmtMoney(charge.unitPrice)}`,   margin + 8, y + 4, { width: contentW * 0.75, align: "right" });
         doc.font("Helvetica-Bold")
-          .text(`$ ${fmtMoney(charge.totalAmount)}`,    margin + 8, y + 5, { width: contentW - 8,   align: "right" });
+          .text(`$ ${fmtMoney(charge.totalAmount)}`,  margin + 8, y + 4, { width: contentW - 8,   align: "right" });
         y += rh;
       }
 
       // Total row
-      doc.roundedRect(margin + contentW - 220, y + 6, 220, 22, 4).fill(NAVY);
-      doc.fillColor("white").fontSize(10).font("Helvetica-Bold")
-        .text("TOTAL (IVA incl.):", margin + 8, y + 11, { width: contentW * 0.72, align: "right" });
-      doc.text(`$ ${fmtMoney(totalConIva)}`, margin + 8, y + 11, { width: contentW - 8, align: "right" });
-      y += 36;
+      doc.roundedRect(margin + contentW - 210, y + 5, 210, 20, 3).fill(NAVY);
+      doc.fillColor("white").fontSize(9.5).font("Helvetica-Bold")
+        .text("TOTAL (IVA incl.):", margin + 8, y + 10, { width: contentW * 0.72, align: "right" });
+      doc.text(`$ ${fmtMoney(totalConIva)}`, margin + 8, y + 10, { width: contentW - 8, align: "right" });
+      y += 32;
 
-      doc.fillColor("#888888").fontSize(7.5).font("Helvetica")
+      doc.fillColor("#888888").fontSize(7).font("Helvetica")
         .text("* IVA a aplicar según condición impositiva del cliente al momento de facturar.", margin, y, { width: contentW });
-      y += 16;
+      y += 14;
     }
 
     // ── FIRMA ────────────────────────────────────────────────────────────────
-    y += 12;
-    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
-    y += 16;
-    doc.fillColor("#555555").fontSize(9).font("Helvetica")
-      .text("Firma y aclaración cliente:", margin, y);
-    doc.moveTo(margin + 180, y + 14).lineTo(margin + 360, y + 14).strokeColor("#333333").lineWidth(0.5).stroke();
-    doc.fillColor("#555555").fontSize(9).font("Helvetica")
-      .text("Fecha:", margin + contentW - 130, y);
-    doc.moveTo(margin + contentW - 80, y + 14).lineTo(margin + contentW, y + 14).strokeColor("#333333").lineWidth(0.5).stroke();
-
-    // ── FOOTER ───────────────────────────────────────────────────────────────
-    pdfBrandedFooter(doc, pageW, pageH, margin, contentW);
+    // Solo dibujar si queda espacio razonable antes del pie del template (~700pt)
+    if (y < 660) {
+      y += 10;
+      doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+      y += 14;
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text("Firma y aclaración cliente:", margin, y);
+      doc.moveTo(margin + 175, y + 13).lineTo(margin + 350, y + 13).strokeColor("#333333").lineWidth(0.5).stroke();
+      doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
+        .text("Fecha:", margin + contentW - 120, y);
+      doc.moveTo(margin + contentW - 75, y + 13).lineTo(margin + contentW, y + 13).strokeColor("#333333").lineWidth(0.5).stroke();
+    }
 
     doc.end();
   });
