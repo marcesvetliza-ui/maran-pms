@@ -596,4 +596,107 @@ export function registerInventoryRoutes(app: Express) {
       res.status(500).json({ error: error.message || "Error fetching warehouses summary" });
     }
   });
+
+  // ==================== INTERNAL MOVEMENTS (Movimientos Internos) ====================
+
+  app.get("/api/inventory/internal-movements/report", requireAuth, async (req, res) => {
+    try {
+      const from = (req.query.from as string) || new Date().toISOString().split("T")[0];
+      const to = (req.query.to as string) || new Date().toISOString().split("T")[0];
+      const rows = await db.execute(sql`
+        SELECT
+          imi.item_id,
+          imi.item_name,
+          imi.unit,
+          imi.cost_price,
+          SUM(imi.quantity)::numeric as total_quantity,
+          SUM(imi.quantity * imi.cost_price)::numeric as total_cost,
+          COUNT(DISTINCT im.id)::int as movement_count
+        FROM internal_movement_items imi
+        JOIN internal_movements im ON im.id = imi.movement_id
+        WHERE im.date >= ${from} AND im.date <= ${to}
+        GROUP BY imi.item_id, imi.item_name, imi.unit, imi.cost_price
+        ORDER BY total_cost DESC
+      `);
+      const totalCost = (rows.rows as any[]).reduce((s, r) => s + parseFloat(r.total_cost || "0"), 0);
+      res.json({ from, to, items: rows.rows, totalCost });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error generating internal movements report" });
+    }
+  });
+
+  app.get("/api/inventory/internal-movements", requireAuth, async (req, res) => {
+    try {
+      const from = (req.query.from as string) || new Date().toISOString().split("T")[0];
+      const to = (req.query.to as string) || new Date().toISOString().split("T")[0];
+      const rows = await db.execute(sql`
+        SELECT
+          im.*,
+          COUNT(imi.id)::int as item_count,
+          COALESCE(SUM(imi.quantity * imi.cost_price), 0)::numeric as total_cost
+        FROM internal_movements im
+        LEFT JOIN internal_movement_items imi ON imi.movement_id = im.id
+        WHERE im.date >= ${from} AND im.date <= ${to}
+        GROUP BY im.id
+        ORDER BY im.created_at DESC
+      `);
+      res.json(rows.rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error fetching internal movements" });
+    }
+  });
+
+  app.get("/api/inventory/internal-movements/:id", requireAuth, async (req, res) => {
+    try {
+      const mov = await db.execute(sql`SELECT * FROM internal_movements WHERE id = ${req.params.id}`);
+      if (!mov.rows.length) return res.status(404).json({ error: "Not found" });
+      const items = await db.execute(sql`SELECT * FROM internal_movement_items WHERE movement_id = ${req.params.id} ORDER BY id`);
+      res.json({ ...mov.rows[0], items: items.rows });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error fetching movement" });
+    }
+  });
+
+  app.post("/api/inventory/internal-movements", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
+    try {
+      const { date, motivo, descripcion, notes, items } = req.body;
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Se requiere al menos un artículo" });
+      }
+      const movRes = await db.execute(sql`
+        INSERT INTO internal_movements (date, motivo, descripcion, notes, created_by)
+        VALUES (${date}, ${motivo}, ${descripcion || null}, ${notes || null}, ${(req as any).user?.username || "sistema"})
+        RETURNING *
+      `);
+      const movement = movRes.rows[0] as any;
+      const processedItems: any[] = [];
+      for (const item of items) {
+        const { itemId, quantity, notes: itemNotes } = item;
+        if (!itemId || !quantity || parseFloat(String(quantity)) <= 0) continue;
+        const itemRes = await db.execute(sql`SELECT * FROM inventory_items WHERE id = ${itemId}`);
+        if (!itemRes.rows.length) continue;
+        const invItem = itemRes.rows[0] as any;
+        const qty = parseFloat(String(quantity));
+        const prevStock = parseFloat(invItem.current_stock || "0");
+        const newStock = prevStock - qty;
+        const costPrice = parseFloat(invItem.cost_price || "0");
+        await db.execute(sql`UPDATE inventory_items SET current_stock = ${newStock} WHERE id = ${itemId}`);
+        await db.execute(sql`
+          INSERT INTO stock_movements (item_id, movement_type, quantity, previous_stock, new_stock, unit_cost, notes, source_type, source_id, created_at)
+          VALUES (${itemId}, 'consumo', ${qty}, ${prevStock}, ${newStock}, ${costPrice},
+                  ${(descripcion || motivo) + (itemNotes ? ` — ${itemNotes}` : "")},
+                  'internal_movement', ${movement.id}, now())
+        `);
+        const imiRes = await db.execute(sql`
+          INSERT INTO internal_movement_items (movement_id, item_id, item_name, unit, quantity, cost_price, notes)
+          VALUES (${movement.id}, ${itemId}, ${invItem.name}, ${invItem.unit}, ${qty}, ${costPrice}, ${itemNotes || null})
+          RETURNING *
+        `);
+        processedItems.push(imiRes.rows[0]);
+      }
+      res.status(201).json({ ...movement, items: processedItems });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error creating internal movement" });
+    }
+  });
 }

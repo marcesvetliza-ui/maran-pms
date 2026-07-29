@@ -2784,3 +2784,28 @@ export const inventoryCountItems = pgTable("inventory_count_items", {
 });
 export type InventoryCountItem = typeof inventoryCountItems.$inferSelect;
 export type InsertInventoryCountItem = typeof inventoryCountItems.$inferInsert;
+
+// ==================== INTERNAL MOVEMENTS (Movimientos Internos / Vouchers de descarga) ====================
+
+export const internalMovements = pgTable("internal_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  date: date("date").notNull(),
+  motivo: text("motivo").notNull(), // desayuno | evento | desperdicio | otro
+  descripcion: text("descripcion"),
+  notes: text("notes"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type InternalMovement = typeof internalMovements.$inferSelect;
+
+export const internalMovementItems = pgTable("internal_movement_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  movementId: varchar("movement_id").notNull(),
+  itemId: varchar("item_id").notNull(),
+  itemName: text("item_name").notNull(),
+  unit: text("unit").notNull().default("unidad"),
+  quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
+  costPrice: decimal("cost_price", { precision: 10, scale: 2 }).notNull().default("0"),
+  notes: text("notes"),
+});
+export type InternalMovementItem = typeof internalMovementItems.$inferSelect;

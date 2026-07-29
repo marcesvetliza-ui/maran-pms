@@ -1017,5 +1017,34 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE menu_categories ADD COLUMN IF NOT EXISTS is_beverage BOOLEAN DEFAULT FALSE`)
   );
 
+  await withTimeout("internal_movements.create", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS internal_movements (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        date date NOT NULL,
+        motivo text NOT NULL,
+        descripcion text,
+        notes text,
+        created_by text,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)
+  );
+
+  await withTimeout("internal_movement_items.create", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS internal_movement_items (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        movement_id varchar NOT NULL REFERENCES internal_movements(id) ON DELETE CASCADE,
+        item_id varchar NOT NULL,
+        item_name text NOT NULL,
+        unit text NOT NULL DEFAULT 'unidad',
+        quantity numeric(10,3) NOT NULL,
+        cost_price numeric(10,2) NOT NULL DEFAULT 0,
+        notes text
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
