@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, startOfMonth, endOfMonth } from "date-fns";
+import * as XLSX from "xlsx";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
 } from "recharts";
-import { TrendingUp, TrendingDown, Minus, Download, FileText, Building2, BarChart2, Users, ShoppingCart, Calendar } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Download, FileText, Building2, BarChart2, Users, ShoppingCart, Calendar, UtensilsCrossed } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -63,6 +64,23 @@ function KpiCard({ title, value, delta, unit = "" }: { title: string; value: str
   );
 }
 
+function exportXLSX(filename: string, sheets: { name: string; data: Record<string, unknown>[] }[]) {
+  const wb = XLSX.utils.book_new();
+  for (const sheet of sheets) {
+    const ws = XLSX.utils.json_to_sheet(sheet.data);
+    XLSX.utils.book_append_sheet(wb, ws, sheet.name);
+  }
+  XLSX.writeFile(wb, filename);
+}
+
+function ExportXLSXButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button variant="outline" size="sm" onClick={onClick}>
+      <Download className="w-3.5 h-3.5 mr-1" /> Excel
+    </Button>
+  );
+}
+
 function ExportButtons({ tipo, params }: { tipo: string; params: Record<string, string> }) {
   const qp = new URLSearchParams(params).toString();
   return (
@@ -99,6 +117,9 @@ export default function AdminReportesPage() {
     { id: "costos",            label: "Costos por Departamento", icon: ShoppingCart },
     { id: "proveedores",       label: "Ranking Proveedores",   icon: Users },
     { id: "comparativo",       label: "Comparativo Mensual",   icon: FileText },
+    { id: "ventas-restaurant", label: "Ventas Restaurant",     icon: UtensilsCrossed },
+    { id: "food-cost",         label: "Food Cost Restaurant",  icon: ShoppingCart },
+    { id: "desvios",           label: "Control de Desvíos",    icon: TrendingDown },
   ];
 
   return (
@@ -133,7 +154,10 @@ export default function AdminReportesPage() {
         {activeTab === "ingresos" && <IngresosReport />}
         {activeTab === "costos" && <CostosReport />}
         {activeTab === "proveedores" && <ProveedoresReport />}
-        {activeTab === "comparativo" && <ComparativoReport />}
+        {activeTab === "comparativo"      && <ComparativoReport />}
+        {activeTab === "ventas-restaurant" && <VentasRestaurantReport />}
+        {activeTab === "food-cost"         && <FoodCostReport />}
+        {activeTab === "desvios"           && <DesviosReport />}
       </main>
     </div>
   );
@@ -824,6 +848,861 @@ function ComparativoReport() {
           </table>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ─── Ventas Restaurant ────────────────────────────────────────────────────────
+
+const CHART_COLORS = ["#3b82f6","#f59e0b","#10b981","#ef4444","#8b5cf6","#ec4899","#06b6d4","#84cc16","#f97316","#6366f1"];
+
+function VentasRestaurantReport() {
+  const [periodo, setPeriodo] = useState(currentPeriodo());
+
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["/api/restaurant/reports/sales-stats", periodo],
+    queryFn: () =>
+      fetch(`/api/restaurant/reports/sales-stats?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" })
+        .then(r => r.json()),
+  });
+
+  const r  = data?.resumen        ?? {};
+  const topPlatos:       any[] = data?.topPlatos        ?? [];
+  const porCategoria:    any[] = data?.porCategoria      ?? [];
+  const tendenciaDiaria: any[] = data?.tendenciaDiaria   ?? [];
+  const porMetodoPago:   any[] = data?.porMetodoPago     ?? [];
+  const porHora:         any[] = data?.porHora           ?? [];
+  const porMozo:         any[] = data?.porMozo           ?? [];
+
+  const handleExport = () => exportXLSX(`ventas-restaurant-${periodo.replace("/", "-")}.xlsx`, [
+    { name: "Resumen", data: [{ Periodo: periodo, Ventas: r.totalVentas, Ordenes: r.totalOrdenes, Cubiertos: r.totalCubiertos, TicketPromedio: r.ticketPromedio }] },
+    { name: "Por Plato", data: topPlatos.map((d: any) => ({ Plato: d.nombre, Unidades: d.cantidad, Facturacion: d.revenue, PctTotal: d.pctRevenue })) },
+    { name: "Por Mozo",  data: porMozo.map((d: any) => ({ Mozo: d.mozo, Ordenes: d.ordenes, Cubiertos: d.cubiertos, TicketPromedio: d.ticketPromedio, Facturacion: d.revenue, PctTotal: d.pct })) },
+    { name: "Por Categoria", data: porCategoria.map((d: any) => ({ Categoria: d.nombre, Unidades: d.cantidad, Facturacion: d.revenue, PctTotal: d.pctRevenue })) },
+    { name: "Por Metodo de Pago", data: porMetodoPago.map((d: any) => ({ Metodo: d.metodo, Facturacion: d.revenue, Cantidad: d.cantidad, Pct: d.pct })) },
+    { name: "Tendencia Diaria", data: tendenciaDiaria.map((d: any) => ({ Fecha: d.fecha, Ventas: d.revenue, Ordenes: d.ordenes, Cubiertos: d.cubiertos })) },
+    { name: "Pico Horario", data: porHora.map((d: any) => ({ Hora: d.hora, Ordenes: d.ordenes })) },
+  ]);
+
+  const noData = !isLoading && r.totalOrdenes === 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Estadísticas de Ventas — Restaurant</h2>
+          <p className="text-sm text-muted-foreground">Análisis completo de ventas del período seleccionado</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={periodo} onValueChange={setPeriodo}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PERIODOS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {!isLoading && data && <ExportXLSXButton onClick={handleExport} />}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="p-8 text-muted-foreground text-center">Cargando estadísticas…</div>
+      ) : noData ? (
+        <div className="p-8 text-muted-foreground text-center">Sin ventas cerradas en este período.</div>
+      ) : (
+        <>
+          {/* KPI row */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {[
+              { label: "Ventas totales",        value: `$${fPeso(r.totalVentas)}`,    sub: `${r.totalOrdenes} órdenes` },
+              { label: "Ticket promedio",        value: `$${fPeso(r.ticketPromedio)}`, sub: "por orden" },
+              { label: "Cubiertos totales",      value: fPeso(r.totalCubiertos),       sub: "del período" },
+              { label: "Promedio cubiertos",     value: r.cubiertosPromedio,           sub: "por mesa" },
+              { label: "Días con ventas",        value: tendenciaDiaria.length,        sub: "días activos" },
+            ].map(k => (
+              <Card key={k.label}>
+                <CardContent className="pt-4 pb-3">
+                  <div className="text-xs text-muted-foreground mb-1">{k.label}</div>
+                  <div className="text-xl font-bold">{k.value}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{k.sub}</div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Tendencia diaria */}
+          {tendenciaDiaria.length > 1 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Evolución diaria de ventas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={tendenciaDiaria} margin={{ top: 5, right: 15, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="fechaLabel" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${fPeso(v)}`} width={72} />
+                    <Tooltip formatter={(v: any) => [`$${fPeso(v)}`, "Ventas"]} labelFormatter={l => `Día ${l}`} />
+                    <Line type="monotone" dataKey="revenue" stroke="#3b82f6" dot={false} strokeWidth={2} name="Ventas" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Top platos + Por categoría side-by-side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Top platos */}
+            {topPlatos.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Top platos por facturación</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart
+                      data={topPlatos.slice(0, 10)}
+                      layout="vertical"
+                      margin={{ top: 0, right: 40, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={v => `$${fPeso(v)}`} />
+                      <YAxis type="category" dataKey="nombre" tick={{ fontSize: 10 }} width={110}
+                        tickFormatter={n => n.length > 14 ? n.slice(0, 13) + "…" : n} />
+                      <Tooltip formatter={(v: any) => [`$${fPeso(v)}`, "Facturación"]} />
+                      <Bar dataKey="revenue" name="Facturación" radius={[0, 3, 3, 0]}>
+                        {topPlatos.slice(0, 10).map((_: any, i: number) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Por categoría — pie */}
+            {porCategoria.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Ventas por categoría</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie
+                        data={porCategoria}
+                        dataKey="revenue"
+                        nameKey="nombre"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        label={({ nombre, pctRevenue }) =>
+                          `${nombre.length > 10 ? nombre.slice(0, 9) + "…" : nombre} ${pctRevenue}%`
+                        }
+                        labelLine={false}
+                      >
+                        {porCategoria.map((_: any, i: number) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: any) => [`$${fPeso(v)}`, "Ventas"]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* legend */}
+                  <div className="mt-2 space-y-1">
+                    {porCategoria.map((c: any, i: number) => (
+                      <div key={c.nombre} className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-sm inline-block shrink-0"
+                            style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
+                          {c.nombre}
+                        </span>
+                        <span className="font-mono text-muted-foreground">${fPeso(c.revenue)} ({c.pctRevenue}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Método de pago + Horarios side-by-side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Método de pago */}
+            {porMetodoPago.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Forma de cobro</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left p-3 font-medium">Método</th>
+                        <th className="text-right p-3 font-medium">Órdenes</th>
+                        <th className="text-right p-3 font-medium">Facturación</th>
+                        <th className="text-right p-3 font-medium">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {porMetodoPago.map((m: any, i: number) => (
+                        <tr key={m.metodo} className={`border-b ${i % 2 === 0 ? "" : "bg-muted/20"}`}>
+                          <td className="p-3 font-medium">{m.metodo}</td>
+                          <td className="p-3 text-right">{m.cantidad}</td>
+                          <td className="p-3 text-right">${fPeso(m.revenue)}</td>
+                          <td className="p-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full bg-blue-500" style={{ width: `${m.pct}%` }} />
+                              </div>
+                              <span>{m.pct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Distribución por hora */}
+            {porHora.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Horarios pico (cierres de orden)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={porHora} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="hora" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                      <Tooltip formatter={(v: any) => [v, "Órdenes"]} />
+                      <Bar dataKey="ordenes" fill="#f59e0b" radius={[3, 3, 0, 0]} name="Órdenes" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Tabla completa top platos */}
+          {topPlatos.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Detalle completo por plato</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left p-3 font-medium">#</th>
+                        <th className="text-left p-3 font-medium">Plato</th>
+                        <th className="text-right p-3 font-medium">Und. vendidas</th>
+                        <th className="text-right p-3 font-medium">Facturación</th>
+                        <th className="text-right p-3 font-medium">% sobre total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topPlatos.map((d: any, i: number) => (
+                        <tr key={i} className={`border-b ${i % 2 === 0 ? "" : "bg-muted/20"}`}>
+                          <td className="p-3 text-muted-foreground">{i + 1}</td>
+                          <td className="p-3 font-medium">{d.nombre}</td>
+                          <td className="p-3 text-right">{d.cantidad}</td>
+                          <td className="p-3 text-right">${fPeso(d.revenue)}</td>
+                          <td className="p-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full bg-blue-500" style={{ width: `${d.pctRevenue}%` }} />
+                              </div>
+                              <span>{d.pctRevenue}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Ventas por Mozo */}
+          {porMozo.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Ventas por Mozo</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left p-3 font-medium">#</th>
+                        <th className="text-left p-3 font-medium">Mozo</th>
+                        <th className="text-right p-3 font-medium">Órdenes</th>
+                        <th className="text-right p-3 font-medium">Cubiertos</th>
+                        <th className="text-right p-3 font-medium">Ticket prom.</th>
+                        <th className="text-right p-3 font-medium">Facturación</th>
+                        <th className="text-right p-3 font-medium">% total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {porMozo.map((d: any, i: number) => (
+                        <tr key={i} className={`border-b ${i % 2 === 0 ? "" : "bg-muted/20"}`}>
+                          <td className="p-3 text-muted-foreground">{i + 1}</td>
+                          <td className="p-3 font-medium">{d.mozo}</td>
+                          <td className="p-3 text-right">{d.ordenes}</td>
+                          <td className="p-3 text-right">{d.cubiertos}</td>
+                          <td className="p-3 text-right">${fPeso(d.ticketPromedio)}</td>
+                          <td className="p-3 text-right font-semibold">${fPeso(d.revenue)}</td>
+                          <td className="p-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${d.pct}%` }} />
+                              </div>
+                              <span>{d.pct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Food Cost Restaurant ─────────────────────────────────────────────────────
+
+function FoodCostReport() {
+  const [periodo, setPeriodo] = useState(currentPeriodo());
+  const [filtro, setFiltro]   = useState<"all" | "food" | "beverage">("all");
+
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["/api/restaurant/reports/food-cost", periodo],
+    queryFn: () =>
+      fetch(`/api/restaurant/reports/food-cost?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" })
+        .then(r => r.json()),
+  });
+
+  const resumen = data?.resumen ?? {};
+  const porPlatoAll: any[] = data?.porPlato ?? [];
+  const porPlato = filtro === "food"     ? porPlatoAll.filter((d: any) => !d.isBeverage)
+                 : filtro === "beverage" ? porPlatoAll.filter((d: any) =>  d.isBeverage)
+                 : porPlatoAll;
+
+  const hasBeverage = porPlatoAll.some((d: any) => d.isBeverage);
+
+  const fcColor = (pct: number) =>
+    pct === 0 ? "text-muted-foreground" :
+    pct < 28  ? "text-green-600" :
+    pct < 35  ? "text-yellow-600" : "text-red-600";
+
+  const fcBadge = (pct: number): "default" | "secondary" | "destructive" =>
+    pct < 28  ? "default" : pct < 35  ? "secondary" : "destructive";
+
+  const chartData = porPlato.slice(0, 15).map((d: any) => ({
+    nombre: d.nombre.length > 18 ? d.nombre.slice(0, 16) + "…" : d.nombre,
+    foodCostPct: parseFloat(d.foodCostPct.toFixed(1)),
+  }));
+
+  const handleExport = () => exportXLSX(`food-cost-${periodo.replace("/", "-")}.xlsx`, [
+    { name: "Resumen", data: [{
+        Periodo: periodo,
+        TotalVentas: resumen.totalVentas,
+        VentasComidas: resumen.ventasFood,
+        VentasBebidas: resumen.ventasBeverage,
+        CostoTeorico: resumen.costoTeorico,
+        FoodCostPct: (resumen.foodCostPct ?? 0).toFixed(1) + "%",
+        FoodCostComidas: (resumen.foodOnlyCostPct ?? 0).toFixed(1) + "%",
+        BeverageCostPct: (resumen.beverageCostPct ?? 0).toFixed(1) + "%",
+    }]},
+    { name: "Comidas", data: porPlatoAll.filter((d: any) => !d.isBeverage).map((d: any) => ({
+        Plato: d.nombre, Unidades: d.cantidadVendida, Venta: d.totalVenta,
+        CostoTeorico: d.costoTotal, FoodCostPct: d.foodCostPct.toFixed(1) + "%", TieneReceta: d.tieneReceta ? "Sí" : "No",
+    }))},
+    { name: "Bebidas", data: porPlatoAll.filter((d: any) => d.isBeverage).map((d: any) => ({
+        Bebida: d.nombre, Unidades: d.cantidadVendida, Venta: d.totalVenta,
+        CostoTeorico: d.costoTotal, BeverageCostPct: d.foodCostPct.toFixed(1) + "%", TieneReceta: d.tieneReceta ? "Sí" : "No",
+    }))},
+  ]);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Food Cost & Beverage Cost — Restaurant</h2>
+          <p className="text-sm text-muted-foreground">Costo teórico basado en recetas vs. ventas reales del período</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={periodo} onValueChange={setPeriodo}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PERIODOS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {!isLoading && data && <ExportXLSXButton onClick={handleExport} />}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="p-8 text-muted-foreground text-center">Calculando food cost…</div>
+      ) : (
+        <>
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Card className="lg:col-span-2">
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Ventas del período</div>
+                <div className="text-xl font-bold">${fPeso(resumen.totalVentas)}</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {resumen.totalOrdenes ?? 0} órdenes · {resumen.totalCovers ?? 0} cubiertos
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Food Cost % <span className="text-blue-500">(comidas)</span></div>
+                <div className={`text-2xl font-bold ${fcColor(resumen.foodOnlyCostPct ?? 0)}`}>
+                  {(resumen.foodOnlyCostPct ?? 0).toFixed(1)}%
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">${fPeso(resumen.ventasFood)} en comidas</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Beverage Cost % <span className="text-purple-500">(bebidas)</span></div>
+                <div className={`text-2xl font-bold ${fcColor(resumen.beverageCostPct ?? 0)}`}>
+                  {hasBeverage ? (resumen.beverageCostPct ?? 0).toFixed(1) + "%" : "—"}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {hasBeverage ? `$${fPeso(resumen.ventasBeverage)} en bebidas` : "Sin categorías de bebidas"}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Food Cost % <span className="text-gray-400">(global)</span></div>
+                <div className={`text-2xl font-bold ${fcColor(resumen.foodCostPct ?? 0)}`}>
+                  {(resumen.foodCostPct ?? 0).toFixed(1)}%
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">${fPeso(resumen.costoTeorico)} costo total</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Margen bruto estimado</div>
+                <div className="text-xl font-bold text-green-600">
+                  ${fPeso((resumen.totalVentas ?? 0) - (resumen.costoTeorico ?? 0))}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {(resumen.totalVentas ?? 0) > 0
+                    ? `${(100 - (resumen.foodCostPct ?? 0)).toFixed(1)}% de margen`
+                    : "Sin ventas"}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Nota si no hay categorías de bebidas configuradas */}
+          {!hasBeverage && (
+            <div className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-md p-3">
+              💡 <b>Beverage Cost:</b> Para separar Food Cost de Beverage Cost, marcá las categorías de bebidas en <b>Recetas & Costos → Categorías → editar categoría → activar "Categoría de Bebidas"</b>.
+            </div>
+          )}
+
+          {/* Filtro Comidas / Bebidas */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Mostrar:</span>
+            {(["all", "food", "beverage"] as const).map(f => (
+              <button key={f} onClick={() => setFiltro(f)}
+                className={`text-xs px-3 py-1 rounded-full border transition-colors ${filtro === f ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"}`}>
+                {f === "all" ? "Todos" : f === "food" ? "🍽 Comidas" : "🍷 Bebidas"}
+              </button>
+            ))}
+          </div>
+
+          {/* Gráfico Food Cost % por plato */}
+          {chartData.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">
+                  {filtro === "beverage" ? "Beverage Cost % por bebida" : "Food Cost % por plato"} (top {chartData.length} por venta)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 65 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="nombre" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, "auto"]} />
+                    <Tooltip formatter={(val: any) => [`${val}%`, "Food Cost"]} />
+                    <Bar dataKey="foodCostPct" name="Food Cost %" radius={[3, 3, 0, 0]}>
+                      {chartData.map((entry, index) => (
+                        <Cell
+                          key={index}
+                          fill={entry.foodCostPct < 28 ? "#22c55e" : entry.foodCostPct < 35 ? "#f59e0b" : "#ef4444"}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="flex gap-4 text-xs text-muted-foreground justify-center mt-2">
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500 inline-block" /> &lt;28% Óptimo</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-500 inline-block" /> 28–35% Alerta</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> &gt;35% Crítico</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Tabla detalle */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Detalle por plato</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {porPlato.length === 0 ? (
+                <p className="p-6 text-center text-muted-foreground text-sm">
+                  Sin ventas registradas en este período.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left p-3 font-medium">Plato</th>
+                        <th className="text-right p-3 font-medium">Und.</th>
+                        <th className="text-right p-3 font-medium">Venta total</th>
+                        <th className="text-right p-3 font-medium">Costo teórico</th>
+                        <th className="text-right p-3 font-medium">Food Cost %</th>
+                        <th className="text-center p-3 font-medium">Receta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {porPlato.map((d: any, i: number) => (
+                        <tr key={d.menuItemId} className={`border-b ${i % 2 === 0 ? "" : "bg-muted/20"}`}>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium">{d.nombre}</span>
+                              {d.isBeverage && <span className="text-xs px-1 py-0.5 rounded bg-purple-100 text-purple-700">Beb.</span>}
+                            </div>
+                          </td>
+                          <td className="p-3 text-right">{d.cantidadVendida}</td>
+                          <td className="p-3 text-right">${fPeso(d.totalVenta)}</td>
+                          <td className="p-3 text-right">
+                            {d.tieneReceta
+                              ? `$${fPeso(d.costoTotal)}`
+                              : <span className="text-muted-foreground">—</span>}
+                          </td>
+                          <td className="p-3 text-right">
+                            {d.tieneReceta ? (
+                              <Badge variant={fcBadge(d.foodCostPct)} className="text-xs">
+                                {d.foodCostPct.toFixed(1)}%
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-xs italic">Sin receta</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            {d.tieneReceta
+                              ? <span className="text-green-600">✓</span>
+                              : <span className="text-muted-foreground">—</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 bg-muted/40 font-semibold">
+                        <td className="p-3">TOTAL ({filtro === "food" ? "comidas" : filtro === "beverage" ? "bebidas" : "todos"})</td>
+                        <td className="p-3 text-right">{porPlato.reduce((s: number, d: any) => s + d.cantidadVendida, 0)}</td>
+                        <td className="p-3 text-right">${fPeso(porPlato.reduce((s: number, d: any) => s + d.totalVenta, 0))}</td>
+                        <td className="p-3 text-right">${fPeso(porPlato.reduce((s: number, d: any) => s + d.costoTotal, 0))}</td>
+                        <td className="p-3 text-right">
+                          {(() => {
+                            const tv = porPlato.reduce((s: number, d: any) => s + d.totalVenta, 0);
+                            const tc = porPlato.reduce((s: number, d: any) => s + d.costoTotal, 0);
+                            const pct = tv > 0 ? (tc / tv) * 100 : 0;
+                            return <Badge variant={fcBadge(pct)}>{pct.toFixed(1)}%</Badge>;
+                          })()}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Control de Desvíos ───────────────────────────────────────────────────────
+
+function DesviosReport() {
+  const [periodo, setPeriodo] = useState(currentPeriodo());
+  const [filtro, setFiltro]   = useState<"todos" | "alerta" | "critico">("todos");
+
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["/api/restaurant/reports/desvios", periodo],
+    queryFn: () =>
+      fetch(`/api/restaurant/reports/desvios?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" })
+        .then(r => r.json()),
+  });
+
+  const handleExport = () => {
+    const r2     = data?.resumen ?? {};
+    const todos2: any[] = data?.desvios ?? [];
+    exportXLSX(`desvios-${periodo.replace("/", "-")}.xlsx`, [
+      { name: "Resumen", data: [{
+          Periodo: periodo, Ingredientes: r2.totalIngredientes, ConDesvio: r2.conDesvio,
+          CostoTeorico: r2.costoTeoricoTotal, CostoReal: r2.costoRealTotal, DesvioNeto: r2.desvioTotal,
+      }]},
+      { name: "Desvios", data: todos2.map((d: any) => ({
+          Ingrediente: d.nombre, Estado: d.estado,
+          ConsumoTeorico: d.consumoTeorico, ConsumoReal: d.consumoReal, Diferencia: d.diferencia,
+          CostoTeorico: d.costoTeorico, CostoReal: d.costoReal, DesvioARS: d.desvioARS, DesvioPorc: d.desvioPct + "%",
+      }))},
+    ]);
+  };
+
+  const r      = data?.resumen ?? {};
+  const todos: any[] = data?.desvios ?? [];
+  const rows   = filtro === "todos" ? todos : todos.filter((d: any) => d.estado === filtro);
+
+  const estadoBadge = (e: string): "default" | "secondary" | "destructive" =>
+    e === "ok" ? "default" : e === "alerta" ? "secondary" : "destructive";
+  const estadoColor = (e: string) =>
+    e === "ok" ? "text-green-600" : e === "alerta" ? "text-yellow-600" : "text-red-600";
+
+  const chartData = todos
+    .filter((d: any) => d.desvioARS !== 0)
+    .slice(0, 12)
+    .map((d: any) => ({
+      nombre: d.nombre.length > 16 ? d.nombre.slice(0, 14) + "…" : d.nombre,
+      desvioARS: d.desvioARS,
+      fill: d.desvioARS > 0 ? "#ef4444" : "#22c55e",
+    }));
+
+  const noData = !isLoading && todos.length === 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Control de Desvíos</h2>
+          <p className="text-sm text-muted-foreground">
+            Consumo teórico (recetas × ventas) vs. consumo real registrado en stock
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={periodo} onValueChange={setPeriodo}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PERIODOS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {!isLoading && data && <ExportXLSXButton onClick={handleExport} />}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="p-8 text-muted-foreground text-center">Calculando desvíos…</div>
+      ) : noData ? (
+        <div className="p-8 text-center text-muted-foreground space-y-2">
+          <p>Sin datos para este período.</p>
+          <p className="text-xs">El reporte requiere órdenes cerradas con recetas que tengan ingredientes vinculados al inventario.</p>
+        </div>
+      ) : (
+        <>
+          {/* KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Ingredientes analizados</div>
+                <div className="text-2xl font-bold">{r.totalIngredientes}</div>
+                <div className="text-xs text-muted-foreground mt-1">con receta vinculada</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Con desvío (&gt;5%)</div>
+                <div className={`text-2xl font-bold ${r.conDesvio > 0 ? "text-red-600" : "text-green-600"}`}>
+                  {r.conDesvio}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">ingredientes en alerta</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Costo teórico</div>
+                <div className="text-xl font-bold">${fPeso(r.costoTeoricoTotal)}</div>
+                <div className="text-xs text-muted-foreground mt-1">según recetas</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Costo real (stock)</div>
+                <div className="text-xl font-bold">${fPeso(r.costoRealTotal)}</div>
+                <div className="text-xs text-muted-foreground mt-1">movimientos registrados</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="text-xs text-muted-foreground mb-1">Desvío neto ($)</div>
+                <div className={`text-xl font-bold ${(r.desvioTotal ?? 0) > 0 ? "text-red-600" : (r.desvioTotal ?? 0) < 0 ? "text-blue-600" : "text-green-600"}`}>
+                  {(r.desvioTotal ?? 0) > 0 ? "+" : ""}${fPeso(r.desvioTotal)}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {(r.desvioTotal ?? 0) > 0 ? "↑ más consumido" : (r.desvioTotal ?? 0) < 0 ? "↓ menos deducido" : "✓ sin desvío"}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Gráfico */}
+          {chartData.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">
+                  Desvíos por ingrediente ($ ARS) — rojo = consumo excedente · verde = consumo inferior al teórico
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 65 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="nombre" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${fPeso(v)}`} width={72} />
+                    <Tooltip formatter={(v: any) => [`${Number(v) > 0 ? "+" : ""}$${fPeso(Number(v))}`, "Desvío"]} />
+                    <Bar dataKey="desvioARS" name="Desvío $" radius={[3, 3, 0, 0]}>
+                      {chartData.map((entry: any, i: number) => (
+                        <Cell key={i} fill={entry.fill} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Tabla con filtros */}
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CardTitle className="text-sm">Detalle por ingrediente</CardTitle>
+                <div className="flex gap-1">
+                  {(["todos", "alerta", "critico"] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setFiltro(f)}
+                      className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                        filtro === f
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {f === "todos"   ? `Todos (${todos.length})` :
+                       f === "alerta"  ? `Alerta (${todos.filter((d: any) => d.estado === "alerta").length})` :
+                       `Crítico (${todos.filter((d: any) => d.estado === "critico").length})`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="text-left p-3 font-medium">Ingrediente</th>
+                      <th className="text-right p-3 font-medium">Qty teórica</th>
+                      <th className="text-right p-3 font-medium">Qty real</th>
+                      <th className="text-right p-3 font-medium">Desvío qty</th>
+                      <th className="text-right p-3 font-medium">Desvío %</th>
+                      <th className="text-right p-3 font-medium">Costo teórico</th>
+                      <th className="text-right p-3 font-medium">Costo real</th>
+                      <th className="text-right p-3 font-medium">Desvío $</th>
+                      <th className="text-center p-3 font-medium">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="p-6 text-center text-muted-foreground">
+                          Sin resultados para este filtro.
+                        </td>
+                      </tr>
+                    ) : rows.map((d: any, i: number) => (
+                      <tr key={d.invItemId} className={`border-b ${i % 2 === 0 ? "" : "bg-muted/20"}`}>
+                        <td className="p-3 font-medium">{d.nombre}</td>
+                        <td className="p-3 text-right text-muted-foreground">{d.qtyTeorica} {d.unit}</td>
+                        <td className="p-3 text-right">
+                          {d.tieneReal
+                            ? `${d.qtyReal} ${d.unit}`
+                            : <span className="text-muted-foreground italic">sin reg.</span>}
+                        </td>
+                        <td className={`p-3 text-right font-mono ${d.desvioQty > 0 ? "text-red-600" : d.desvioQty < 0 ? "text-blue-600" : "text-muted-foreground"}`}>
+                          {d.desvioQty > 0 ? "+" : ""}{d.desvioQty} {d.unit}
+                        </td>
+                        <td className={`p-3 text-right font-mono ${estadoColor(d.estado)}`}>
+                          {d.desvioPct > 0 ? "+" : ""}{d.desvioPct}%
+                        </td>
+                        <td className="p-3 text-right">${fPeso(d.costoTeorico)}</td>
+                        <td className="p-3 text-right">
+                          {d.tieneReal ? `$${fPeso(d.costoReal)}` : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className={`p-3 text-right font-mono ${d.desvioARS > 0 ? "text-red-600" : d.desvioARS < 0 ? "text-blue-600" : "text-muted-foreground"}`}>
+                          {d.desvioARS !== 0 ? `${d.desvioARS > 0 ? "+" : ""}$${fPeso(d.desvioARS)}` : "—"}
+                        </td>
+                        <td className="p-3 text-center">
+                          <Badge variant={estadoBadge(d.estado)} className="text-xs">
+                            {d.estado === "ok" ? "✓ OK" : d.estado === "alerta" ? "⚠ Alerta" : "✗ Crítico"}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Leyenda */}
+          <Card className="bg-muted/30">
+            <CardContent className="pt-4 pb-3">
+              <p className="text-xs font-medium mb-2">Cómo leer este reporte</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-muted-foreground">
+                <div>
+                  <span className="text-green-600 font-medium">✓ OK (≤5%)</span> — El consumo real coincide con lo esperado por receta.
+                </div>
+                <div>
+                  <span className="text-yellow-600 font-medium">⚠ Alerta (5–15%)</span> — Desvío moderado; puede ser merma real mayor a la cargada en receta.
+                </div>
+                <div>
+                  <span className="text-red-600 font-medium">✗ Crítico (&gt;15%)</span> — Revisar pérdidas, porciones, o mermas mal calibradas.
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                <span className="text-red-600 font-medium">+ (positivo)</span> = se consumió más de lo teórico (desperdicio / porciones generosas / pérdidas).&nbsp;
+                <span className="text-blue-600 font-medium">− (negativo)</span> = se consumió menos (stock no deducido / porciones menores / receta sobreestimada).
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

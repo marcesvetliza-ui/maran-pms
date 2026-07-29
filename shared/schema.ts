@@ -992,6 +992,7 @@ export const menuCategories = pgTable("menu_categories", {
   description: text("description"),
   displayOrder: integer("display_order").default(0),
   isActive: text("is_active").default("true"),
+  isBeverage: boolean("is_beverage").default(false),
 });
 
 export const insertMenuCategorySchema = createInsertSchema(menuCategories).omit({ id: true });
@@ -1126,11 +1127,16 @@ export const insertRestaurantTimeSlotSchema = createInsertSchema(restaurantTimeS
 export type InsertRestaurantTimeSlot = z.infer<typeof insertRestaurantTimeSlotSchema>;
 export type RestaurantTimeSlot = typeof restaurantTimeSlots.$inferSelect;
 
-// Recipes (ingredients per dish)
+// Recipes (ingredients per dish, or standalone base "elaboraciones")
 export const recipes = pgTable("recipes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  menuItemId: varchar("menu_item_id").notNull(),
+  menuItemId: varchar("menu_item_id"),   // nullable — null when isBase=true
   notes: text("notes"),
+  // Elaboraciones base (sub-recipes / intermediate productions)
+  isBase: boolean("is_base").default(false),   // true = standalone elaboración not tied to a menu item
+  name: text("name"),                          // display name (used when isBase=true)
+  productionUnit: text("production_unit"),     // e.g. "ml", "g", "porciones", "kg"
+  productionYield: decimal("production_yield", { precision: 10, scale: 3 }), // qty produced per batch
 });
 
 export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true });
@@ -1141,12 +1147,16 @@ export type Recipe = typeof recipes.$inferSelect;
 export const recipeIngredients = pgTable("recipe_ingredients", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   recipeId: varchar("recipe_id").notNull(),
-  inventoryItemId: varchar("inventory_item_id"),
+  inventoryItemId: varchar("inventory_item_id"),  // link to raw material in inventory
+  subRecipeId: varchar("sub_recipe_id"),           // OR link to a base elaboración recipe
   ingredientName: text("ingredient_name").notNull(),
   quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
   unit: text("unit").notNull(),
   unitCost: decimal("unit_cost", { precision: 10, scale: 2 }).default("0"),
   warehouseId: varchar("warehouse_id"),
+  // Merma: % de desperdicio en el proceso (ej: 10 = 10%).
+  // La cantidad bruta real = quantity / (1 - merma/100).
+  merma: decimal("merma", { precision: 5, scale: 2 }),
 });
 
 export const insertRecipeIngredientSchema = createInsertSchema(recipeIngredients).omit({ id: true });
@@ -2746,3 +2756,31 @@ export const giftVouchers = pgTable("gift_vouchers", {
 export const insertGiftVoucherSchema = createInsertSchema(giftVouchers).omit({ id: true, issuedAt: true, usedAt: true });
 export type InsertGiftVoucher = z.infer<typeof insertGiftVoucherSchema>;
 export type GiftVoucher = typeof giftVouchers.$inferSelect;
+
+// ==================== TOMA DE INVENTARIO ====================
+export const inventoryCounts = pgTable("inventory_counts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  date: date("date").notNull(),
+  area: text("area"),                          // null = todos los artículos
+  status: text("status").notNull().default("borrador"), // "borrador" | "cerrado"
+  notes: text("notes"),
+  createdBy: text("created_by"),
+  closedAt: timestamp("closed_at"),
+  closedBy: text("closed_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type InventoryCount = typeof inventoryCounts.$inferSelect;
+export type InsertInventoryCount = typeof inventoryCounts.$inferInsert;
+
+export const inventoryCountItems = pgTable("inventory_count_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  countId: varchar("count_id").notNull(),
+  itemId: varchar("item_id").notNull(),
+  itemName: text("item_name").notNull(),
+  unit: text("unit").notNull().default("unidad"),
+  expectedStock: decimal("expected_stock", { precision: 10, scale: 3 }).notNull().default("0"),
+  actualStock: decimal("actual_stock", { precision: 10, scale: 3 }),
+  notes: text("notes"),
+});
+export type InventoryCountItem = typeof inventoryCountItems.$inferSelect;
+export type InsertInventoryCountItem = typeof inventoryCountItems.$inferInsert;

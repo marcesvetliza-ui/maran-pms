@@ -48,3 +48,9 @@ id = "DpdtFpnoWZdGpOOYYKe1A"
 uri = "file://certs/maran_suites_CERT.txt"
 type = "text"
 title = "Certificado ARCA (maran_suites_CERT.pem)"
+
+[[outputs]]
+id = "6VInX0jo16CZE4HdsU8Ap"
+uri = "file://attached_assets/Respuesta_Colobig_ImplementacionGastronomica_Julio2026.pdf"
+type = "pdf"
+title = "Respuesta Colobig — Implementación Gastronómica Julio 2026"

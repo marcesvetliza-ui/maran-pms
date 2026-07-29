@@ -20,3 +20,7 @@
 - [Auth testing quirks](auth-testing-quirks.md) — system_users table + bcryptjs (not bcrypt) hashes; generate test-login hashes via code_execution sandbox, not DB/testing-subagent.
 - [Production migration gap](production-migration-gap.md) — Railway skips Drizzle's baseline migrate(); schema.ts/migrations-folder changes must ALSO be added as idempotent SQL in migrate.ts's incremental block or the table/column won't exist in prod.
 - [Server assets in production](server-assets-production.md) — build.ts deletes dist/ and never copied server/assets/; added copyDir step + assetPath() util that uses __dirname in prod vs process.cwd() in dev.
+- [Recetas de producción intermedias](recipe-subrepes.md) — schema de sub-recetas, deducción recursiva de stock, y UI en recetas-costos.tsx con tabs Platos/Elaboraciones.
+- [Gastronomic Colobig feature status](colobig-features-status.md) — P1/P2/P5/P6/P9 implementation status; toma de inventario tables; porMozo aggregation pattern.
+- [Beverage Cost split](beverage-cost-split.md) — isBeverage boolean column on menu_categories; food-cost endpoint returns foodOnlyCostPct + beverageCostPct; FoodCostReport has filter toggle + 6 KPI cards.
+- [Restaurant reports Excel export](restaurant-reports-excel.md) — xlsx npm package; client-side exportXLSX() helper in admin-reportes.tsx; Export buttons on Ventas/FoodCost/Desvios reports.

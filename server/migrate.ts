@@ -961,5 +961,61 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // merma: % de desperdicio por ingrediente en recetas
+  await withTimeout("recipe_ingredients.merma", T, () =>
+    db.execute(sql`ALTER TABLE recipe_ingredients ADD COLUMN IF NOT EXISTS merma numeric(5,2)`)
+  );
+
+  // Elaboraciones base (sub-recipes / intermediate productions)
+  await withTimeout("recipes.elaboraciones_fields", T, () =>
+    db.execute(sql`
+      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS is_base boolean DEFAULT false;
+      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS name text;
+      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS production_unit text;
+      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS production_yield numeric(10,3);
+      ALTER TABLE recipes ALTER COLUMN menu_item_id DROP NOT NULL;
+    `)
+  );
+
+  await withTimeout("recipe_ingredients.sub_recipe_id", T, () =>
+    db.execute(sql`ALTER TABLE recipe_ingredients ADD COLUMN IF NOT EXISTS sub_recipe_id varchar`)
+  );
+
+  // Toma de Inventario
+  await withTimeout("inventory_counts.create", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS inventory_counts (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        date date NOT NULL,
+        area text,
+        status text NOT NULL DEFAULT 'borrador',
+        notes text,
+        created_by text,
+        closed_at timestamp,
+        closed_by text,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)
+  );
+
+  await withTimeout("inventory_count_items.create", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS inventory_count_items (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        count_id varchar NOT NULL REFERENCES inventory_counts(id) ON DELETE CASCADE,
+        item_id varchar NOT NULL,
+        item_name text NOT NULL,
+        unit text NOT NULL DEFAULT 'unidad',
+        expected_stock numeric(10,3) NOT NULL DEFAULT 0,
+        actual_stock numeric(10,3),
+        notes text
+      )
+    `)
+  );
+
+  await withTimeout("menu_categories.is_beverage", T, () =>
+    db.execute(sql`ALTER TABLE menu_categories ADD COLUMN IF NOT EXISTS is_beverage BOOLEAN DEFAULT FALSE`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import path from "path";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -79,6 +80,13 @@ setupAuth(app);
 
 // Diagnóstico temporal de assets (público, sin auth)
 import { assetPathDiagnostic } from "./utils/assetPath";
+app.get("/descargar-colobig-pdf", (_req, res) => {
+  const filePath = path.join(process.cwd(), "attached_assets", "Respuesta_Colobig_ImplementacionGastronomica_Julio2026.pdf");
+  res.setHeader("Content-Disposition", 'attachment; filename="Respuesta_Colobig_ImplementacionGastronomica_Julio2026.pdf"');
+  res.setHeader("Content-Type", "application/pdf");
+  res.sendFile(filePath, (err) => { if (err) res.status(404).json({ error: "Archivo no encontrado" }); });
+});
+
 app.get("/api/debug/assets", (_req, res) => {
   res.json(assetPathDiagnostic());
 });

@@ -3,8 +3,8 @@ import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
 import { db } from "../db";
-import { restaurantOrders, orderItems, menuItems } from "@shared/schema";
-import { eq, and, not, inArray } from "drizzle-orm";
+import { restaurantOrders, orderItems, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
+import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -288,7 +288,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId } = req.body;
       const effectiveReservationId = reservationId || roomReservationId;
       const primarySplit = Array.isArray(paymentSplits) && paymentSplits.length > 0 ? paymentSplits[0] : null;
       const effectivePrimaryMethod = primarySplit ? primarySplit.method : (paymentMethod || "cash");
@@ -364,7 +364,8 @@ export function registerRestaurantRoutes(app: Express) {
             await storage.registerCashMovement(
               "restaurant", "restaurant_order", req.params.id,
               `${cashLabel} (${split.method})`,
-              split.method, String(splitAmt.toFixed(2)), "income",
+              split.method, String(splitAmt.toFixed(2)),
+              split.method === "consumo_interno" ? "expense" : "income",
               undefined, receiptType
             );
           } catch (e) {
@@ -376,7 +377,8 @@ export function registerRestaurantRoutes(app: Express) {
           await storage.registerCashMovement(
             "restaurant", "restaurant_order", req.params.id, cashLabel,
             effectivePaymentMethod,
-            String(finalTotal.toFixed(2)), "income",
+            String(finalTotal.toFixed(2)),
+            effectivePaymentMethod === "consumo_interno" ? "expense" : "income",
             undefined, receiptType
           );
         } catch (e) {
@@ -384,8 +386,8 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
-      // Motor financiero: escribir al folio del pedido
-      {
+      // Motor financiero: escribir al folio del pedido (no aplica a consumos internos)
+      if (effectivePaymentMethod !== "consumo_interno") {
         const ordLabel = `Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
         if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
           // Multi-split: one charge + one payment per split
@@ -567,6 +569,19 @@ export function registerRestaurantRoutes(app: Express) {
           invoiceId = invoice.id;
         } catch (e) {
           console.error("[Billing] Error emitiendo factura restaurant:", e);
+        }
+      }
+
+      // Marcar voucher de regalo como usado (si aplica)
+      if (voucherId) {
+        try {
+          await storage.markGiftVoucherUsed(
+            voucherId,
+            (req as any).user?.username || "sistema",
+            `Aplicado al pedido ${order.orderNumber}${voucherCode ? ` — código ${voucherCode}` : ""}`
+          );
+        } catch (e) {
+          console.error("[GiftVoucher] Error al marcar voucher como usado:", e);
         }
       }
 
@@ -1464,6 +1479,503 @@ export function registerRestaurantRoutes(app: Express) {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Error applying advances" });
+    }
+  });
+
+  // ── Sales Statistics Report ───────────────────────────────────────────────────
+  app.get("/api/restaurant/reports/sales-stats", requireAuth, async (req, res) => {
+    try {
+      const { periodo } = req.query as { periodo?: string };
+      let from: Date, to: Date;
+      if (periodo) {
+        const [mm, yyyy] = periodo.split("/");
+        from = new Date(parseInt(yyyy), parseInt(mm) - 1, 1);
+        to   = new Date(parseInt(yyyy), parseInt(mm), 0, 23, 59, 59);
+      } else {
+        const now = new Date();
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+        to   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      }
+
+      // Closed orders in period
+      const orders = await db.select().from(restaurantOrders).where(and(
+        eq(restaurantOrders.status, "closed"),
+        gte(restaurantOrders.closedAt, from),
+        lte(restaurantOrders.closedAt, to),
+      ));
+
+      const empty = {
+        periodo, resumen: { totalOrdenes: 0, totalVentas: 0, totalCubiertos: 0, ticketPromedio: 0, cubiertosPromedio: 0 },
+        topPlatos: [], porCategoria: [], tendenciaDiaria: [], porMetodoPago: [], porHora: [],
+      };
+      if (orders.length === 0) return res.json(empty);
+
+      const orderIds = orders.map(o => o.id);
+
+      // Items + menu data
+      const items = await db.select({
+        orderId:    orderItems.orderId,
+        menuItemId: orderItems.menuItemId,
+        quantity:   orderItems.quantity,
+        subtotal:   orderItems.subtotal,
+        status:     orderItems.status,
+      }).from(orderItems).where(and(
+        inArray(orderItems.orderId, orderIds),
+        not(inArray(orderItems.status, ["cancelled", "voided"])),
+      ));
+
+      const allMenuItems = await db.select({
+        id: menuItems.id, name: menuItems.name, categoryId: menuItems.categoryId,
+      }).from(menuItems);
+
+      const allCategories = await db.select({
+        id: menuCategories.id, name: menuCategories.name,
+      }).from(menuCategories);
+
+      const menuMap   = new Map(allMenuItems.map(m => [m.id, m]));
+      const catMap    = new Map(allCategories.map(c => [c.id, c.name]));
+
+      // ── aggregations ──────────────────────────────────────────────────────────
+
+      // by dish
+      const dishMap = new Map<string, { nombre: string; cantidad: number; revenue: number }>();
+      // by category
+      const catAgg  = new Map<string, { nombre: string; cantidad: number; revenue: number }>();
+      // daily trend
+      const dayAgg  = new Map<string, { revenue: number; ordenes: number; cubiertos: number }>();
+      // by payment method
+      const pmAgg   = new Map<string, { revenue: number; cantidad: number }>();
+      // by hour
+      const hrAgg   = new Map<number, number>();
+
+      // by waiter
+      const waiterAgg = new Map<string, { revenue: number; ordenes: number; cubiertos: number }>();
+
+      let totalVentas = 0;
+      let totalCubiertos = 0;
+
+      for (const o of orders) {
+        const orderTotal = parseFloat(String(o.total ?? 0));
+        totalVentas    += orderTotal;
+        totalCubiertos += o.covers ?? 0;
+
+        // daily
+        const day = o.closedAt ? o.closedAt.toISOString().slice(0, 10) : "sin-fecha";
+        if (!dayAgg.has(day)) dayAgg.set(day, { revenue: 0, ordenes: 0, cubiertos: 0 });
+        const da = dayAgg.get(day)!;
+        da.revenue  += orderTotal;
+        da.ordenes  += 1;
+        da.cubiertos += o.covers ?? 0;
+
+        // hour
+        if (o.closedAt) {
+          const hr = o.closedAt.getHours();
+          hrAgg.set(hr, (hrAgg.get(hr) ?? 0) + 1);
+        }
+
+        // payment method
+        const pm = o.paymentMethod ?? "no_especificado";
+        if (!pmAgg.has(pm)) pmAgg.set(pm, { revenue: 0, cantidad: 0 });
+        pmAgg.get(pm)!.revenue  += orderTotal;
+        pmAgg.get(pm)!.cantidad += 1;
+
+        // waiter
+        const waiter = o.waiterName?.trim() || "Sin asignar";
+        if (!waiterAgg.has(waiter)) waiterAgg.set(waiter, { revenue: 0, ordenes: 0, cubiertos: 0 });
+        const wa = waiterAgg.get(waiter)!;
+        wa.revenue  += orderTotal;
+        wa.ordenes  += 1;
+        wa.cubiertos += o.covers ?? 0;
+      }
+
+      // dish & category from items
+      for (const item of items) {
+        const mid     = item.menuItemId ?? "";
+        const mi      = menuMap.get(mid);
+        const nombre  = mi?.name ?? "Desconocido";
+        const catId   = mi?.categoryId ?? "";
+        const catName = catMap.get(catId) ?? "Sin categoría";
+        const qty     = parseFloat(String(item.quantity));
+        const sub     = parseFloat(String(item.subtotal ?? 0));
+
+        if (!dishMap.has(mid)) dishMap.set(mid, { nombre, cantidad: 0, revenue: 0 });
+        dishMap.get(mid)!.cantidad += qty;
+        dishMap.get(mid)!.revenue  += sub;
+
+        if (!catAgg.has(catId)) catAgg.set(catId, { nombre: catName, cantidad: 0, revenue: 0 });
+        catAgg.get(catId)!.cantidad += qty;
+        catAgg.get(catId)!.revenue  += sub;
+      }
+
+      const totalVentasItems = Array.from(dishMap.values()).reduce((s, d) => s + d.revenue, 0) || 1;
+
+      const topPlatos = Array.from(dishMap.values())
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 15)
+        .map(d => ({ ...d, revenue: Math.round(d.revenue), pctRevenue: parseFloat((d.revenue / totalVentasItems * 100).toFixed(1)) }));
+
+      const porCategoria = Array.from(catAgg.values())
+        .sort((a, b) => b.revenue - a.revenue)
+        .map(d => ({ ...d, revenue: Math.round(d.revenue), pctRevenue: parseFloat((d.revenue / totalVentasItems * 100).toFixed(1)) }));
+
+      const tendenciaDiaria = Array.from(dayAgg.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([fecha, d]) => ({
+          fecha,
+          fechaLabel: new Date(fecha + "T12:00:00Z").toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }),
+          revenue: Math.round(d.revenue),
+          ordenes: d.ordenes,
+          cubiertos: d.cubiertos,
+        }));
+
+      const PM_LABELS: Record<string, string> = {
+        cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia",
+        cuenta_corriente: "Cta. Corriente", voucher: "Voucher",
+        cuenta_habitacion: "Hab.", no_especificado: "No esp.",
+      };
+      const porMetodoPago = Array.from(pmAgg.entries())
+        .sort(([, a], [, b]) => b.revenue - a.revenue)
+        .map(([metodo, d]) => ({
+          metodo: PM_LABELS[metodo] ?? metodo,
+          revenue: Math.round(d.revenue),
+          cantidad: d.cantidad,
+          pct: parseFloat((d.revenue / totalVentas * 100).toFixed(1)),
+        }));
+
+      const porHora = Array.from({ length: 24 }, (_, h) => ({
+        hora: `${String(h).padStart(2, "0")}:00`,
+        ordenes: hrAgg.get(h) ?? 0,
+      })).filter(h => h.ordenes > 0);
+
+      const porMozo = Array.from(waiterAgg.entries())
+        .sort(([, a], [, b]) => b.revenue - a.revenue)
+        .map(([mozo, d]) => ({
+          mozo,
+          revenue:         Math.round(d.revenue),
+          ordenes:         d.ordenes,
+          cubiertos:       d.cubiertos,
+          ticketPromedio:  d.ordenes > 0 ? Math.round(d.revenue / d.ordenes) : 0,
+          pct:             parseFloat((d.revenue / totalVentas * 100).toFixed(1)),
+        }));
+
+      res.json({
+        periodo,
+        resumen: {
+          totalOrdenes: orders.length,
+          totalVentas:  Math.round(totalVentas),
+          totalCubiertos,
+          ticketPromedio: orders.length > 0 ? Math.round(totalVentas / orders.length) : 0,
+          cubiertosPromedio: orders.length > 0 ? parseFloat((totalCubiertos / orders.length).toFixed(1)) : 0,
+        },
+        topPlatos,
+        porCategoria,
+        tendenciaDiaria,
+        porMetodoPago,
+        porHora,
+        porMozo,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Error generando estadísticas de ventas", detail: error?.message });
+    }
+  });
+
+  // ── Control de Desvíos ───────────────────────────────────────────────────────
+  app.get("/api/restaurant/reports/desvios", requireAuth, async (req, res) => {
+    try {
+      const { periodo } = req.query as { periodo?: string };
+      let from: Date, to: Date;
+      if (periodo) {
+        const [mm, yyyy] = periodo.split("/");
+        from = new Date(parseInt(yyyy), parseInt(mm) - 1, 1);
+        to   = new Date(parseInt(yyyy), parseInt(mm), 0, 23, 59, 59);
+      } else {
+        const now = new Date();
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+        to   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      }
+
+      const empty = { periodo, resumen: { totalIngredientes: 0, conDesvio: 0, costoTeoricoTotal: 0, costoRealTotal: 0, desvioTotal: 0 }, desvios: [] };
+
+      // ── 1. Órdenes cerradas en el período ────────────────────────────────────
+      const orders = await db.select({
+        id: restaurantOrders.id,
+      }).from(restaurantOrders).where(and(
+        eq(restaurantOrders.status, "closed"),
+        gte(restaurantOrders.closedAt, from),
+        lte(restaurantOrders.closedAt, to),
+      ));
+      if (orders.length === 0) return res.json(empty);
+      const orderIds = orders.map(o => o.id);
+
+      // ── 2. Items vendidos ────────────────────────────────────────────────────
+      const items = await db.select({
+        orderId:    orderItems.orderId,
+        menuItemId: orderItems.menuItemId,
+        quantity:   orderItems.quantity,
+        status:     orderItems.status,
+      }).from(orderItems).where(and(
+        inArray(orderItems.orderId, orderIds),
+        not(inArray(orderItems.status, ["cancelled", "voided"])),
+      ));
+
+      // ── 3. Recetas e ingredientes ────────────────────────────────────────────
+      const allRecipes     = await db.select({ id: recipes.id, menuItemId: recipes.menuItemId }).from(recipes);
+      const allIngredients = await db.select().from(recipeIngredients);
+      const allInvItems    = await db.select({ id: inventoryItems.id, name: inventoryItems.name, unit: inventoryItems.unit }).from(inventoryItems);
+
+      const recipeByMenuId = new Map(allRecipes.map(r => [r.menuItemId, r.id]));
+      const ingByRecipe    = new Map<string, typeof allIngredients>();
+      for (const ing of allIngredients) {
+        if (!ingByRecipe.has(ing.recipeId)) ingByRecipe.set(ing.recipeId, []);
+        ingByRecipe.get(ing.recipeId)!.push(ing);
+      }
+      const invMap = new Map(allInvItems.map(i => [i.id, i]));
+
+      // ── 4. Consumo teórico por inventoryItemId ───────────────────────────────
+      // Map: inventoryItemId → { nombre, unit, qtyTeorica, costoTeorico }
+      const teoricoMap = new Map<string, { nombre: string; unit: string; qtyTeorica: number; costoTeorico: number }>();
+
+      for (const item of items) {
+        const recipeId = recipeByMenuId.get(item.menuItemId ?? "");
+        if (!recipeId) continue;
+        const ings = ingByRecipe.get(recipeId) ?? [];
+        const soldQty = parseFloat(String(item.quantity));
+
+        for (const ing of ings) {
+          if (!ing.inventoryItemId) continue; // ingrediente sin vínculo a inventario
+          const invItem  = invMap.get(ing.inventoryItemId);
+          const nombre   = invItem?.name ?? ing.ingredientName;
+          const unit     = invItem?.unit ?? ing.unit;
+          const netQty   = parseFloat(String(ing.quantity));
+          const merma    = parseFloat(String(ing.merma ?? 0));
+          const grossQty = merma > 0 ? netQty / (1 - merma / 100) : netQty;
+          const costUnit = parseFloat(String(ing.unitCost ?? 0));
+
+          const key = ing.inventoryItemId;
+          if (!teoricoMap.has(key)) teoricoMap.set(key, { nombre, unit, qtyTeorica: 0, costoTeorico: 0 });
+          const t = teoricoMap.get(key)!;
+          t.qtyTeorica  += grossQty * soldQty;
+          t.costoTeorico += grossQty * soldQty * costUnit;
+        }
+      }
+
+      if (teoricoMap.size === 0) return res.json(empty);
+
+      // ── 5. Consumo real (stock_movements) en el período ──────────────────────
+      const realMovements = await db.select({
+        itemId:   stockMovements.itemId,
+        quantity: stockMovements.quantity,
+      }).from(stockMovements).where(and(
+        eq(stockMovements.movementType, "consumo"),
+        eq(stockMovements.sourceType,   "restaurant_order"),
+        gte(stockMovements.createdAt, from),
+        lte(stockMovements.createdAt, to),
+      ));
+
+      const realMap = new Map<string, number>();
+      for (const mv of realMovements) {
+        realMap.set(mv.itemId, (realMap.get(mv.itemId) ?? 0) + parseFloat(String(mv.quantity)));
+      }
+
+      // ── 6. Calcular desvíos ──────────────────────────────────────────────────
+      const desvios = Array.from(teoricoMap.entries()).map(([invItemId, t]) => {
+        const qtyReal    = realMap.get(invItemId) ?? 0;
+        const desvioQty  = qtyReal - t.qtyTeorica;
+        const desvioPct  = t.qtyTeorica > 0 ? (desvioQty / t.qtyTeorica) * 100 : 0;
+        const costUnit   = t.qtyTeorica > 0 ? t.costoTeorico / t.qtyTeorica : 0;
+        const costoReal  = qtyReal * costUnit;
+        const desvioARS  = costoReal - t.costoTeorico;
+
+        const estado =
+          Math.abs(desvioPct) <= 5  ? "ok" :
+          Math.abs(desvioPct) <= 15 ? "alerta" : "critico";
+
+        return {
+          invItemId,
+          nombre:       t.nombre,
+          unit:         t.unit,
+          qtyTeorica:   parseFloat(t.qtyTeorica.toFixed(3)),
+          qtyReal:      parseFloat(qtyReal.toFixed(3)),
+          desvioQty:    parseFloat(desvioQty.toFixed(3)),
+          desvioPct:    parseFloat(desvioPct.toFixed(1)),
+          costoTeorico: Math.round(t.costoTeorico),
+          costoReal:    Math.round(costoReal),
+          desvioARS:    Math.round(desvioARS),
+          estado,
+          tieneReal:    qtyReal > 0,
+        };
+      }).sort((a, b) => Math.abs(b.desvioARS) - Math.abs(a.desvioARS));
+
+      const costoTeoricoTotal = desvios.reduce((s, d) => s + d.costoTeorico, 0);
+      const costoRealTotal    = desvios.reduce((s, d) => s + d.costoReal,    0);
+      const conDesvio         = desvios.filter(d => d.estado !== "ok").length;
+
+      res.json({
+        periodo,
+        resumen: {
+          totalIngredientes: desvios.length,
+          conDesvio,
+          costoTeoricoTotal,
+          costoRealTotal,
+          desvioTotal: costoRealTotal - costoTeoricoTotal,
+        },
+        desvios,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Error generando control de desvíos", detail: error?.message });
+    }
+  });
+
+  // ── Food Cost Report ─────────────────────────────────────────────────────────
+  app.get("/api/restaurant/reports/food-cost", requireAuth, async (req, res) => {
+    try {
+      const { periodo } = req.query as { periodo?: string };
+      let from: Date, to: Date;
+      if (periodo) {
+        const [mm, yyyy] = periodo.split("/");
+        from = new Date(parseInt(yyyy), parseInt(mm) - 1, 1);
+        to   = new Date(parseInt(yyyy), parseInt(mm), 0, 23, 59, 59);
+      } else {
+        const now = new Date();
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+        to   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      }
+
+      // 1. Órdenes cerradas en el período
+      const orders = await db.select({
+        id: restaurantOrders.id,
+        total: restaurantOrders.total,
+        covers: restaurantOrders.covers,
+        closedAt: restaurantOrders.closedAt,
+      }).from(restaurantOrders).where(and(
+        eq(restaurantOrders.status, "closed"),
+        gte(restaurantOrders.closedAt, from),
+        lte(restaurantOrders.closedAt, to),
+      ));
+
+      if (orders.length === 0) {
+        return res.json({ periodo, resumen: { totalVentas: 0, costoTeorico: 0, foodCostPct: 0, totalCovers: 0, totalItems: 0 }, porPlato: [] });
+      }
+
+      const orderIds = orders.map(o => o.id);
+
+      // 2. Items de esas órdenes
+      const items = await db.select({
+        orderId: orderItems.orderId,
+        menuItemId: orderItems.menuItemId,
+        quantity: orderItems.quantity,
+        unitPrice: orderItems.unitPrice,
+        subtotal: orderItems.subtotal,
+        status: orderItems.status,
+      }).from(orderItems).where(and(
+        inArray(orderItems.orderId, orderIds),
+        not(inArray(orderItems.status, ["cancelled", "voided"])),
+      ));
+
+      // 3. Todos los menú items (con categoryId)
+      const allMenuItems = await db.select({
+        id: menuItems.id, name: menuItems.name, categoryId: menuItems.categoryId,
+      }).from(menuItems);
+      const menuMap = new Map(allMenuItems.map(m => [m.id, m]));
+
+      // 3b. Categorías → isBeverage
+      const allCats = await db.select({ id: menuCategories.id, isBeverage: menuCategories.isBeverage }).from(menuCategories);
+      const catBevMap = new Map(allCats.map(c => [c.id, c.isBeverage ?? false]));
+
+      // 4. Todas las recetas con ingredientes
+      const allRecipes = await db.select({ id: recipes.id, menuItemId: recipes.menuItemId }).from(recipes);
+      const recipeMap = new Map(allRecipes.map(r => [r.menuItemId, r.id]));
+
+      const allIngredients = await db.select({
+        recipeId: recipeIngredients.recipeId,
+        quantity: recipeIngredients.quantity,
+        unitCost: recipeIngredients.unitCost,
+        merma: recipeIngredients.merma,
+      }).from(recipeIngredients);
+
+      // ingredientsByRecipe: recipeId → ingredientes
+      const ingByRecipe = new Map<string, typeof allIngredients>();
+      for (const ing of allIngredients) {
+        if (!ingByRecipe.has(ing.recipeId)) ingByRecipe.set(ing.recipeId, []);
+        ingByRecipe.get(ing.recipeId)!.push(ing);
+      }
+
+      // Costo unitario de una receta (con merma)
+      const recipeCostPerUnit = (recipeId: string): number => {
+        const ings = ingByRecipe.get(recipeId) ?? [];
+        return ings.reduce((sum, ing) => {
+          const qty  = parseFloat(String(ing.quantity));
+          const cost = parseFloat(String(ing.unitCost ?? 0));
+          const merma = parseFloat(String(ing.merma ?? 0));
+          const gross = merma > 0 ? qty / (1 - merma / 100) : qty;
+          return sum + gross * cost;
+        }, 0);
+      };
+
+      // 5. Agregar por plato
+      const byDish = new Map<string, { nombre: string; cantidadVendida: number; totalVenta: number; costoTotal: number; tieneReceta: boolean; isBeverage: boolean }>();
+
+      for (const item of items) {
+        const mid      = item.menuItemId ?? "";
+        const mi       = menuMap.get(mid);
+        const nombre   = mi?.name ?? "Desconocido";
+        const catId    = mi?.categoryId ?? "";
+        const isBev    = catBevMap.get(catId) ?? false;
+        const qty      = parseFloat(String(item.quantity));
+        const subtotal = parseFloat(String(item.subtotal ?? 0));
+        const recipeId = recipeMap.get(mid);
+        const costUnit = recipeId ? recipeCostPerUnit(recipeId) : 0;
+
+        if (!byDish.has(mid)) byDish.set(mid, { nombre, cantidadVendida: 0, totalVenta: 0, costoTotal: 0, tieneReceta: !!recipeId, isBeverage: isBev });
+        const d = byDish.get(mid)!;
+        d.cantidadVendida += qty;
+        d.totalVenta      += subtotal;
+        d.costoTotal      += costUnit * qty;
+      }
+
+      const porPlato = Array.from(byDish.entries()).map(([menuItemId, d]) => ({
+        menuItemId,
+        nombre:          d.nombre,
+        isBeverage:      d.isBeverage,
+        cantidadVendida: d.cantidadVendida,
+        totalVenta:      Math.round(d.totalVenta),
+        costoTotal:      Math.round(d.costoTotal),
+        foodCostPct:     d.totalVenta > 0 ? (d.costoTotal / d.totalVenta) * 100 : 0,
+        tieneReceta:     d.tieneReceta,
+      })).sort((a, b) => b.totalVenta - a.totalVenta);
+
+      const food    = porPlato.filter(d => !d.isBeverage);
+      const bev     = porPlato.filter(d =>  d.isBeverage);
+
+      const totalVentas       = porPlato.reduce((s, d) => s + d.totalVenta, 0);
+      const costoTeorico      = porPlato.reduce((s, d) => s + d.costoTotal, 0);
+      const ventasFood        = food.reduce((s, d) => s + d.totalVenta, 0);
+      const costoFood         = food.reduce((s, d) => s + d.costoTotal, 0);
+      const ventasBeverage    = bev.reduce((s, d) => s + d.totalVenta, 0);
+      const costoBeverage     = bev.reduce((s, d) => s + d.costoTotal, 0);
+      const totalCovers       = orders.reduce((s, o) => s + (o.covers ?? 0), 0);
+      const totalItems        = items.reduce((s, i) => s + parseFloat(String(i.quantity)), 0);
+
+      res.json({
+        periodo,
+        desde: from.toISOString().split("T")[0],
+        hasta: to.toISOString().split("T")[0],
+        resumen: {
+          totalVentas,
+          costoTeorico,
+          foodCostPct:     totalVentas  > 0 ? (costoTeorico   / totalVentas)   * 100 : 0,
+          ventasFood,      costoFood,
+          foodOnlyCostPct: ventasFood   > 0 ? (costoFood      / ventasFood)    * 100 : 0,
+          ventasBeverage,  costoBeverage,
+          beverageCostPct: ventasBeverage > 0 ? (costoBeverage / ventasBeverage) * 100 : 0,
+          totalCovers,
+          totalItems: Math.round(totalItems),
+          totalOrdenes: orders.length,
+        },
+        porPlato,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Error generando reporte food cost", detail: error?.message });
     }
   });
 

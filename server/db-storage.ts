@@ -120,6 +120,8 @@ import {
   type ReservationCompanion, type InsertReservationCompanion,
   giftVouchers,
   type GiftVoucher, type InsertGiftVoucher,
+  inventoryCounts,
+  inventoryCountItems,
 } from "@shared/schema";
 
 export class DatabaseStorage implements IStorage {
@@ -2394,7 +2396,7 @@ export class DatabaseStorage implements IStorage {
 
     return allRecipes.map(recipe => ({
       ...recipe,
-      menuItem: menuItemsMap.get(recipe.menuItemId),
+      menuItem: recipe.menuItemId ? menuItemsMap.get(recipe.menuItemId) : undefined,
       ingredients: allIngredients.filter(i => i.recipeId === recipe.id),
     }));
   }
@@ -2403,15 +2405,21 @@ export class DatabaseStorage implements IStorage {
     const [recipe] = await db.select().from(recipes).where(eq(recipes.id, id));
     if (!recipe) return undefined;
     const ingredients = await db.select().from(recipeIngredients).where(eq(recipeIngredients.recipeId, id));
-    const menuItem = (await db.select().from(menuItems).where(eq(menuItems.id, recipe.menuItemId)))[0];
+    const menuItem = recipe.menuItemId
+      ? (await db.select().from(menuItems).where(eq(menuItems.id, recipe.menuItemId)))[0]
+      : undefined;
     return { ...recipe, menuItem, ingredients };
   }
 
   async getRecipeByMenuItem(menuItemId: string): Promise<RecipeWithIngredients | undefined> {
-    const [recipe] = await db.select().from(recipes).where(eq(recipes.menuItemId, menuItemId));
+    const [recipe] = await db.select().from(recipes).where(
+      and(eq(recipes.menuItemId, menuItemId), eq(recipes.isBase as any, false))
+    );
     if (!recipe) return undefined;
     const ingredients = await db.select().from(recipeIngredients).where(eq(recipeIngredients.recipeId, recipe.id));
-    const menuItem = (await db.select().from(menuItems).where(eq(menuItems.id, recipe.menuItemId)))[0];
+    const menuItem = recipe.menuItemId
+      ? (await db.select().from(menuItems).where(eq(menuItems.id, recipe.menuItemId)))[0]
+      : undefined;
     return { ...recipe, menuItem, ingredients };
   }
 
@@ -2603,14 +2611,42 @@ export class DatabaseStorage implements IStorage {
     const warnings: Array<{ itemName: string; required: number; available: number }> = [];
     const skipped: Array<{ ingredientName: string; reason: string }> = [];
 
-    for (const orderItem of orderItems) {
-      const recipe = await this.getRecipeByMenuItem(orderItem.menuItemId);
-      if (!recipe || recipe.ingredients.length === 0) {
-        skipped.push({ ingredientName: orderItem.menuItemId, reason: "Sin receta configurada" });
-        continue;
-      }
+    // Recursive helper: deduct raw materials for a list of ingredients at a given multiplier.
+    // Supports sub-recipes (elaboraciones): when an ingredient has subRecipeId, its ingredients
+    // are expanded recursively in proportion to quantity/productionYield.
+    const deductIngredients = async (
+      ingredients: RecipeIngredient[],
+      multiplier: number,
+      depth: number = 0
+    ): Promise<void> => {
+      if (depth > 6) return; // safety guard against infinite recursion
 
-      for (const ingredient of recipe.ingredients) {
+      for (const ingredient of ingredients) {
+        const subRecipeId = (ingredient as any).subRecipeId as string | null;
+
+        if (subRecipeId) {
+          // ── Sub-recipe / elaboración ─────────────────────────────────────
+          const subRecipe = await this.getRecipe(subRecipeId);
+          if (!subRecipe) {
+            skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sub-receta no encontrada" });
+            continue;
+          }
+          const subYield = parseFloat(String((subRecipe as any).productionYield || "0"));
+          if (subYield <= 0) {
+            skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sub-receta sin rendimiento (productionYield) definido" });
+            continue;
+          }
+          const merma = ingredient.merma ? parseFloat(String(ingredient.merma)) : 0;
+          const grossQty = merma > 0
+            ? parseFloat(String(ingredient.quantity)) / (1 - merma / 100)
+            : parseFloat(String(ingredient.quantity));
+          // How much of the sub-recipe batch is needed for this usage
+          const ratio = (grossQty / subYield) * multiplier;
+          await deductIngredients(subRecipe.ingredients, ratio, depth + 1);
+          continue;
+        }
+
+        // ── Raw material from inventory ───────────────────────────────────
         if (!ingredient.inventoryItemId) {
           skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sin vínculo con inventario" });
           continue;
@@ -2622,7 +2658,12 @@ export class DatabaseStorage implements IStorage {
           continue;
         }
 
-        const totalToDeduct = parseFloat(String(ingredient.quantity)) * orderItem.quantity;
+        // Si hay merma, la cantidad bruta real = neta / (1 - merma/100)
+        const merma = ingredient.merma ? parseFloat(String(ingredient.merma)) : 0;
+        const grossQty = merma > 0
+          ? parseFloat(String(ingredient.quantity)) / (1 - merma / 100)
+          : parseFloat(String(ingredient.quantity));
+        const totalToDeduct = grossQty * multiplier;
         const currentStock = parseFloat(String(invItem.currentStock ?? 0));
 
         if (currentStock < totalToDeduct) {
@@ -2653,6 +2694,15 @@ export class DatabaseStorage implements IStorage {
 
         deducted.push({ itemName: invItem.name, quantity: actualDeduct, unit: invItem.unit });
       }
+    };
+
+    for (const orderItem of orderItems) {
+      const recipe = await this.getRecipeByMenuItem(orderItem.menuItemId);
+      if (!recipe || recipe.ingredients.length === 0) {
+        skipped.push({ ingredientName: orderItem.menuItemId, reason: "Sin receta configurada" });
+        continue;
+      }
+      await deductIngredients(recipe.ingredients, orderItem.quantity);
     }
 
     return { deducted, warnings, skipped };
@@ -5022,6 +5072,115 @@ export class DatabaseStorage implements IStorage {
     );
     const count = parseInt((result.rows[0] as any).count ?? "0", 10) + 1;
     return `VCHR-${year}-${String(count).padStart(4, "0")}`;
+  }
+
+  // ── Toma de Inventario ────────────────────────────────────────────────────────
+
+  async getInventoryCounts(): Promise<any[]> {
+    const rows = await db.execute(sql`
+      SELECT
+        ic.*,
+        COUNT(ici.id)::int                                                                   AS total_items,
+        COUNT(CASE WHEN ici.actual_stock IS NOT NULL THEN 1 END)::int                        AS counted_items,
+        COUNT(CASE WHEN ici.actual_stock IS NOT NULL
+                    AND ABS(ici.actual_stock::numeric - ici.expected_stock::numeric) > 0.001
+                   THEN 1 END)::int                                                          AS items_with_diff
+      FROM inventory_counts ic
+      LEFT JOIN inventory_count_items ici ON ic.id = ici.count_id
+      GROUP BY ic.id
+      ORDER BY ic.created_at DESC
+    `);
+    return rows.rows;
+  }
+
+  async createInventoryCount(data: { date: string; area?: string; notes?: string; createdBy?: string }): Promise<any> {
+    const countResult = await db.execute(sql`
+      INSERT INTO inventory_counts (date, area, notes, created_by)
+      VALUES (${data.date}, ${data.area || null}, ${data.notes || null}, ${data.createdBy || null})
+      RETURNING *
+    `);
+    const count = countResult.rows[0] as any;
+
+    const itemsResult = data.area
+      ? await db.execute(sql`
+          SELECT ii.id, ii.name, ii.unit, ii.current_stock::numeric AS current_stock
+          FROM inventory_items ii
+          LEFT JOIN item_categories ic ON ii.category_id = ic.id
+          WHERE ii.is_active = 'true' AND ic.area = ${data.area}
+          ORDER BY ii.name ASC
+        `)
+      : await db.execute(sql`
+          SELECT ii.id, ii.name, ii.unit, ii.current_stock::numeric AS current_stock
+          FROM inventory_items ii
+          WHERE ii.is_active = 'true'
+          ORDER BY ii.name ASC
+        `);
+
+    for (const item of itemsResult.rows as any[]) {
+      await db.execute(sql`
+        INSERT INTO inventory_count_items (count_id, item_id, item_name, unit, expected_stock)
+        VALUES (${count.id}, ${item.id}, ${item.name}, ${item.unit}, ${item.current_stock ?? 0})
+      `);
+    }
+    return count;
+  }
+
+  async getInventoryCountWithItems(id: string): Promise<any | null> {
+    const countResult = await db.execute(sql`SELECT * FROM inventory_counts WHERE id = ${id}`);
+    if (!countResult.rows.length) return null;
+    const count = countResult.rows[0] as any;
+
+    const itemsResult = await db.execute(sql`
+      SELECT ici.*, ii.sku, ii.cost_price::numeric AS cost_price
+      FROM inventory_count_items ici
+      LEFT JOIN inventory_items ii ON ici.item_id = ii.id
+      WHERE ici.count_id = ${id}
+      ORDER BY ici.item_name ASC
+    `);
+    return { ...count, items: itemsResult.rows };
+  }
+
+  async updateInventoryCountItem(countId: string, itemId: string, actualStock: number | null, notes?: string): Promise<void> {
+    await db.execute(sql`
+      UPDATE inventory_count_items
+      SET actual_stock = ${actualStock}, notes = ${notes ?? null}
+      WHERE count_id = ${countId} AND item_id = ${itemId}
+    `);
+  }
+
+  async closeInventoryCount(id: string, closedBy: string): Promise<{ adjustments: number }> {
+    const itemsResult = await db.execute(sql`
+      SELECT * FROM inventory_count_items
+      WHERE count_id = ${id} AND actual_stock IS NOT NULL
+    `);
+
+    let adjustments = 0;
+    for (const item of itemsResult.rows as any[]) {
+      const expected = parseFloat(item.expected_stock);
+      const actual = parseFloat(item.actual_stock);
+      const diff = actual - expected;
+      if (Math.abs(diff) < 0.001) continue;
+
+      const curResult = await db.execute(sql`SELECT current_stock FROM inventory_items WHERE id = ${item.item_id}`);
+      const current = parseFloat((curResult.rows[0] as any)?.current_stock ?? "0");
+      const newStock = Math.max(0, current + diff);
+
+      await db.execute(sql`
+        INSERT INTO stock_movements (item_id, movement_type, quantity, previous_stock, new_stock, notes, created_at, created_by, source_type, source_id)
+        VALUES (
+          ${item.item_id}, 'ajuste', ${Math.abs(diff)}, ${current}, ${newStock},
+          ${'Ajuste por toma de inventario'}, now(), ${closedBy}, 'inventory_count', ${id}
+        )
+      `);
+      await db.execute(sql`UPDATE inventory_items SET current_stock = ${newStock} WHERE id = ${item.item_id}`);
+      adjustments++;
+    }
+
+    await db.execute(sql`
+      UPDATE inventory_counts SET status = 'cerrado', closed_at = now(), closed_by = ${closedBy}
+      WHERE id = ${id}
+    `);
+    return { adjustments };
   }
 }
 

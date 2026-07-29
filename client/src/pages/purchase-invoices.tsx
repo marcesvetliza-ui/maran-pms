@@ -211,6 +211,9 @@ interface InvItemRow {
   name: string;
   existingItemId: string;
   categoryId: string;
+  supplierId: string;
+  itemKind: string;
+  minStock: string;
   quantity: string;
   unit: string;
   costPrice: string;
@@ -414,7 +417,7 @@ function InvoiceDialog({
     enabled: open,
   });
 
-  const addInvRow = () => setInvItems((p) => [...p, { mode: "new", name: "", existingItemId: "", categoryId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "" }]);
+  const addInvRow = () => setInvItems((p) => [...p, { mode: "new", name: "", existingItemId: "", categoryId: "", supplierId: "", itemKind: "materia_prima", minStock: "0", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "" }]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
@@ -473,7 +476,8 @@ function InvoiceDialog({
             unit: row.unit,
             costPrice: row.costPrice,
             currentStock: row.quantity,
-            minStock: 0,
+            minStock: parseInt(row.minStock) || 0,
+            itemKind: row.itemKind || "materia_prima",
             warehouseId: row.warehouseId || undefined,
           });
           const item = await itemRes.json();
@@ -1067,22 +1071,40 @@ function InvoiceDialog({
                           </Popover>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label className="text-xs mb-1 block">Nombre del artículo</Label>
-                            <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Ej: Aceite de Oliva 1L" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-xs mb-1 block">Nombre del artículo *</Label>
+                              <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Ej: Aceite de Oliva 1L" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
+                            </div>
+                            <div>
+                              <Label className="text-xs mb-1 block">Categoría</Label>
+                              <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">— Sin categoría —</SelectItem>
+                                  {(itemCategories as any[]).filter((cat: any) => cat.id).map((cat: any) => (
+                                    <SelectItem key={cat.id} value={String(cat.id)}>{cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
-                          <div>
-                            <Label className="text-xs mb-1 block">Categoría</Label>
-                            <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">— Sin categoría —</SelectItem>
-                                {(itemCategories as any[]).filter((cat: any) => cat.id).map((cat: any) => (
-                                  <SelectItem key={cat.id} value={String(cat.id)}>{cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-xs mb-1 block">Tipo de artículo</Label>
+                              <Select value={row.itemKind || "materia_prima"} onValueChange={(v) => updateInvRow(i, "itemKind", v)}>
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-kind-${i}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="materia_prima">Materia Prima</SelectItem>
+                                  <SelectItem value="venta_directa">Venta Directa</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label className="text-xs mb-1 block">Stock mínimo</Label>
+                              <Input type="number" min="0" step="1" value={row.minStock} onChange={(e) => updateInvRow(i, "minStock", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-minstock-${i}`} />
+                            </div>
                           </div>
                         </div>
                       )}

@@ -1,0 +1,54 @@
+⚠️ EXISTE PARCIALMENTE
+
+Factor de Conversión — El documento habla de "unidad de compra" (caja de 12) vs "unidad de uso" (unidad). El sistema hoy tiene una sola unidad por ítem. Podés cargar la compra en una unidad o en la otra, pero no convierte automáticamente. Esto es un gap real.
+
+Food Cost / Margen Bruto — Está calculado por receta individual en recetas-costos.tsx, pero no hay un dashboard consolidado de Food Cost % total, ni por familia, ni por sector.
+
+Estadísticas de ventas — Hay reportes en el módulo de reportes, pero no están los KPIs comerciales que pide: ticket promedio con costo asociado, venta por mozo/hora/mesa/cubiertos en un solo panel.
+
+❌ NO EXISTE (los gaps más importantes)
+
+1. Mermas y Rendimiento en recetas Hoy la receta dice "200g de carne". No dice que de esos 200g se desperdician 20g en el proceso. El campo merma y rendimiento no existen en recipeIngredients. Sin esto no podés calcular el Food Cost real.
+
+2. Recetas de Producción intermedias (sub-recetas) El sistema no tiene el concepto de "salsa filetto" como ingrediente de otra receta. Una receta solo puede tener ítems de inventario, no productos elaborados. Esto es fundamental para operaciones complejas.
+
+3. Control de Desvíos (el más valioso del documento) La fórmula clave: Stock Inicial + Compras - Stock Final = Consumo Real. Comparar eso con el Consumo Teórico (recetas × ventas) y mostrar diferencias en unidades, %, e impacto económico. Hoy el sistema descuenta stock pero no hace esa comparación. Este reporte es el que justifica todo el sistema de gestión.
+
+4. Integración Factura de Compra → Stock Hoy purchaseInvoices (contabilidad) y el inventario son módulos separados. Cargar una factura de compra no mueve el stock. Tenés que hacer la entrada de inventario aparte. El especialista pide que sea automático.
+
+5. Gestión de Bajas estructurada Desperdicios, mermas de proceso, consumo de desayuno diario, descuento automático por evento — todo esto se puede hacer hoy como "salida manual", pero no hay categorías específicas, ni flujos automatizados, ni reportes por tipo de baja.
+
+6. KPI Dashboard unificado No existe un tablero que muestre en un solo lugar: Food Cost %, Beverage Cost %, ticket promedio con costo, rotación de stock, días de inventario, ranking de desvíos, utilidad bruta.
+
+Mi opinión sobre qué implementar primero y el riesgo
+
+🟢 Bajo riesgo — Agregar sin tocar lo existente
+
+Dashboard de KPIs — solo lee datos que ya existen. No toca nada.
+Reporte de desvíos — cálculo nuevo sobre datos existentes.
+Gestión de bajas/desperdicios — agrega tipos nuevos a stockMovements. No modifica los existentes.
+Exportación a Excel de reportes de inventario (el especialista lo pide explícitamente).
+🟡 Riesgo medio — Extiende cosas que andan
+
+Mermas y rendimiento en recetas — agregar columnas a recipeIngredients. Si solo agrega columnas nullables, el riesgo es bajo. Pero hay que actualizar el cálculo de Food Cost en recetas-costos.tsx y en deductStockFromOrder.
+Factor de conversión — agregar campos a inventoryItems. El riesgo está en que el cálculo de costo unitario cambia en todo el sistema (recetas, compras, valorización de stock).
+🔴 Alto riesgo — Toca módulos que hoy funcionan bien
+
+Integración Factura de Compra → Stock automático — requiere modificar purchaseInvoices para disparar movimientos de inventario al registrar. Hay que manejar: ¿qué pasa si ya cargaste el movimiento manualmente? ¿Se duplica? Necesita una lógica de "esta factura ya generó movimiento de stock".
+Sub-recetas — cambiar la estructura de recipeIngredients para que pueda apuntar a otra receta además de a un ítem de inventario. Eso rompe deductStockFromOrder que hoy solo "desenrolla" un nivel.
+Extrapolación al resto del hotel (tu idea)
+
+El principio es el mismo para SPA y Eventos. Los gaps críticos se repiten:
+
+SPA: consume productos (aceites, toallas, consumibles). Mermas, control de stock por tratamiento, desvíos.
+Eventos: el doc menciona expresamente "descontar automáticamente todos los insumos consumidos durante un evento". Hoy no existe eso.
+Desayunos: descuento diario automático de insumos según cantidad de huéspedes y menú de desayuno — sería totalmente nuevo.
+Mi recomendación de secuencia
+
+Fase 1 (sin riesgo, mucho valor): Dashboard KPIs + Reporte de desvíos + Gestión de bajas estructurada + Export Excel.
+
+Fase 2 (riesgo bajo-medio, con cuidado): Mermas y rendimiento en recetas. Bien hecho, agrega mucho al Food Cost real.
+
+Fase 3 (planificar bien antes de tocar): Factor de conversión + Integración factura→stock + Sub-recetas.
+
+¿Querés que empecemos por la Fase 1, o hay algún punto que te parece más urgente para el especialista?

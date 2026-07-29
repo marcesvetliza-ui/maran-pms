@@ -20,8 +20,6 @@ import {
   Plus, 
   Package, 
   AlertTriangle, 
-  ArrowDownCircle, 
-  ArrowUpCircle,
   Building2,
   Loader2,
   Search,
@@ -40,6 +38,11 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  ClipboardList,
+  ChevronLeft,
+  CheckCircle2,
+  XCircle,
+  Save,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -167,10 +170,15 @@ export default function InventoryPage() {
   const [consumoFrom, setConsumoFrom] = useState(today);
   const [consumoTo, setConsumoTo] = useState(today);
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
-  const [isMovementDialogOpen, setIsMovementDialogOpen] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [movementType, setMovementType] = useState<"entrada" | "salida">("entrada");
   const [areaFilter, setAreaFilter] = useState("all");
+
+  // Toma de Inventario state
+  const [selectedCountId, setSelectedCountId] = useState<string | null>(null);
+  const [isNewCountDialogOpen, setIsNewCountDialogOpen] = useState(false);
+  const [newCountDate, setNewCountDate] = useState(today);
+  const [newCountArea, setNewCountArea] = useState("");
+  const [newCountNotes, setNewCountNotes] = useState("");
+  const [countItemEdits, setCountItemEdits] = useState<Record<string, string>>({});
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [kindFilter, setKindFilter] = useState("all");
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
@@ -182,8 +190,6 @@ export default function InventoryPage() {
   // Warehouses state
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | null>(null);
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
-  const [isWarehouseMovementDialogOpen, setIsWarehouseMovementDialogOpen] = useState(false);
-  const [warehouseMovementType, setWarehouseMovementType] = useState<"entrada" | "salida">("entrada");
   const [selectedWarehouseItem, setSelectedWarehouseItem] = useState<WarehouseStockRow | null>(null);
   const [isPriceHistoryOpen, setIsPriceHistoryOpen] = useState(false);
   const [priceHistoryItemId, setPriceHistoryItemId] = useState<string | null>(null);
@@ -245,6 +251,75 @@ export default function InventoryPage() {
     enabled: !!priceHistoryItemId && isPriceHistoryOpen,
   });
 
+  // Toma de Inventario queries
+  const { data: inventoryCounts = [], refetch: refetchCounts } = useQuery<any[]>({
+    queryKey: ["/api/inventory/counts"],
+    enabled: activeTab === "tomas",
+  });
+
+  const { data: selectedCount, refetch: refetchSelectedCount } = useQuery<any>({
+    queryKey: ["/api/inventory/counts", selectedCountId],
+    queryFn: () => fetch(`/api/inventory/counts/${selectedCountId}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!selectedCountId,
+  });
+
+  const createCountMutation = useMutation({
+    mutationFn: async (data: { date: string; area?: string; notes?: string }) => {
+      const res = await apiRequest("POST", "/api/inventory/counts", data);
+      return res.json();
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/counts"] });
+      setIsNewCountDialogOpen(false);
+      setNewCountArea(""); setNewCountNotes("");
+      setSelectedCountId(count.id);
+      setCountItemEdits({});
+    },
+    onError: (e: any) => toast({ title: "Error al crear la toma", description: e?.message, variant: "destructive" }),
+  });
+
+  const saveCountItemsMutation = useMutation({
+    mutationFn: async (edits: Record<string, string>) => {
+      const entries = Object.entries(edits);
+      for (const [itemId, val] of entries) {
+        await apiRequest("PATCH", `/api/inventory/counts/${selectedCountId}/items/${itemId}`, {
+          actualStock: val === "" ? null : parseFloat(val),
+        });
+      }
+    },
+    onSuccess: () => {
+      refetchSelectedCount();
+      setCountItemEdits({});
+      toast({ title: "Conteos guardados" });
+    },
+    onError: (e: any) => toast({ title: "Error al guardar", description: e?.message, variant: "destructive" }),
+  });
+
+  const closeCountMutation = useMutation({
+    mutationFn: async () => {
+      // Save any pending edits first
+      const entries = Object.entries(countItemEdits);
+      for (const [itemId, val] of entries) {
+        await apiRequest("PATCH", `/api/inventory/counts/${selectedCountId}/items/${itemId}`, {
+          actualStock: val === "" ? null : parseFloat(val),
+        });
+      }
+      const res = await apiRequest("POST", `/api/inventory/counts/${selectedCountId}/close`, {});
+      return res.json();
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/counts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/counts", selectedCountId] });
+      setCountItemEdits({});
+      toast({
+        title: "Toma cerrada",
+        description: `Se aplicaron ${result.adjustments} ajuste${result.adjustments !== 1 ? "s" : ""} de stock.`,
+      });
+    },
+    onError: (e: any) => toast({ title: "Error al cerrar", description: e?.message, variant: "destructive" }),
+  });
+
   const createItemMutation = useMutation({
     mutationFn: async (data: Partial<InventoryItem> & { warehouseId?: string }) => {
       const res = await apiRequest("POST", "/api/inventory/items", data);
@@ -257,28 +332,6 @@ export default function InventoryPage() {
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error?.message || "No se pudo crear el artículo", variant: "destructive" });
-    },
-  });
-
-  const createMovementMutation = useMutation({
-    mutationFn: async (data: { itemId: string; movementType: string; quantity: number; notes?: string }) => {
-      const res = await apiRequest("POST", "/api/inventory/movements", data);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items/low-stock"] });
-      setIsMovementDialogOpen(false);
-      setSelectedItem(null);
-      toast({ title: "Movimiento registrado" });
-    },
-    onError: (error: any) => {
-      toast({ 
-        title: "Error", 
-        description: error.message || "No se pudo registrar el movimiento",
-        variant: "destructive",
-      });
     },
   });
 
@@ -328,22 +381,6 @@ export default function InventoryPage() {
       toast({ title: "Transferencia registrada correctamente" });
     },
     onError: (e: any) => toast({ title: "Error en transferencia", description: e?.message, variant: "destructive" }),
-  });
-
-  const warehouseMovementMutation = useMutation({
-    mutationFn: async (data: { itemId: string; movementType: string; quantity: number; notes?: string; unitCost?: number }) => {
-      const res = await apiRequest("POST", `/api/inventory/warehouses/${selectedWarehouseId}/movements`, data);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses", selectedWarehouseId, "stock"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses-summary"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      setIsWarehouseMovementDialogOpen(false);
-      setSelectedWarehouseItem(null);
-      toast({ title: "Movimiento registrado" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e?.message, variant: "destructive" }),
   });
 
   const openCategoryDialog = (cat?: ItemCategory) => {
@@ -403,13 +440,6 @@ export default function InventoryPage() {
     (sum, item) => sum + (item.currentStock * parseFloat(item.costPrice || "0")),
     0
   );
-
-  const handleMovement = (item: InventoryItem, type: "entrada" | "salida") => {
-    setSelectedItem(item);
-    setMovementType(type);
-    setIsMovementDialogOpen(true);
-  };
-
 
   if (itemsLoading) {
     return (
@@ -511,6 +541,10 @@ export default function InventoryPage() {
             <Warehouse className="h-4 w-4 mr-2" />
             Depósitos
           </TabsTrigger>
+          <TabsTrigger value="tomas" data-testid="tab-tomas">
+            <ClipboardList className="h-4 w-4 mr-2" />
+            Toma de Inventario
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="items" className="space-y-4">
@@ -591,7 +625,6 @@ export default function InventoryPage() {
                     <th className="p-3 font-medium text-right">Stock</th>
                     <th className="p-3 font-medium text-right">Min</th>
                     <th className="p-3 font-medium text-right">Costo</th>
-                    <th className="p-3 font-medium text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -634,28 +667,6 @@ export default function InventoryPage() {
                       </td>
                       <td className="p-3 text-right">
                         ${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center justify-center gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => handleMovement(item, "entrada")}
-                            title="Registrar entrada"
-                            data-testid={`button-entry-${item.id}`}
-                          >
-                            <ArrowDownCircle className="h-4 w-4 text-green-600" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => handleMovement(item, "salida")}
-                            title="Registrar salida"
-                            data-testid={`button-exit-${item.id}`}
-                          >
-                            <ArrowUpCircle className="h-4 w-4 text-red-600" />
-                          </Button>
-                        </div>
                       </td>
                     </tr>
                   ))}
@@ -700,15 +711,6 @@ export default function InventoryPage() {
                       <span className="text-muted-foreground">Faltante:</span>
                       <span className="font-semibold">{item.minStock - item.currentStock} {item.unit}</span>
                     </div>
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      onClick={() => handleMovement(item, "entrada")}
-                      data-testid={`button-restock-${item.id}`}
-                    >
-                      <ArrowDownCircle className="h-4 w-4 mr-2" />
-                      Registrar Entrada
-                    </Button>
                   </CardContent>
                 </Card>
               ))}
@@ -1066,24 +1068,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <Package className="h-4 w-4" />
                     Stock — {warehouses.find(w => w.id === selectedWarehouseId)?.name}
                   </CardTitle>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => {
-                      setWarehouseMovementType("salida");
-                      setSelectedWarehouseItem(null);
-                      setIsWarehouseMovementDialogOpen(true);
-                    }} data-testid="btn-wh-salida">
-                      <ArrowUpCircle className="h-4 w-4 mr-1 text-red-500" />
-                      Salida
-                    </Button>
-                    <Button size="sm" onClick={() => {
-                      setWarehouseMovementType("entrada");
-                      setSelectedWarehouseItem(null);
-                      setIsWarehouseMovementDialogOpen(true);
-                    }} data-testid="btn-wh-entrada">
-                      <ArrowDownCircle className="h-4 w-4 mr-1 text-green-500" />
-                      Entrada
-                    </Button>
-                  </div>
+  
                 </div>
               </CardHeader>
               <CardContent>
@@ -1149,6 +1134,188 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 )}
               </CardContent>
             </Card>
+          )}
+        </TabsContent>
+
+        {/* ==================== TOMA DE INVENTARIO TAB ==================== */}
+        <TabsContent value="tomas" className="space-y-4">
+          {!selectedCountId ? (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    Registrá el stock real contado para detectar diferencias con el sistema.
+                  </p>
+                </div>
+                <Button onClick={() => { setNewCountDate(today); setIsNewCountDialogOpen(true); }} data-testid="btn-new-count">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nueva Toma
+                </Button>
+              </div>
+
+              {inventoryCounts.length === 0 ? (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                    <ClipboardList className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">Sin tomas registradas</h3>
+                    <p className="text-muted-foreground mb-4">Creá la primera toma de inventario para controlar el stock real</p>
+                    <Button onClick={() => { setNewCountDate(today); setIsNewCountDialogOpen(true); }}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Nueva Toma
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-muted/50">
+                      <tr className="text-left">
+                        <th className="p-3 font-medium">Fecha</th>
+                        <th className="p-3 font-medium">Área</th>
+                        <th className="p-3 font-medium text-center">Artículos</th>
+                        <th className="p-3 font-medium text-center">Contados</th>
+                        <th className="p-3 font-medium text-center">Con diferencias</th>
+                        <th className="p-3 font-medium text-center">Estado</th>
+                        <th className="p-3 font-medium"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventoryCounts.map((c: any) => (
+                        <tr key={c.id} className="border-t hover:bg-muted/20" data-testid={`row-count-${c.id}`}>
+                          <td className="p-3 font-medium">{new Date(c.date + "T12:00:00").toLocaleDateString("es-AR")}</td>
+                          <td className="p-3 text-sm text-muted-foreground">{c.area || "Todos"}</td>
+                          <td className="p-3 text-center">{c.total_items}</td>
+                          <td className="p-3 text-center">{c.counted_items} / {c.total_items}</td>
+                          <td className="p-3 text-center">
+                            {c.items_with_diff > 0
+                              ? <span className="text-orange-600 font-semibold">{c.items_with_diff}</span>
+                              : <span className="text-green-600">—</span>}
+                          </td>
+                          <td className="p-3 text-center">
+                            <Badge variant={c.status === "cerrado" ? "secondary" : "default"}>
+                              {c.status === "cerrado" ? "Cerrado" : "Borrador"}
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-right">
+                            <Button size="sm" variant="outline" onClick={() => { setSelectedCountId(c.id); setCountItemEdits({}); }}>
+                              {c.status === "cerrado" ? "Ver" : "Continuar"}
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : (
+            /* ── Detail view ── */
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedCountId(null); setCountItemEdits({}); refetchCounts(); }}>
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Volver
+                </Button>
+                {selectedCount && (
+                  <div className="flex items-center gap-2 flex-1">
+                    <h2 className="font-semibold">
+                      Toma del {new Date((selectedCount.date || "") + "T12:00:00").toLocaleDateString("es-AR")}
+                      {selectedCount.area ? ` — ${selectedCount.area}` : " — Todos los artículos"}
+                    </h2>
+                    <Badge variant={selectedCount.status === "cerrado" ? "secondary" : "default"}>
+                      {selectedCount.status === "cerrado" ? "Cerrado" : "Borrador"}
+                    </Badge>
+                  </div>
+                )}
+                {selectedCount?.status === "borrador" && (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm" variant="outline"
+                      onClick={() => saveCountItemsMutation.mutate(countItemEdits)}
+                      disabled={saveCountItemsMutation.isPending || Object.keys(countItemEdits).length === 0}
+                      data-testid="btn-save-count"
+                    >
+                      {saveCountItemsMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+                      Guardar
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => closeCountMutation.mutate()}
+                      disabled={closeCountMutation.isPending}
+                      data-testid="btn-close-count"
+                    >
+                      {closeCountMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
+                      Cerrar y aplicar ajustes
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {selectedCount?.notes && (
+                <p className="text-sm text-muted-foreground border rounded-md p-2 bg-muted/20">{selectedCount.notes}</p>
+              )}
+
+              {!selectedCount ? (
+                <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+              ) : (
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-muted/50">
+                      <tr className="text-left">
+                        <th className="p-3 font-medium">Artículo</th>
+                        <th className="p-3 font-medium text-center">Unidad</th>
+                        <th className="p-3 font-medium text-right">Stock Sistema</th>
+                        <th className="p-3 font-medium text-right">Stock Contado</th>
+                        <th className="p-3 font-medium text-right">Diferencia</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedCount.items || []).map((item: any) => {
+                        const editVal = countItemEdits[item.item_id];
+                        const displayVal = editVal !== undefined ? editVal : (item.actual_stock ?? "");
+                        const expected = parseFloat(item.expected_stock);
+                        const actual = displayVal !== "" ? parseFloat(String(displayVal)) : (item.actual_stock != null ? parseFloat(item.actual_stock) : null);
+                        const diff = actual != null ? actual - expected : null;
+                        const isDirty = editVal !== undefined;
+                        return (
+                          <tr key={item.item_id} className={`border-t ${isDirty ? "bg-blue-50 dark:bg-blue-950/20" : ""}`} data-testid={`row-count-item-${item.item_id}`}>
+                            <td className="p-3">
+                              <div className="font-medium">{item.item_name}</div>
+                              {item.sku && <div className="text-xs text-muted-foreground">{item.sku}</div>}
+                            </td>
+                            <td className="p-3 text-center text-sm text-muted-foreground">{item.unit}</td>
+                            <td className="p-3 text-right text-sm">{parseFloat(item.expected_stock).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
+                            <td className="p-3 text-right">
+                              {selectedCount.status === "cerrado" ? (
+                                <span className="text-sm">{item.actual_stock != null ? parseFloat(item.actual_stock).toLocaleString("es-AR", { minimumFractionDigits: 3 }) : <span className="text-muted-foreground">—</span>}</span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  min="0"
+                                  value={displayVal}
+                                  placeholder={parseFloat(item.expected_stock).toFixed(3)}
+                                  onChange={e => setCountItemEdits(prev => ({ ...prev, [item.item_id]: e.target.value }))}
+                                  className="w-28 text-right border rounded px-2 py-1 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                                  data-testid={`input-count-${item.item_id}`}
+                                />
+                              )}
+                            </td>
+                            <td className="p-3 text-right text-sm font-medium">
+                              {diff === null ? <span className="text-muted-foreground">—</span>
+                                : diff === 0 ? <span className="text-green-600 flex items-center justify-end gap-1"><CheckCircle2 className="h-3 w-3" />0</span>
+                                : diff > 0
+                                  ? <span className="text-blue-600">+{diff.toLocaleString("es-AR", { minimumFractionDigits: 3 })}</span>
+                                  : <span className="text-red-600">{diff.toLocaleString("es-AR", { minimumFractionDigits: 3 })}</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
         </TabsContent>
       </Tabs>
@@ -1217,22 +1384,51 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
         </DialogContent>
       </Dialog>
 
-      {/* Warehouse Movement Dialog (Entrada/Salida) */}
-      <Dialog open={isWarehouseMovementDialogOpen} onOpenChange={(open) => { setIsWarehouseMovementDialogOpen(open); if (!open) setSelectedWarehouseItem(null); }}>
-        <DialogContent>
+      {/* Nueva Toma de Inventario Dialog */}
+      <Dialog open={isNewCountDialogOpen} onOpenChange={setIsNewCountDialogOpen}>
+        <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>
-              Registrar {warehouseMovementType === "entrada" ? "Entrada" : "Salida"} — {warehouses.find(w => w.id === selectedWarehouseId)?.name}
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5" />
+              Nueva Toma de Inventario
             </DialogTitle>
           </DialogHeader>
-          <WarehouseMovementForm
-            items={items}
-            movementType={warehouseMovementType}
-            preselectedItem={selectedWarehouseItem}
-            onSubmit={(data) => warehouseMovementMutation.mutate(data)}
-            isPending={warehouseMovementMutation.isPending}
-            onCancel={() => { setIsWarehouseMovementDialogOpen(false); setSelectedWarehouseItem(null); }}
-          />
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Fecha *</Label>
+              <Input type="date" value={newCountDate} onChange={e => setNewCountDate(e.target.value)} data-testid="input-count-date" />
+            </div>
+            <div className="space-y-1">
+              <Label>Área <span className="text-muted-foreground font-normal">(opcional — filtra artículos)</span></Label>
+              <Select value={newCountArea || "__all__"} onValueChange={v => setNewCountArea(v === "__all__" ? "" : v)}>
+                <SelectTrigger data-testid="select-count-area"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todos los artículos</SelectItem>
+                  <SelectItem value="restaurant">Restaurante</SelectItem>
+                  <SelectItem value="spa">SPA</SelectItem>
+                  <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="admin">Administración</SelectItem>
+                  <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Observaciones <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+              <Input value={newCountNotes} onChange={e => setNewCountNotes(e.target.value)} placeholder="Ej: Toma mensual de cocina" data-testid="input-count-notes" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewCountDialogOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!newCountDate || createCountMutation.isPending}
+              onClick={() => createCountMutation.mutate({ date: newCountDate, area: newCountArea || undefined, notes: newCountNotes || undefined })}
+              data-testid="btn-confirm-new-count"
+            >
+              {createCountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Crear Toma
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1303,36 +1499,9 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             categories={categories}
             suppliers={suppliers}
             existingItems={items}
-            warehouses={warehouses}
             onSubmit={(data) => createItemMutation.mutate(data)}
             isPending={createItemMutation.isPending}
             onCancel={() => setIsNewItemDialogOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isMovementDialogOpen} onOpenChange={setIsMovementDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              Registrar {movementType === "entrada" ? "Entrada" : "Salida"} de Stock
-            </DialogTitle>
-          </DialogHeader>
-          <MovementForm
-            selectedItem={selectedItem}
-            movementType={movementType}
-            onSubmit={({ quantity, notes }) => {
-              if (selectedItem) {
-                createMovementMutation.mutate({
-                  itemId: selectedItem.id,
-                  movementType,
-                  quantity,
-                  notes: notes || undefined,
-                });
-              }
-            }}
-            isPending={createMovementMutation.isPending}
-            onCancel={() => setIsMovementDialogOpen(false)}
           />
         </DialogContent>
       </Dialog>
@@ -1400,7 +1569,6 @@ function NewItemForm({
   categories,
   suppliers,
   existingItems,
-  warehouses,
   onSubmit,
   isPending,
   onCancel,
@@ -1408,8 +1576,7 @@ function NewItemForm({
   categories: ItemCategory[];
   suppliers: Supplier[];
   existingItems: InventoryItem[];
-  warehouses: InventoryWarehouse[];
-  onSubmit: (data: Partial<InventoryItem> & { warehouseId?: string }) => void;
+  onSubmit: (data: Partial<InventoryItem>) => void;
   isPending: boolean;
   onCancel: () => void;
 }) {
@@ -1419,9 +1586,7 @@ function NewItemForm({
   const [unit, setUnit] = useState<string>("unidad");
   const [costPrice, setCostPrice] = useState("0");
   const [minStock, setMinStock] = useState(0);
-  const [currentStock, setCurrentStock] = useState(0);
   const [itemKind, setItemKind] = useState<string>("venta_directa");
-  const [warehouseId, setWarehouseId] = useState("");
 
   const duplicateMatches = name.trim().length > 1
     ? existingItems.filter(
@@ -1533,32 +1698,6 @@ function NewItemForm({
           />
         </div>
       </div>
-      <div className="space-y-2">
-        <Label>Stock Inicial</Label>
-        <Input
-          type="number"
-          min={0}
-          value={currentStock}
-          onChange={(e) => setCurrentStock(parseInt(e.target.value) || 0)}
-          data-testid="input-current-stock"
-        />
-      </div>
-      {warehouses.length > 0 && (
-        <div className="space-y-2">
-          <Label>Depósito destino <span className="text-muted-foreground font-normal">(del stock inicial)</span></Label>
-          <Select value={warehouseId || "__none__"} onValueChange={(v) => setWarehouseId(v === "__none__" ? "" : v)}>
-            <SelectTrigger data-testid="select-warehouse-item">
-              <SelectValue placeholder="Sin depósito asignado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— Sin depósito asignado —</SelectItem>
-              {warehouses.filter(w => w.id).map((wh) => (
-                <SelectItem key={wh.id} value={wh.id}>{wh.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
           Cancelar
@@ -1572,9 +1711,7 @@ function NewItemForm({
               unit: unit as any,
               costPrice,
               minStock,
-              currentStock,
               itemKind: itemKind as any,
-              warehouseId: warehouseId || undefined,
             } as any);
           }}
           disabled={isPending || !name}
@@ -1672,136 +1809,3 @@ function TransferForm({
   );
 }
 
-function WarehouseMovementForm({
-  items,
-  movementType,
-  preselectedItem,
-  onSubmit,
-  isPending,
-  onCancel,
-}: {
-  items: InventoryItem[];
-  movementType: "entrada" | "salida";
-  preselectedItem: WarehouseStockRow | null;
-  onSubmit: (data: { itemId: string; movementType: string; quantity: number; notes?: string; unitCost?: number }) => void;
-  isPending: boolean;
-  onCancel: () => void;
-}) {
-  const [itemId, setItemId] = useState(preselectedItem?.item_id || "");
-  const [quantity, setQuantity] = useState<number>(1);
-  const [unitCost, setUnitCost] = useState<number>(0);
-  const [notes, setNotes] = useState("");
-
-  const selectedItem = items.find(i => i.id === itemId);
-
-  return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <Label>Artículo *</Label>
-        <Select value={itemId} onValueChange={(v) => { setItemId(v); const it = items.find(i => i.id === v); if (it) setUnitCost(parseFloat(it.costPrice || "0")); }}>
-          <SelectTrigger data-testid="select-wh-mov-item"><SelectValue placeholder="Seleccionar artículo..." /></SelectTrigger>
-          <SelectContent>
-            {items.filter(i => i.id && i.isActive !== "false").map(i => (
-              <SelectItem key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ""}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      {selectedItem && (
-        <div className="p-2 bg-muted rounded text-sm text-muted-foreground">
-          Stock global actual: <span className="font-semibold text-foreground">{selectedItem.currentStock} {selectedItem.unit}</span>
-        </div>
-      )}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <Label>Cantidad *</Label>
-          <Input type="number" min={0.001} step="0.001" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} data-testid="input-wh-mov-qty" />
-        </div>
-        {movementType === "entrada" && (
-          <div className="space-y-1">
-            <Label>Costo Unitario</Label>
-            <Input type="number" min={0} step="0.01" value={unitCost} onChange={e => setUnitCost(parseFloat(e.target.value) || 0)} data-testid="input-wh-mov-cost" />
-            <p className="text-xs text-muted-foreground">Si cambió, se actualiza el precio del artículo.</p>
-          </div>
-        )}
-      </div>
-      <div className="space-y-1">
-        <Label>Notas (opcional)</Label>
-        <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Observaciones..." data-testid="input-wh-mov-notes" />
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
-        <Button
-          onClick={() => onSubmit({ itemId, movementType, quantity, notes: notes || undefined, unitCost: movementType === "entrada" ? unitCost : undefined })}
-          disabled={isPending || !itemId || quantity <= 0}
-          data-testid="btn-confirm-wh-movement"
-        >
-          {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          {movementType === "entrada" ? <ArrowDownCircle className="h-4 w-4 mr-2 text-green-500" /> : <ArrowUpCircle className="h-4 w-4 mr-2 text-red-500" />}
-          Registrar {movementType === "entrada" ? "Entrada" : "Salida"}
-        </Button>
-      </DialogFooter>
-    </div>
-  );
-}
-
-function MovementForm({
-  selectedItem,
-  movementType,
-  onSubmit,
-  isPending,
-  onCancel,
-}: {
-  selectedItem: { id: string; name: string; currentStock: number; unit?: string } | null;
-  movementType: "entrada" | "salida";
-  onSubmit: (data: { quantity: number; notes: string }) => void;
-  isPending: boolean;
-  onCancel: () => void;
-}) {
-  const [quantity, setQuantity] = useState(1);
-  const [notes, setNotes] = useState("");
-
-  return (
-    <div className="space-y-4">
-      <div className="p-3 bg-muted rounded-md">
-        <div className="font-medium">{selectedItem?.name}</div>
-        <div className="text-sm text-muted-foreground">
-          Stock actual: {selectedItem?.currentStock} {selectedItem?.unit}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <Label>Cantidad</Label>
-        <Input
-          autoFocus
-          type="number"
-          min={1}
-          value={quantity}
-          onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-          data-testid="input-movement-quantity"
-        />
-      </div>
-      <div className="space-y-2">
-        <Label>Notas (opcional)</Label>
-        <Textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Ej: Proveedor XYZ, Factura #123"
-          data-testid="input-movement-notes"
-        />
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>
-          Cancelar
-        </Button>
-        <Button
-          onClick={() => onSubmit({ quantity, notes })}
-          disabled={isPending}
-          data-testid="button-confirm-movement"
-        >
-          {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          Confirmar {movementType === "entrada" ? "Entrada" : "Salida"}
-        </Button>
-      </DialogFooter>
-    </div>
-  );
-}

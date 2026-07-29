@@ -76,6 +76,7 @@ import {
   RotateCcw,
   Download,
   CalendarClock,
+  Tag,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -285,6 +286,8 @@ const paymentMethodLabels: Record<string, string> = {
   mercadopago: "MercadoPago",
   cuenta_corriente: "Cuenta Corriente",
   cuenta_habitacion: "Cargo a Habitación",
+  gift_voucher: "Voucher de Regalo",
+  consumo_interno: "Consumo Interno",
 };
 
 function deriveReceiptFromVat(vatCondition: string | null | undefined): "factura_a" | "factura_b" {
@@ -859,6 +862,8 @@ export default function RestaurantPage() {
   const [closeBillingClientSearchOpen, setCloseBillingClientSearchOpen] = useState(false);
   const [showAlternateClientSearch, setShowAlternateClientSearch] = useState(false);
   const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "ticket" | "voucher">("__default__");
+  const [closeGiftVoucherCode, setCloseGiftVoucherCode] = useState("");
+  const [closeGiftVoucherData, setCloseGiftVoucherData] = useState<any>(null);
   const [closePaymentSplits, setClosePaymentSplits] = useState<{id: string; method: string; amount: string; roomId?: string; roomSearch?: string}[]>([{id: "1", method: "efectivo", amount: ""}]);
 
   // Clientes tab state
@@ -1522,6 +1527,7 @@ export default function RestaurantPage() {
       emitInvoice?: boolean; vatCondition?: string; customerRazonSocial?: string; customerCuit?: string;
       customerDni?: string; puntoVenta?: number; reservationAdvanceCredit?: number;
       paymentSplits?: {method: string; amount: number; roomReservationId?: string}[];
+      voucherCode?: string; voucherId?: string;
     }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
@@ -1542,6 +1548,8 @@ export default function RestaurantPage() {
         puntoVenta: data.puntoVenta,
         reservationAdvanceCredit: data.reservationAdvanceCredit,
         paymentSplits: data.paymentSplits,
+        voucherCode: data.voucherCode,
+        voucherId: data.voucherId,
       });
       return res.json();
     },
@@ -1576,6 +1584,8 @@ export default function RestaurantPage() {
       setCloseCcEntityId("");
       setBillingSearch("");
       setFbIsExento(false);
+      setCloseGiftVoucherCode("");
+      setCloseGiftVoucherData(null);
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       if (data?.invoiceId) {
@@ -5010,8 +5020,8 @@ export default function RestaurantPage() {
                   const splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
                   const remaining = Math.round((finalTotal - splitTotal) * 100) / 100;
                   const availablePayMethods = !isFactura
-                    ? { efectivo: "Efectivo" }
-                    : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => k !== "cuenta_corriente")) as Record<string, string>;
+                    ? { efectivo: "Efectivo", gift_voucher: "Voucher de Regalo", consumo_interno: "Consumo Interno" }
+                    : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => !["cuenta_corriente", "consumo_interno"].includes(k))) as Record<string, string>;
                   const allClientsForSearch: {id: string; name: string; cuit: string; vatCondition: string; type: "guest" | "company"; condicionVenta: string}[] = closeBillingClientSearch.length >= 2 ? [
                     ...companies.filter(c => {
                       const q = closeBillingClientSearch.toLowerCase();
@@ -5311,6 +5321,71 @@ export default function RestaurantPage() {
                             )}
                           </div>
                         ))}
+
+                      {/* ── CONSUMO INTERNO: aviso ── */}
+                      {closePaymentSplits.some(s => s.method === "consumo_interno") && (
+                        <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md text-amber-800 dark:text-amber-200">
+                          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                          <div className="text-xs space-y-0.5">
+                            <p className="font-semibold">Consumo Interno</p>
+                            <p>No se emite comprobante fiscal. El costo se registrará como egreso en caja.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── VOUCHER DE REGALO: código ── */}
+                      {closePaymentSplits.some(s => s.method === "gift_voucher") && (
+                        <div className="space-y-2 p-3 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-md">
+                          <p className="text-xs font-semibold text-purple-800 dark:text-purple-200 flex items-center gap-1.5">
+                            <Tag className="h-3.5 w-3.5" />Código del Voucher de Regalo
+                          </p>
+                          <div className="flex gap-2">
+                            <Input
+                              value={closeGiftVoucherCode}
+                              onChange={e => { setCloseGiftVoucherCode(e.target.value.toUpperCase()); setCloseGiftVoucherData(null); }}
+                              placeholder="VCHR-2024-XXXX"
+                              className="h-8 text-sm font-mono flex-1"
+                              data-testid="input-gift-voucher-code"
+                            />
+                            <Button size="sm" variant="outline" className="h-8 shrink-0"
+                              onClick={async () => {
+                                const code = closeGiftVoucherCode.trim();
+                                if (!code) return;
+                                try {
+                                  const res = await fetch(`/api/gift-vouchers?search=${encodeURIComponent(code)}&status=activo`);
+                                  const list = await res.json();
+                                  const found = Array.isArray(list) ? list.find((v: any) => v.voucherCode === code) : null;
+                                  if (found) {
+                                    setCloseGiftVoucherData(found);
+                                    if (found.valueType === "monetario" && found.valueAmount) {
+                                      const vAmt = parseFloat(found.valueAmount);
+                                      setClosePaymentSplits(prev => prev.map(s =>
+                                        s.method === "gift_voucher" && !parseFloat(s.amount || "0")
+                                          ? { ...s, amount: String(Math.min(vAmt, finalTotal).toFixed(2)) }
+                                          : s
+                                      ));
+                                    }
+                                  } else {
+                                    setCloseGiftVoucherData({ error: "Voucher no encontrado o inactivo" });
+                                  }
+                                } catch {
+                                  setCloseGiftVoucherData({ error: "Error al validar el voucher" });
+                                }
+                              }}
+                              data-testid="button-validate-voucher"
+                            >Validar</Button>
+                          </div>
+                          {closeGiftVoucherData && (
+                            closeGiftVoucherData.error
+                              ? <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><XCircle className="h-3.5 w-3.5 shrink-0" />{closeGiftVoucherData.error}</p>
+                              : <div className="text-xs bg-purple-100 dark:bg-purple-900/30 rounded px-2.5 py-1.5 space-y-0.5 text-purple-800 dark:text-purple-200">
+                                  <p className="font-medium flex items-center gap-1"><CheckCircle className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />{closeGiftVoucherData.beneficiaryName || closeGiftVoucherData.buyerName}</p>
+                                  {closeGiftVoucherData.valueType === "monetario" && <p>Valor: ${parseFloat(closeGiftVoucherData.valueAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>}
+                                  {closeGiftVoucherData.description && <p className="text-muted-foreground">{closeGiftVoucherData.description}</p>}
+                                </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* ── DIVIDIR CUENTA ── */}
                       <div className="pt-2 border-t">
@@ -5973,6 +6048,8 @@ export default function RestaurantPage() {
                 setShowAlternateClientSearch(false);
                 setCloseNonFiscalOverride("__default__");
                 setClosePaymentSplits([{ id: "1", method: "efectivo", amount: "" }]);
+                setCloseGiftVoucherCode("");
+                setCloseGiftVoucherData(null);
               }}
               className="w-full sm:w-auto"
             >
@@ -6039,9 +6116,13 @@ export default function RestaurantPage() {
                         amount: parseFloat(s.amount || "0"),
                         roomReservationId: s.method === "cuenta_habitacion" ? s.roomId : undefined,
                       }));
+                // Consumo interno: forzar receipt no-fiscal
+                const finalReceiptType = primaryPaymentMethod === "consumo_interno" ? "consumo_interno" : effReceiptType;
+                // Gift voucher: incluir código y id del voucher si está validado
+                const hasGiftVoucher = closePaymentSplits.some(s => s.method === "gift_voucher");
                 closeOrderMutation.mutate({
                   orderId: currentOrder.id,
-                  receiptType: effReceiptType,
+                  receiptType: finalReceiptType,
                   paymentMethod: primaryPaymentMethod,
                   discount: disc > 0 ? disc : undefined,
                   discountType: disc > 0 ? closeDiscountType : undefined,
@@ -6060,6 +6141,8 @@ export default function RestaurantPage() {
                   puntoVenta: isFactura && selectedPosNumero ? selectedPosNumero : undefined,
                   reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
                   paymentSplits: validSplits && validSplits.length > 1 ? validSplits : undefined,
+                  voucherCode: hasGiftVoucher ? (closeGiftVoucherData?.voucherCode || closeGiftVoucherCode || undefined) : undefined,
+                  voucherId: hasGiftVoucher ? (closeGiftVoucherData?.id || undefined) : undefined,
                 });
               };
               return (

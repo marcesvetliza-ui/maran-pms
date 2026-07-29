@@ -517,6 +517,61 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
+  // ── Toma de Inventario ────────────────────────────────────────────────────────
+
+  app.get("/api/inventory/counts", requireAuth, async (req, res) => {
+    try {
+      res.json(await storage.getInventoryCounts());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/inventory/counts", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const count = await storage.createInventoryCount({ ...req.body, createdBy: user?.username });
+      res.status(201).json(count);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/inventory/counts/:id", requireAuth, async (req, res) => {
+    try {
+      const count = await storage.getInventoryCountWithItems(req.params.id);
+      if (!count) return res.status(404).json({ error: "Toma no encontrada" });
+      res.json(count);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/inventory/counts/:id/items/:itemId", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
+    try {
+      const { actualStock, notes } = req.body;
+      await storage.updateInventoryCountItem(
+        req.params.id,
+        req.params.itemId,
+        actualStock !== undefined && actualStock !== "" ? parseFloat(actualStock) : null,
+        notes
+      );
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/inventory/counts/:id/close", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const result = await storage.closeInventoryCount(req.params.id, user?.username ?? "sistema");
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // All warehouses summary — GET /api/inventory/warehouses-summary
   app.get("/api/inventory/warehouses-summary", async (req, res) => {
     try {
