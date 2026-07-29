@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
 import type { EventWithDetails } from "@shared/schema";
+import { assetPath } from "./utils/assetPath";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -280,7 +281,7 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
     // ── BACKGROUND TEMPLATE ──────────────────────────────────────────────────
     // Usar la imagen institucional como fondo A4 completo (encabezado foto ciudad
     // + pie con logo y beneficios). El contenido se superpone en el área blanca.
-    const bgPath = path.join(process.cwd(), "server", "assets", "confirmacion-evento-bg.jpg");
+    const bgPath = assetPath("confirmacion-evento-bg.jpg");
     if (fs.existsSync(bgPath)) {
       doc.image(bgPath, 0, 0, { width: pageW, height: pageH });
     } else {
