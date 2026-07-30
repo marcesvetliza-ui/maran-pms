@@ -12,7 +12,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
+  SelectSeparator, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -1083,9 +1084,32 @@ function InvoiceDialog({
                                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__none__">— Sin categoría —</SelectItem>
-                                  {(itemCategories as any[]).filter((cat: any) => cat.id).map((cat: any) => (
-                                    <SelectItem key={cat.id} value={String(cat.id)}>{cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}</SelectItem>
-                                  ))}
+                                  {(() => {
+                                    const cats = (itemCategories as any[]);
+                                    const groups = cats.filter((c: any) => c.isGroup);
+                                    const leafCats = cats.filter((c: any) => !c.isGroup && c.id);
+                                    const result: JSX.Element[] = [];
+                                    for (const g of groups) {
+                                      const children = leafCats.filter((c: any) => c.parentId === g.id);
+                                      if (!children.length) continue;
+                                      result.push(
+                                        <SelectGroup key={g.id}>
+                                          <SelectLabel>{g.name}</SelectLabel>
+                                          {children.map((cat: any) => (
+                                            <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
+                                          ))}
+                                        </SelectGroup>
+                                      );
+                                    }
+                                    const ungrouped = leafCats.filter((c: any) => !c.parentId);
+                                    if (ungrouped.length) {
+                                      if (result.length) result.push(<SelectSeparator key="sep" />);
+                                      ungrouped.forEach((cat: any) => result.push(
+                                        <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
+                                      ));
+                                    }
+                                    return result;
+                                  })()}
                                 </SelectContent>
                               </Select>
                             </div>
@@ -1098,6 +1122,7 @@ function InvoiceDialog({
                                 <SelectContent>
                                   <SelectItem value="materia_prima">Materia Prima</SelectItem>
                                   <SelectItem value="venta_directa">Venta Directa</SelectItem>
+                                  <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>

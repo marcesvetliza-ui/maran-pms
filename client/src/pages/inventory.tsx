@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -47,6 +47,8 @@ import {
   BookOpen,
   Utensils,
   X,
+  Layers,
+  FolderOpen,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -56,6 +58,7 @@ type ItemCategory = {
   parentId: string | null;
   area: string;
   isActive: string | null;
+  isGroup: boolean;
 };
 
 type Supplier = {
@@ -236,6 +239,13 @@ export default function InventoryPage() {
   const [catName, setCatName] = useState("");
   const [catArea, setCatArea] = useState("general");
   const [catDescription, setCatDescription] = useState("");
+  const [catParentId, setCatParentId] = useState<string>("");
+  // Group (Agrupamiento) state
+  const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<ItemCategory | null>(null);
+  const [groupName, setGroupName] = useState("");
+  const [groupArea, setGroupArea] = useState("general");
+  const [groupDescription, setGroupDescription] = useState("");
 
   // Warehouses state
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | null>(null);
@@ -628,7 +638,16 @@ ${(movement.items || []).map(i => `    <tr>
     setCatName(cat?.name || "");
     setCatArea(cat?.area || "general");
     setCatDescription(cat?.description || "");
+    setCatParentId(cat?.parentId || "");
     setIsCategoryDialogOpen(true);
+  };
+
+  const openGroupDialog = (group?: ItemCategory) => {
+    setEditingGroup(group || null);
+    setGroupName(group?.name || "");
+    setGroupArea(group?.area || "general");
+    setGroupDescription(group?.description || "");
+    setIsGroupDialogOpen(true);
   };
 
   const openWarehouseForm = (wh?: InventoryWarehouse) => {
@@ -640,7 +659,7 @@ ${(movement.items || []).map(i => `    <tr>
   };
 
   const saveCategoryMutation = useMutation({
-    mutationFn: async (data: { name: string; area: string; description: string }) => {
+    mutationFn: async (data: { name: string; area: string; description: string; parentId?: string | null; isGroup: boolean }) => {
       const res = editingCategory
         ? await apiRequest("PATCH", `/api/inventory/categories/${editingCategory.id}`, data)
         : await apiRequest("POST", "/api/inventory/categories", data);
@@ -652,6 +671,21 @@ ${(movement.items || []).map(i => `    <tr>
       toast({ title: editingCategory ? "Categoría actualizada" : "Categoría creada" });
     },
     onError: () => toast({ title: "Error al guardar categoría", variant: "destructive" }),
+  });
+
+  const saveGroupMutation = useMutation({
+    mutationFn: async (data: { name: string; area: string; description: string; isGroup: boolean }) => {
+      const res = editingGroup
+        ? await apiRequest("PATCH", `/api/inventory/categories/${editingGroup.id}`, data)
+        : await apiRequest("POST", "/api/inventory/categories", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
+      setIsGroupDialogOpen(false);
+      toast({ title: editingGroup ? "Agrupamiento actualizado" : "Agrupamiento creado" });
+    },
+    onError: () => toast({ title: "Error al guardar agrupamiento", variant: "destructive" }),
   });
 
   const deleteCategoryMutation = useMutation({
@@ -1147,67 +1181,158 @@ ${(movement.items || []).map(i => `    <tr>
           )}
         </TabsContent>
 
-        <TabsContent value="categorias" className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              Las categorías determinan el prefijo del SKU automático y el área de cada artículo.
-            </p>
-            <Button onClick={() => openCategoryDialog()} data-testid="btn-new-category">
-              <Plus className="h-4 w-4 mr-2" />
-              Nueva Categoría
-            </Button>
-          </div>
+        <TabsContent value="categorias" className="space-y-6">
+          {(() => {
+            const areaLabels: Record<string, string> = {
+              general: "General", spa: "SPA", restaurant: "Restaurante",
+              housekeeping: "Housekeeping", maintenance: "Mantenimiento",
+              admin: "Administración", marketing: "Marketing",
+            };
+            const areaColors: Record<string, string> = {
+              general: "secondary", spa: "default", restaurant: "destructive",
+              housekeeping: "outline", maintenance: "outline",
+              admin: "outline", marketing: "outline",
+            };
+            const skuPrefix = (area: string) =>
+              area === "spa" ? "SPA" : area === "restaurant" ? "RST" : area === "housekeeping" ? "HSK" :
+              area === "maintenance" ? "MNT" : area === "admin" ? "ADM" : area === "marketing" ? "MKT" : "GEN";
 
-          {categories.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <Tag className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Sin categorías</h3>
-                <p className="text-muted-foreground">Creá categorías para organizar tu inventario</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {categories.map((cat) => {
-                const areaLabels: Record<string, string> = {
-                  general: "General", spa: "SPA", restaurant: "Restaurante",
-                  housekeeping: "Housekeeping", maintenance: "Mantenimiento", admin: "Administración",
-                  marketing: "Marketing",
-                };
-                const areaColors: Record<string, string> = {
-                  general: "secondary", spa: "default", restaurant: "destructive",
-                  housekeeping: "outline", maintenance: "outline", admin: "outline",
-                  marketing: "outline",
-                };
-                const itemCount = items.filter(i => i.categoryId === cat.id).length;
-                return (
-                  <Card key={cat.id} data-testid={`cat-card-${cat.id}`} className="flex flex-col">
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <CardTitle className="text-base">{cat.name}</CardTitle>
-                        <div className="flex gap-1 shrink-0">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openCategoryDialog(cat)} data-testid={`btn-edit-cat-${cat.id}`}>
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteCategoryMutation.mutate(cat.id)} disabled={itemCount > 0} data-testid={`btn-delete-cat-${cat.id}`}>
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+            const groups = categories.filter(c => c.isGroup);
+            const leafCats = categories.filter(c => !c.isGroup);
+
+            const CatCard = ({ cat, isLeaf }: { cat: ItemCategory; isLeaf: boolean }) => {
+              const itemCount = items.filter(i => i.categoryId === cat.id).length;
+              const childCount = categories.filter(c => c.parentId === cat.id).length;
+              const canDelete = isLeaf ? itemCount === 0 : childCount === 0;
+              return (
+                <Card key={cat.id} data-testid={`cat-card-${cat.id}`} className="flex flex-col">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-sm font-semibold">{cat.name}</CardTitle>
+                      <div className="flex gap-1 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-7 w-7"
+                          onClick={() => isLeaf ? openCategoryDialog(cat) : openGroupDialog(cat)}
+                          data-testid={`btn-edit-cat-${cat.id}`}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => deleteCategoryMutation.mutate(cat.id)}
+                          disabled={!canDelete}
+                          title={!canDelete ? (isLeaf ? "Tiene artículos asociados" : "Tiene categorías asociadas") : ""}
+                          data-testid={`btn-delete-cat-${cat.id}`}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="text-sm space-y-1 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant={areaColors[cat.area] as any} className="text-xs">{areaLabels[cat.area] ?? cat.area}</Badge>
+                      {isLeaf && <span className="text-muted-foreground text-xs">SKU: {skuPrefix(cat.area)}-####</span>}
+                    </div>
+                    {cat.description && <p className="text-muted-foreground text-xs">{cat.description}</p>}
+                    <p className="text-xs text-muted-foreground">
+                      {isLeaf
+                        ? `${itemCount} artículo${itemCount !== 1 ? "s" : ""}`
+                        : `${childCount} categoría${childCount !== 1 ? "s" : ""}`}
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            };
+
+            // Group leaf cats by their parent group
+            const catsByGroup: Record<string, ItemCategory[]> = {};
+            const catsWithoutGroup: ItemCategory[] = [];
+            for (const cat of leafCats) {
+              if (cat.parentId) {
+                if (!catsByGroup[cat.parentId]) catsByGroup[cat.parentId] = [];
+                catsByGroup[cat.parentId].push(cat);
+              } else {
+                catsWithoutGroup.push(cat);
+              }
+            }
+
+            return (
+              <>
+                {/* ── Agrupamientos ─────────────────────────────── */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="font-semibold text-sm">Agrupamientos</h3>
+                      <Badge variant="secondary" className="text-xs">{groups.length}</Badge>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => openGroupDialog()} data-testid="btn-new-group">
+                      <Plus className="h-3.5 w-3.5 mr-1.5" /> Nuevo Agrupamiento
+                    </Button>
+                  </div>
+                  {groups.length === 0 ? (
+                    <div className="border rounded-lg p-6 text-center text-sm text-muted-foreground bg-muted/20">
+                      <Layers className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                      <p>Sin agrupamientos todavía. Creá uno para organizar tus categorías.</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                      {groups.map(g => <CatCard key={g.id} cat={g} isLeaf={false} />)}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Categorías ─────────────────────────────────── */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Tag className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="font-semibold text-sm">Categorías</h3>
+                      <Badge variant="secondary" className="text-xs">{leafCats.length}</Badge>
+                    </div>
+                    <Button size="sm" onClick={() => openCategoryDialog()} data-testid="btn-new-category">
+                      <Plus className="h-3.5 w-3.5 mr-1.5" /> Nueva Categoría
+                    </Button>
+                  </div>
+
+                  {leafCats.length === 0 ? (
+                    <div className="border rounded-lg p-6 text-center text-sm text-muted-foreground bg-muted/20">
+                      <Tag className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                      <p>Sin categorías todavía.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-5">
+                      {/* Categorías agrupadas bajo su agrupamiento */}
+                      {groups.map(g => {
+                        const children = catsByGroup[g.id] || [];
+                        if (children.length === 0) return null;
+                        return (
+                          <div key={g.id} className="space-y-2">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                              <FolderOpen className="h-3.5 w-3.5" />
+                              {g.name}
+                            </div>
+                            <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3 pl-2 border-l-2 border-muted">
+                              {children.map(c => <CatCard key={c.id} cat={c} isLeaf={true} />)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {/* Categorías sin agrupamiento */}
+                      {catsWithoutGroup.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                            <Tag className="h-3.5 w-3.5" />
+                            Sin agrupamiento
+                          </div>
+                          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3 pl-2 border-l-2 border-dashed border-muted">
+                            {catsWithoutGroup.map(c => <CatCard key={c.id} cat={c} isLeaf={true} />)}
+                          </div>
                         </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="text-sm space-y-1 flex-1">
-                      <div className="flex items-center gap-2">
-                        <Badge variant={areaColors[cat.area] as any}>{areaLabels[cat.area] ?? cat.area}</Badge>
-                        <span className="text-muted-foreground text-xs">SKU: {cat.area === "spa" ? "SPA" : cat.area === "restaurant" ? "RST" : cat.area === "housekeeping" ? "HSK" : cat.area === "maintenance" ? "MNT" : cat.area === "admin" ? "ADM" : "GEN"}-####</span>
-                      </div>
-                      {cat.description && <p className="text-muted-foreground text-xs">{cat.description}</p>}
-                      <p className="text-xs text-muted-foreground">{itemCount} artículo{itemCount !== 1 ? "s" : ""}</p>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="consumos" className="space-y-4">
@@ -2127,6 +2252,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
         </DialogContent>
       </Dialog>
 
+      {/* ── Diálogo: Nueva / Editar Categoría ─────────────── */}
       <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -2138,13 +2264,13 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               <Input
                 value={catName}
                 onChange={(e) => setCatName(e.target.value)}
-                placeholder="Ej: Aceites de Masajes"
+                placeholder="Ej: Vinos Tintos"
                 data-testid="input-cat-name"
               />
             </div>
             <div className="space-y-1">
               <Label>Área</Label>
-              <Select value={catArea} onValueChange={setCatArea}>
+              <Select value={catArea} onValueChange={(v) => { setCatArea(v); setCatParentId(""); }}>
                 <SelectTrigger data-testid="select-cat-area">
                   <SelectValue />
                 </SelectTrigger>
@@ -2159,8 +2285,28 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 </SelectContent>
               </Select>
             </div>
+            {/* Agrupamiento selector — solo muestra grupos del área seleccionada */}
+            {(() => {
+              const matchingGroups = categories.filter(c => c.isGroup && c.area === catArea);
+              return matchingGroups.length > 0 ? (
+                <div className="space-y-1">
+                  <Label>Agrupamiento <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+                  <Select value={catParentId || "__none__"} onValueChange={(v) => setCatParentId(v === "__none__" ? "" : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Sin agrupamiento" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Sin agrupamiento</SelectItem>
+                      {matchingGroups.map(g => (
+                        <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null;
+            })()}
             <div className="space-y-1">
-              <Label>Descripción (opcional)</Label>
+              <Label>Descripción <span className="text-muted-foreground font-normal">(opcional)</span></Label>
               <Input
                 value={catDescription}
                 onChange={(e) => setCatDescription(e.target.value)}
@@ -2172,11 +2318,82 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>Cancelar</Button>
             <Button
-              onClick={() => saveCategoryMutation.mutate({ name: catName.trim(), area: catArea, description: catDescription.trim() })}
+              onClick={() => saveCategoryMutation.mutate({
+                name: catName.trim(),
+                area: catArea,
+                description: catDescription.trim(),
+                parentId: catParentId || null,
+                isGroup: false,
+              })}
               disabled={saveCategoryMutation.isPending || !catName.trim()}
               data-testid="btn-save-category"
             >
               {saveCategoryMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Diálogo: Nuevo / Editar Agrupamiento ───────────── */}
+      <Dialog open={isGroupDialogOpen} onOpenChange={setIsGroupDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Layers className="h-4 w-4" />
+              {editingGroup ? "Editar Agrupamiento" : "Nuevo Agrupamiento"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Nombre *</Label>
+              <Input
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                placeholder="Ej: Vinos y Champagne, Limpieza, Platos"
+                data-testid="input-group-name"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Área *</Label>
+              <Select value={groupArea} onValueChange={setGroupArea}>
+                <SelectTrigger data-testid="select-group-area">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="spa">SPA</SelectItem>
+                  <SelectItem value="restaurant">Restaurante</SelectItem>
+                  <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                  <SelectItem value="admin">Administración</SelectItem>
+                  <SelectItem value="marketing">Marketing</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Descripción <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+              <Input
+                value={groupDescription}
+                onChange={(e) => setGroupDescription(e.target.value)}
+                placeholder="Descripción breve..."
+                data-testid="input-group-description"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsGroupDialogOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={() => saveGroupMutation.mutate({
+                name: groupName.trim(),
+                area: groupArea,
+                description: groupDescription.trim(),
+                isGroup: true,
+              })}
+              disabled={saveGroupMutation.isPending || !groupName.trim()}
+              data-testid="btn-save-group"
+            >
+              {saveGroupMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Guardar
             </Button>
           </DialogFooter>
@@ -2242,14 +2459,33 @@ function NewItemForm({
           <Label>Categoria</Label>
           <Select value={categoryId} onValueChange={setCategoryId}>
             <SelectTrigger data-testid="select-category">
-              <SelectValue placeholder="Seleccionar categoria" />
+              <SelectValue placeholder="Seleccionar categoría" />
             </SelectTrigger>
             <SelectContent>
-              {categories.filter(cat => cat.id).map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>
-                  {cat.name} {cat.area !== "general" ? `(${cat.area.toUpperCase()})` : ""}
-                </SelectItem>
-              ))}
+              {(() => {
+                const leafCats = categories.filter(c => !c.isGroup);
+                const groups = categories.filter(c => c.isGroup);
+                // Build: grouped under their parent, then ungrouped
+                const grouped: { groupName: string | null; cats: ItemCategory[] }[] = [];
+                for (const g of groups) {
+                  const children = leafCats.filter(c => c.parentId === g.id);
+                  if (children.length > 0) grouped.push({ groupName: g.name, cats: children });
+                }
+                const ungrouped = leafCats.filter(c => !c.parentId);
+                if (ungrouped.length > 0) grouped.push({ groupName: null, cats: ungrouped });
+
+                return grouped.map(({ groupName, cats }, idx) => (
+                  <SelectGroup key={groupName ?? "__none__"}>
+                    {groupName && <SelectLabel>{groupName}</SelectLabel>}
+                    {idx > 0 && !groupName && <SelectSeparator />}
+                    {cats.map(cat => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ));
+              })()}
             </SelectContent>
           </Select>
         </div>

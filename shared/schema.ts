@@ -1180,6 +1180,7 @@ export const itemCategories = pgTable("item_categories", {
   parentId: varchar("parent_id"),
   area: text("area").$type<InventoryArea>().notNull().default("general"),
   isActive: text("is_active").default("true"),
+  isGroup: boolean("is_group").notNull().default(false),
 });
 
 export const insertItemCategorySchema = createInsertSchema(itemCategories).omit({ id: true });
