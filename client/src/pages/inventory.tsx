@@ -900,6 +900,7 @@ ${(movement.items || []).map(i => `    <tr>
                 <SelectItem value="spa">SPA</SelectItem>
                 <SelectItem value="restaurant">Restaurante</SelectItem>
                 <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                <SelectItem value="hotel">Hotel</SelectItem>
                 <SelectItem value="maintenance">Mantenimiento</SelectItem>
                 <SelectItem value="admin">Administración</SelectItem>
                 <SelectItem value="marketing">Marketing</SelectItem>
@@ -1219,16 +1220,17 @@ ${(movement.items || []).map(i => `    <tr>
             const areaLabels: Record<string, string> = {
               general: "General", spa: "SPA", restaurant: "Restaurante",
               housekeeping: "Housekeeping", maintenance: "Mantenimiento",
-              admin: "Administración", marketing: "Marketing",
+              admin: "Administración", marketing: "Marketing", hotel: "Hotel",
             };
             const areaColors: Record<string, string> = {
               general: "secondary", spa: "default", restaurant: "destructive",
               housekeeping: "outline", maintenance: "outline",
-              admin: "outline", marketing: "outline",
+              admin: "outline", marketing: "outline", hotel: "outline",
             };
             const skuPrefix = (area: string) =>
               area === "spa" ? "SPA" : area === "restaurant" ? "RST" : area === "housekeeping" ? "HSK" :
-              area === "maintenance" ? "MNT" : area === "admin" ? "ADM" : area === "marketing" ? "MKT" : "GEN";
+              area === "maintenance" ? "MNT" : area === "admin" ? "ADM" : area === "marketing" ? "MKT" :
+              area === "hotel" ? "HTL" : "GEN";
 
             const groups = categories.filter(c => c.isGroup);
             const leafCats = categories.filter(c => !c.isGroup);
@@ -1937,6 +1939,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="restaurant">Restaurante</SelectItem>
                   <SelectItem value="spa">SPA</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="hotel">Hotel</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
                   <SelectItem value="admin">Administración</SelectItem>
                   <SelectItem value="marketing">Marketing</SelectItem>
@@ -2002,6 +2005,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="restaurant">Restaurante</SelectItem>
                   <SelectItem value="spa">SPA</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="hotel">Hotel</SelectItem>
                   <SelectItem value="general">General</SelectItem>
                   <SelectItem value="admin">Administración</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
@@ -2312,6 +2316,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="spa">SPA (SPA)</SelectItem>
                   <SelectItem value="restaurant">Restaurante (RST)</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping (HSK)</SelectItem>
+                  <SelectItem value="hotel">Hotel (HTL)</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento (MNT)</SelectItem>
                   <SelectItem value="admin">Administración (ADM)</SelectItem>
                   <SelectItem value="marketing">Marketing (MKT)</SelectItem>
@@ -2398,6 +2403,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="spa">SPA</SelectItem>
                   <SelectItem value="restaurant">Restaurante</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="hotel">Hotel</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
                   <SelectItem value="admin">Administración</SelectItem>
                   <SelectItem value="marketing">Marketing</SelectItem>
