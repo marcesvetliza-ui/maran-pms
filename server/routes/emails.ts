@@ -60,10 +60,10 @@ export function registerEmailRoutes(app: Express) {
   app.get("/api/email/config", requireAuth, async (_req, res) => {
     try {
       const [cfg] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
-      // Never expose API key or SMTP password — send booleans only
+      // Never expose API key, SMTP password, or raw base64 images — send booleans only
       if (cfg) {
-        const { apiKey, smtpPass, ...safe } = cfg;
-        res.json({ ...safe, apiKeySet: !!apiKey, smtpPassSet: !!smtpPass });
+        const { apiKey, smtpPass, emailBannerBase64, emailFooterBase64, ...safe } = cfg;
+        res.json({ ...safe, apiKeySet: !!apiKey, smtpPassSet: !!smtpPass, bannerImageSet: !!emailBannerBase64, footerImageSet: !!emailFooterBase64 });
       } else {
         res.json(null);
       }
@@ -111,10 +111,66 @@ export function registerEmailRoutes(app: Express) {
 
       await db.update(emailConfig).set(updateData).where(eq(emailConfig.id, 1));
       const [updated] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
-      const { apiKey: _k, smtpPass: _p, ...safe } = updated;
-      res.json({ ...safe, apiKeySet: !!_k, smtpPassSet: !!_p });
+      const { apiKey: _k, smtpPass: _p, emailBannerBase64: _b, emailFooterBase64: _f, ...safe } = updated;
+      res.json({ ...safe, apiKeySet: !!_k, smtpPassSet: !!_p, bannerImageSet: !!_b, footerImageSet: !!_f });
     } catch (e) {
       res.status(500).json({ error: "Error al guardar configuración" });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // POST /api/email/upload-image — guarda banner o footer como base64 en DB
+  // ──────────────────────────────────────────────────────────────────────────
+  app.post("/api/email/upload-image", requireAuth, async (req, res) => {
+    try {
+      const { type, imageData } = req.body;
+      if (!["banner", "footer"].includes(type)) return res.status(400).json({ error: "Tipo inválido" });
+      if (!imageData || !String(imageData).startsWith("data:image/")) return res.status(400).json({ error: "Imagen inválida" });
+      // Limit ~2MB base64
+      if (String(imageData).length > 3_000_000) return res.status(400).json({ error: "Imagen demasiado grande (máx ~2 MB)" });
+
+      const field = type === "banner" ? "emailBannerBase64" : "emailFooterBase64";
+      await db.update(emailConfig).set({ [field]: imageData }).where(eq(emailConfig.id, 1));
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Error al guardar imagen" });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // DELETE /api/email/upload-image/:type — borra banner o footer
+  // ──────────────────────────────────────────────────────────────────────────
+  app.delete("/api/email/upload-image/:type", requireAuth, async (req, res) => {
+    try {
+      const { type } = req.params;
+      if (!["banner", "footer"].includes(type)) return res.status(400).json({ error: "Tipo inválido" });
+      const field = type === "banner" ? "emailBannerBase64" : "emailFooterBase64";
+      await db.update(emailConfig).set({ [field]: null }).where(eq(emailConfig.id, 1));
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Error al eliminar imagen" });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // GET /api/public/email-images/:type — sirve banner/footer sin auth (para clientes de email)
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get("/api/public/email-images/:type", async (req, res) => {
+    try {
+      const { type } = req.params;
+      if (!["banner", "footer"].includes(type)) return res.status(404).end();
+      const [cfg] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
+      const dataUrl = type === "banner" ? cfg?.emailBannerBase64 : cfg?.emailFooterBase64;
+      if (!dataUrl) return res.status(404).end();
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+      if (!match) return res.status(400).end();
+      const [, mimeType, b64] = match;
+      const buffer = Buffer.from(b64, "base64");
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(buffer);
+    } catch (e) {
+      res.status(500).end();
     }
   });
 

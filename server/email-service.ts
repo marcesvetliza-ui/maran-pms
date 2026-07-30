@@ -28,7 +28,7 @@ const HOTEL_BASE_URL =
 const BORDO = "#8B1535";
 const BORDO_DARK = "#6B1028";
 
-function buildHtmlEmail(bodyText: string, subject: string): string {
+function buildHtmlEmail(bodyText: string, subject: string, images?: { bannerUrl?: string; footerImageUrl?: string }): string {
   const logoUrl = `${HOTEL_BASE_URL}/hotel-logo.jpeg`;
 
   // Convert plain text paragraphs to HTML, converting URLs to links
@@ -68,10 +68,17 @@ function buildHtmlEmail(bodyText: string, subject: string): string {
 
           <!-- LOGO HEADER -->
           <tr>
-            <td style="background:#ffffff;padding:28px 40px 24px;text-align:center;border-bottom:3px solid ${BORDO};">
+            <td style="background:#ffffff;padding:28px 40px 24px;text-align:center;border-bottom:${images?.bannerUrl ? "none" : `3px solid ${BORDO}`};">
               <img src="${logoUrl}" alt="Maran Suites &amp; Towers" width="260" style="display:block;margin:0 auto;max-width:260px;height:auto;" />
             </td>
           </tr>
+          ${images?.bannerUrl ? `
+          <!-- BANNER IMAGE -->
+          <tr>
+            <td style="padding:0;margin:0;border-bottom:3px solid ${BORDO};">
+              <img src="${images.bannerUrl}" alt="" width="600" style="display:block;width:100%;max-width:600px;height:auto;" />
+            </td>
+          </tr>` : ""}
 
           <!-- BODY -->
           <tr>
@@ -86,6 +93,14 @@ function buildHtmlEmail(bodyText: string, subject: string): string {
               <hr style="border:none;border-top:1px solid #e8dfe2;margin:0;">
             </td>
           </tr>
+
+          ${images?.footerImageUrl ? `
+          <!-- FOOTER IMAGE -->
+          <tr>
+            <td style="padding:0;margin:0;">
+              <img src="${images.footerImageUrl}" alt="" width="600" style="display:block;width:100%;max-width:600px;height:auto;" />
+            </td>
+          </tr>` : ""}
 
           <!-- FOOTER -->
           <tr>
@@ -225,7 +240,9 @@ async function sendEmail(opts: {
   }
 
   const from = `${cfg.fromName} <${cfg.fromEmail}>`;
-  const html = buildHtmlEmail(opts.body, opts.subject);
+  const bannerUrl = (cfg as any).emailBannerBase64 ? `${HOTEL_BASE_URL}/api/public/email-images/banner` : undefined;
+  const footerImageUrl = (cfg as any).emailFooterBase64 ? `${HOTEL_BASE_URL}/api/public/email-images/footer` : undefined;
+  const html = buildHtmlEmail(opts.body, opts.subject, { bannerUrl, footerImageUrl });
   let result: { ok: boolean; error?: string };
 
   if (cfg.provider === "smtp") {

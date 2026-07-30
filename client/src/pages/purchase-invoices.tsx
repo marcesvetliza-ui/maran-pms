@@ -314,10 +314,23 @@ function InvoiceDialog({
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
 
+  const TIPOS_C = ["FACT-C", "NC-C", "RECIBO-C"];
+
+  const applyNetoLines = (updated: NetoLine[]) => {
+    setForm(p => {
+      if (TIPOS_C.includes(p.tipoComprobante)) {
+        // Factura C: no IVA — el neto es el total, no calcular IVA
+        const netoTotal = updated.reduce((sum, l) => sum + (parseFloat(l.neto) || 0), 0);
+        return { ...p, montoNeto: netoTotal > 0 ? netoTotal.toFixed(2) : "", ...ALL_IVA_FIELDS };
+      }
+      return { ...p, ...calcFromLines(updated) };
+    });
+  };
+
   const updateNetoLine = (i: number, field: keyof NetoLine, val: string) => {
     setNetoLines(prev => {
       const updated = prev.map((l, j) => j === i ? { ...l, [field]: val } : l);
-      setForm(p => ({ ...p, ...calcFromLines(updated) }));
+      applyNetoLines(updated);
       return updated;
     });
   };
@@ -325,7 +338,7 @@ function InvoiceDialog({
   const removeNetoLine = (i: number) => {
     setNetoLines(prev => {
       const updated = prev.filter((_, j) => j !== i);
-      setForm(p => ({ ...p, ...calcFromLines(updated) }));
+      applyNetoLines(updated);
       return updated;
     });
   };
@@ -584,18 +597,9 @@ function InvoiceDialog({
     const validItems = invItems.filter(
       (r) => (r.mode === "new" && r.name.trim()) || (r.mode === "existing" && r.existingItemId)
     );
-    if (validItems.length > 0) {
-      const itemsTotal = validItems.reduce((acc, r) => acc + (parseFloat(r.quantity) || 0) * (parseFloat(r.costPrice) || 0), 0);
-      const netoVal = $n(form.montoNeto);
-      if (netoVal > 0 && Math.abs(itemsTotal - netoVal) > 1) {
-        toast({
-          title: "Diferencia en artículos",
-          description: `La suma de artículos ($${fmtMoney(itemsTotal)}) no coincide con el Monto Neto ($${fmtMoney(netoVal)}). Revisá los precios antes de finalizar.`,
-          variant: "destructive",
-        });
-        return;
-      }
-    }
+    // Nota: no se valida que la suma de artículos coincida con el neto —
+    // los precios de costo en inventario pueden diferir del total facturado
+    // (descuentos exclusivos, artículos sin cargo, etc.).
     createMut.mutate({ ...form, supplierId: form.supplierId ? parseInt(form.supplierId) : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
   };
 
@@ -605,6 +609,7 @@ function InvoiceDialog({
   const isResumen = form.tipoComprobante === "RESUMEN-BANCO" || form.tipoComprobante === "LIQ-TARJETA";
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
+  const isFacturaC = ["FACT-C", "NC-C", "RECIBO-C"].includes(form.tipoComprobante);
 
   return (
     <>
@@ -789,28 +794,30 @@ function InvoiceDialog({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-semibold">
-                    Netos Gravados
-                    {isResumen && <span className="ml-1 text-xs font-normal text-muted-foreground">(base para IVA)</span>}
+                    {isFacturaC ? "Importe" : "Netos Gravados"}
+                    {isResumen && !isFacturaC && <span className="ml-1 text-xs font-normal text-muted-foreground">(base para IVA)</span>}
                   </Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs gap-1"
-                    onClick={addNetoLine}
-                    data-testid="btn-add-neto-line"
-                  >
-                    <Plus className="h-3 w-3" /> Agregar línea
-                  </Button>
+                  {!isFacturaC && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={addNetoLine}
+                      data-testid="btn-add-neto-line"
+                    >
+                      <Plus className="h-3 w-3" /> Agregar línea
+                    </Button>
+                  )}
                 </div>
 
                 <div className="border rounded-md overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Neto gravado $</th>
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Alícuota IVA</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground text-xs">IVA calculado $</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs">{isFacturaC ? "Importe total $" : "Neto gravado $"}</th>
+                        {!isFacturaC && <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Alícuota IVA</th>}
+                        {!isFacturaC && <th className="text-right px-3 py-2 font-medium text-muted-foreground text-xs">IVA calculado $</th>}
                         <th className="w-8"></th>
                       </tr>
                     </thead>
@@ -818,7 +825,7 @@ function InvoiceDialog({
                       {netoLines.map((line, i) => {
                         const n = parseFloat(line.neto) || 0;
                         const entry = IVA_MAP[line.alicuota];
-                        const ivaCalc = entry && n > 0 ? n * entry.rate / 100 : 0;
+                        const ivaCalc = !isFacturaC && entry && n > 0 ? n * entry.rate / 100 : 0;
                         return (
                           <tr key={i} className="bg-background">
                             <td className="px-2 py-1.5">
@@ -833,26 +840,30 @@ function InvoiceDialog({
                                 data-testid={`input-neto-line-${i}`}
                               />
                             </td>
-                            <td className="px-2 py-1.5">
-                              <Select
-                                value={line.alicuota}
-                                onValueChange={v => updateNetoLine(i, "alicuota", v)}
-                              >
-                                <SelectTrigger className="h-8 text-sm" data-testid={`select-alicuota-line-${i}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="5">5%</SelectItem>
-                                  <SelectItem value="10.5">10.5%</SelectItem>
-                                  <SelectItem value="21">21%</SelectItem>
-                                  <SelectItem value="25">2.5%</SelectItem>
-                                  <SelectItem value="27">27%</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="px-3 py-1.5 text-right font-mono text-sm text-muted-foreground whitespace-nowrap">
-                              {ivaCalc > 0 ? `$${fmt(ivaCalc)}` : "—"}
-                            </td>
+                            {!isFacturaC && (
+                              <td className="px-2 py-1.5">
+                                <Select
+                                  value={line.alicuota}
+                                  onValueChange={v => updateNetoLine(i, "alicuota", v)}
+                                >
+                                  <SelectTrigger className="h-8 text-sm" data-testid={`select-alicuota-line-${i}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="5">5%</SelectItem>
+                                    <SelectItem value="10.5">10.5%</SelectItem>
+                                    <SelectItem value="21">21%</SelectItem>
+                                    <SelectItem value="25">2.5%</SelectItem>
+                                    <SelectItem value="27">27%</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                            )}
+                            {!isFacturaC && (
+                              <td className="px-3 py-1.5 text-right font-mono text-sm text-muted-foreground whitespace-nowrap">
+                                {ivaCalc > 0 ? `$${fmt(ivaCalc)}` : "—"}
+                              </td>
+                            )}
                             <td className="px-1 py-1.5 text-center">
                               {netoLines.length > 1 && (
                                 <button
@@ -872,14 +883,16 @@ function InvoiceDialog({
                     </tbody>
                     <tfoot className="border-t bg-muted/30">
                       <tr>
-                        <td colSpan={2} className="px-3 py-2 text-xs text-muted-foreground">
-                          Total neto: <span className="font-bold text-foreground font-mono">${fmt(form.montoNeto || "0")}</span>
+                        <td colSpan={isFacturaC ? 2 : 2} className="px-3 py-2 text-xs text-muted-foreground">
+                          {isFacturaC ? "Total:" : "Total neto:"} <span className="font-bold text-foreground font-mono">${fmt(form.montoNeto || "0")}</span>
                         </td>
-                        <td className="px-3 py-2 text-xs text-right text-muted-foreground">
-                          Total IVA: <span className="font-bold text-foreground font-mono">
-                            ${fmt($n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoIva105) + $n(form.montoIva21) + $n(form.montoIva27))}
-                          </span>
-                        </td>
+                        {!isFacturaC && (
+                          <td className="px-3 py-2 text-xs text-right text-muted-foreground">
+                            Total IVA: <span className="font-bold text-foreground font-mono">
+                              ${fmt($n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoIva105) + $n(form.montoIva21) + $n(form.montoIva27))}
+                            </span>
+                          </td>
+                        )}
                         <td></td>
                       </tr>
                     </tfoot>

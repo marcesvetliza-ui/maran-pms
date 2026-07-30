@@ -2544,6 +2544,9 @@ export const emailConfig = pgTable("email_config", {
   checkoutEnabled: boolean("checkout_enabled").notNull().default(true),
   checkoutSubject: text("checkout_subject").notNull().default("Gracias por tu estadía — Contanos tu experiencia"),
   checkoutBody: text("checkout_body").notNull().default("Hola {nombre_huesped},\n\nGracias por elegir Maran Suites & Towers. Esperamos que hayas disfrutado tu estadía.\n\nNos encantaría conocer tu experiencia. Completá nuestra encuesta rápida (menos de 2 minutos):\n\n{link_encuesta}\n\nSi tu estadía fue excelente, también podés dejarnos una reseña en Google Maps:\n{link_google_maps}\n\n¡Hasta la próxima!\nMaran Suites & Towers"),
+  // Email design images (stored as base64 data URLs, served via /api/public/email-images/:type)
+  emailBannerBase64: text("email_banner_base64"),
+  emailFooterBase64: text("email_footer_base64"),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 

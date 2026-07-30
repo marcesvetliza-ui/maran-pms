@@ -2734,22 +2734,19 @@ export async function registerRoutes(
 
       // ── Prevenir comprobantes duplicados ──────────────────────────────────
       if (body.numeroComprobante) {
+        const supplierClause = body.supplierId
+          ? sql`supplier_id = ${parseInt(body.supplierId)}`
+          : sql`(proveedor_cuit IS NOT NULL AND proveedor_cuit = ${body.proveedorCuit || ""})`;
+        const pvClause = body.puntoVenta
+          ? sql`punto_venta = ${parseInt(body.puntoVenta)}`
+          : sql`punto_venta IS NULL`;
         const dupCheck = await db.execute(sql`
           SELECT id, numero_comprobante_ext, numero_comprobante
           FROM purchase_invoices
           WHERE tipo_comprobante = ${body.tipoComprobante}
             AND numero_comprobante = ${body.numeroComprobante}
-            AND (
-              CASE
-                WHEN ${body.supplierId ? String(body.supplierId) : null}::int IS NOT NULL
-                  THEN supplier_id = ${body.supplierId ? parseInt(body.supplierId) : null}
-                ELSE (proveedor_cuit IS NOT NULL AND proveedor_cuit = ${body.proveedorCuit || null})
-              END
-            )
-            AND (
-              (${body.puntoVenta || null} IS NULL AND punto_venta IS NULL)
-              OR punto_venta = ${body.puntoVenta || null}
-            )
+            AND (${supplierClause})
+            AND (${pvClause})
           LIMIT 1
         `);
         if (dupCheck.rows.length > 0) {

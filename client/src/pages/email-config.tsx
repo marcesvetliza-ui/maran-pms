@@ -16,6 +16,7 @@ import {
   Mail, Send, CheckCircle2, XCircle, Clock, Star, MessageSquare, Eye,
   RefreshCw, Settings2, BarChart3, AlertTriangle, Zap, Server,
   Database, Download, MailCheck, ShieldCheck, FlaskConical, History,
+  Upload, ImageIcon, Trash2,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -187,6 +188,9 @@ export default function EmailConfigPage() {
 
         {/* ─── PLANTILLAS ─── */}
         <TabsContent value="plantillas" className="space-y-4 mt-4">
+          {/* Diseño del email — imágenes de banner y pie */}
+          <EmailImagesCard cfg={cfg} />
+
           {[
             {
               key: "confirmation",
@@ -941,6 +945,156 @@ function BackupTab() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email Images Card — upload/delete banner and footer images
+// ─────────────────────────────────────────────────────────────────────────────
+function EmailImagesCard({ cfg }: { cfg: any }) {
+  const { toast } = useToast();
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
+  const [footerPreview, setFooterPreview] = useState<string | null>(null);
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ type, imageData }: { type: string; imageData: string }) =>
+      apiRequest("POST", "/api/email/upload-image", { type, imageData }),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/email/config"] });
+      toast({ title: `Imagen ${vars.type === "banner" ? "de encabezado" : "de pie"} guardada` });
+    },
+    onError: (e: any) => toast({ title: "Error al guardar imagen", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (type: string) => apiRequest("DELETE", `/api/email/upload-image/${type}`),
+    onSuccess: (_data, type) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/email/config"] });
+      if (type === "banner") setBannerPreview(null);
+      else setFooterPreview(null);
+      toast({ title: `Imagen ${type === "banner" ? "de encabezado" : "de pie"} eliminada` });
+    },
+    onError: () => toast({ title: "Error al eliminar imagen", variant: "destructive" }),
+  });
+
+  const handleFile = (type: "banner" | "footer") => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Solo se aceptan imágenes (JPG, PNG)", variant: "destructive" });
+      return;
+    }
+    if (file.size > 2_000_000) {
+      toast({ title: "La imagen no puede superar 2 MB", variant: "destructive" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      if (type === "banner") setBannerPreview(dataUrl);
+      else setFooterPreview(dataUrl);
+      uploadMutation.mutate({ type, imageData: dataUrl });
+    };
+    reader.readAsDataURL(file);
+    // Reset input so same file can be re-selected
+    e.target.value = "";
+  };
+
+  const previewUrl = (type: "banner" | "footer") => {
+    if (type === "banner" && bannerPreview) return bannerPreview;
+    if (type === "footer" && footerPreview) return footerPreview;
+    // Fallback to served URL (adds cache-bust to reflect latest upload)
+    return `/api/public/email-images/${type}?t=${Date.now()}`;
+  };
+
+  const isSet = (type: "banner" | "footer") =>
+    type === "banner" ? (bannerPreview || cfg?.bannerImageSet) : (footerPreview || cfg?.footerImageSet);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <ImageIcon className="h-5 w-5 text-primary" />
+          Diseño visual del email
+        </CardTitle>
+        <CardDescription>
+          Imágenes que aparecen en todos los emails automáticos. Se aplican a confirmación, recordatorio y post-checkout.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Specs reminder */}
+        <div className="rounded-lg bg-muted/50 border px-4 py-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-semibold text-foreground">Especificaciones para el equipo de diseño</p>
+          <p>• Ancho: <strong>600 px</strong> exactos &nbsp;|&nbsp; Alto: 180–220 px recomendado &nbsp;|&nbsp; Formato: <strong>JPG</strong></p>
+          <p>• Resolución: 144 dpi (retina) o 72 dpi mínimo &nbsp;|&nbsp; Tamaño máximo: 2 MB</p>
+          <p>• Color bordo de referencia: <code className="bg-muted px-1 rounded">#8B1535</code> &nbsp;|&nbsp; Fondo actual: <code className="bg-muted px-1 rounded">#f0ebe8</code></p>
+        </div>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          {(["banner", "footer"] as const).map(type => (
+            <div key={type} className="space-y-2">
+              <Label className="text-sm font-medium">
+                {type === "banner" ? "📸 Encabezado (debajo del logo)" : "🖼️ Pie de email (sobre el footer)"}
+              </Label>
+
+              {/* Preview */}
+              <div className="border rounded-lg overflow-hidden bg-muted/30 min-h-[80px] flex items-center justify-center">
+                {isSet(type) ? (
+                  <img
+                    src={previewUrl(type)}
+                    alt={type}
+                    className="w-full h-auto object-contain max-h-[120px]"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-1 py-4 text-muted-foreground">
+                    <ImageIcon className="h-8 w-8 opacity-30" />
+                    <span className="text-xs">Sin imagen cargada</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2">
+                <label className="flex-1">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={handleFile(type)}
+                    disabled={uploadMutation.isPending}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full cursor-pointer"
+                    asChild
+                    disabled={uploadMutation.isPending}
+                  >
+                    <span>
+                      <Upload className="h-3.5 w-3.5 mr-1.5" />
+                      {isSet(type) ? "Cambiar imagen" : "Cargar imagen"}
+                    </span>
+                  </Button>
+                </label>
+                {isSet(type) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => deleteMutation.mutate(type)}
+                    disabled={deleteMutation.isPending}
+                    title="Eliminar imagen"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
