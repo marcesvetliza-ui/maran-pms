@@ -233,6 +233,7 @@ export default function InventoryPage() {
   const [newCountNotes, setNewCountNotes] = useState("");
   const [countItemEdits, setCountItemEdits] = useState<Record<string, string>>({});
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [groupFilter, setGroupFilter] = useState("all");
   const [kindFilter, setKindFilter] = useState("all");
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ItemCategory | null>(null);
@@ -699,6 +700,13 @@ ${(movement.items || []).map(i => `    <tr>
     onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
   });
 
+  // Groups are categories with isGroup=true; leaf categories are those with a parentId
+  const groups = categories.filter((c) => c.isGroup);
+  // Leaf categories available for the category filter — when a group is selected, only show its children
+  const categoriesForFilter = groupFilter === "all"
+    ? categories.filter((c) => !c.isGroup)
+    : categories.filter((c) => !c.isGroup && String(c.parentId) === groupFilter);
+
   const filteredItems = items
     .filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -706,7 +714,9 @@ ${(movement.items || []).map(i => `    <tr>
       const matchesArea = areaFilter === "all" || (item.category as any)?.area === areaFilter;
       const matchesCategory = categoryFilter === "all" || String((item.category as any)?.id || item.categoryId || "") === categoryFilter;
       const matchesKind = kindFilter === "all" || (item as any).itemKind === kindFilter;
-      return matchesSearch && matchesArea && matchesCategory && matchesKind;
+      // Group filter: item matches if its category's parentId equals the selected group
+      const matchesGroup = groupFilter === "all" || String((item.category as any)?.parentId || "") === groupFilter;
+      return matchesSearch && matchesArea && matchesCategory && matchesKind && matchesGroup;
     })
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
@@ -841,13 +851,36 @@ ${(movement.items || []).map(i => `    <tr>
                 data-testid="input-search"
               />
             </div>
+            {groups.length > 0 && (
+              <Select
+                value={groupFilter}
+                onValueChange={(val) => {
+                  setGroupFilter(val);
+                  setCategoryFilter("all");
+                }}
+              >
+                <SelectTrigger className="w-[200px]" data-testid="select-group-filter">
+                  <SelectValue placeholder="Todos los agrupamientos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los agrupamientos</SelectItem>
+                  {[...groups]
+                    .sort((a, b) => a.name.localeCompare(b.name, "es"))
+                    .map((g) => (
+                      <SelectItem key={g.id} value={String(g.id)}>
+                        {g.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            )}
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
                 <SelectValue placeholder="Todas las categorías" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas las categorías</SelectItem>
-                {[...categories]
+                {[...categoriesForFilter]
                   .filter(cat => cat.id)
                   .sort((a, b) => a.name.localeCompare(b.name, "es"))
                   .map((cat) => (
