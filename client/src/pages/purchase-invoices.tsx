@@ -1027,7 +1027,7 @@ function InvoiceDialog({
                       {row.mode === "existing" ? (
                         <div>
                           <Label className="text-xs mb-1 block">Artículo del inventario</Label>
-                          <Popover modal={false} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
+                          <Popover modal={true} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
                             <PopoverTrigger asChild>
                               <Button
                                 variant="outline"
