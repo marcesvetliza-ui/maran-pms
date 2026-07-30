@@ -1055,6 +1055,7 @@ function InvoiceDialog({
                                         <CommandItem
                                           key={item.id}
                                           value={item.name}
+                                          onMouseDown={(e) => e.preventDefault()}
                                           onSelect={() => {
                                             updateInvRow(i, "existingItemId", String(item.id));
                                             setExistingItemOpen((p) => ({ ...p, [i]: false }));
