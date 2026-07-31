@@ -1518,6 +1518,156 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Helper: compute already-transferred amount for a source item.
+  // Negative adjustment charges include [xfer:{ref}] in their description to track prior transfers.
+  async function getAlreadyTransferred(sourceId: string, ref: string): Promise<number> {
+    const rows = await db.execute(sql`
+      SELECT COALESCE(SUM(ABS(amount::numeric)), 0) AS total
+      FROM charges
+      WHERE reservation_id = ${sourceId}
+        AND status = 'active'
+        AND amount::numeric < 0
+        AND description LIKE ${`%[xfer:${ref}]%`}
+    `);
+    return parseFloat((rows.rows[0] as any)?.total ?? "0");
+  }
+
+  // GET remaining transferable amount for each item in a source reservation.
+  // Returns { accommodation: number, charges: { [chargeId]: number } }
+  app.get("/api/reservations/:id/transfer-remaining", requireAuth, async (req, res) => {
+    try {
+      const sourceId = req.params.id;
+      const sourceRes = await storage.getReservation(sourceId);
+      if (!sourceRes) return res.status(404).json({ error: "Reserva no encontrada" });
+      if (isReservationLocked(sourceRes)) {
+        return res.status(403).json({ error: "No se puede operar sobre una reserva cerrada o cancelada" });
+      }
+
+      const roomTotal = parseFloat(sourceRes.totalRoomAmount || "0");
+      const alreadyAccommodation = await getAlreadyTransferred(sourceId, "accommodation");
+      const remainingAccommodation = Math.max(0, roomTotal - alreadyAccommodation);
+
+      const chargesList = await storage.getCharges(sourceId);
+      const chargeRemaining: Record<string, number> = {};
+      for (const c of chargesList) {
+        if (c.status !== "active" || parseFloat(c.amount) <= 0) continue;
+        const alreadyCharge = await getAlreadyTransferred(sourceId, c.id);
+        chargeRemaining[c.id] = Math.max(0, parseFloat(c.amount) - alreadyCharge);
+      }
+
+      res.json({ accommodation: remainingAccommodation, charges: chargeRemaining });
+    } catch (error) {
+      console.error("[transfer-remaining] Error:", error);
+      res.status(500).json({ error: "Error al obtener saldos transferibles" });
+    }
+  });
+
+  // Transfer a single charge (partial or full) from one reservation to another.
+  // Creates a negative adjustment on the source (with a [xfer:{ref}] tag for tracking)
+  // and a positive charge on the destination.
+  app.post("/api/reservations/:id/transfer-charge", requireAuth, async (req, res) => {
+    try {
+      const sourceId = req.params.id;
+      const { chargeId, amount, targetReservationId, description } = req.body;
+      const operator = (req as any).user?.username || "Sistema";
+
+      if (!targetReservationId) return res.status(400).json({ error: "Se requiere reserva destino" });
+      if (sourceId === targetReservationId) return res.status(400).json({ error: "Origen y destino no pueden ser iguales" });
+
+      const transferAmount = parseFloat(amount);
+      if (!transferAmount || transferAmount <= 0) return res.status(400).json({ error: "El monto debe ser mayor a 0" });
+
+      const sourceRes = await storage.getReservation(sourceId);
+      if (!sourceRes) return res.status(404).json({ error: "Reserva origen no encontrada" });
+      if (isReservationLocked(sourceRes)) {
+        return res.status(403).json({ error: "No se puede transferir cargos de una reserva cerrada o cancelada" });
+      }
+
+      const targetRes = await storage.getReservation(targetReservationId);
+      if (!targetRes) return res.status(404).json({ error: "Reserva destino no encontrada" });
+
+      if (targetRes.status !== "checked_in" && targetRes.status !== "confirmed") {
+        return res.status(400).json({ error: "La reserva destino debe estar activa (confirmada o con check-in)" });
+      }
+
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const sourceRoom = (sourceRes as any).room?.roomNumber || sourceRes.roomId || "?";
+      const targetRoom = (targetRes as any).room?.roomNumber || targetRes.roomId || "?";
+      const sourceGuest = (sourceRes as any).guest ? `${(sourceRes as any).guest.firstName} ${(sourceRes as any).guest.lastName}` : "Huésped";
+
+      let sourceDescription: string;
+      let targetDescription: string;
+      let xferRef: string; // machine-readable ref tag embedded in the negative charge description
+
+      if (chargeId === "accommodation") {
+        const roomTotal = parseFloat(sourceRes.totalRoomAmount || "0");
+        if (roomTotal <= 0) return res.status(400).json({ error: "Esta reserva no tiene monto de alojamiento" });
+
+        // Compute remaining after prior transfers (authoritative server-side cap)
+        const alreadyTransferred = await getAlreadyTransferred(sourceId, "accommodation");
+        const remaining = roomTotal - alreadyTransferred;
+        if (transferAmount > remaining + 0.01) {
+          return res.status(400).json({
+            error: `Solo quedan $${remaining.toFixed(2)} disponibles para transferir de alojamiento (ya se transfirieron $${alreadyTransferred.toFixed(2)})`,
+          });
+        }
+
+        xferRef = "accommodation";
+        sourceDescription = `Transferencia alojamiento → Hab.${targetRoom} [xfer:accommodation]`;
+        targetDescription = `Alojamiento transferido desde Hab.${sourceRoom} (${sourceGuest})`;
+      } else {
+        // Validate charge belongs to this reservation
+        const charge = await storage.getCharge(chargeId);
+        if (!charge) return res.status(404).json({ error: "Cargo no encontrado" });
+        if (charge.reservationId !== sourceId) return res.status(403).json({ error: "El cargo no pertenece a esta reserva" });
+        if (charge.status !== "active") return res.status(400).json({ error: "El cargo no está activo" });
+
+        const chargeAmount = parseFloat(charge.amount);
+        if (chargeAmount <= 0) return res.status(400).json({ error: "El cargo tiene monto inválido" });
+
+        // Compute remaining after prior transfers (authoritative server-side cap)
+        const alreadyTransferred = await getAlreadyTransferred(sourceId, charge.id);
+        const remaining = chargeAmount - alreadyTransferred;
+        if (transferAmount > remaining + 0.01) {
+          return res.status(400).json({
+            error: `Solo quedan $${remaining.toFixed(2)} disponibles para transferir de este cargo (ya se transfirieron $${alreadyTransferred.toFixed(2)})`,
+          });
+        }
+
+        xferRef = charge.id;
+        sourceDescription = `Transferencia "${charge.description}" → Hab.${targetRoom} [xfer:${charge.id}]`;
+        targetDescription = `${charge.description} (transferido desde Hab.${sourceRoom} – ${sourceGuest})`;
+      }
+
+      // 1. Create negative adjustment on source (reduces source balance)
+      await storage.createCharge({
+        reservationId: sourceId,
+        description: sourceDescription,
+        amount: String(-transferAmount),
+        date: today,
+        category: "adjustment",
+        createdBy: operator,
+        status: "active",
+      });
+
+      // 2. Create positive charge on destination
+      await storage.createCharge({
+        reservationId: targetReservationId,
+        description: targetDescription,
+        amount: String(transferAmount),
+        date: today,
+        category: "adjustment",
+        createdBy: operator,
+        status: "active",
+      });
+
+      res.json({ success: true, transferred: transferAmount, sourceRoom, targetRoom });
+    } catch (error) {
+      console.error("[transfer-charge] Error:", error);
+      res.status(500).json({ error: "Error al transferir el cargo" });
+    }
+  });
+
   // Bulk transfer charges + accommodation + advances to another reservation
   app.post("/api/reservations/:id/bulk-transfer", requireAuth, async (req, res) => {
     try {

@@ -23,6 +23,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
+import { useQuery, useMutation } from "@tanstack/react-query";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -192,6 +193,10 @@ export function PrefacturaDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Transfer charge sub-dialog
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [transferCharge, setTransferCharge] = useState<{ id: string; description: string; maxAmount: number; originalAmount?: number } | null>(null);
+
   // Queries
   const { data: folio, isLoading: folioLoading, refetch: refetchFolio } = useQuery<PrefacturaFolioData>({
     queryKey: ["/api/reservations", String(reservationId), "folio"],
@@ -206,6 +211,20 @@ export function PrefacturaDialog({
   const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], enabled: open });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"], enabled: open });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"], enabled: open });
+
+  // Remaining transferable amounts per source item (re-fetched after each transfer)
+  const { data: transferRemaining, refetch: refetchTransferRemaining } = useQuery<{
+    accommodation: number;
+    charges: Record<string, number>;
+  }>({
+    queryKey: ["/api/reservations", String(reservationId), "transfer-remaining"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservationId}/transfer-remaining`);
+      if (!res.ok) return { accommodation: 0, charges: {} };
+      return res.json();
+    },
+    enabled: open && !!reservationId,
+  });
 
   // On open: reset step
   useEffect(() => {
@@ -562,6 +581,7 @@ export function PrefacturaDialog({
                       <TableHead className="w-28 text-right">Total</TableHead>
                       <TableHead className="w-24 text-right">Ya cobrado</TableHead>
                       <TableHead className="w-24 text-right">Pendiente</TableHead>
+                      <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -580,6 +600,7 @@ export function PrefacturaDialog({
                         onEditChange={setEditingValue}
                         onSaveEdit={saveEdit}
                         onCancelEdit={() => setEditingId(null)}
+                        onTransfer={() => { setTransferCharge({ id: "accommodation", description: `Alojamiento Hab. ${folio.roomNumber}`, maxAmount: transferRemaining?.accommodation ?? folio.roomTotal, originalAmount: folio.roomTotal }); setTransferDialogOpen(true); }}
                       />
                     )}
                     {/* Extra charges */}
@@ -599,13 +620,14 @@ export function PrefacturaDialog({
                         onEditChange={setEditingValue}
                         onSaveEdit={saveEdit}
                         onCancelEdit={() => setEditingId(null)}
+                        onTransfer={() => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
                       />
                     ))}
                     {/* Payments / advances already made */}
                     {(folio.payments || []).length > 0 && (
                       <>
                         <TableRow className="bg-muted/20">
-                          <TableCell colSpan={5} className="py-1 px-3 text-xs text-muted-foreground font-medium">Cobros ya registrados</TableCell>
+                          <TableCell colSpan={6} className="py-1 px-3 text-xs text-muted-foreground font-medium">Cobros ya registrados</TableCell>
                         </TableRow>
                         {(folio.payments || []).map((p: any) => (
                           <TableRow key={p.id} className="opacity-60">
@@ -614,7 +636,7 @@ export function PrefacturaDialog({
                               {PAYMENT_METHOD_LABELS[p.method] || p.method}
                               {p.date ? <span className="text-xs text-muted-foreground ml-2">{formatDateAR(p.date)}</span> : null}
                             </TableCell>
-                            <TableCell className="text-right text-sm text-green-700 dark:text-green-400" colSpan={3}>
+                            <TableCell className="text-right text-sm text-green-700 dark:text-green-400" colSpan={4}>
                               − ${fmtMoney(p.amount)}
                             </TableCell>
                           </TableRow>
@@ -1025,6 +1047,20 @@ export function PrefacturaDialog({
           </div>
         )}
       </DialogContent>
+
+      {/* Transfer charge sub-dialog */}
+      <TransferChargeDialog
+        open={transferDialogOpen}
+        onClose={() => setTransferDialogOpen(false)}
+        reservationId={reservationId}
+        charge={transferCharge}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "transfer-remaining"] });
+          refetchFolio();
+          refetchTransferRemaining();
+        }}
+      />
     </Dialog>
   );
 }
@@ -1034,12 +1070,14 @@ export function PrefacturaDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
+  onTransfer,
 }: {
   id: string; amount: number; description: string; date?: string; alreadyPaid: number;
   selected: boolean; onToggle: () => void;
   editing: boolean; editingValue: string;
   onStartEdit: () => void; onEditChange: (v: string) => void;
   onSaveEdit: () => void; onCancelEdit: () => void;
+  onTransfer?: () => void;
 }) {
   const pending = Math.max(0, amount - alreadyPaid);
 
@@ -1082,6 +1120,191 @@ function ChargeRow({
       <TableCell className="text-right text-sm font-medium">
         ${fmtMoney(pending)}
       </TableCell>
+      {onTransfer && (
+        <TableCell className="w-10 text-right">
+          <Button
+            size="icon" variant="ghost"
+            className="h-7 w-7 text-muted-foreground hover:text-blue-600 shrink-0"
+            title="Transferir a otra habitación"
+            onClick={e => { e.stopPropagation(); onTransfer(); }}
+          >
+            <ArrowRightLeft className="h-3.5 w-3.5" />
+          </Button>
+        </TableCell>
+      )}
     </TableRow>
+  );
+}
+
+function TransferChargeDialog({
+  open, onClose, reservationId, charge, onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  reservationId: string | number;
+  charge: { id: string; description: string; maxAmount: number; originalAmount?: number } | null;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [targetReservationId, setTargetReservationId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fetch active reservations (checked_in and confirmed) for the target picker
+  const { data: activeReservations = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations", "active-for-transfer"],
+    queryFn: async () => {
+      const res = await fetch("/api/reservations");
+      if (!res.ok) throw new Error("Error cargando reservas");
+      const all: any[] = await res.json();
+      return all.filter((r: any) =>
+        (r.status === "checked_in" || r.status === "confirmed") &&
+        String(r.id) !== String(reservationId)
+      );
+    },
+    enabled: open,
+  });
+
+  // Reset on open — default to the full remaining amount
+  useEffect(() => {
+    if (open && charge) {
+      setAmount(charge.maxAmount > 0 ? String(charge.maxAmount.toFixed(2)) : "");
+      setTargetReservationId("");
+    }
+  }, [open, charge?.id]);
+
+  async function handleSubmit() {
+    if (!targetReservationId) {
+      toast({ title: "Seleccioná una habitación destino", variant: "destructive" });
+      return;
+    }
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) {
+      toast({ title: "El monto debe ser mayor a 0", variant: "destructive" });
+      return;
+    }
+    if (charge && amt > charge.maxAmount + 0.01) {
+      toast({ title: `El monto no puede superar $${fmtMoney(charge.maxAmount)}`, variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const res = await apiRequest("POST", `/api/reservations/${reservationId}/transfer-charge`, {
+        chargeId: charge?.id,
+        amount: amt,
+        targetReservationId,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || "Error al transferir");
+      toast({ title: `Transferencia realizada: $${fmtMoney(amt)} → Hab. ${body.targetRoom}` });
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (!charge) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o && !isSubmitting) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowRightLeft className="h-5 w-5" />
+            Transferir cargo a otra habitación
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          {/* Charge info */}
+          <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm space-y-1">
+            <div><span className="text-muted-foreground">Cargo: </span><span className="font-medium">{charge.description}</span></div>
+            {charge.originalAmount !== undefined && charge.originalAmount !== charge.maxAmount ? (
+              <>
+                <div><span className="text-muted-foreground">Total original: </span><span className="font-medium">${fmtMoney(charge.originalAmount)}</span></div>
+                <div>
+                  <span className="text-muted-foreground">Disponible para transferir: </span>
+                  <span className={`font-semibold ${charge.maxAmount <= 0 ? "text-red-600" : "text-blue-700 dark:text-blue-400"}`}>
+                    ${fmtMoney(charge.maxAmount)}
+                  </span>
+                  <span className="text-muted-foreground ml-1">(ya transferido: ${fmtMoney(charge.originalAmount - charge.maxAmount)})</span>
+                </div>
+              </>
+            ) : (
+              <div><span className="text-muted-foreground">Monto total: </span><span className="font-medium">${fmtMoney(charge.maxAmount)}</span></div>
+            )}
+          </div>
+
+          {charge.maxAmount <= 0 ? (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
+              <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-amber-800 dark:text-amber-300">Este cargo ya fue transferido en su totalidad. No hay saldo disponible para transferir.</p>
+            </div>
+          ) : (
+            <>
+              {/* Target room picker */}
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Habitación destino</Label>
+                <Select value={targetReservationId} onValueChange={setTargetReservationId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar habitación activa..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeReservations.map((r: any) => {
+                      const roomNum = r.room?.roomNumber || r.roomId || "?";
+                      const guestName = r.guest
+                        ? `${r.guest.lastName ?? ""} ${r.guest.firstName ?? ""}`.trim()
+                        : "Huésped";
+                      const statusLabel = r.status === "checked_in" ? "CI" : "Conf.";
+                      return (
+                        <SelectItem key={r.id} value={String(r.id)}>
+                          Hab. {roomNum} — {guestName} ({statusLabel})
+                        </SelectItem>
+                      );
+                    })}
+                    {activeReservations.length === 0 && (
+                      <SelectItem value="_none" disabled>Sin reservas activas disponibles</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Amount */}
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">
+                  Monto a transferir (máx. ${fmtMoney(charge.maxAmount)})
+                </Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max={charge.maxAmount}
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="text-sm"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Se creará un descuento en este folio y se agregará el cargo al folio destino.
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
+          {charge.maxAmount > 0 && (
+            <Button onClick={handleSubmit} disabled={isSubmitting || !targetReservationId}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <ArrowRightLeft className="h-4 w-4 mr-1" />}
+              Transferir
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
