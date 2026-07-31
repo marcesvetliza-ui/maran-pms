@@ -7,7 +7,7 @@ import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
   CircleCheck, AlertCircle, Loader2, Percent, Building2, User,
-  Edit2, Check, X, FileText, AlertTriangle, MinusCircle, ArrowRightLeft,
+  Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -200,6 +200,9 @@ export function PrefacturaDialog({
 
   // NC sub-dialog
   const [ncDialogOpen, setNcDialogOpen] = useState(false);
+
+  // ND sub-dialog
+  const [ndDialogOpen, setNdDialogOpen] = useState(false);
 
   // Queries
   const { data: folio, isLoading: folioLoading, refetch: refetchFolio } = useQuery<PrefacturaFolioData>({
@@ -815,14 +818,24 @@ export function PrefacturaDialog({
             <DialogFooter className="gap-2 flex-wrap">
               <Button variant="outline" onClick={handleClose}>Cancelar</Button>
               {emittedInvoices.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30"
-                  onClick={() => setNcDialogOpen(true)}
-                >
-                  <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30"
+                    onClick={() => setNcDialogOpen(true)}
+                  >
+                    <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-blue-700 border-blue-300 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-700 dark:hover:bg-blue-950/30"
+                    onClick={() => setNdDialogOpen(true)}
+                  >
+                    <PlusCircle className="h-4 w-4 mr-1" />Nota de Débito
+                  </Button>
+                </>
               )}
               <Button
                 variant="outline"
@@ -1099,6 +1112,21 @@ export function PrefacturaDialog({
       <NotaCreditoDialog
         open={ncDialogOpen}
         onClose={() => setNcDialogOpen(false)}
+        reservationId={reservationId}
+        invoices={emittedInvoices}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+          refetchFolio();
+          refetchEmittedInvoices();
+        }}
+      />
+
+      {/* Nota de Débito sub-dialog */}
+      <NotaDebitoDialog
+        open={ndDialogOpen}
+        onClose={() => setNdDialogOpen(false)}
         reservationId={reservationId}
         invoices={emittedInvoices}
         onSuccess={() => {
@@ -1421,6 +1449,224 @@ function NotaCreditoDialog({
               <><Loader2 className="h-4 w-4 animate-spin mr-1" />Emitiendo...</>
             ) : (
               <><MinusCircle className="h-4 w-4 mr-1" />Emitir NC por ${fmtMoney(totalNc)}</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── NotaDebitoDialog sub-component ──────────────────────────────────────────
+
+function NotaDebitoDialog({
+  open, onClose, reservationId, invoices, onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  reservationId: string | number;
+  invoices: NcInvoice[];
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>("");
+  const [motivo, setMotivo] = useState("");
+  const [monto, setMonto] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emittedNd, setEmittedNd] = useState<any>(null);
+
+  const selectedInvoice = invoices.find(inv => String(inv.id) === selectedInvoiceId) ?? null;
+
+  // Reset when dialog opens
+  useEffect(() => {
+    if (open) {
+      setSelectedInvoiceId(invoices.length === 1 ? String(invoices[0].id) : "");
+      setMotivo("");
+      setMonto("");
+      setEmittedNd(null);
+    }
+  }, [open]);
+
+  const montoNum = parseFloat(monto) || 0;
+
+  async function handleSubmit() {
+    if (!selectedInvoice) {
+      toast({ title: "Seleccioná una factura de referencia", variant: "destructive" }); return;
+    }
+    if (montoNum <= 0) {
+      toast({ title: "El monto debe ser mayor a $0", variant: "destructive" }); return;
+    }
+    if (!motivo.trim()) {
+      toast({ title: "Ingresá un motivo para la Nota de Débito", variant: "destructive" }); return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await apiRequest("POST", `/api/billing/invoices/${selectedInvoice.id}/nota-debito`, {
+        motivo: motivo.trim(),
+        monto: montoNum,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || body?.message || "Error al emitir ND");
+
+      setEmittedNd(body);
+      toast({ title: `ND emitida: ${body.tipoComprobante ?? body.tipo_comprobante} ${String(body.puntoVenta ?? body.punto_venta ?? 0).padStart(4,"0")}-${String(body.numero ?? 0).padStart(8,"0")}` });
+      onSuccess();
+
+      // Auto-open PDF
+      setTimeout(() => window.open(`/api/billing/invoices/${body.id}/pdf`, "_blank"), 300);
+    } catch (err: any) {
+      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (emittedNd) {
+    return (
+      <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CircleCheck className="h-5 w-5 text-blue-600" />
+              Nota de Débito emitida
+            </DialogTitle>
+          </DialogHeader>
+          <Card className="border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/10">
+            <CardContent className="p-4 space-y-1 text-sm">
+              <div className="font-bold text-blue-700 dark:text-blue-400">
+                {emittedNd.tipoComprobante ?? emittedNd.tipo_comprobante}{" "}
+                {String(emittedNd.puntoVenta ?? emittedNd.punto_venta ?? 0).padStart(4,"0")}-{String(emittedNd.numero ?? 0).padStart(8,"0")}
+              </div>
+              <div className="text-muted-foreground">Monto: <span className="font-medium text-foreground">${fmtMoney(emittedNd.montoTotal ?? emittedNd.monto_total)}</span></div>
+              {emittedNd.cae && <div className="text-muted-foreground">CAE: <span className="font-mono text-xs">{emittedNd.cae}</span></div>}
+            </CardContent>
+          </Card>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline" size="sm"
+              onClick={() => window.open(`/api/billing/invoices/${emittedNd.id}/pdf`, "_blank")}
+            >
+              <Printer className="h-4 w-4 mr-1" />Ver PDF
+            </Button>
+            <Button onClick={onClose}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o && !isSubmitting) onClose(); }}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <PlusCircle className="h-5 w-5 text-blue-600" />
+            Emitir Nota de Débito
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/20 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
+            La Nota de Débito se emite cuando se facturó un monto menor al que correspondía. Se emite una ND por la diferencia.
+          </div>
+
+          {/* Invoice selector */}
+          {invoices.length > 1 ? (
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Factura de referencia</Label>
+              <Select value={selectedInvoiceId} onValueChange={setSelectedInvoiceId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar factura..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {invoices.map(inv => (
+                    <SelectItem key={inv.id} value={String(inv.id)}>
+                      {inv.tipo_comprobante} {String(inv.punto_venta).padStart(4,"0")}-{String(inv.numero).padStart(8,"0")} — ${fmtMoney(inv.monto_total)} · {inv.cliente_razon_social}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : invoices.length === 1 && !selectedInvoiceId ? (
+            // auto-select handled by useEffect; show nothing extra
+            null
+          ) : null}
+
+          {/* Invoice summary */}
+          {selectedInvoice && (
+            <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm space-y-1">
+              <div className="font-medium">
+                {selectedInvoice.tipo_comprobante}{" "}
+                {String(selectedInvoice.punto_venta).padStart(4,"0")}-{String(selectedInvoice.numero).padStart(8,"0")}
+                {" · "}{formatDateAR(selectedInvoice.fecha_emision)}
+              </div>
+              <div className="text-muted-foreground">
+                <span>Cliente: </span><span className="text-foreground">{selectedInvoice.cliente_razon_social}</span>
+                {selectedInvoice.cliente_cuit && <span className="ml-2 text-xs">CUIT {selectedInvoice.cliente_cuit}</span>}
+              </div>
+              <div className="text-muted-foreground">
+                Total facturado: <span className="text-foreground font-medium">${fmtMoney(selectedInvoice.monto_total)}</span>
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                La ND se emitirá como <strong>{selectedInvoice.tipo_comprobante === "FA" ? "NDA (Nota de Débito A)" : selectedInvoice.tipo_comprobante === "FC" ? "NDC (Nota de Débito C)" : "NDB (Nota de Débito B)"}</strong>
+              </div>
+            </div>
+          )}
+
+          {/* Motivo */}
+          {selectedInvoice && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Motivo / Descripción <span className="text-red-500">*</span></Label>
+                <Input
+                  value={motivo}
+                  onChange={e => setMotivo(e.target.value)}
+                  placeholder="Ej: Diferencia de tarifa no facturada, cargo adicional..."
+                  className="text-sm"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Monto adicional a cobrar <span className="text-red-500">*</span></Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={monto}
+                  onChange={e => setMonto(e.target.value)}
+                  placeholder="0.00"
+                  className="text-sm"
+                />
+                {montoNum > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Se emitirá una ND por <strong>${fmtMoney(montoNum)}</strong> adicionales.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
+          {invoices.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">No hay facturas emitidas para esta reserva.</p>
+          )}
+
+          {invoices.length > 1 && !selectedInvoice && (
+            <p className="text-sm text-muted-foreground text-center py-4">Seleccioná una factura para continuar.</p>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || !selectedInvoice || montoNum <= 0 || !motivo.trim()}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {isSubmitting ? (
+              <><Loader2 className="h-4 w-4 animate-spin mr-1" />Emitiendo...</>
+            ) : (
+              <><PlusCircle className="h-4 w-4 mr-1" />Emitir ND por ${fmtMoney(montoNum)}</>
             )}
           </Button>
         </DialogFooter>

@@ -1,7 +1,7 @@
 const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
 
-const TIPOS_CBT: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8 };
+const TIPOS_CBT: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8, NCC: 13, NDA: 2, NDB: 7, NDC: 12 };
 
 export interface FECAERequest {
   tipo: string;

@@ -495,4 +495,88 @@ export function registerBillingRoutes(app: Express) {
       res.status(500).json({ error: e.message });
     }
   });
+
+  // POST /api/billing/invoices/:id/nota-debito
+  app.post("/api/billing/invoices/:id/nota-debito", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
+      if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
+      const original = row.rows[0] as any;
+
+      if (original.estado === "anulada") {
+        return res.status(400).json({ error: "No se puede emitir una ND sobre una factura anulada" });
+      }
+
+      const { motivo, monto } = req.body;
+      if (!monto || parseFloat(monto) <= 0) {
+        return res.status(400).json({ error: "El monto de la Nota de Débito debe ser mayor a $0" });
+      }
+      if (!motivo || !String(motivo).trim()) {
+        return res.status(400).json({ error: "El motivo es requerido" });
+      }
+
+      // Derive ND type from original invoice: FA → NDA, FB → NDB, FC → NDC (AFIP criteria)
+      const tipoND =
+        original.tipo_comprobante === "FA" ? "NDA" :
+        original.tipo_comprobante === "FC" ? "NDC" : "NDB";
+      const user = (req as any).user;
+
+      const montoParsed = parseFloat(monto);
+      const nroOriginal = `${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}`;
+
+      const ndItems = [{
+        descripcion: `${String(motivo).trim()} — s/${nroOriginal}`,
+        cantidad: 1,
+        precioUnitario: montoParsed,
+        alicuotaIva: "no_gravado" as const,
+        subtotalNeto: 0,
+        subtotal: montoParsed,
+      }];
+
+      const nd = await emitirFactura({
+        tipoComprobante: tipoND as "NDA" | "NDB" | "NDC",
+        cliente: {
+          razonSocial: original.cliente_razon_social,
+          cuit: original.cliente_cuit,
+          dni: original.cliente_dni,
+          condicionIva: original.cliente_condicion_iva,
+          domicilio: original.cliente_domicilio,
+        },
+        items: ndItems,
+        reservaId: original.reserva_id || undefined,
+        folioId: original.folio_id || undefined,
+        facturaOriginalId: original.id,
+        operador: user?.fullName || user?.username,
+        puntoVentaOverride: original.punto_venta,
+      } as any);
+
+      // Register cash movement (income) in the corresponding area
+      try {
+        const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nd.puntoVenta} AND activo = true LIMIT 1`);
+        const pvArea = (pvRow.rows[0] as any)?.area || "recepcion";
+        const totalND = parseFloat(String((nd as any).montoTotal || "0"));
+        if (totalND > 0) {
+          const nroND = `${nd.tipoComprobante}-${String(nd.numero).padStart(8, "0")}`;
+          await storage.registerCashMovement(
+            pvArea,
+            "nota_debito",
+            String(nd.id),
+            `${nroND} s/${nroOriginal}${motivo ? ` — ${motivo}` : ""}`,
+            "nd",
+            String(totalND.toFixed(2)),
+            "income",
+            user?.fullName || user?.username,
+            nd.tipoComprobante
+          );
+        }
+      } catch (cashErr) {
+        console.error("[ND] Error registrando movimiento de caja:", cashErr);
+      }
+
+      res.status(201).json(nd);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 }

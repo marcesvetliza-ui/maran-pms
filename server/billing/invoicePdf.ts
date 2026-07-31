@@ -22,6 +22,10 @@ const TIPO_LABELS: Record<string, { nombre: string; letra: string; codigo: strin
   FC:  { nombre: "FACTURA",          letra: "C", codigo: "011" },
   NCA: { nombre: "NOTA DE CRÉDITO",  letra: "A", codigo: "003" },
   NCB: { nombre: "NOTA DE CRÉDITO",  letra: "B", codigo: "008" },
+  NCC: { nombre: "NOTA DE CRÉDITO",  letra: "C", codigo: "013" },
+  NDA: { nombre: "NOTA DE DÉBITO",   letra: "A", codigo: "002" },
+  NDB: { nombre: "NOTA DE DÉBITO",   letra: "B", codigo: "007" },
+  NDC: { nombre: "NOTA DE DÉBITO",   letra: "C", codigo: "012" },
 };
 
 export async function generarFacturaPDF(factura: any, config: any): Promise<Buffer> {
@@ -118,7 +122,7 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
 
     // ── Items table ─────────────────────────────────────────────
     // Factura A / NC-A discriminan IVA; B, C, NC-B no discriminan
-    const discriminaIVA = ["FA", "NCA"].includes(tipoKey);
+    const discriminaIVA = ["FA", "NCA", "NDA"].includes(tipoKey);
 
     doc.rect(x0, y, W, 16).fillColor("#f0f0f0").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
     doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);

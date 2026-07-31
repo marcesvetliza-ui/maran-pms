@@ -22,7 +22,7 @@ export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
 ];
 
 export interface NewInvoiceData {
-  tipoComprobante: "FA" | "FB" | "FC" | "NCA" | "NCB" | NonFiscalTipo;
+  tipoComprobante: "FA" | "FB" | "FC" | "NCA" | "NCB" | "NDA" | "NDB" | "NDC" | NonFiscalTipo;
   cliente: {
     razonSocial: string;
     cuit?: string;
@@ -38,7 +38,7 @@ export interface NewInvoiceData {
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
 }
 
-const TIPOS_CBT_WSFE: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8 };
+const TIPOS_CBT_WSFE: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8, NDA: 2, NDB: 7, NDC: 12 };
 
 function calcularMontos(items: InvoiceItem[], tipo: string) {
   let montoNeto = 0;
