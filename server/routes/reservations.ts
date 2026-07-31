@@ -817,6 +817,25 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // GET /api/reservations/:id/invoices — facturas fiscales emitidas para una reserva
+  app.get("/api/reservations/:id/invoices", requireAuth, async (req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT id, tipo_comprobante, punto_venta, numero, fecha_emision,
+               cliente_razon_social, cliente_cuit, cliente_condicion_iva,
+               monto_total, monto_acreditado, estado, items, cae, modo_ficticio
+        FROM sales_invoices
+        WHERE reserva_id = ${req.params.id}
+          AND tipo_comprobante IN ('FA', 'FB', 'FC')
+          AND estado IN ('emitida', 'parcial')
+        ORDER BY created_at DESC
+      `);
+      res.json(rows.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Changelog por reserva
   app.get("/api/reservations/:id/changelog", requireAuth, async (req, res) => {
     try {

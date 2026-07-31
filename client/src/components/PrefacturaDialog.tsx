@@ -7,7 +7,7 @@ import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
   CircleCheck, AlertCircle, Loader2, Percent, Building2, User,
-  Edit2, Check, X, FileText, AlertTriangle,
+  Edit2, Check, X, FileText, AlertTriangle, MinusCircle, ArrowRightLeft,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,6 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
-import { useQuery, useMutation } from "@tanstack/react-query";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -197,6 +196,9 @@ export function PrefacturaDialog({
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferCharge, setTransferCharge] = useState<{ id: string; description: string; maxAmount: number; originalAmount?: number } | null>(null);
 
+  // NC sub-dialog
+  const [ncDialogOpen, setNcDialogOpen] = useState(false);
+
   // Queries
   const { data: folio, isLoading: folioLoading, refetch: refetchFolio } = useQuery<PrefacturaFolioData>({
     queryKey: ["/api/reservations", String(reservationId), "folio"],
@@ -211,6 +213,17 @@ export function PrefacturaDialog({
   const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], enabled: open });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"], enabled: open });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"], enabled: open });
+
+  // Emitted fiscal invoices for this reservation (for NC flow)
+  const { data: emittedInvoices = [], refetch: refetchEmittedInvoices } = useQuery<any[]>({
+    queryKey: ["/api/reservations", String(reservationId), "invoices"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservationId}/invoices`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: open && !!reservationId,
+  });
 
   // Remaining transferable amounts per source item (re-fetched after each transfer)
   const { data: transferRemaining, refetch: refetchTransferRemaining } = useQuery<{
@@ -789,8 +802,18 @@ export function PrefacturaDialog({
               </div>
             )}
 
-            <DialogFooter className="gap-2">
+            <DialogFooter className="gap-2 flex-wrap">
               <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+              {emittedInvoices.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30"
+                  onClick={() => setNcDialogOpen(true)}
+                >
+                  <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -1061,6 +1084,337 @@ export function PrefacturaDialog({
           refetchTransferRemaining();
         }}
       />
+
+      {/* Nota de Crédito sub-dialog */}
+      <NotaCreditoDialog
+        open={ncDialogOpen}
+        onClose={() => setNcDialogOpen(false)}
+        reservationId={reservationId}
+        invoices={emittedInvoices}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+          refetchFolio();
+          refetchEmittedInvoices();
+        }}
+      />
+    </Dialog>
+  );
+}
+
+// ─── NotaCreditoDialog sub-component ─────────────────────────────────────────
+
+interface NcInvoice {
+  id: number;
+  tipo_comprobante: string;
+  punto_venta: number;
+  numero: number;
+  fecha_emision: string;
+  cliente_razon_social: string;
+  cliente_cuit: string | null;
+  cliente_condicion_iva: string;
+  monto_total: string;
+  monto_acreditado: string | null;
+  estado: string;
+  items: any[] | null;
+}
+
+interface NcItemRow {
+  key: string;
+  descripcion: string;
+  subtotal: number;
+  amount: string; // editable partial amount
+  selected: boolean;
+}
+
+function NotaCreditoDialog({
+  open, onClose, reservationId, invoices, onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  reservationId: string | number;
+  invoices: NcInvoice[];
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>("");
+  const [motivo, setMotivo] = useState("");
+  const [ncItems, setNcItems] = useState<NcItemRow[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emittedNc, setEmittedNc] = useState<any>(null);
+
+  const selectedInvoice = invoices.find(inv => String(inv.id) === selectedInvoiceId) ?? null;
+
+  // Reset when dialog opens
+  useEffect(() => {
+    if (open) {
+      setSelectedInvoiceId(invoices.length === 1 ? String(invoices[0].id) : "");
+      setMotivo("");
+      setNcItems([]);
+      setEmittedNc(null);
+    }
+  }, [open]);
+
+  // Build item rows when invoice changes
+  useEffect(() => {
+    if (!selectedInvoice) { setNcItems([]); return; }
+    const montoTotal = parseFloat(selectedInvoice.monto_total);
+    const montoAcreditado = parseFloat(selectedInvoice.monto_acreditado || "0");
+    const saldoPendiente = montoTotal - montoAcreditado;
+
+    const rawItems: any[] = Array.isArray(selectedInvoice.items) ? selectedInvoice.items : [];
+
+    if (rawItems.length === 0) {
+      // Single synthetic item for the full pending amount
+      setNcItems([{
+        key: "total",
+        descripcion: `${selectedInvoice.tipo_comprobante} ${String(selectedInvoice.punto_venta).padStart(4,"0")}-${String(selectedInvoice.numero).padStart(8,"0")}`,
+        subtotal: saldoPendiente,
+        amount: saldoPendiente.toFixed(2),
+        selected: true,
+      }]);
+    } else {
+      // Scale items proportionally if there's already a partial credit
+      const scaleFactor = saldoPendiente / montoTotal;
+      setNcItems(rawItems.map((item: any, idx: number) => {
+        const originalAmount = parseFloat(String(item.subtotal ?? item.precioUnitario ?? 0));
+        const available = Math.max(0, originalAmount * scaleFactor);
+        return {
+          key: String(idx),
+          descripcion: item.descripcion || `Ítem ${idx + 1}`,
+          subtotal: available,
+          amount: available.toFixed(2),
+          selected: true,
+        };
+      }));
+    }
+  }, [selectedInvoiceId]);
+
+  function toggleItem(key: string) {
+    setNcItems(prev => prev.map(it => it.key === key ? { ...it, selected: !it.selected } : it));
+  }
+
+  function updateAmount(key: string, val: string) {
+    setNcItems(prev => prev.map(it => it.key === key ? { ...it, amount: val } : it));
+  }
+
+  const totalNc = ncItems
+    .filter(it => it.selected)
+    .reduce((acc, it) => acc + (parseFloat(it.amount) || 0), 0);
+
+  const saldoPendienteInvoice = selectedInvoice
+    ? parseFloat(selectedInvoice.monto_total) - parseFloat(selectedInvoice.monto_acreditado || "0")
+    : 0;
+
+  async function handleSubmit() {
+    if (!selectedInvoice) {
+      toast({ title: "Seleccioná una factura", variant: "destructive" }); return;
+    }
+    if (totalNc <= 0) {
+      toast({ title: "El monto de la NC debe ser mayor a $0", variant: "destructive" }); return;
+    }
+    if (totalNc > saldoPendienteInvoice + 0.01) {
+      toast({ title: `El monto ($${fmtMoney(totalNc)}) supera el saldo pendiente de la factura ($${fmtMoney(saldoPendienteInvoice)})`, variant: "destructive" }); return;
+    }
+    if (!motivo.trim()) {
+      toast({ title: "Ingresá un motivo para la Nota de Crédito", variant: "destructive" }); return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await apiRequest("POST", `/api/billing/invoices/${selectedInvoice.id}/nota-credito`, {
+        motivo: motivo.trim(),
+        monto: totalNc,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || body?.message || "Error al emitir NC");
+
+      setEmittedNc(body);
+      toast({ title: `NC emitida: ${body.tipoComprobante ?? body.tipo_comprobante} ${String(body.puntoVenta ?? body.punto_venta ?? 0).padStart(4,"0")}-${String(body.numero ?? 0).padStart(8,"0")}` });
+      onSuccess();
+
+      // Auto-open PDF
+      setTimeout(() => window.open(`/api/billing/invoices/${body.id}/pdf`, "_blank"), 300);
+    } catch (err: any) {
+      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (emittedNc) {
+    return (
+      <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CircleCheck className="h-5 w-5 text-green-600" />
+              Nota de Crédito emitida
+            </DialogTitle>
+          </DialogHeader>
+          <Card className="border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10">
+            <CardContent className="p-4 space-y-1 text-sm">
+              <div className="font-bold text-green-700 dark:text-green-400">
+                {emittedNc.tipoComprobante ?? emittedNc.tipo_comprobante}{" "}
+                {String(emittedNc.puntoVenta ?? emittedNc.punto_venta ?? 0).padStart(4,"0")}-{String(emittedNc.numero ?? 0).padStart(8,"0")}
+              </div>
+              <div className="text-muted-foreground">Monto: <span className="font-medium text-foreground">${fmtMoney(emittedNc.montoTotal ?? emittedNc.monto_total)}</span></div>
+              {emittedNc.cae && <div className="text-muted-foreground">CAE: <span className="font-mono text-xs">{emittedNc.cae}</span></div>}
+            </CardContent>
+          </Card>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline" size="sm"
+              onClick={() => window.open(`/api/billing/invoices/${emittedNc.id}/pdf`, "_blank")}
+            >
+              <Printer className="h-4 w-4 mr-1" />Ver PDF
+            </Button>
+            <Button onClick={onClose}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o && !isSubmitting) onClose(); }}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <MinusCircle className="h-5 w-5 text-amber-600" />
+            Emitir Nota de Crédito
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          {/* Invoice selector */}
+          {invoices.length > 1 && (
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Factura a acreditar</Label>
+              <Select value={selectedInvoiceId} onValueChange={setSelectedInvoiceId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar factura..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {invoices.map(inv => {
+                    const saldo = parseFloat(inv.monto_total) - parseFloat(inv.monto_acreditado || "0");
+                    return (
+                      <SelectItem key={inv.id} value={String(inv.id)}>
+                        {inv.tipo_comprobante} {String(inv.punto_venta).padStart(4,"0")}-{String(inv.numero).padStart(8,"0")} — ${fmtMoney(saldo)} pendiente
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Invoice summary */}
+          {selectedInvoice && (
+            <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm space-y-1">
+              <div className="font-medium">
+                {selectedInvoice.tipo_comprobante}{" "}
+                {String(selectedInvoice.punto_venta).padStart(4,"0")}-{String(selectedInvoice.numero).padStart(8,"0")}
+                {" · "}{formatDateAR(selectedInvoice.fecha_emision)}
+              </div>
+              <div className="text-muted-foreground">
+                <span>Cliente: </span><span className="text-foreground">{selectedInvoice.cliente_razon_social}</span>
+                {selectedInvoice.cliente_cuit && <span className="ml-2 text-xs">CUIT {selectedInvoice.cliente_cuit}</span>}
+              </div>
+              <div className="text-muted-foreground flex gap-4">
+                <span>Total: <span className="text-foreground font-medium">${fmtMoney(selectedInvoice.monto_total)}</span></span>
+                {parseFloat(selectedInvoice.monto_acreditado || "0") > 0 && (
+                  <span>Ya acreditado: <span className="text-amber-700 font-medium">${fmtMoney(selectedInvoice.monto_acreditado || "0")}</span></span>
+                )}
+                <span>Saldo disponible: <span className="font-bold text-green-700 dark:text-green-400">${fmtMoney(saldoPendienteInvoice)}</span></span>
+              </div>
+            </div>
+          )}
+
+          {/* Items table */}
+          {ncItems.length > 0 && (
+            <div className="rounded-md border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="w-8"></TableHead>
+                    <TableHead>Descripción</TableHead>
+                    <TableHead className="w-32 text-right">Disponible</TableHead>
+                    <TableHead className="w-36 text-right">Monto NC</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ncItems.map(item => (
+                    <TableRow key={item.key} className={!item.selected ? "opacity-40" : undefined}>
+                      <TableCell>
+                        <Checkbox checked={item.selected} onCheckedChange={() => toggleItem(item.key)} />
+                      </TableCell>
+                      <TableCell className="text-sm">{item.descripcion}</TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">${fmtMoney(item.subtotal)}</TableCell>
+                      <TableCell className="text-right">
+                        {item.selected ? (
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            max={item.subtotal}
+                            value={item.amount}
+                            onChange={e => updateAmount(item.key, e.target.value)}
+                            className="h-7 text-sm w-28 text-right ml-auto"
+                          />
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="border-t bg-muted/30 px-4 py-2 flex justify-end text-sm gap-2">
+                <span className="text-muted-foreground">Total NC:</span>
+                <span className="font-bold">${fmtMoney(totalNc)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Motivo */}
+          {selectedInvoice && (
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Motivo <span className="text-red-500">*</span></Label>
+              <Input
+                value={motivo}
+                onChange={e => setMotivo(e.target.value)}
+                placeholder="Ej: Error en facturación, devolución de servicio..."
+                className="text-sm"
+              />
+            </div>
+          )}
+
+          {!selectedInvoice && invoices.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">No hay facturas emitidas para esta reserva.</p>
+          )}
+
+          {!selectedInvoice && invoices.length > 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">Seleccioná una factura para continuar.</p>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || !selectedInvoice || totalNc <= 0 || !motivo.trim()}
+            className="bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            {isSubmitting ? (
+              <><Loader2 className="h-4 w-4 animate-spin mr-1" />Emitiendo...</>
+            ) : (
+              <><MinusCircle className="h-4 w-4 mr-1" />Emitir NC por ${fmtMoney(totalNc)}</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }
