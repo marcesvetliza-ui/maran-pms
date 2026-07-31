@@ -7,7 +7,7 @@ import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
   CircleCheck, AlertCircle, Loader2, Percent, Building2, User,
-  Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft,
+  Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -197,6 +197,10 @@ export function PrefacturaDialog({
   // Transfer charge sub-dialog
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferCharge, setTransferCharge] = useState<{ id: string; description: string; maxAmount: number; originalAmount?: number } | null>(null);
+
+  // Reversal confirmation
+  const [revertCharge, setRevertCharge] = useState<{ id: string; description: string; amount: number; category: string } | null>(null);
+  const [revertDialogOpen, setRevertDialogOpen] = useState(false);
 
   // NC sub-dialog
   const [ncDialogOpen, setNcDialogOpen] = useState(false);
@@ -626,29 +630,41 @@ export function PrefacturaDialog({
                       />
                     )}
                     {/* Extra charges */}
-                    {(folio.charges || []).map((charge: any) => {
-                      const isTransfer = charge.category === "transfer_out" || charge.category === "transfer_in";
-                      return (
-                        <ChargeRow
-                          key={charge.id}
-                          id={String(charge.id)}
-                          amount={parseFloat(charge.amount)}
-                          description={itemDescriptions[String(charge.id)] || charge.description}
-                          date={charge.date}
-                          alreadyPaid={0}
-                          selected={!isTransfer && selectedIds.has(String(charge.id))}
-                          onToggle={() => { if (isTransfer) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
-                          editing={editingId === String(charge.id)}
-                          editingValue={editingValue}
-                          onStartEdit={() => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description)}
-                          onEditChange={setEditingValue}
-                          onSaveEdit={saveEdit}
-                          onCancelEdit={() => setEditingId(null)}
-                          onTransfer={isTransfer ? undefined : () => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
-                          category={charge.category}
-                        />
-                      );
-                    })}
+                    {(() => {
+                      // Build set of already-reversed charge IDs by scanning [rev:X] tags
+                      const reversedIds = new Set<string>();
+                      (folio.charges || []).forEach((c: any) => {
+                        const m = c.description?.match(/\[rev:([^\]]+)\]/);
+                        if (m) reversedIds.add(m[1]);
+                      });
+                      return (folio.charges || []).map((charge: any) => {
+                        const isTransfer = charge.category === "transfer_out" || charge.category === "transfer_in";
+                        const isReversal = charge.description?.includes("[rev:") ?? false;
+                        const alreadyReversed = reversedIds.has(String(charge.id));
+                        return (
+                          <ChargeRow
+                            key={charge.id}
+                            id={String(charge.id)}
+                            amount={parseFloat(charge.amount)}
+                            description={itemDescriptions[String(charge.id)] || charge.description}
+                            date={charge.date}
+                            alreadyPaid={0}
+                            selected={!isTransfer && selectedIds.has(String(charge.id))}
+                            onToggle={() => { if (isTransfer) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
+                            editing={editingId === String(charge.id)}
+                            editingValue={editingValue}
+                            onStartEdit={() => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description)}
+                            onEditChange={setEditingValue}
+                            onSaveEdit={saveEdit}
+                            onCancelEdit={() => setEditingId(null)}
+                            onTransfer={isTransfer ? undefined : () => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
+                            onRevert={(isTransfer && !isReversal && !alreadyReversed) ? () => { setRevertCharge({ id: String(charge.id), description: charge.description, amount: Math.abs(parseFloat(charge.amount)), category: charge.category }); setRevertDialogOpen(true); } : undefined}
+                            alreadyReversed={alreadyReversed}
+                            category={charge.category}
+                          />
+                        );
+                      });
+                    })()}
                     {/* Payments / advances already made */}
                     {(folio.payments || []).length > 0 && (
                       <>
@@ -1100,6 +1116,20 @@ export function PrefacturaDialog({
         onClose={() => setTransferDialogOpen(false)}
         reservationId={reservationId}
         charge={transferCharge}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "transfer-remaining"] });
+          refetchFolio();
+          refetchTransferRemaining();
+        }}
+      />
+
+      {/* Reversal confirmation dialog */}
+      <RevertTransferDialog
+        open={revertDialogOpen}
+        onClose={() => setRevertDialogOpen(false)}
+        reservationId={reservationId}
+        charge={revertCharge}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "transfer-remaining"] });
@@ -1680,7 +1710,7 @@ function NotaDebitoDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
-  onTransfer, category,
+  onTransfer, onRevert, alreadyReversed, category,
 }: {
   id: string; amount: number; description: string; date?: string; alreadyPaid: number;
   selected: boolean; onToggle: () => void;
@@ -1688,12 +1718,23 @@ function ChargeRow({
   onStartEdit: () => void; onEditChange: (v: string) => void;
   onSaveEdit: () => void; onCancelEdit: () => void;
   onTransfer?: () => void;
+  onRevert?: () => void;
+  alreadyReversed?: boolean;
   category?: string;
 }) {
   const pending = Math.max(0, amount - alreadyPaid);
   const isTransferOut = category === "transfer_out";
   const isTransferIn = category === "transfer_in";
   const isTransfer = isTransferOut || isTransferIn;
+  // A reversal counter-entry should not itself show a Revertir button
+  const isReversal = isTransfer && description.includes("[rev:");
+
+  // Strip machine-readable tags from visible description
+  const cleanDescription = description
+    .replace(/\s*\[xfer:[^\]]+\]/g, "")
+    .replace(/\s*\[corr:[^\]]+\]/g, "")
+    .replace(/\s*\[rev:[^\]]+\]/g, "")
+    .trim();
 
   const rowCls = isTransfer
     ? (isTransferOut
@@ -1702,7 +1743,7 @@ function ChargeRow({
     : (!selected ? "opacity-40" : undefined);
 
   return (
-    <TableRow className={rowCls}>
+    <TableRow className={`${rowCls ?? ""} ${alreadyReversed ? "opacity-40" : ""}`}>
       <TableCell className="w-8">
         {isTransfer ? (
           <ArrowRightLeft className={`h-3.5 w-3.5 mx-auto ${isTransferOut ? "text-orange-500" : "text-blue-500"}`} />
@@ -1727,10 +1768,15 @@ function ChargeRow({
           <div className="flex items-center gap-2 group">
             {isTransfer && (
               <Badge variant="outline" className={`text-[10px] px-1 py-0 shrink-0 ${isTransferOut ? "border-orange-400 text-orange-700 dark:text-orange-400" : "border-blue-400 text-blue-700 dark:text-blue-400"}`}>
-                {isTransferOut ? "Transferencia salida" : "Transferencia entrada"}
+                {isReversal ? "Reversa" : (isTransferOut ? "Transferencia salida" : "Transferencia entrada")}
               </Badge>
             )}
-            <span className="text-sm">{description.replace(/\s*\[xfer:[^\]]+\]/, "")}</span>
+            {alreadyReversed && (
+              <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 border-gray-400 text-gray-500 dark:text-gray-400">
+                Revertida
+              </Badge>
+            )}
+            <span className="text-sm">{cleanDescription}</span>
             {date && <span className="text-xs text-muted-foreground">{formatDateAR(date)}</span>}
             {!isTransfer && (
               <Button
@@ -1753,8 +1799,8 @@ function ChargeRow({
       <TableCell className="text-right text-sm font-medium">
         {isTransfer ? "—" : `$${fmtMoney(pending)}`}
       </TableCell>
-      {!isTransfer && onTransfer ? (
-        <TableCell className="w-10 text-right">
+      <TableCell className="w-10 text-right">
+        {!isTransfer && onTransfer ? (
           <Button
             size="icon" variant="ghost"
             className="h-7 w-7 text-muted-foreground hover:text-blue-600 shrink-0"
@@ -1763,11 +1809,165 @@ function ChargeRow({
           >
             <ArrowRightLeft className="h-3.5 w-3.5" />
           </Button>
-        </TableCell>
-      ) : (
-        <TableCell className="w-10" />
-      )}
+        ) : isTransfer && !isReversal && !alreadyReversed && onRevert ? (
+          <Button
+            size="icon" variant="ghost"
+            className="h-7 w-7 text-muted-foreground hover:text-red-600 shrink-0"
+            title="Revertir transferencia"
+            onClick={e => { e.stopPropagation(); onRevert(); }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
+      </TableCell>
     </TableRow>
+  );
+}
+
+// ─── RevertTransferDialog sub-component ──────────────────────────────────────
+
+function RevertTransferDialog({
+  open, onClose, reservationId, charge, onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  reservationId: string | number;
+  charge: { id: string; description: string; amount: number; category: string } | null;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [partialResult, setPartialResult] = useState<{ otherRoom: string | null } | null>(null);
+
+  // Reset on open
+  useEffect(() => {
+    if (open) setPartialResult(null);
+  }, [open]);
+
+  if (!charge) return null;
+
+  const isOut = charge.category === "transfer_out";
+  const cleanDesc = charge.description
+    .replace(/\s*\[xfer:[^\]]+\]/g, "")
+    .replace(/\s*\[corr:[^\]]+\]/g, "")
+    .replace(/\s*\[rev:[^\]]+\]/g, "")
+    .trim();
+
+  async function handleRevert() {
+    setIsSubmitting(true);
+    try {
+      const res = await apiRequest("POST", `/api/reservations/${reservationId}/reverse-transfer-charge`, {
+        chargeId: charge!.id,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || "Error al revertir");
+
+      if (!body.pairedReversed) {
+        // Partial reversal — stay open to show the warning
+        setPartialResult({ otherRoom: body.otherRoom ?? null });
+        onSuccess();
+      } else {
+        toast({ title: body.message || "Transferencia revertida en ambos folios" });
+        onSuccess();
+        onClose();
+      }
+    } catch (err: any) {
+      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // Partial-reversal result view
+  if (partialResult !== null) {
+    return (
+      <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-600" />
+              Reversión parcial
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
+              <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-green-800 dark:text-green-300">
+                El cargo en <strong>este folio</strong> fue revertido correctamente.
+              </p>
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
+              <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                No se encontró el cargo correspondiente en el folio{partialResult.otherRoom ? ` de Hab. ${partialResult.otherRoom}` : " destino/origen"}.
+                Revisá ese folio manualmente para completar la reversión.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={onClose}>Entendido</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o && !isSubmitting) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RotateCcw className="h-5 w-5 text-red-600" />
+            Revertir transferencia
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
+            <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+            <p className="text-sm text-amber-800 dark:text-amber-300">
+              Esto creará un cargo compensatorio para cancelar esta transferencia. La operación afectará ambos folios.
+            </p>
+          </div>
+
+          <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm space-y-2">
+            <div>
+              <span className="text-muted-foreground">Cargo a revertir: </span>
+              <span className="font-medium">{cleanDesc}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Monto: </span>
+              <span className="font-semibold">${fmtMoney(charge.amount)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Tipo: </span>
+              <span className={isOut ? "text-orange-700 dark:text-orange-400" : "text-blue-700 dark:text-blue-400"}>
+                {isOut ? "Transferencia salida (cargo negativo en este folio)" : "Transferencia entrada (cargo positivo en este folio)"}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-sm text-muted-foreground">
+            Se creará un contra-cargo de <strong>${fmtMoney(charge.amount)}</strong> en este folio para neutralizar la transferencia, y se buscará el cargo correspondiente en el folio {isOut ? "destino" : "origen"} para revertirlo también.
+          </p>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
+          <Button
+            onClick={handleRevert}
+            disabled={isSubmitting}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {isSubmitting ? (
+              <><Loader2 className="h-4 w-4 animate-spin mr-1" />Revirtiendo...</>
+            ) : (
+              <><RotateCcw className="h-4 w-4 mr-1" />Revertir transferencia</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

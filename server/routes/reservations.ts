@@ -1631,9 +1631,11 @@ export function registerReservationsRoutes(app: Express) {
           });
         }
 
+        // Correlation ID links both sides so reversal can find the counterpart deterministically
+        const corrId = randomUUID();
         xferRef = "accommodation";
-        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:accommodation]`;
-        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${sourceGuest})`;
+        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:accommodation] [corr:${corrId}]`;
+        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${sourceGuest}) [corr:${corrId}]`;
       } else {
         // Validate charge belongs to this reservation
         const charge = await storage.getCharge(chargeId);
@@ -1653,13 +1655,15 @@ export function registerReservationsRoutes(app: Express) {
           });
         }
 
+        // Correlation ID links both sides so reversal can find the counterpart deterministically
+        const corrId = randomUUID();
         xferRef = charge.id;
-        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:${charge.id}]`;
-        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${charge.description})`;
+        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:${charge.id}] [corr:${corrId}]`;
+        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${charge.description}) [corr:${corrId}]`;
       }
 
       // 1. Create negative charge on source (reduces source balance)
-      await storage.createCharge({
+      const sourceCharge = await storage.createCharge({
         reservationId: sourceId,
         description: sourceDescription,
         amount: String(-transferAmount),
@@ -1670,7 +1674,7 @@ export function registerReservationsRoutes(app: Express) {
       });
 
       // 2. Create positive charge on destination
-      await storage.createCharge({
+      const destCharge = await storage.createCharge({
         reservationId: targetReservationId,
         description: targetDescription,
         amount: String(transferAmount),
@@ -1694,6 +1698,219 @@ export function registerReservationsRoutes(app: Express) {
     } catch (error) {
       console.error("[transfer-charge] Error:", error);
       res.status(500).json({ error: "Error al transferir el cargo" });
+    }
+  });
+
+  // Reverse a mistaken transfer charge on this reservation.
+  // Accepts the chargeId of a transfer_out or transfer_in entry that lives on this reservation.
+  // Uses [corr:UUID] embedded at transfer creation time for deterministic pairing.
+  // Embeds [rev:originalChargeId] in reversal descriptions to prevent double-reversal.
+  app.post("/api/reservations/:id/reverse-transfer-charge", requireAuth, async (req, res) => {
+    try {
+      const reservationId = req.params.id;
+      const { chargeId } = req.body;
+      const operator = (req as any).user?.username || "Sistema";
+
+      if (!chargeId) return res.status(400).json({ error: "Se requiere chargeId" });
+
+      // 1. Load the charge to reverse
+      const charge = await storage.getCharge(chargeId);
+      if (!charge) return res.status(404).json({ error: "Cargo no encontrado" });
+      if (charge.reservationId !== reservationId) {
+        return res.status(403).json({ error: "El cargo no pertenece a esta reserva" });
+      }
+      if (charge.category !== "transfer_out" && charge.category !== "transfer_in") {
+        return res.status(400).json({ error: "Solo se pueden revertir cargos de transferencia" });
+      }
+      if (charge.status !== "active") {
+        return res.status(400).json({ error: "El cargo ya fue revertido o cancelado" });
+      }
+      // Reject reversal of a reversal counter-charge
+      if (charge.description.includes("[rev:")) {
+        return res.status(400).json({ error: "Este cargo ya es una reversa — no se puede revertir nuevamente" });
+      }
+
+      // 2. Server-side idempotency guard: check if this charge was already reversed
+      //    A reversal embeds [rev:chargeId] in its description. Look for it on this reservation.
+      const alreadyReversedRows = await db.execute(
+        sql`SELECT id FROM charges
+            WHERE reservation_id = ${reservationId}
+              AND status = 'active'
+              AND description LIKE ${"%" + `[rev:${chargeId}]` + "%"}
+            LIMIT 1`
+      );
+      if ((alreadyReversedRows.rows as any[]).length > 0) {
+        return res.status(409).json({ error: "Esta transferencia ya fue revertida anteriormente" });
+      }
+
+      const chargeAmount = parseFloat(charge.amount); // negative for transfer_out, positive for transfer_in
+      const absAmount = Math.abs(chargeAmount);
+
+      // 3. Find the paired charge using deterministic [corr:UUID] if present; fall back to heuristic.
+      let pairedCharge: any = null;
+      let pairedReservationId: string | null = null;
+
+      const corrMatch = charge.description.match(/\[corr:([^\]]+)\]/);
+      const corrId = corrMatch ? corrMatch[1] : null;
+
+      if (corrId) {
+        // Deterministic: find the charge with the same correlation ID across all reservations
+        const corrRows = await db.execute(
+          sql`SELECT id, reservation_id, amount, description, category, status
+              FROM charges
+              WHERE description LIKE ${"%" + `[corr:${corrId}]` + "%"}
+                AND reservation_id != ${reservationId}
+                AND status = 'active'
+              LIMIT 5`
+        );
+        const corrCandidates = (corrRows.rows as any[]);
+        if (corrCandidates.length === 1) {
+          pairedCharge = corrCandidates[0];
+          pairedReservationId = pairedCharge.reservation_id;
+        } else if (corrCandidates.length > 1) {
+          // Shouldn't happen (UUID is unique), but handle gracefully
+          console.warn(`[reverse-transfer] Multiple charges with corr:${corrId} — skipping paired reversal`);
+        }
+      } else {
+        // Legacy fallback: room-number + amount + category heuristic.
+        // Only proceed if exactly ONE candidate is found (to avoid reversing the wrong folio).
+        let otherRoomNumber: string | null = null;
+        if (charge.category === "transfer_out") {
+          const m = charge.description.match(/→\s*Hab\.(\S+)/);
+          otherRoomNumber = m ? m[1] : null;
+        } else {
+          const m = charge.description.match(/desde\s+Hab\.(\S+)/);
+          otherRoomNumber = m ? m[1] : null;
+        }
+
+        if (otherRoomNumber) {
+          const pairedCategory = charge.category === "transfer_out" ? "transfer_in" : "transfer_out";
+          // Find reservations matching the other room; search charges for exactly one matching counterpart
+          const roomRows = await db.execute(
+            sql`SELECT r.id FROM reservations r
+                JOIN rooms rm ON rm.id = r.room_id
+                WHERE rm.room_number = ${otherRoomNumber}
+                  AND r.status NOT IN ('cancelled')
+                ORDER BY r.created_at DESC
+                LIMIT 10`
+          );
+          const candidateIds = (roomRows.rows as any[]).map((r: any) => r.id as string);
+          const allMatches: Array<{ charge: any; reservationId: string }> = [];
+          for (const candId of candidateIds) {
+            const candCharges = await storage.getCharges(candId);
+            for (const c of candCharges) {
+              if (
+                c.category === pairedCategory &&
+                c.status === "active" &&
+                !c.description.includes("[rev:") &&
+                Math.abs(Math.abs(parseFloat(c.amount)) - absAmount) < 0.02
+              ) {
+                allMatches.push({ charge: c, reservationId: candId });
+              }
+            }
+          }
+          if (allMatches.length === 1) {
+            // Exactly one match — safe to proceed
+            pairedCharge = allMatches[0].charge;
+            pairedReservationId = allMatches[0].reservationId;
+          } else if (allMatches.length > 1) {
+            // Ambiguous — do not auto-reverse the other side
+            console.warn(`[reverse-transfer] Ambiguous paired charge (${allMatches.length} matches, no corr ID) — skipping other-side reversal`);
+          }
+        }
+      }
+
+      // 4. Verify the paired reservation is not locked
+      if (pairedReservationId) {
+        const pairedRes = await storage.getReservation(pairedReservationId);
+        if (pairedRes && isReservationLocked(pairedRes)) {
+          return res.status(400).json({
+            error: "No se puede revertir: la reserva del otro folio ya está cerrada o cancelada",
+          });
+        }
+      }
+
+      // 5. Verify the current reservation is not locked
+      const thisRes = await storage.getReservation(reservationId);
+      if (!thisRes) return res.status(404).json({ error: "Reserva no encontrada" });
+      if (isReservationLocked(thisRes)) {
+        return res.status(403).json({ error: "No se puede revertir un cargo de una reserva cerrada" });
+      }
+
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+      // 6. Create counter-charges embedding [rev:originalChargeId] for idempotency tracking
+      const thisCounterAmount = -chargeAmount;
+      const cleanDesc = charge.description
+        .replace(/\s*\[xfer:[^\]]+\]/g, "")
+        .replace(/\s*\[corr:[^\]]+\]/g, "")
+        .trim();
+      const thisCounterDesc = `Reversa de transferencia (${cleanDesc}) [rev:${chargeId}]`;
+      const thisCounterCategory: "transfer_out" | "transfer_in" =
+        charge.category === "transfer_out" ? "transfer_in" : "transfer_out";
+
+      await storage.createCharge({
+        reservationId,
+        description: thisCounterDesc,
+        amount: String(thisCounterAmount),
+        date: today,
+        category: thisCounterCategory,
+        createdBy: operator,
+        status: "active",
+      });
+
+      // Record on this folio
+      try {
+        const thisFolio = await storage.getOrCreateFolio("reservation", reservationId);
+        await storage.addFolioAdjustment(thisFolio.id, thisCounterCategory, absAmount, thisCounterDesc, operator);
+      } catch (e) { console.error("[reverse-transfer] this folio adjustment:", e); }
+
+      // 7. Reverse the paired charge if found
+      if (pairedCharge && pairedReservationId) {
+        const pairedChargeId = pairedCharge.id ?? pairedCharge.id;
+        const pairedCounterAmount = -parseFloat(pairedCharge.amount);
+        const pairedCleanDesc = (pairedCharge.description as string)
+          .replace(/\s*\[xfer:[^\]]+\]/g, "")
+          .replace(/\s*\[corr:[^\]]+\]/g, "")
+          .trim();
+        const pairedCounterDesc = `Reversa de transferencia (${pairedCleanDesc}) [rev:${pairedChargeId}]`;
+        const pairedCounterCategory: "transfer_out" | "transfer_in" =
+          pairedCharge.category === "transfer_out" ? "transfer_in" : "transfer_out";
+
+        await storage.createCharge({
+          reservationId: pairedReservationId,
+          description: pairedCounterDesc,
+          amount: String(pairedCounterAmount),
+          date: today,
+          category: pairedCounterCategory,
+          createdBy: operator,
+          status: "active",
+        });
+
+        try {
+          const pairedFolio = await storage.getOrCreateFolio("reservation", pairedReservationId);
+          await storage.addFolioAdjustment(pairedFolio.id, pairedCounterCategory, absAmount, pairedCounterDesc, operator);
+        } catch (e) { console.error("[reverse-transfer] paired folio adjustment:", e); }
+      }
+
+      res.json({
+        success: true,
+        reversed: absAmount,
+        pairedReversed: !!pairedCharge,
+        otherRoom: (() => {
+          if (charge.category === "transfer_out") {
+            const m = charge.description.match(/→\s*Hab\.(\S+)/); return m ? m[1] : null;
+          } else {
+            const m = charge.description.match(/desde\s+Hab\.(\S+)/); return m ? m[1] : null;
+          }
+        })(),
+        message: pairedCharge
+          ? `Transferencia revertida: se canceló el cargo en ambos folios ($${absAmount.toFixed(2)})`
+          : `Cargo revertido en este folio ($${absAmount.toFixed(2)}). No se encontró el cargo correspondiente en el otro folio — revisá manualmente.`,
+      });
+    } catch (error) {
+      console.error("[reverse-transfer] Error:", error);
+      res.status(500).json({ error: "Error al revertir la transferencia" });
     }
   });
 
