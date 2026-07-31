@@ -172,18 +172,25 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
       for (let i = 0; i < folio.movements.length; i++) {
         const m = folio.movements[i];
         const isDebit = ["charge", "transfer_in"].includes(m.type);
-        const rowBg = i % 2 === 0 ? "#ffffff" : "#fafafa";
+        const isTransferOut = m.type === "transfer_out";
+        const isTransferIn = m.type === "transfer_in";
+        const isTransfer = isTransferOut || isTransferIn;
+        const rowBg = isTransferOut ? "#fff7ed" : isTransferIn ? "#eff6ff" : (i % 2 === 0 ? "#ffffff" : "#fafafa");
         doc.rect(L, y, cW, ROW_H).fill(rowBg).stroke("#eeeeee");
+        // Left accent stripe for transfer rows
+        if (isTransfer) {
+          doc.rect(L, y, 3, ROW_H).fill(isTransferOut ? "#f97316" : "#3b82f6");
+        }
 
         doc.font("Helvetica").fontSize(8).fillColor(MUTED)
            .text(fmtDate(m.createdAt ?? ""), COL.date + 4, y + 5, { width: 92 });
-        doc.fillColor(DARK)
+        doc.fillColor(isTransferOut ? "#c2410c" : isTransferIn ? "#1d4ed8" : DARK)
            .text(MOVEMENT_LABELS[m.type] ?? m.type, COL.type + 4, y + 5, { width: 90 });
         const payLabel = m.paymentMethod ? (PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod) : "—";
         doc.fillColor(MUTED)
            .text(payLabel, COL.method + 4, y + 5, { width: 100 });
         const invText = (paymentInvoiceMap && m.sourceId) ? paymentInvoiceMap[m.sourceId] : null;
-        const rawDesc = m.description || "—";
+        const rawDesc = (m.description || "—").replace(/\s*\[xfer:[^\]]+\]/, "");
         const desc = invText
           ? (rawDesc.length > 14 ? rawDesc.slice(0, 14) + "… " : rawDesc + " ") + invText
           : (rawDesc.length > 28 ? rawDesc.slice(0, 28) + "…" : rawDesc);

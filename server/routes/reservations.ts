@@ -1632,8 +1632,8 @@ export function registerReservationsRoutes(app: Express) {
         }
 
         xferRef = "accommodation";
-        sourceDescription = `Transferencia alojamiento → Hab.${targetRoom} [xfer:accommodation]`;
-        targetDescription = `Alojamiento transferido desde Hab.${sourceRoom} (${sourceGuest})`;
+        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:accommodation]`;
+        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${sourceGuest})`;
       } else {
         // Validate charge belongs to this reservation
         const charge = await storage.getCharge(chargeId);
@@ -1654,17 +1654,17 @@ export function registerReservationsRoutes(app: Express) {
         }
 
         xferRef = charge.id;
-        sourceDescription = `Transferencia "${charge.description}" → Hab.${targetRoom} [xfer:${charge.id}]`;
-        targetDescription = `${charge.description} (transferido desde Hab.${sourceRoom} – ${sourceGuest})`;
+        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:${charge.id}]`;
+        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${charge.description})`;
       }
 
-      // 1. Create negative adjustment on source (reduces source balance)
+      // 1. Create negative charge on source (reduces source balance)
       await storage.createCharge({
         reservationId: sourceId,
         description: sourceDescription,
         amount: String(-transferAmount),
         date: today,
-        category: "adjustment",
+        category: "transfer_out",
         createdBy: operator,
         status: "active",
       });
@@ -1675,10 +1675,20 @@ export function registerReservationsRoutes(app: Express) {
         description: targetDescription,
         amount: String(transferAmount),
         date: today,
-        category: "adjustment",
+        category: "transfer_in",
         createdBy: operator,
         status: "active",
       });
+
+      // 3. Write folio movements so the folio view and PDF show labeled transfer entries
+      try {
+        const sourceFolio = await storage.getOrCreateFolio("reservation", sourceId);
+        await storage.addFolioAdjustment(sourceFolio.id, "transfer_out", transferAmount, sourceDescription, operator);
+      } catch (e) { console.error("[transfer-charge] folio source movement:", e); }
+      try {
+        const targetFolio = await storage.getOrCreateFolio("reservation", targetReservationId);
+        await storage.addFolioAdjustment(targetFolio.id, "transfer_in", transferAmount, targetDescription, operator);
+      } catch (e) { console.error("[transfer-charge] folio target movement:", e); }
 
       res.json({ success: true, transferred: transferAmount, sourceRoom, targetRoom });
     } catch (error) {

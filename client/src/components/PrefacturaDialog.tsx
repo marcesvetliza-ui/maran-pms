@@ -131,6 +131,8 @@ function buildInvoiceItems(
     items.push(computeItem(desc, folio.roomTotal));
   }
   for (const charge of folio.charges || []) {
+    // Never invoice transfer entries — they are folio adjustments, not billable items
+    if (charge.category === "transfer_out" || charge.category === "transfer_in") continue;
     if (selectedIds.has(String(charge.id))) {
       const desc = itemDescriptions[String(charge.id)] || charge.description;
       items.push(computeItem(desc, parseFloat(charge.amount)));
@@ -251,11 +253,15 @@ export function PrefacturaDialog({
     }
   }, [open]);
 
-  // When folio loads: select all items, pre-fill payment amount
+  // When folio loads: select all billable items (exclude transfer entries), pre-fill payment amount
   useEffect(() => {
     if (!folio || !open) return;
     const allIds = new Set<string>(["accommodation"]);
-    (folio.charges || []).forEach((c: any) => allIds.add(String(c.id)));
+    (folio.charges || []).forEach((c: any) => {
+      if (c.category !== "transfer_out" && c.category !== "transfer_in") {
+        allIds.add(String(c.id));
+      }
+    });
     setSelectedIds(allIds);
     if (folio.balance > 0.01) {
       setPaymentRows([{
@@ -617,25 +623,29 @@ export function PrefacturaDialog({
                       />
                     )}
                     {/* Extra charges */}
-                    {(folio.charges || []).map((charge: any) => (
-                      <ChargeRow
-                        key={charge.id}
-                        id={String(charge.id)}
-                        amount={parseFloat(charge.amount)}
-                        description={itemDescriptions[String(charge.id)] || charge.description}
-                        date={charge.date}
-                        alreadyPaid={0}
-                        selected={selectedIds.has(String(charge.id))}
-                        onToggle={() => setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-                        editing={editingId === String(charge.id)}
-                        editingValue={editingValue}
-                        onStartEdit={() => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description)}
-                        onEditChange={setEditingValue}
-                        onSaveEdit={saveEdit}
-                        onCancelEdit={() => setEditingId(null)}
-                        onTransfer={() => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
-                      />
-                    ))}
+                    {(folio.charges || []).map((charge: any) => {
+                      const isTransfer = charge.category === "transfer_out" || charge.category === "transfer_in";
+                      return (
+                        <ChargeRow
+                          key={charge.id}
+                          id={String(charge.id)}
+                          amount={parseFloat(charge.amount)}
+                          description={itemDescriptions[String(charge.id)] || charge.description}
+                          date={charge.date}
+                          alreadyPaid={0}
+                          selected={!isTransfer && selectedIds.has(String(charge.id))}
+                          onToggle={() => { if (isTransfer) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
+                          editing={editingId === String(charge.id)}
+                          editingValue={editingValue}
+                          onStartEdit={() => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description)}
+                          onEditChange={setEditingValue}
+                          onSaveEdit={saveEdit}
+                          onCancelEdit={() => setEditingId(null)}
+                          onTransfer={isTransfer ? undefined : () => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
+                          category={charge.category}
+                        />
+                      );
+                    })}
                     {/* Payments / advances already made */}
                     {(folio.payments || []).length > 0 && (
                       <>
@@ -1424,7 +1434,7 @@ function NotaCreditoDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
-  onTransfer,
+  onTransfer, category,
 }: {
   id: string; amount: number; description: string; date?: string; alreadyPaid: number;
   selected: boolean; onToggle: () => void;
@@ -1432,16 +1442,30 @@ function ChargeRow({
   onStartEdit: () => void; onEditChange: (v: string) => void;
   onSaveEdit: () => void; onCancelEdit: () => void;
   onTransfer?: () => void;
+  category?: string;
 }) {
   const pending = Math.max(0, amount - alreadyPaid);
+  const isTransferOut = category === "transfer_out";
+  const isTransferIn = category === "transfer_in";
+  const isTransfer = isTransferOut || isTransferIn;
+
+  const rowCls = isTransfer
+    ? (isTransferOut
+        ? "bg-orange-50/60 dark:bg-orange-950/20 opacity-80"
+        : "bg-blue-50/60 dark:bg-blue-950/20 opacity-80")
+    : (!selected ? "opacity-40" : undefined);
 
   return (
-    <TableRow className={!selected ? "opacity-40" : undefined}>
+    <TableRow className={rowCls}>
       <TableCell className="w-8">
-        <Checkbox checked={selected} onCheckedChange={onToggle} />
+        {isTransfer ? (
+          <ArrowRightLeft className={`h-3.5 w-3.5 mx-auto ${isTransferOut ? "text-orange-500" : "text-blue-500"}`} />
+        ) : (
+          <Checkbox checked={selected} onCheckedChange={onToggle} />
+        )}
       </TableCell>
       <TableCell>
-        {editing ? (
+        {editing && !isTransfer ? (
           <div className="flex items-center gap-1">
             <Input
               value={editingValue}
@@ -1455,26 +1479,35 @@ function ChargeRow({
           </div>
         ) : (
           <div className="flex items-center gap-2 group">
-            <span className="text-sm">{description}</span>
+            {isTransfer && (
+              <Badge variant="outline" className={`text-[10px] px-1 py-0 shrink-0 ${isTransferOut ? "border-orange-400 text-orange-700 dark:text-orange-400" : "border-blue-400 text-blue-700 dark:text-blue-400"}`}>
+                {isTransferOut ? "Transferencia salida" : "Transferencia entrada"}
+              </Badge>
+            )}
+            <span className="text-sm">{description.replace(/\s*\[xfer:[^\]]+\]/, "")}</span>
             {date && <span className="text-xs text-muted-foreground">{formatDateAR(date)}</span>}
-            <Button
-              size="icon" variant="ghost"
-              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-              onClick={onStartEdit}
-            >
-              <Edit2 className="h-3 w-3 text-muted-foreground" />
-            </Button>
+            {!isTransfer && (
+              <Button
+                size="icon" variant="ghost"
+                className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                onClick={onStartEdit}
+              >
+                <Edit2 className="h-3 w-3 text-muted-foreground" />
+              </Button>
+            )}
           </div>
         )}
       </TableCell>
-      <TableCell className="text-right text-sm">${fmtMoney(amount)}</TableCell>
+      <TableCell className={`text-right text-sm ${isTransferOut ? "text-orange-700 dark:text-orange-400" : isTransferIn ? "text-blue-700 dark:text-blue-400" : ""}`}>
+        ${fmtMoney(amount)}
+      </TableCell>
       <TableCell className="text-right text-sm text-green-700 dark:text-green-400">
         {alreadyPaid > 0 ? `$${fmtMoney(alreadyPaid)}` : "—"}
       </TableCell>
       <TableCell className="text-right text-sm font-medium">
-        ${fmtMoney(pending)}
+        {isTransfer ? "—" : `$${fmtMoney(pending)}`}
       </TableCell>
-      {onTransfer && (
+      {!isTransfer && onTransfer ? (
         <TableCell className="w-10 text-right">
           <Button
             size="icon" variant="ghost"
@@ -1485,6 +1518,8 @@ function ChargeRow({
             <ArrowRightLeft className="h-3.5 w-3.5" />
           </Button>
         </TableCell>
+      ) : (
+        <TableCell className="w-10" />
       )}
     </TableRow>
   );

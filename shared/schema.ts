@@ -265,7 +265,7 @@ export type InsertReservation = z.infer<typeof insertReservationSchema>;
 export type Reservation = typeof reservations.$inferSelect;
 
 // Charges (Cargos/Folio)
-export type ChargeCategory = "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment" | "payment";
+export type ChargeCategory = "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment" | "payment" | "transfer_out" | "transfer_in";
 
 export const charges = pgTable("charges", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
