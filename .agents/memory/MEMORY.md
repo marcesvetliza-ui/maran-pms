@@ -24,3 +24,4 @@
 - [Gastronomic Colobig feature status](colobig-features-status.md) — P1/P2/P5/P6/P9 implementation status; toma de inventario tables; porMozo aggregation pattern.
 - [Beverage Cost split](beverage-cost-split.md) — isBeverage boolean column on menu_categories; food-cost endpoint returns foodOnlyCostPct + beverageCostPct; FoodCostReport has filter toggle + 6 KPI cards.
 - [Restaurant reports Excel export](restaurant-reports-excel.md) — xlsx npm package; client-side exportXLSX() helper in admin-reportes.tsx; Export buttons on Ventas/FoodCost/Desvios reports.
+- [PrefacturaDialog unified checkout/billing](prefactura-dialog.md) — replaces checkout wizard steps 1-3 and reservations.tsx EmitirFacturaDialog; mode='checkout'|'billing'; folio/pdf endpoint missing (404 on print).

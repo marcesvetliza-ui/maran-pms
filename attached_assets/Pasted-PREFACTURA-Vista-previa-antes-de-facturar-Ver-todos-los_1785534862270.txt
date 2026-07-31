@@ -1,0 +1,51 @@
+PREFACTURA — Vista previa antes de facturar
+
+	•	Ver todos los cargos del folio con descripción
+	•	Ver los importes adeudados
+	•	Ver los importes ya facturados
+	•	Ver los importes pendientes de facturar
+	•	Ver los anticipos registrados
+	•	Ver el total de ingresos y anticipos
+	•	Ver el saldo pendiente real
+	•	Seleccionar cargos individuales para facturar
+	•	Seleccionar importes parciales o totales por cargo
+	•	Transferir cargos a otra habitación — parciales o totales
+	•	Modificar la descripción de los ítems seleccionados
+	•	Ver y cambiar el punto de venta
+	•	Ver la condición de venta del cliente y cambiarla si es necesario
+	•	Ver por separado el pasajero, la empresa y la agencia con su tipo de comprobante sugerido según inscripción
+	•	Emitir el comprobante desde esta misma pantalla
+
+FACTURAR
+
+	•	Seleccionar a quién facturar: pasajero, empresa o agencia
+	•	El sistema sugiere automáticamente el tipo de comprobante según la inscripción del cliente
+	•	Cambiar el tipo de comprobante si es necesario
+	•	Seleccionar múltiples formas de pago con sus importes correspondientes
+	•	Incluir retenciones como forma de pago (IIBB, Ganancias)
+	•	Seleccionar el punto de venta
+	•	Emitir cualquiera de estos comprobantes:
+	•	Factura A / B / T
+	•	Factura Mipyme A
+	•	Nota de Crédito A / B / T / Mipyme A
+	•	Nota de Débito A / B / T / Mipyme A
+	•	Cierre de habitación (comprobante no fiscal)
+	•	Grabar y emitir el comprobante
+
+POST FACTURACIÓN — Pantalla de resultado
+
+	•	Ver en dos columnas lo adeudado y lo abonado
+	•	Ver si quedaron ítems sin abonar con su saldo al lado
+	•	Los ítems con saldo quedan seleccionados automáticamente para continuar
+	•	Emitir otro comprobante al mismo cliente o a otro
+	•	Trasladar el saldo a otra habitación
+
+NOTAS DE CRÉDITO Y DÉBITO
+
+	•	Acceder desde la misma prefactura
+	•	Ver los artículos de las facturas ya emitidas con sus importes
+	•	Seleccionar ítems individuales para incluir en la nota
+	•	Ingresar un importe menor al original si la nota es parcial
+	•	El sistema valida que sea el mismo tipo de comprobante, mismo cliente, misma condición de venta y formas de pago
+	•	Emitir la nota de crédito o débito
+	•	Al emitirla, los saldos vuelven automáticamente a los cargos correspondientes para poder refacturar

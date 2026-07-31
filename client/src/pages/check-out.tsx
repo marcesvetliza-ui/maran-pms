@@ -62,6 +62,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails, Charge, Payment, PaymentMethod } from "@shared/schema";
 import { EmitirFacturaDialog } from "@/pages/billing";
 import type { EmitirFacturaInitialValues } from "@/pages/billing";
+import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 
 const paymentMethodLabels: Record<PaymentMethod, string> = {
   efectivo: "Efectivo",
@@ -122,6 +123,7 @@ export default function CheckOutPage() {
   const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
   const [retencionMonto, setRetencionMonto] = useState("");
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [prefacturaOpen, setPrefacturaOpen] = useState(false);
 
   const handleToggleItem = (id: string, amount: number) => {
     const next = new Set(selectedItemIds);
@@ -368,31 +370,7 @@ export default function CheckOutPage() {
 
   const startCheckout = (reservation: ReservationWithDetails) => {
     setSelectedReservation(reservation);
-    setWizardStep(1);
-    setCheckoutComplete(false);
-    setFinalSummary(null);
-    pendingFacturaTipoRef.current = "";
-    pendingPaymentIdRef.current = "";
-    setReceiptTypeForFreeCheckout("cierre_habitacion");
-    if (reservation.companyId) {
-      setPaymentBillingTarget("company");
-      setCcCompanyId(reservation.companyId);
-      setCcAgencyId("");
-      setPaymentMethod("cuenta_corriente");
-    } else if (reservation.agencyId) {
-      setPaymentBillingTarget("agency");
-      setCcAgencyId(reservation.agencyId);
-      setCcCompanyId("");
-      setPaymentMethod("cuenta_corriente");
-    } else {
-      setPaymentBillingTarget("guest");
-      setCcCompanyId("");
-      setCcAgencyId("");
-      setPaymentMethod("efectivo");
-    }
-    setShowRetencion(false);
-    setRetencionMonto("");
-    setRetencionTipo("iibb");
+    setPrefacturaOpen(true);
   };
 
   const doCancel = () => {
@@ -1640,13 +1618,20 @@ export default function CheckOutPage() {
         </DialogContent>
       </Dialog>
 
-      {showFacturar && (
-        <EmitirFacturaDialog
-          open={showFacturar}
-          onClose={() => setShowFacturar(false)}
-          config={billingConfig}
-          initialValues={facturaInitialValues}
-          requiresEmission={true}
+      {/* PrefacturaDialog — unified checkout + billing */}
+      {selectedReservation && (
+        <PrefacturaDialog
+          open={prefacturaOpen}
+          onClose={() => {
+            setPrefacturaOpen(false);
+            setSelectedReservation(null);
+          }}
+          reservationId={selectedReservation.id}
+          reservation={selectedReservation}
+          mode="checkout"
+          onCheckoutComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+          }}
         />
       )}
     </div>

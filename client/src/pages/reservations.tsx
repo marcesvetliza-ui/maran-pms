@@ -52,6 +52,7 @@ import {
   Heart,
 } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues } from "./billing";
+import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
 import { Button } from "@/components/ui/button";
@@ -5031,61 +5032,15 @@ function ReservationDetailDialog({
         <NotaCreditoDialog invoiceId={ncForInvoiceId} onClose={() => setNcForInvoiceId(null)} />
       )}
 
-      {/* Factura desde folio */}
-      {showFacturar && (() => {
-        const g = reservation.guest;
-        const isJuridica = (g as any)?.tipoPersona === "juridica";
-        const guestName = isJuridica
-          ? (g?.firstName || "")
-          : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
-        // Fallback: guest's default company/agency if reservation has none linked
-        const guestComp = !(reservation.company) && (g as any)?.companyId ? allCompanies.find((c: any) => c.id === (g as any).companyId) as any : null;
-        const guestAg = !(reservation.agency) && !guestComp && (g as any)?.agencyId ? allAgencies.find((a: any) => a.id === (g as any).agencyId) as any : null;
-        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || guestComp?.razonSocial || guestComp?.nombreFantasia || "";
-        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || guestAg?.razonSocial || guestAg?.nombreFantasia || "";
-        const razonSocial = companyName || agencyName || guestName;
-        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || guestComp?.cuilCuit || guestAg?.cuilCuit || g?.cuilCuit || "";
-        const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
-        const vatMap: Record<string, string> = {
-          responsable_inscripto: "Responsable Inscripto",
-          monotributista: "Monotributista",
-          exento: "Exento",
-          consumidor_final: "Consumidor Final",
-          no_responsable: "No Responsable",
-          no_categorizado: "No Categorizado (Extranjero)",
-        };
-        const guestVat = (g as any)?.vatCondition || "consumidor_final";
-        const companyCondIva = (reservation.company as any)?.condicionIva || guestComp?.condicionIva || "";
-        const agencyCondIva = (reservation.agency as any)?.condicionIva || guestAg?.condicionIva || "";
-        const condicionIva = companyCondIva || agencyCondIva || (cuit
-          ? (vatMap[guestVat] || "Responsable Inscripto")
-          : (vatMap[guestVat] || "Consumidor Final"));
-        const companyDom = (reservation.company as any)?.domicilio || guestComp?.domicilio || "";
-        const agencyDom = (reservation.agency as any)?.domicilio || guestAg?.domicilio || "";
-        const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
-        const domicilio = companyDom || agencyDom || domicilioParts.join(", ");
-        const roomNum = reservation.room?.roomNumber || "";
-        const desc = `Alojamiento Hab. ${roomNum} — ${reservation.checkInDate} al ${reservation.checkOutDate} (${reservation.nights} noche${reservation.nights !== 1 ? "s" : ""})`;
-        const amount = Math.max(balance, 0);
-        const initialValues: EmitirFacturaInitialValues = {
-          razonSocial,
-          cuit,
-          dni,
-          condicionIva,
-          domicilio,
-          items: [{ descripcion: desc, precioUnitario: amount }],
-        };
-        return (
-          <EmitirFacturaDialog
-            open={showFacturar}
-            onClose={() => setShowFacturar(false)}
-            config={billingConfig}
-            initialValues={initialValues}
-            onSuccess={() => setFacturaEmitida(true)}
-            cashArea="recepcion"
-          />
-        );
-      })()}
+      {/* Prefactura / Facturar Saldo desde folio */}
+      <PrefacturaDialog
+        open={showFacturar}
+        onClose={() => setShowFacturar(false)}
+        reservationId={reservation.id}
+        reservation={reservation}
+        mode="billing"
+        onCheckoutComplete={() => setFacturaEmitida(true)}
+      />
     </Dialog>
   );
 }
