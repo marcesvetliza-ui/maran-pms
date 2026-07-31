@@ -1144,10 +1144,12 @@ export function PrefacturaDialog({
         onClose={() => setNcDialogOpen(false)}
         reservationId={reservationId}
         invoices={emittedInvoices}
+        payments={(folio?.payments || []).filter((p: any) => p.status !== "anulado")}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
           queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
           refetchFolio();
           refetchEmittedInvoices();
         }}
@@ -1197,12 +1199,13 @@ interface NcItemRow {
 }
 
 function NotaCreditoDialog({
-  open, onClose, reservationId, invoices, onSuccess,
+  open, onClose, reservationId, invoices, payments, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   reservationId: string | number;
   invoices: NcInvoice[];
+  payments: any[];
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
@@ -1211,6 +1214,7 @@ function NotaCreditoDialog({
   const [ncItems, setNcItems] = useState<NcItemRow[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [emittedNc, setEmittedNc] = useState<any>(null);
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set());
 
   const selectedInvoice = invoices.find(inv => String(inv.id) === selectedInvoiceId) ?? null;
 
@@ -1221,6 +1225,7 @@ function NotaCreditoDialog({
       setMotivo("");
       setNcItems([]);
       setEmittedNc(null);
+      setSelectedPaymentIds(new Set());
     }
   }, [open]);
 
@@ -1275,6 +1280,14 @@ function NotaCreditoDialog({
     ? parseFloat(selectedInvoice.monto_total) - parseFloat(selectedInvoice.monto_acreditado || "0")
     : 0;
 
+  function togglePayment(payId: string) {
+    setSelectedPaymentIds(prev => {
+      const next = new Set(prev);
+      next.has(payId) ? next.delete(payId) : next.add(payId);
+      return next;
+    });
+  }
+
   async function handleSubmit() {
     if (!selectedInvoice) {
       toast({ title: "Seleccioná una factura", variant: "destructive" }); return;
@@ -1294,12 +1307,18 @@ function NotaCreditoDialog({
       const res = await apiRequest("POST", `/api/billing/invoices/${selectedInvoice.id}/nota-credito`, {
         motivo: motivo.trim(),
         monto: totalNc,
+        paymentIdsToVoid: Array.from(selectedPaymentIds),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error || body?.message || "Error al emitir NC");
 
       setEmittedNc(body);
-      toast({ title: `NC emitida: ${body.tipoComprobante ?? body.tipo_comprobante} ${String(body.puntoVenta ?? body.punto_venta ?? 0).padStart(4,"0")}-${String(body.numero ?? 0).padStart(8,"0")}` });
+      const ncLabel = `${body.tipoComprobante ?? body.tipo_comprobante} ${String(body.puntoVenta ?? body.punto_venta ?? 0).padStart(4,"0")}-${String(body.numero ?? 0).padStart(8,"0")}`;
+      const voidCount = body.voidedPaymentIds?.length ?? 0;
+      toast({
+        title: `NC emitida: ${ncLabel}`,
+        description: voidCount > 0 ? `${voidCount} pago${voidCount !== 1 ? "s" : ""} anulado${voidCount !== 1 ? "s" : ""} — saldo del folio restaurado` : undefined,
+      });
       onSuccess();
 
       // Auto-open PDF
@@ -1443,6 +1462,46 @@ function NotaCreditoDialog({
                 <span className="text-muted-foreground">Total NC:</span>
                 <span className="font-bold">${fmtMoney(totalNc)}</span>
               </div>
+            </div>
+          )}
+
+          {/* Payment void selection — shown when there are active payments on the folio */}
+          {selectedInvoice && payments.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20 p-3 space-y-2">
+              <div className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                <RotateCcw className="h-3 w-3" />
+                Anular cobros para restaurar el saldo del folio (opcional)
+              </div>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Seleccioná los pagos que deben anularse. El monto volverá a aparecer como deuda pendiente en el folio.
+              </p>
+              <div className="space-y-1">
+                {payments.map((p: any) => (
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-2 cursor-pointer rounded px-2 py-1 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                  >
+                    <Checkbox
+                      checked={selectedPaymentIds.has(String(p.id))}
+                      onCheckedChange={() => togglePayment(String(p.id))}
+                    />
+                    <span className="text-sm flex-1">
+                      {PAYMENT_METHOD_LABELS[p.method] || p.method}
+                      {p.date ? <span className="text-xs text-muted-foreground ml-2">{formatDateAR(p.date)}</span> : null}
+                      {p.reference ? <span className="text-xs text-muted-foreground ml-2">({p.reference})</span> : null}
+                    </span>
+                    <span className="text-sm font-medium text-amber-900 dark:text-amber-200">${fmtMoney(p.amount)}</span>
+                  </label>
+                ))}
+              </div>
+              {selectedPaymentIds.size > 0 && (
+                <div className="text-xs text-amber-800 dark:text-amber-300 pt-1 border-t border-amber-200 dark:border-amber-700">
+                  Se anularán {selectedPaymentIds.size} pago{selectedPaymentIds.size !== 1 ? "s" : ""} por un total de{" "}
+                  <strong>
+                    ${fmtMoney(payments.filter((p: any) => selectedPaymentIds.has(String(p.id))).reduce((acc: number, p: any) => acc + parseFloat(p.amount), 0))}
+                  </strong>
+                </div>
+              )}
             </div>
           )}
 

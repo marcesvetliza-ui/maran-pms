@@ -398,7 +398,7 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "La factura ya fue anulada completamente" });
       }
 
-      const { motivo, items, monto } = req.body;
+      const { motivo, items, monto, paymentIdsToVoid } = req.body;
       const tipoNC = original.tipo_comprobante === "FA" ? "NCA" : original.tipo_comprobante === "FC" ? "NCC" : "NCB";
       const user = (req as any).user;
 
@@ -490,7 +490,93 @@ export function registerBillingRoutes(app: Express) {
         console.error("[NC] Error registrando movimiento de caja:", cashErr);
       }
 
-      res.status(201).json(nc);
+      // Void selected payments to restore the folio balance
+      const voidedPaymentIds: number[] = [];
+      if (Array.isArray(paymentIdsToVoid) && paymentIdsToVoid.length > 0) {
+        const operador = user?.fullName || user?.username || "sistema";
+        const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+        const voidMotivo = `Nota de Crédito ${nroNC}${motivo ? ` — ${motivo}` : ""}`;
+
+        // Determine the reservation ID this invoice belongs to (ownership anchor)
+        const invoiceReservaId = original.reserva_id ? String(original.reserva_id) : null;
+        if (!invoiceReservaId) {
+          console.warn("[nc-void-payment] invoice has no reserva_id — skipping payment voids");
+        }
+
+        // Validate input: each element must be a non-empty string (UUID)
+        const validPaymentIds = paymentIdsToVoid.filter((id: any) => {
+          if (typeof id !== "string" || !id.trim()) {
+            console.warn(`[nc-void-payment] invalid payment ID rejected: ${JSON.stringify(id)}`);
+            return false;
+          }
+          return true;
+        });
+
+        for (const payId of validPaymentIds) {
+          try {
+            const payRow = await db.execute(sql`SELECT * FROM payments WHERE id = ${payId}`);
+            const pay = payRow.rows?.[0] as any;
+            if (!pay || pay.status === "anulado") continue;
+
+            // ── Security: ensure payment belongs to the same reservation ──────
+            if (!invoiceReservaId || String(pay.reservation_id) !== invoiceReservaId) {
+              console.warn(`[nc-void-payment] payment ${payId} does not belong to reservation ${invoiceReservaId} — skipped`);
+              continue;
+            }
+
+            // Mark payment as voided (bypass the "today only" guard since this is a fiscal NC operation)
+            await db.execute(sql`
+              UPDATE payments
+              SET status = 'anulado',
+                  anulado_por = ${operador},
+                  motivo_anulacion = ${voidMotivo},
+                  anulado_at = NOW()
+              WHERE id = ${payId}
+            `);
+            voidedPaymentIds.push(payId);
+
+            // Add folio void adjustment so the balance is restored
+            if (pay.reservation_id) {
+              try {
+                const folioRows = await db.execute(sql`SELECT id FROM folios WHERE entity_type = 'reservation' AND entity_id = ${pay.reservation_id} LIMIT 1`);
+                const folioRec = folioRows.rows?.[0] as any;
+                if (folioRec) {
+                  const methodLabel: Record<string, string> = {
+                    efectivo: "Efectivo", tarjeta_debito: "Tarj. Débito", tarjeta_credito: "Tarj. Crédito",
+                    transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente",
+                  };
+                  await storage.addFolioAdjustment(
+                    folioRec.id, "void", parseFloat(pay.amount),
+                    `Anulación pago ${methodLabel[pay.method] || pay.method} — ${voidMotivo}`,
+                    operador, undefined, voidMotivo
+                  );
+                }
+              } catch (e) { console.error("[nc-void-payment] folio adjustment:", e); }
+
+              // Cash reversal
+              try {
+                const reservation = await storage.getReservation(pay.reservation_id);
+                const cashLabel = reservation
+                  ? [
+                      `Anulación ${reservation.reservationCode}`,
+                      reservation.room?.roomNumber ? `Hab. ${reservation.room.roomNumber}` : null,
+                      reservation.guest ? `${reservation.guest.lastName}${reservation.guest.firstName ? ", " + reservation.guest.firstName : ""}` : null,
+                      pay.method,
+                    ].filter(Boolean).join(" — ")
+                  : `Anulación pago — ${pay.method}`;
+                await storage.registerCashMovement(
+                  "reception", "payment_void", pay.id, cashLabel,
+                  pay.method, String(pay.amount), "expense", operador
+                );
+              } catch (e) { console.error("[nc-void-payment] cash reversal:", e); }
+            }
+          } catch (e) {
+            console.error(`[nc-void-payment] failed for payment ${payId}:`, e);
+          }
+        }
+      }
+
+      res.status(201).json({ ...nc, voidedPaymentIds });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
