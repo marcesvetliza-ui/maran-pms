@@ -1502,6 +1502,14 @@ function NotaCreditoDialog({
                   </strong>
                 </div>
               )}
+              {payments.some((p: any) => selectedPaymentIds.has(String(p.id)) && p.date < getLocalToday()) && (
+                <div className="flex items-start gap-2 rounded-md border border-orange-300 bg-orange-100 dark:border-orange-700 dark:bg-orange-950/40 px-3 py-2 mt-1">
+                  <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
+                  <p className="text-xs text-orange-800 dark:text-orange-300 font-medium">
+                    Estás anulando pagos de fechas anteriores — coordiná con administración
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
