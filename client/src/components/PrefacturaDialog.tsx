@@ -9,7 +9,7 @@ import {
   CircleCheck, AlertCircle, Loader2, Percent, Building2, User,
   Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,10 +74,14 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 };
 
 const TIPO_OPTIONS = [
-  { value: "FA", label: "Factura A", fiscal: true },
-  { value: "FB", label: "Factura B", fiscal: true },
-  { value: "NCA", label: "Nota de Crédito A", fiscal: true },
-  { value: "NCB", label: "Nota de Crédito B", fiscal: true },
+  { value: "FA",  label: "Factura A",           fiscal: true },
+  { value: "FB",  label: "Factura B",           fiscal: true },
+  { value: "FT",  label: "Factura T",           fiscal: true },
+  { value: "FM",  label: "Factura MiPyme A",    fiscal: true },
+  { value: "NCA", label: "Nota de Crédito A",   fiscal: true },
+  { value: "NCB", label: "Nota de Crédito B",   fiscal: true },
+  { value: "NCT", label: "Nota de Crédito T",   fiscal: true },
+  { value: "NCM", label: "Nota de Crédito MiPyme A", fiscal: true },
   { value: "cierre_habitacion", label: "Cierre de habitación (no fiscal)", fiscal: false },
   { value: "ticket", label: "Ticket (no fiscal)", fiscal: false },
 ];
@@ -86,7 +90,8 @@ const NON_FISCAL = new Set(["cierre_habitacion", "ticket", "voucher_justo", "vou
 
 const RECEIPT_TYPE_MAP: Record<string, string> = {
   FA: "factura_a", FB: "factura_b", FC: "factura_c",
-  NCA: "factura_a", NCB: "factura_b",
+  FT: "factura_t", FM: "factura_mipyme_a",
+  NCA: "factura_a", NCB: "factura_b", NCT: "factura_t", NCM: "factura_mipyme_a",
   cierre_habitacion: "cierre_habitacion", ticket: "ticket",
 };
 
@@ -112,11 +117,13 @@ function buildInvoiceItems(
   tipo: string
 ) {
   const isFiscal = !NON_FISCAL.has(tipo);
-  const isFC = tipo === "FC";
+  // FC (Monotributista) no discrimina IVA — todo "no gravado"
+  // FT (Turismo) tampoco discrimina IVA en el comprobante
+  const esNoGravado = tipo === "FC" || tipo === "FT";
 
   function computeItem(descripcion: string, precio: number) {
     const base = precio;
-    if (!isFiscal || isFC) {
+    if (!isFiscal || esNoGravado) {
       return { descripcion, cantidad: 1, precioUnitario: base, alicuotaIva: "no_gravado" as const, subtotalNeto: base, subtotal: base };
     }
     const neto = Number((base / 1.21).toFixed(2));
@@ -193,9 +200,15 @@ export function PrefacturaDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Transfer charge sub-dialog
+  // Transfer charge sub-dialog (single charge)
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferCharge, setTransferCharge] = useState<{ id: string; description: string; maxAmount: number; originalAmount?: number } | null>(null);
+
+  // Bulk transfer dialog
+  const [showBulkTransfer, setShowBulkTransfer] = useState(false);
+
+  // Partial payment warning
+  const [showPartialWarning, setShowPartialWarning] = useState(false);
 
   // Reversal confirmation
   const [revertCharge, setRevertCharge] = useState<{ id: string; description: string; amount: number; category: string } | null>(null);
@@ -402,7 +415,20 @@ export function PrefacturaDialog({
 
   // ── Submit ──────────────────────────────────────────────────────────────────
 
-  async function handleSubmit() {
+  // Gate: warn if user enters less than the full balance before actually submitting
+  function handleSubmit() {
+    if (paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
+      toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
+      return;
+    }
+    if (saldoRestante > 0.01) {
+      setShowPartialWarning(true);
+      return;
+    }
+    doSubmit();
+  }
+
+  async function doSubmit() {
     if (paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
       toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
       return;
@@ -877,6 +903,15 @@ export function PrefacturaDialog({
                 <Printer className="h-4 w-4 mr-1" />Imprimir resumen
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                className="text-orange-700 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/30"
+                onClick={() => setShowBulkTransfer(true)}
+                disabled={folioLoading || !folio}
+              >
+                <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
+              </Button>
+              <Button
                 onClick={() => setStep(2)}
                 disabled={folioLoading || selectedIds.size === 0}
               >
@@ -1028,9 +1063,18 @@ export function PrefacturaDialog({
               </div>
             )}
 
-            <DialogFooter className="gap-2">
+            <DialogFooter className="gap-2 flex-wrap">
               <Button variant="outline" onClick={() => setStep(1)} disabled={isSubmitting}>
                 <ChevronLeft className="h-4 w-4 mr-1" />Volver
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-orange-700 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/30"
+                onClick={() => setShowBulkTransfer(true)}
+                disabled={isSubmitting || !folio}
+              >
+                <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
               </Button>
               <Button
                 onClick={handleSubmit}
@@ -1126,7 +1170,7 @@ export function PrefacturaDialog({
         )}
       </DialogContent>
 
-      {/* Transfer charge sub-dialog */}
+      {/* Transfer charge sub-dialog (single charge) */}
       <TransferChargeDialog
         open={transferDialogOpen}
         onClose={() => setTransferDialogOpen(false)}
@@ -1139,6 +1183,56 @@ export function PrefacturaDialog({
           refetchTransferRemaining();
         }}
       />
+
+      {/* Bulk transfer sub-dialog */}
+      <BulkTransferDialog
+        open={showBulkTransfer}
+        onClose={() => setShowBulkTransfer(false)}
+        reservationId={reservationId}
+        folio={folio ?? null}
+        onSuccess={() => {
+          setShowBulkTransfer(false);
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "transfer-remaining"] });
+          refetchFolio();
+          refetchTransferRemaining();
+        }}
+      />
+
+      {/* Partial payment warning dialog */}
+      <Dialog open={showPartialWarning} onOpenChange={o => { if (!o) setShowPartialWarning(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="h-5 w-5 shrink-0" />
+              Saldo sin abonar
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm">
+            <p>
+              El monto ingresado cubre <strong>${fmtMoney(totalPayments)}</strong> pero el saldo del folio es{" "}
+              <strong className="text-red-600 dark:text-red-400">${fmtMoney(folio?.balance || 0)}</strong>.
+              Quedarán <strong className="text-red-600 dark:text-red-400">${fmtMoney(saldoRestante)}</strong> sin abonar.
+            </p>
+            <p className="text-muted-foreground">
+              Si continuás, se emitirá el comprobante fiscal por el total de los cargos seleccionados
+              y se registrará el pago parcial. El saldo restante quedará pendiente en el folio.
+            </p>
+            <p className="font-medium">¿Querés continuar igual?</p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowPartialWarning(false)}>
+              Volver a revisar
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => { setShowPartialWarning(false); doSubmit(); }}
+            >
+              Sí, continuar con saldo pendiente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reversal confirmation dialog */}
       <RevertTransferDialog
@@ -1176,7 +1270,7 @@ export function PrefacturaDialog({
         open={ndDialogOpen}
         onClose={() => setNdDialogOpen(false)}
         reservationId={reservationId}
-        invoices={emittedInvoices.filter((inv: any) => inv.tipo_comprobante === "FA" || inv.tipo_comprobante === "FB" || inv.tipo_comprobante === "FC")}
+        invoices={emittedInvoices.filter((inv: any) => ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante))}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
@@ -1722,7 +1816,12 @@ function NotaDebitoDialog({
                 Total facturado: <span className="text-foreground font-medium">${fmtMoney(selectedInvoice.monto_total)}</span>
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                La ND se emitirá como <strong>{selectedInvoice.tipo_comprobante === "FA" ? "NDA (Nota de Débito A)" : selectedInvoice.tipo_comprobante === "FC" ? "NDC (Nota de Débito C)" : "NDB (Nota de Débito B)"}</strong>
+                La ND se emitirá como <strong>{{
+                  FA: "NDA (Nota de Débito A)",
+                  FT: "NDT (Nota de Débito T)",
+                  FM: "NDM (Nota de Débito MiPyme A)",
+                  FC: "NDC (Nota de Débito C)",
+                }[selectedInvoice.tipo_comprobante] ?? "NDB (Nota de Débito B)"}</strong>
               </div>
             </div>
           )}
@@ -2080,6 +2179,238 @@ function RevertTransferDialog({
             )}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── BulkTransferDialog sub-component ────────────────────────────────────────
+
+function BulkTransferDialog({
+  open, onClose, reservationId, folio, onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  reservationId: string | number;
+  folio: PrefacturaFolioData | null;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [targetReservationId, setTargetReservationId] = useState("");
+  const [includeAccommodation, setIncludeAccommodation] = useState(false);
+  const [selectedChargeIds, setSelectedChargeIds] = useState<Set<string>>(new Set());
+  const [transferNote, setTransferNote] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fetch active reservations for the target picker
+  const { data: activeReservations = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations", "active-for-transfer"],
+    queryFn: async () => {
+      const res = await fetch("/api/reservations");
+      if (!res.ok) throw new Error("Error cargando reservas");
+      const all: any[] = await res.json();
+      return all.filter((r: any) =>
+        (r.status === "checked_in" || r.status === "confirmed") &&
+        String(r.id) !== String(reservationId)
+      );
+    },
+    enabled: open,
+  });
+
+  // Reset on open
+  useEffect(() => {
+    if (open) {
+      setTargetReservationId("");
+      setIncludeAccommodation(false);
+      setSelectedChargeIds(new Set());
+      setTransferNote("");
+    }
+  }, [open]);
+
+  const billableCharges = (folio?.charges || []).filter(
+    (c: any) => c.category !== "transfer_out" && c.category !== "transfer_in" && parseFloat(c.amount) > 0
+  );
+
+  const nothingSelected = !includeAccommodation && selectedChargeIds.size === 0;
+
+  async function handleSubmit() {
+    if (!targetReservationId) {
+      toast({ title: "Seleccioná una habitación destino", variant: "destructive" }); return;
+    }
+    if (nothingSelected) {
+      toast({ title: "Seleccioná al menos un cargo para transferir", variant: "destructive" }); return;
+    }
+    setIsSubmitting(true);
+    try {
+      const res = await apiRequest("POST", `/api/reservations/${reservationId}/bulk-transfer`, {
+        targetReservationId,
+        chargeIds: Array.from(selectedChargeIds),
+        includeAccommodation,
+        transferNote: transferNote.trim(),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || "Error al transferir");
+      const parts: string[] = [];
+      if (body.accommodationTransferred) parts.push("alojamiento");
+      if (body.chargesTransferred > 0) parts.push(`${body.chargesTransferred} cargo(s)`);
+      toast({ title: `Transferencia realizada: ${parts.join(" y ")} → otra habitación` });
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const targetRes = activeReservations.find((r: any) => String(r.id) === targetReservationId);
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o && !isSubmitting) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[85dvh] flex flex-col p-0 gap-0">
+        <DialogHeader className="px-6 pt-6 pb-4 shrink-0 border-b">
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowRightLeft className="h-5 w-5 text-orange-600" />
+            Transferir a otra habitación
+          </DialogTitle>
+          <DialogDescription>
+            Seleccioná los cargos que querés mover. El folio destino los recibirá para facturar allí.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {/* Target reservation */}
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">Habitación destino</Label>
+            <Select value={targetReservationId} onValueChange={setTargetReservationId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar habitación activa..." />
+              </SelectTrigger>
+              <SelectContent>
+                {activeReservations.map((r: any) => {
+                  const roomNum = r.room?.roomNumber || "?";
+                  const guestName = r.guest
+                    ? `${r.guest.lastName ?? ""} ${r.guest.firstName ?? ""}`.trim()
+                    : "Huésped";
+                  const statusLabel = r.status === "checked_in" ? "CI" : "Conf.";
+                  return (
+                    <SelectItem key={r.id} value={String(r.id)}>
+                      Hab. {roomNum} — {guestName} ({statusLabel})
+                    </SelectItem>
+                  );
+                })}
+                {activeReservations.length === 0 && (
+                  <SelectItem value="_none" disabled>Sin reservas activas disponibles</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+            {targetRes && (
+              <p className="text-xs text-muted-foreground">
+                Destino: Hab. {targetRes.room?.roomNumber} — {targetRes.guest?.lastName} {targetRes.guest?.firstName}
+              </p>
+            )}
+          </div>
+
+          {/* Charges to transfer */}
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">Cargos a transferir</Label>
+            <div className="border rounded-lg divide-y">
+              {/* Accommodation */}
+              {(folio?.roomTotal ?? 0) > 0 && (
+                <div className="flex items-center gap-3 p-3">
+                  <input
+                    type="checkbox"
+                    id="bulk-pfx-accommodation"
+                    className="h-4 w-4 rounded border-gray-300 shrink-0"
+                    checked={includeAccommodation}
+                    onChange={e => setIncludeAccommodation(e.target.checked)}
+                  />
+                  <label htmlFor="bulk-pfx-accommodation" className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                    <span className="font-medium">Alojamiento Hab. {folio?.roomNumber} ({folio?.nights} noche{folio?.nights !== 1 ? "s" : ""})</span>
+                    <span className="font-semibold tabular-nums shrink-0">${fmtMoney(folio?.roomTotal ?? 0)}</span>
+                  </label>
+                </div>
+              )}
+              {/* Extra charges */}
+              {billableCharges.length === 0 && (folio?.roomTotal ?? 0) === 0 ? (
+                <div className="p-3 text-sm text-muted-foreground text-center">Sin cargos disponibles</div>
+              ) : billableCharges.length > 0 ? (
+                <>
+                  {billableCharges.length > 1 && (
+                    <div className="flex items-center gap-3 p-2 bg-muted/30">
+                      <input
+                        type="checkbox"
+                        id="bulk-pfx-all"
+                        className="h-4 w-4 rounded border-gray-300 shrink-0"
+                        checked={selectedChargeIds.size === billableCharges.length}
+                        onChange={e => {
+                          if (e.target.checked) setSelectedChargeIds(new Set(billableCharges.map((c: any) => String(c.id))));
+                          else setSelectedChargeIds(new Set());
+                        }}
+                      />
+                      <label htmlFor="bulk-pfx-all" className="text-xs text-muted-foreground cursor-pointer">Seleccionar todos los consumos</label>
+                    </div>
+                  )}
+                  {billableCharges.map((charge: any) => (
+                    <div key={charge.id} className="flex items-center gap-3 p-3">
+                      <input
+                        type="checkbox"
+                        id={`bulk-pfx-${charge.id}`}
+                        className="h-4 w-4 rounded border-gray-300 shrink-0"
+                        checked={selectedChargeIds.has(String(charge.id))}
+                        onChange={e => {
+                          const next = new Set(selectedChargeIds);
+                          if (e.target.checked) next.add(String(charge.id));
+                          else next.delete(String(charge.id));
+                          setSelectedChargeIds(next);
+                        }}
+                      />
+                      <label htmlFor={`bulk-pfx-${charge.id}`} className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                        <span className="truncate">{charge.description}</span>
+                        <span className="font-medium tabular-nums shrink-0">${fmtMoney(charge.amount)}</span>
+                      </label>
+                    </div>
+                  ))}
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Note */}
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">Nota (opcional)</Label>
+            <Input
+              value={transferNote}
+              onChange={e => setTransferNote(e.target.value)}
+              placeholder="Ej: Folio Maestro grupo, pedido del huésped..."
+              className="text-sm"
+            />
+          </div>
+
+          {/* Preview */}
+          {!nothingSelected && targetReservationId && (
+            <div className="rounded-lg border bg-orange-50/60 dark:bg-orange-950/20 px-4 py-3 text-sm space-y-1">
+              <p className="font-medium text-orange-700 dark:text-orange-400">Resultado de la transferencia</p>
+              <p className="text-muted-foreground text-xs">
+                Los cargos seleccionados se moverán al folio de Hab. {targetRes?.room?.roomNumber ?? "destino"}.
+                Este folio quedará sin esos cargos y el destino los recibirá para facturar allí.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t flex justify-end gap-2 shrink-0">
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || nothingSelected || !targetReservationId}
+            className="bg-orange-600 hover:bg-orange-700 text-white"
+          >
+            {isSubmitting
+              ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />Transfiriendo...</>
+              : <><ArrowRightLeft className="h-4 w-4 mr-1" />Transferir</>
+            }
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

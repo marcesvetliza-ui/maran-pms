@@ -2,12 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/App";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { es } from "date-fns/locale";
 import { Link } from "wouter";
 import {
   ArrowUpCircle, ArrowDownCircle, RefreshCw, Plus, Ban,
-  Settings, FileDown, ClipboardList, AlertTriangle, CircleDot,
+  Settings, FileDown, ClipboardList, AlertTriangle, CircleDot, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -757,10 +758,21 @@ function ArqueoDialog({ open, onClose, saldoActual }: { open: boolean; onClose: 
 
 export function AdminCajaConfigPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const { data: config } = useQuery<any>({ queryKey: ["/api/admin-cash/config"] });
 
   const [fondoFijo, setFondoFijo] = useState("");
   const [alertaBajo, setAlertaBajo] = useState("");
+
+  // Purga de no fiscales
+  const [purgeStart, setPurgeStart] = useState("");
+  const [purgeEnd, setPurgeEnd] = useState("");
+  const [previewCount, setPreviewCount] = useState<number | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
+
+  const canPurge = user?.role === "admin" || user?.role === "administracion";
 
   // Sync when config loads
   useState(() => {
@@ -778,10 +790,51 @@ export function AdminCajaConfigPage() {
     },
   });
 
+  async function handlePreview() {
+    if (!purgeStart || !purgeEnd) {
+      toast({ title: "Ingresá rango de fechas", variant: "destructive" }); return;
+    }
+    setPreviewLoading(true);
+    setPreviewCount(null);
+    try {
+      const res = await fetch(
+        `/api/billing/invoices/non-fiscal/count?startDate=${purgeStart}&endDate=${purgeEnd}`,
+        { credentials: "include" }
+      );
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || "Error");
+      setPreviewCount(body.count);
+    } catch (e: any) {
+      toast({ title: e.message || "Error al consultar", variant: "destructive" });
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function handlePurge() {
+    setPurgeLoading(true);
+    try {
+      const res = await fetch(
+        `/api/billing/invoices/non-fiscal?startDate=${purgeStart}&endDate=${purgeEnd}`,
+        { method: "DELETE", credentials: "include" }
+      );
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || "Error");
+      toast({ title: `Se eliminaron ${body.deleted} comprobante(s) no fiscal(es)` });
+      setPreviewCount(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+    } catch (e: any) {
+      toast({ title: e.message || "Error al eliminar", variant: "destructive" });
+    } finally {
+      setPurgeLoading(false);
+      setPurgeConfirmOpen(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-xl mx-auto p-6">
-        <div className="flex items-center gap-3 mb-6">
+      <div className="max-w-xl mx-auto p-6 space-y-6">
+        <div className="flex items-center gap-3">
           <Link href="/admin/caja">
             <Button variant="ghost" size="sm">← Volver</Button>
           </Link>
@@ -836,7 +889,122 @@ export function AdminCajaConfigPage() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* ── Zona de mantenimiento (solo admin / administracion) ─────────────── */}
+        {canPurge && (
+          <Card className="border-red-200 dark:border-red-900">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-red-700 dark:text-red-400">
+                <Trash2 className="h-4 w-4" />
+                Mantenimiento — Comprobantes no fiscales
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                Elimina los registros internos de vouchers y cierres de habitación/SPA del período indicado.
+                Los cobros, cargos, movimientos de inventario y reportes de ventas <strong>no se modifican</strong>.
+                Solo se borran los comprobantes internos de la tabla de facturación.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Desde (fecha)</Label>
+                  <Input
+                    type="date"
+                    value={purgeStart}
+                    onChange={e => { setPurgeStart(e.target.value); setPreviewCount(null); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Hasta (fecha)</Label>
+                  <Input
+                    type="date"
+                    value={purgeEnd}
+                    onChange={e => { setPurgeEnd(e.target.value); setPreviewCount(null); }}
+                  />
+                </div>
+              </div>
+
+              {/* Quick-range shortcuts */}
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "Enero", start: "2025-01-01", end: "2025-01-31" },
+                  { label: "Mes anterior", start: toArg(startOfMonth(new Date(new Date().getFullYear(), new Date().getMonth() - 1))), end: toArg(endOfMonth(new Date(new Date().getFullYear(), new Date().getMonth() - 1))) },
+                  { label: "Este mes", start: toArg(startOfMonth(new Date())), end: toArg(endOfMonth(new Date())) },
+                  { label: "2025 completo", start: "2025-01-01", end: "2025-12-31" },
+                ].map(r => (
+                  <Button
+                    key={r.label}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-7"
+                    onClick={() => { setPurgeStart(r.start); setPurgeEnd(r.end); setPreviewCount(null); }}
+                  >
+                    {r.label}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePreview}
+                  disabled={previewLoading || !purgeStart || !purgeEnd}
+                >
+                  {previewLoading ? "Consultando..." : "Ver cuántos hay"}
+                </Button>
+
+                {previewCount !== null && (
+                  <span className={`text-sm font-medium ${previewCount === 0 ? "text-muted-foreground" : "text-red-600 dark:text-red-400"}`}>
+                    {previewCount === 0
+                      ? "No hay comprobantes no fiscales en ese período"
+                      : `${previewCount} comprobante(s) no fiscal(es) serán eliminados`}
+                  </span>
+                )}
+              </div>
+
+              {previewCount !== null && previewCount > 0 && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setPurgeConfirmOpen(true)}
+                  disabled={purgeLoading}
+                  className="flex items-center gap-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Eliminar {previewCount} comprobante(s) no fiscal(es)
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
+
+      {/* Confirm purge */}
+      <AlertDialog open={purgeConfirmOpen} onOpenChange={setPurgeConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Confirmar eliminación?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminarán <strong>{previewCount}</strong> comprobante(s) no fiscal(es) del período{" "}
+              <strong>{purgeStart}</strong> al <strong>{purgeEnd}</strong>.
+              <br /><br />
+              Esta acción <strong>no se puede deshacer</strong>. Los cobros, cargos y reportes de ventas
+              no se modifican — solo se borran los registros de comprobantes internos (vouchers y cierres).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={purgeLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handlePurge}
+              disabled={purgeLoading}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {purgeLoading ? "Eliminando..." : "Sí, eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

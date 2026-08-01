@@ -22,7 +22,7 @@ export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
 ];
 
 export interface NewInvoiceData {
-  tipoComprobante: "FA" | "FB" | "FC" | "NCA" | "NCB" | "NDA" | "NDB" | "NDC" | NonFiscalTipo;
+  tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "NCA" | "NCB" | "NCT" | "NCM" | "NDA" | "NDB" | "NDT" | "NDM" | "NDC" | NonFiscalTipo;
   cliente: {
     razonSocial: string;
     cuit?: string;
@@ -38,7 +38,11 @@ export interface NewInvoiceData {
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
 }
 
-const TIPOS_CBT_WSFE: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8, NDA: 2, NDB: 7, NDC: 12 };
+const TIPOS_CBT_WSFE: Record<string, number> = {
+  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201,
+  NCA: 3, NCB: 8, NCT: 197, NCM: 203,
+  NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDC: 12,
+};
 
 function calcularMontos(items: InvoiceItem[], tipo: string) {
   let montoNeto = 0;
@@ -47,10 +51,9 @@ function calcularMontos(items: InvoiceItem[], tipo: string) {
   let montoExento = 0;
   let montoNoGravado = 0;
 
-  // Factura C (monotributista) no discrimina IVA: todo el importe se
-  // considera "no gravado" a los fines de ARCA, sin importar la alícuota
-  // que haya llegado del cliente (defensa por si el front no la fuerza).
-  if (tipo === "FC") {
+  // Factura C (monotributista) y Factura T (turismo) no discriminan IVA:
+  // todo el importe se considera "no gravado" a los fines de ARCA.
+  if (tipo === "FC" || tipo === "FT") {
     for (const item of items) montoNoGravado += item.subtotal;
     const montoTotal = round2(montoNoGravado);
     return {

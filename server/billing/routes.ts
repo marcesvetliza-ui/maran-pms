@@ -5,7 +5,7 @@ import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData } from "./invoicePdf";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
 import { storage } from "../db-storage";
 
 export function registerBillingRoutes(app: Express) {
@@ -215,6 +215,51 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
+  // ── Purga de comprobantes no fiscales ────────────────────────────────────────
+  const NON_FISCAL_TIPOS = [
+    "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa",
+  ];
+
+  // GET /api/billing/invoices/non-fiscal/count?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  app.get("/api/billing/invoices/non-fiscal/count", requireRole(["admin", "administracion"]), async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query as Record<string, string>;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate y endDate son requeridos" });
+      }
+      const result = await db.execute(sql`
+        SELECT COUNT(*)::int AS total
+        FROM sales_invoices
+        WHERE tipo_comprobante = ANY(${NON_FISCAL_TIPOS}::text[])
+          AND fecha_emision >= ${startDate}
+          AND fecha_emision <= ${endDate}
+      `);
+      res.json({ count: (result.rows[0] as any)?.total ?? 0 });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/billing/invoices/non-fiscal?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  app.delete("/api/billing/invoices/non-fiscal", requireRole(["admin", "administracion"]), async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query as Record<string, string>;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate y endDate son requeridos" });
+      }
+      const result = await db.execute(sql`
+        DELETE FROM sales_invoices
+        WHERE tipo_comprobante = ANY(${NON_FISCAL_TIPOS}::text[])
+          AND fecha_emision >= ${startDate}
+          AND fecha_emision <= ${endDate}
+        RETURNING id
+      `);
+      res.json({ deleted: result.rows.length });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/billing/invoices/:id
   app.get("/api/billing/invoices/:id", requireAuth, async (req, res) => {
     try {
@@ -399,7 +444,11 @@ export function registerBillingRoutes(app: Express) {
       }
 
       const { motivo, items, monto, paymentIdsToVoid } = req.body;
-      const tipoNC = original.tipo_comprobante === "FA" ? "NCA" : original.tipo_comprobante === "FC" ? "NCC" : "NCB";
+      const tipoNC =
+        original.tipo_comprobante === "FA" ? "NCA" :
+        original.tipo_comprobante === "FT" ? "NCT" :
+        original.tipo_comprobante === "FM" ? "NCM" :
+        original.tipo_comprobante === "FC" ? "NCC" : "NCB";
       const user = (req as any).user;
 
       const montoTotal = parseFloat(original.monto_total);
@@ -594,9 +643,9 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "No se puede emitir una ND sobre una factura anulada" });
       }
 
-      // AFIP rule: NDs may only reference original invoices (FA/FB/FC), not NCs or other NDs
-      const NC_TYPES = new Set(["NCA", "NCB", "NCC"]);
-      const ND_TYPES = new Set(["NDA", "NDB", "NDC"]);
+      // AFIP rule: NDs may only reference original invoices (FA/FB/FT/FM/FC), not NCs or other NDs
+      const NC_TYPES = new Set(["NCA", "NCB", "NCT", "NCM", "NCC"]);
+      const ND_TYPES = new Set(["NDA", "NDB", "NDT", "NDM", "NDC"]);
       if (NC_TYPES.has(original.tipo_comprobante)) {
         return res.status(400).json({ error: "No se puede emitir una Nota de Débito sobre una Nota de Crédito" });
       }
@@ -612,9 +661,11 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "El motivo es requerido" });
       }
 
-      // Derive ND type from original invoice: FA → NDA, FB → NDB, FC → NDC (AFIP criteria)
+      // Derive ND type from original invoice: FA → NDA, FT → NDT, FM → NDM, FB → NDB, FC → NDC
       const tipoND =
         original.tipo_comprobante === "FA" ? "NDA" :
+        original.tipo_comprobante === "FT" ? "NDT" :
+        original.tipo_comprobante === "FM" ? "NDM" :
         original.tipo_comprobante === "FC" ? "NDC" : "NDB";
       const user = (req as any).user;
 
@@ -631,7 +682,7 @@ export function registerBillingRoutes(app: Express) {
       }];
 
       const nd = await emitirFactura({
-        tipoComprobante: tipoND as "NDA" | "NDB" | "NDC",
+        tipoComprobante: tipoND as "NDA" | "NDB" | "NDT" | "NDM" | "NDC",
         cliente: {
           razonSocial: original.cliente_razon_social,
           cuit: original.cliente_cuit,

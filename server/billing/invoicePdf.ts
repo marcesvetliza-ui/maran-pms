@@ -20,12 +20,18 @@ const TIPO_LABELS: Record<string, { nombre: string; letra: string; codigo: strin
   FA:  { nombre: "FACTURA",          letra: "A", codigo: "001" },
   FB:  { nombre: "FACTURA",          letra: "B", codigo: "006" },
   FC:  { nombre: "FACTURA",          letra: "C", codigo: "011" },
+  FT:  { nombre: "FACTURA",          letra: "T", codigo: "195" },
+  FM:  { nombre: "FACTURA MiPyME",   letra: "A", codigo: "201" },
   NCA: { nombre: "NOTA DE CRÉDITO",  letra: "A", codigo: "003" },
   NCB: { nombre: "NOTA DE CRÉDITO",  letra: "B", codigo: "008" },
   NCC: { nombre: "NOTA DE CRÉDITO",  letra: "C", codigo: "013" },
+  NCT: { nombre: "NOTA DE CRÉDITO",  letra: "T", codigo: "197" },
+  NCM: { nombre: "NOTA DE CRÉDITO MiPyME", letra: "A", codigo: "203" },
   NDA: { nombre: "NOTA DE DÉBITO",   letra: "A", codigo: "002" },
   NDB: { nombre: "NOTA DE DÉBITO",   letra: "B", codigo: "007" },
   NDC: { nombre: "NOTA DE DÉBITO",   letra: "C", codigo: "012" },
+  NDT: { nombre: "NOTA DE DÉBITO",   letra: "T", codigo: "196" },
+  NDM: { nombre: "NOTA DE DÉBITO MiPyME", letra: "A", codigo: "202" },
 };
 
 export async function generarFacturaPDF(factura: any, config: any): Promise<Buffer> {
@@ -121,8 +127,8 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
     y += 56;
 
     // ── Items table ─────────────────────────────────────────────
-    // Factura A / NC-A discriminan IVA; B, C, NC-B no discriminan
-    const discriminaIVA = ["FA", "NCA", "NDA"].includes(tipoKey);
+    // Factura A y MiPyme A discriminan IVA; B, T, C no discriminan
+    const discriminaIVA = ["FA", "NCA", "NDA", "FM", "NCM", "NDM"].includes(tipoKey);
 
     doc.rect(x0, y, W, 16).fillColor("#f0f0f0").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
     doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);

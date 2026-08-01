@@ -193,11 +193,17 @@ export default function BillingPage() {
                   <SelectItem value="__all__">Todos los tipos</SelectItem>
                   <SelectItem value="FA">Factura A</SelectItem>
                   <SelectItem value="FB">Factura B</SelectItem>
+                  <SelectItem value="FT">Factura T</SelectItem>
+                  <SelectItem value="FM">Factura MiPyme A</SelectItem>
                   <SelectItem value="FC">Factura C</SelectItem>
                   <SelectItem value="NCA">NC A</SelectItem>
                   <SelectItem value="NCB">NC B</SelectItem>
+                  <SelectItem value="NCT">NC T</SelectItem>
+                  <SelectItem value="NCM">NC MiPyme A</SelectItem>
                   <SelectItem value="NDA">ND A</SelectItem>
                   <SelectItem value="NDB">ND B</SelectItem>
+                  <SelectItem value="NDT">ND T</SelectItem>
+                  <SelectItem value="NDM">ND MiPyme A</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={filtroArea || "__all__"} onValueChange={(v) => setFiltroArea(v === "__all__" ? "" : v)}>
@@ -450,9 +456,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       // Auto-select comprobante type based on cuit + condición IVA
       if (initialValues.cuit) {
         const iva = initialValues.condicionIva || "";
-        let preferido: "FA" | "FB" | "FC" = "FA";
-        if (iva === "Responsable Inscripto" || iva === "Exento") preferido = "FA";
-        else if (iva === "Monotributista" || iva === "No Responsable" || iva === "No Categorizado (Extranjero)") preferido = "FC";
+        const preferido = (iva === "Responsable Inscripto" || iva === "Exento") ? "FA" : "FB";
         setTipo(tipos.includes(preferido) ? preferido : tipos.includes("FA") ? "FA" : tipos[0]);
       } else {
         setTipo(tipos.includes("FB") ? "FB" : tipos[0]);
@@ -479,7 +483,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setCondicionIva(condVal);
     if (domVal) setDomicilio(domVal);
     if (cuitVal) {
-      const auto = condVal === "Monotributista" ? "FC" : "FA";
+      const auto = (condVal === "Responsable Inscripto" || condVal === "Exento") ? "FA" : "FB";
       const nextTipo = tipos.includes(auto) ? auto : tipos.includes("FB") ? "FB" : tipos[0];
       setTipo(nextTipo);
       recalcForTipo(nextTipo, tipo);
@@ -509,26 +513,23 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }
 
   function newItem(): Item {
-    return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: tipo === "FC" ? "no_gravado" : "21", subtotalNeto: 0, subtotal: 0 };
+    return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21", subtotalNeto: 0, subtotal: 0 };
   }
 
   function recalcForTipo(nextTipo: string, prevTipo?: string) {
     setItems(prev => prev.map(item => {
       // Si el ítem venía de Factura C, la alícuota fue forzada a "no_gravado" automáticamente;
       // al salir de FC hay que restaurar una alícuota real (21%) para que no quede "huérfano".
-      const alicuota = prevTipo === "FC" && nextTipo !== "FC" && item.alicuotaIva === "no_gravado" ? "21" : item.alicuotaIva;
+      const esNoGravadoViejo = (prevTipo === "FC" || prevTipo === "FT") && (nextTipo !== "FC" && nextTipo !== "FT");
+      const alicuota = esNoGravadoViejo && item.alicuotaIva === "no_gravado" ? "21" : item.alicuotaIva;
       const base = item.cantidad * item.precioUnitario;
-      if (nextTipo === "FC") {
+      if (nextTipo === "FC" || nextTipo === "FT") {
         return { ...item, alicuotaIva: "no_gravado" as const, subtotalNeto: base, subtotal: base };
       }
-      // FA y FB: el precio ingresado ya incluye IVA → extraer el neto dividiendo
+      // FA, FB, FM: el precio ingresado ya incluye IVA → extraer el neto dividiendo
       if (alicuota === "21") return { ...item, alicuotaIva: alicuota, subtotalNeto: Number((base / 1.21).toFixed(2)), subtotal: base };
       if (alicuota === "10.5") return { ...item, alicuotaIva: alicuota, subtotalNeto: Number((base / 1.105).toFixed(2)), subtotal: base };
-      if (nextTipo === "FA") {
-        // exento / no_gravado en FA: el monto ingresado es el total
-        return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
-      }
-      // FB: exento / no_gravado
+      // exento / no_gravado: el monto ingresado es el total
       return { ...item, alicuotaIva: alicuota, subtotalNeto: base, subtotal: base };
     }));
   }
@@ -627,8 +628,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
   }
 
-  const isFA = tipo === "FA";
-  const isFC = tipo === "FC";
+  const isFA = tipo === "FA" || tipo === "FM";
+  const isFC = tipo === "FC" || tipo === "FT";
   const isNonFiscal = NON_FISCAL_TIPOS_SET.has(tipo);
   const ambiente: AmbienteMode = config?.arcaAmbiente ?? "ficticio";
 
@@ -829,11 +830,17 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
         <div className="space-y-1">
           <Label>Tipo de comprobante</Label>
-          <Select value={tipo} onValueChange={v => { const prevTipo = tipo; setTipo(v); setCondicionIva(v === "FA" ? "Responsable Inscripto" : v === "FC" ? "Monotributista" : "Consumidor Final"); recalcForTipo(v, prevTipo); }}>
+          <Select value={tipo} onValueChange={v => {
+            const prevTipo = tipo; setTipo(v);
+            const cIva = (v === "FA" || v === "FM") ? "Responsable Inscripto" : (v === "FC" || v === "FT") ? "Consumidor Final" : "Consumidor Final";
+            setCondicionIva(cIva); recalcForTipo(v, prevTipo);
+          }}>
             <SelectTrigger data-testid="select-tipo-factura"><SelectValue /></SelectTrigger>
             <SelectContent>
               {tipos.includes("FA") && <SelectItem value="FA">Factura A</SelectItem>}
               {tipos.includes("FB") && <SelectItem value="FB">Factura B</SelectItem>}
+              {tipos.includes("FT") && <SelectItem value="FT">Factura T</SelectItem>}
+              {tipos.includes("FM") && <SelectItem value="FM">Factura MiPyme A</SelectItem>}
               {tipos.filter(t => NON_FISCAL_TIPOS_SET.has(t)).map(t => (
                 <SelectItem key={t} value={t}>{NON_FISCAL_LABELS[t] ?? t}</SelectItem>
               ))}
@@ -1116,7 +1123,8 @@ export function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; o
   });
 
   if (!invoice) return null;
-  const tipoNC = invoice.tipo_comprobante === "FA" ? "Nota de Crédito A" : "Nota de Crédito B";
+  const tipoNC: Record<string, string> = { FA: "Nota de Crédito A", FT: "Nota de Crédito T", FM: "Nota de Crédito MiPyme A" };
+  const tipoNCLabel = tipoNC[invoice.tipo_comprobante] ?? "Nota de Crédito B";
   const totalOriginal = parseFloat(invoice.monto_total) || 0;
   const montoNC = modoParcial ? parseFloat(montoParcial) || 0 : totalOriginal;
   const montoInvalido = modoParcial && (!montoParcial || montoNC <= 0 || montoNC > totalOriginal);
@@ -1129,7 +1137,7 @@ export function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; o
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Emitir {tipoNC}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Emitir {tipoNCLabel}</DialogTitle></DialogHeader>
         <div className="space-y-3 py-2">
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
             <div className="font-medium">Factura original:</div>

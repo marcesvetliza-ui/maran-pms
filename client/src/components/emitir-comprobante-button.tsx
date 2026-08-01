@@ -31,7 +31,7 @@ export function EmitirComprobanteButton({ area, variant = "outline", size = "sm"
     enabled: open,
   });
 
-  const invoicesActivas = (invoices || []).filter((i: any) => i.estado !== "anulada" && ["FA", "FB"].includes(i.tipo_comprobante));
+  const invoicesActivas = (invoices || []).filter((i: any) => i.estado !== "anulada" && ["FA", "FB", "FT", "FM"].includes(i.tipo_comprobante));
 
   return (
     <>
@@ -92,7 +92,7 @@ export function EmitirComprobanteButton({ area, variant = "outline", size = "sm"
           open={showFactura}
           onClose={() => setShowFactura(false)}
           config={config}
-          allowedTipos={["FA", "FB", ...extraTipos.map(t => t.value)]}
+          allowedTipos={["FA", "FB", "FT", "FM", ...extraTipos.map(t => t.value)]}
           cashArea={area}
         />
       )}
