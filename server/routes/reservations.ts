@@ -783,6 +783,27 @@ export function registerReservationsRoutes(app: Express) {
         getBillingConfig(),
       ]);
 
+      // Fetch void adjustments from folio_movements (written when an NC voids a payment)
+      let voidAdjustments: Array<{ description: string; date: string; amount: string }> = [];
+      try {
+        const folioRow = await db.execute(
+          sql`SELECT id FROM folios WHERE entity_type = 'reservation' AND entity_id = ${req.params.id} LIMIT 1`
+        );
+        const folioRec = folioRow.rows?.[0] as any;
+        if (folioRec) {
+          const movRows = await db.execute(
+            sql`SELECT description, amount, created_at FROM folio_movements WHERE folio_id = ${folioRec.id} AND type = 'void' ORDER BY created_at ASC`
+          );
+          voidAdjustments = (movRows.rows as any[]).map((r) => ({
+            description: r.description as string,
+            date: (r.created_at instanceof Date ? r.created_at : new Date(r.created_at)).toISOString().split("T")[0],
+            amount: String(r.amount),
+          }));
+        }
+      } catch (adjErr: any) {
+        console.warn("[folio-pdf] could not load void adjustments (non-fatal):", adjErr?.message);
+      }
+
       const activePayments = paymentsList.filter((p) => (p as any).status !== "anulado");
       const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
       const totalCharges = chargesList.reduce((s, c) => s + parseFloat(c.amount), 0);
@@ -803,6 +824,7 @@ export function registerReservationsRoutes(app: Express) {
         roomTotal,
         charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount, category: c.category ?? undefined })),
         payments: activePayments.map(p => ({ date: p.date, method: p.method, amount: p.amount, reference: p.reference, notes: p.notes })),
+        adjustments: voidAdjustments.length > 0 ? voidAdjustments : undefined,
         grandTotal,
         totalPayments,
         balance,
