@@ -2291,7 +2291,7 @@ export const salesInvoices = pgTable("sales_invoices", {
   caeFechaVto: date("cae_fecha_vto"),
   modoFicticio: boolean("modo_ficticio").default(true),
   estado: text("estado").default("emitida"),
-  reservaId: integer("reserva_id"),
+  reservaId: varchar("reserva_id"),
   folioId: integer("folio_id"),
   notaCreditoId: integer("nota_credito_id"),
   montoAcreditado: numeric("monto_acreditado", { precision: 14, scale: 2 }).default("0"),

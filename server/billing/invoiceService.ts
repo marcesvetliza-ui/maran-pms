@@ -31,7 +31,7 @@ export interface NewInvoiceData {
     domicilio?: string;
   };
   items: InvoiceItem[];
-  reservaId?: number;
+  reservaId?: string;
   folioId?: number;
   facturaOriginalId?: number; // para NC
   operador?: string;

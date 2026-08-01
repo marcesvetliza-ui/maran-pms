@@ -1220,6 +1220,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  // sales_invoices.reserva_id was integer, but reservations use UUID/varchar IDs.
+  // Converting to varchar so the folio lookup (entity_id = reserva_id) works correctly.
+  await withTimeout("sales_invoices.reserva_id_varchar", T, () =>
+    db.execute(sql`
+      ALTER TABLE sales_invoices
+        ALTER COLUMN reserva_id TYPE varchar USING reserva_id::varchar
+    `)
+  );
+
   await withTimeout("spa_accounts.invoice_id", T, () =>
     db.execute(sql`ALTER TABLE spa_accounts ADD COLUMN IF NOT EXISTS invoice_id integer`)
   );

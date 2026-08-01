@@ -501,7 +501,7 @@ export function PrefacturaDialog({
             domicilio: domicilio || undefined,
           },
           items: invoiceItems,
-          reservaId: Number(reservationId),
+          reservaId: reservationId ? String(reservationId) : undefined,
           puntoVentaOverride: puntoVenta ? parseInt(puntoVenta) : undefined,
         });
         const invoiceBody = await invoiceRes.json();
