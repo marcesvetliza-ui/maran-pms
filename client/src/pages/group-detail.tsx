@@ -2141,10 +2141,40 @@ export default function GroupDetailPage() {
                               )}
 
                               {/* Pagos individuales */}
-                              {r.individualPayments > 0 && (
-                                <div className="flex items-center justify-between text-sm">
-                                  <span className="text-muted-foreground">Pagos individuales recibidos</span>
-                                  <span className="font-medium text-green-600">${r.individualPayments.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                              {Array.isArray(r.individualPayments) && r.individualPayments.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pagos individuales recibidos</p>
+                                  <div className="rounded-md border divide-y">
+                                    {r.individualPayments.map((p: any) => {
+                                      const invoiceBadge = (() => {
+                                        if (!p.invoiceRef) return null;
+                                        try {
+                                          const ref = JSON.parse(p.invoiceRef);
+                                          return `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4, "0")}-${String(ref.numero ?? "").padStart(8, "0")}`;
+                                        } catch { return null; }
+                                      })();
+                                      return (
+                                        <div key={p.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-muted-foreground">{fmtDate(p.date)}</span>
+                                            <Badge variant="secondary">{PAYMENT_METHOD_LABELS[p.method] || p.method}</Badge>
+                                            {invoiceBadge && (
+                                              <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-xs font-mono">
+                                                {invoiceBadge}
+                                              </Badge>
+                                            )}
+                                          </div>
+                                          <span className="font-medium text-green-600">${p.amount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                        </div>
+                                      );
+                                    })}
+                                    {r.individualPayments.length > 1 && (
+                                      <div className="flex items-center justify-between px-3 py-2 text-sm font-semibold border-t bg-muted/30">
+                                        <span>Total pagado</span>
+                                        <span className="text-green-600">${r.individualPayments.reduce((s: number, p: any) => s + p.amount, 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               )}
 

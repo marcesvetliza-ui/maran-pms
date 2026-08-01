@@ -937,7 +937,13 @@ export function registerGroupsRoutes(app: Express) {
             date: c.date,
             category: c.category,
           })),
-          individualPayments: paid,
+          individualPayments: resPayments.map((p: any) => ({
+            id: p.id,
+            amount: parseFloat(p.amount),
+            method: p.method,
+            invoiceRef: p.invoiceRef ?? null,
+            date: p.date,
+          })),
           // balance that remains on the individual folio
           individualBalance: config === "accommodation"
             ? extras - paid  // accommodation covered by master
@@ -955,7 +961,7 @@ export function registerGroupsRoutes(app: Express) {
 
       // Payments received: use individual reservation payments as source of truth
       // (includes master folio distributions + any direct payments to individual rooms)
-      const indivPaid = rooms.reduce((s: number, r: any) => s + r.individualPayments, 0);
+      const indivPaid = rooms.reduce((s: number, r: any) => s + r.individualPayments.reduce((ps: number, p: any) => ps + p.amount, 0), 0);
       const gPaid = gPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
       // Take the larger value to avoid double-counting when both records exist
       const masterPaid = Math.max(gPaid, indivPaid);
