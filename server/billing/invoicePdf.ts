@@ -346,10 +346,28 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
     // Cargos adicionales
     for (const charge of data.charges) {
       if (y > 720) { doc.addPage(); y = 40; }
-      doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
-      doc.text(charge.description, x0 + 4, y + 3, { width: 300 });
-      doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
-      doc.text(`$ ${fPeso(charge.amount)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+      const isTransferOut = charge.category === "transfer_out";
+      const isTransferIn  = charge.category === "transfer_in";
+      const isTransfer    = isTransferOut || isTransferIn;
+
+      if (isTransfer) {
+        doc.rect(x0, y, W, 14).fillColor("#e8f4fd").fill()
+          .rect(x0, y, W, 14).strokeColor("#b3d4f5").stroke();
+        const cleanDesc = cleanTransferDesc(charge.description);
+        const amt = $n(charge.amount);
+        const sign = amt < 0 ? "−" : "+";
+        doc.font("Helvetica-Oblique").fontSize(7.5).fillColor("#1a4f8a");
+        doc.text(cleanDesc, x0 + 4, y + 3, { width: 300 });
+        doc.font("Helvetica-Oblique").fontSize(7.5).fillColor("#1a4f8a");
+        doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`${sign} $ ${fPeso(Math.abs(amt))}`, x0 + 402, y + 3, { width: 125, align: "right" });
+        doc.font("Helvetica").fillColor("#000");
+      } else {
+        doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+        doc.text(charge.description, x0 + 4, y + 3, { width: 300 });
+        doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`$ ${fPeso(charge.amount)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+      }
       y += 14;
     }
 
