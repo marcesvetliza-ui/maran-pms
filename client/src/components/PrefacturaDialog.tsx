@@ -575,6 +575,12 @@ export function PrefacturaDialog({
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
+  // Invoices eligible for a Nota de Crédito (only FA / FB / FC / FT / FM)
+  const ncEligibleInvoices = emittedInvoices.filter((inv: any) =>
+    ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante)
+  );
+  const ncDisabled = ncEligibleInvoices.length === 0;
+
   // Invoices eligible for a Nota de Débito (only FA / FB / FC / FT / FM)
   const ndEligibleInvoices = emittedInvoices.filter((inv: any) =>
     ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante)
@@ -884,14 +890,28 @@ export function PrefacturaDialog({
               <Button variant="outline" onClick={handleClose}>Cancelar</Button>
               {emittedInvoices.length > 0 && (
                 <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30"
-                    onClick={() => setNcDialogOpen(true)}
-                  >
-                    <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
-                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={ncDisabled ? 0 : undefined}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30 disabled:pointer-events-none"
+                            onClick={() => setNcDialogOpen(true)}
+                            disabled={ncDisabled}
+                          >
+                            <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {ncDisabled && (
+                        <TooltipContent side="top">
+                          No hay facturas (FA/FB/FC/FT/FM) emitidas para esta reserva. La Nota de Crédito requiere al menos una factura base.
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
