@@ -860,7 +860,8 @@ export function registerGroupsRoutes(app: Express) {
             method,
             reference: reference || `Pago grupal`,
             date: paymentDate,
-          });
+            groupPaymentId: groupPayment.id,
+          } as any);
         }
       }
 
@@ -1053,6 +1054,7 @@ export function registerGroupsRoutes(app: Express) {
       });
 
       // Apply individual room payments based on distribution
+      // Store group_payment_id so invoice_ref can be deterministically propagated later
       let distributed = 0;
       for (const [reservationId, amt] of Object.entries(distribution)) {
         if (amt > 0.005) {
@@ -1062,7 +1064,8 @@ export function registerGroupsRoutes(app: Express) {
             method,
             reference: reference || `Pago Folio Maestro — ${group.name}`,
             date: paymentDate,
-          });
+            groupPaymentId: groupPayment.id,
+          } as any);
           distributed++;
         }
       }

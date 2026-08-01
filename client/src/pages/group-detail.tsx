@@ -1953,19 +1953,34 @@ export default function GroupDetailPage() {
                       <div>
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pagos recibidos del organizador</p>
                         <div className="rounded-md border divide-y">
-                          {masterFolio.groupPayments.map((gp: any) => (
-                            <div key={gp.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-${gp.id}`}>
-                              <div className="flex items-center gap-3">
-                                <span className="text-muted-foreground">{fmtDate(gp.date)}</span>
-                                <Badge variant="secondary">{PAYMENT_METHOD_LABELS[gp.method] || gp.method}</Badge>
-                                {gp.reference && <span className="text-xs text-muted-foreground">{gp.reference}</span>}
-                                {gp.distribution === "master_folio" && (
-                                  <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs">Folio Maestro</Badge>
-                                )}
+                          {masterFolio.groupPayments.map((gp: any) => {
+                            const invoiceBadge = (() => {
+                              if (!gp.invoiceRef) return null;
+                              try {
+                                const ref = JSON.parse(gp.invoiceRef);
+                                return `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4, "0")}-${String(ref.numero ?? "").padStart(8, "0")}`;
+                              } catch { return null; }
+                            })();
+                            return (
+                              <div key={gp.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-${gp.id}`}>
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  <span className="text-muted-foreground">{fmtDate(gp.date)}</span>
+                                  <Badge variant="secondary">{PAYMENT_METHOD_LABELS[gp.method] || gp.method}</Badge>
+                                  {gp.reference && <span className="text-xs text-muted-foreground">{gp.reference}</span>}
+                                  {gp.distribution === "master_folio" && (
+                                    <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs">Folio Maestro</Badge>
+                                  )}
+                                  {invoiceBadge && (
+                                    <Badge variant="outline" className="text-xs font-mono gap-1 border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400">
+                                      <Receipt className="h-3 w-3" />
+                                      {invoiceBadge}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <span className="font-semibold text-green-600">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                               </div>
-                              <span className="font-semibold text-green-600">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                            </div>
-                          ))}
+                            );
+                          })}
                           <div className="flex items-center justify-between px-3 py-2 text-sm bg-muted/30 font-semibold text-green-700 dark:text-green-400">
                             <span>Total pagado</span>
                             <span>${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>

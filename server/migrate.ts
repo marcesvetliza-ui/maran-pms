@@ -1063,5 +1063,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // group_payment_id on payments: deterministic FK so invoice_ref can be propagated to the exact group_payments row
+  await withTimeout("payments.group_payment_id", T, () =>
+    db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS group_payment_id varchar`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

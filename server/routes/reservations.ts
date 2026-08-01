@@ -2363,7 +2363,23 @@ export function registerReservationsRoutes(app: Express) {
             invoice_link_failed = false
         WHERE id = ${req.params.id} RETURNING *
       `);
-      res.json(updated.rows[0]);
+      const updatedPay = updated.rows[0] as any;
+      res.json(updatedPay);
+
+      // Propagate invoice_ref to the associated group_payment when this payment was created
+      // as part of a group payment distribution. Uses the deterministic group_payment_id FK
+      // set at payment creation time — no heuristic matching.
+      if (updatedPay?.group_payment_id) {
+        try {
+          await db.execute(sql`
+            UPDATE group_payments
+            SET invoice_ref = ${JSON.stringify(invoiceData)}
+            WHERE id = ${updatedPay.group_payment_id}
+          `);
+        } catch (propagateErr) {
+          console.error("[invoice-link] Failed to propagate invoice_ref to group_payment:", propagateErr);
+        }
+      }
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
