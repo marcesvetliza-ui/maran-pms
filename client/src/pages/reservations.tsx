@@ -1956,6 +1956,24 @@ function ReservationDetailDialog({
   const [showUninvoicedWarning, setShowUninvoicedWarning] = useState(false);
   const [uninvoicedWarningAction, setUninvoicedWarningAction] = useState<"facturar" | "checkout" | null>(null);
 
+  // Reset all wizard/billing state whenever a different reservation is opened
+  useEffect(() => {
+    setCoWizardStep(0);
+    setCoIsFacturarSolo(false);
+    setCoPayAmount("");
+    setCoReceiptType("cierre_habitacion");
+    setCoPayMethod("efectivo");
+    setCoBillingTarget("guest");
+    setCoCompanyId("");
+    setCoAgencyId("");
+    setShowFacturar(false);
+    setShowFacturarPrompt(false);
+    setUninvoicedWarningAction(null);
+    setShowUninvoicedWarning(false);
+    coPendingPaymentIdRef.current = "";
+    setCoPendingInvoice(false);
+  }, [reservation.id]);
+
   const openCheckoutWizard = () => {
     coPendingPaymentIdRef.current = "";
     setCoPayAmount("");
