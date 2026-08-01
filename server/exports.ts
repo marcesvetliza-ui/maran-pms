@@ -926,7 +926,7 @@ export function registerExportRoutes(app: Express) {
           ["Fecha de Pago", fDate(op.fecha)],
           ["N° de OP", op.numero],
           ["Importe Base de Calculo", `$ ${fPeso(base)}`],
-          ["Alicuota Aplicada", `${alicuota}%`],
+          ["Alicuota Aplicada", "0%"],
           ["Importe de Retencion", `$ ${fPeso(retIibb)}`],
         ];
 

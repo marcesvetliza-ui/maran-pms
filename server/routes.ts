@@ -2989,7 +2989,7 @@ export async function registerRoutes(
       }
       const idsSQL = sql.raw(idsInt.join(","));
       const facturasRes = await db.execute(sql`
-        SELECT id, monto_total, monto_neto, estado, supplier_id FROM purchase_invoices
+        SELECT id, monto_total, monto_neto, tipo_comprobante, estado, supplier_id FROM purchase_invoices
         WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado = 'pendiente'
       `);
       if (facturasRes.rows.length !== idsInt.length) {
@@ -3006,9 +3006,12 @@ export async function registerRoutes(
         return res.status(400).json({ error: errorMsg });
       }
 
-      // Calcular totales
-      const totalFacturas = facturasRes.rows.reduce((s: number, r: any) => s + parseFloat(r.monto_total), 0);
-      const baseNetosIibb = facturasRes.rows.reduce((s: number, r: any) => s + parseFloat(r.monto_neto || "0"), 0);
+      // Calcular totales — las NC (Notas de Crédito) restan del total a abonar
+      const isNC = (r: any) => (r.tipo_comprobante || "").startsWith("NC");
+      const totalFacturas = facturasRes.rows.reduce((s: number, r: any) =>
+        isNC(r) ? s - parseFloat(r.monto_total) : s + parseFloat(r.monto_total), 0);
+      const baseNetosIibb = facturasRes.rows.reduce((s: number, r: any) =>
+        isNC(r) ? s : s + parseFloat(r.monto_neto || "0"), 0);
       const retIibb = parseFloat(retencionIibb || "0");
       const retGan = parseFloat(retencionGanancias || "0");
       const retIva = parseFloat(retencionIva || "0");
@@ -3035,12 +3038,16 @@ export async function registerRoutes(
       const op = opRes.rows[0] as any;
 
       // Marcar facturas como pagadas e insertar ítems
+      // Las NC se insertan con importe_cancelado negativo (reducen el total de la OP)
       for (const fid of idsInt) {
         const factura = facturasRes.rows.find((r: any) => Number(r.id) === fid) as any;
+        const importeCancelado = isNC(factura)
+          ? -Math.abs(parseFloat(factura.monto_total))
+          : parseFloat(factura.monto_total);
         await db.execute(sql`UPDATE purchase_invoices SET estado = 'pagado' WHERE id = ${fid}`);
         await db.execute(sql`
           INSERT INTO payment_order_items (payment_order_id, invoice_id, importe_cancelado)
-          VALUES (${op.id}, ${fid}, ${parseFloat(factura.monto_total)})
+          VALUES (${op.id}, ${fid}, ${importeCancelado})
         `);
       }
 

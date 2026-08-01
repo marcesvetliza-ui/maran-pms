@@ -1426,8 +1426,12 @@ function PaymentOrderDialog({
     setSelectedInvoices((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   const selectedFacturas = facturas.filter((inv) => selectedInvoices.includes(inv.id));
-  const totalSelected = selectedFacturas.reduce((s, inv) => s + $n(inv.montoTotal), 0);
-  const baseNetosIibb = selectedFacturas.reduce((s, inv) => s + $n(inv.montoNeto), 0);
+  const isNC = (inv: Invoice) => (inv.tipoComprobante || "").startsWith("NC");
+  // NCs restan del total a abonar; solo las facturas positivas forman la base de retenciones
+  const totalSelected = selectedFacturas.reduce(
+    (s, inv) => isNC(inv) ? s - $n(inv.montoTotal) : s + $n(inv.montoTotal), 0);
+  const baseNetosIibb = selectedFacturas.reduce(
+    (s, inv) => isNC(inv) ? s : s + $n(inv.montoNeto), 0);
 
   // Al abrir el diálogo (para cualquier proveedor), resetear todo el estado.
   // Sin esto, `selectedInvoices` y `createdOpId` quedaban de la OP anterior
@@ -1563,20 +1567,28 @@ function PaymentOrderDialog({
               {facturas.length === 0 && (
                 <div className="p-4 text-center text-sm text-muted-foreground">Sin facturas pendientes</div>
               )}
-              {facturas.map((inv) => (
-                <div key={inv.id} className="flex items-center gap-3 p-3 hover:bg-muted/50">
-                  <Checkbox
-                    checked={selectedInvoices.includes(inv.id)}
-                    onCheckedChange={() => toggleInv(inv.id)}
-                    data-testid={`chk-invoice-${inv.id}`}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{inv.tipoComprobante} {inv.numeroComprobanteExt || inv.numeroComprobante}</div>
-                    <div className="text-xs text-muted-foreground">{inv.fechaEmision}</div>
+              {facturas.map((inv) => {
+                const esNC = isNC(inv);
+                return (
+                  <div key={inv.id} className="flex items-center gap-3 p-3 hover:bg-muted/50">
+                    <Checkbox
+                      checked={selectedInvoices.includes(inv.id)}
+                      onCheckedChange={() => toggleInv(inv.id)}
+                      data-testid={`chk-invoice-${inv.id}`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium flex items-center gap-1.5">
+                        {inv.tipoComprobante} {inv.numeroComprobanteExt || inv.numeroComprobante}
+                        {esNC && <span className="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 px-1.5 py-0.5 rounded font-normal">resta del total</span>}
+                      </div>
+                      <div className="text-xs text-muted-foreground">{inv.fechaEmision}</div>
+                    </div>
+                    <div className={`font-semibold ${esNC ? "text-orange-600 dark:text-orange-400" : ""}`}>
+                      {esNC ? "−" : ""}${fmt(inv.montoTotal)}
+                    </div>
                   </div>
-                  <div className="font-semibold">${fmt(inv.montoTotal)}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
