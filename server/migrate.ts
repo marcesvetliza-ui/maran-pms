@@ -1068,5 +1068,73 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS group_payment_id varchar`)
   );
 
+  // Backfill [res:ID] tag on transfer charges that predate the room-link feature.
+  // Charges with [corr:UUID] but no [res:...] are matched by their corr UUID; the paired
+  // charge's reservation_id becomes the [res:ID] written into the other side.
+  await withTimeout("charges.backfill_transfer_res_tags", T, async () => {
+    const rows = await db.execute(sql`
+      SELECT id, reservation_id, description, category
+      FROM charges
+      WHERE category IN ('transfer_in', 'transfer_out')
+        AND description LIKE '%[corr:%'
+        AND description NOT LIKE '%[res:%'
+        AND status = 'active'
+    `);
+
+    if (rows.rows.length === 0) return;
+
+    // Build a map: corrId → list of charge rows
+    const byCorr = new Map<string, any[]>();
+    for (const row of rows.rows as any[]) {
+      const m = (row.description as string).match(/\[corr:([^\]]+)\]/);
+      if (!m) continue;
+      const corrId = m[1];
+      if (!byCorr.has(corrId)) byCorr.set(corrId, []);
+      byCorr.get(corrId)!.push(row);
+    }
+
+    let patched = 0;
+    for (const [corrId, charges] of byCorr.entries()) {
+      // We need at least one charge to carry a corr tag; find any paired charge
+      // (even if the counterpart already has [res:]) to identify the linked reservation.
+      const allWithCorr = await db.execute(sql`
+        SELECT id, reservation_id, description, category
+        FROM charges
+        WHERE description LIKE ${"%" + `[corr:${corrId}]` + "%"}
+          AND category IN ('transfer_in', 'transfer_out')
+      `);
+
+      const allPairs = allWithCorr.rows as any[];
+      if (allPairs.length < 2) continue; // can't determine the other side
+
+      for (const charge of charges) {
+        // The res to link to is the reservation_id of the OTHER side
+        const other = allPairs.find((p: any) => p.id !== charge.id);
+        if (!other) continue;
+        const resId = other.reservation_id as string;
+        const newDesc = `${charge.description} [res:${resId}]`;
+
+        await db.execute(sql`
+          UPDATE charges SET description = ${newDesc} WHERE id = ${charge.id}
+        `);
+
+        // Mirror the update into folio_movements for the same corr tag + category
+        await db.execute(sql`
+          UPDATE folio_movements
+          SET description = description || ${` [res:${resId}]`}
+          WHERE type = ${charge.category}
+            AND description LIKE ${"%" + `[corr:${corrId}]` + "%"}
+            AND description NOT LIKE '%[res:%'
+        `);
+
+        patched++;
+      }
+    }
+
+    if (patched > 0) {
+      logger.info(`Backfill: ${patched} transfer charge(s) actualizados con etiqueta [res:].`);
+    }
+  });
+
   logger.info("Migraciones incrementales completadas.");
 }
