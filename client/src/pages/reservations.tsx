@@ -600,24 +600,46 @@ export function ReservationFormDialog({
         reservationCode: data.reservationCode || generatedCode?.code || `RES-${Date.now()}`,
       });
       const created = await res.json();
+      // Reservation is confirmed in DB at this point.
+      // Charges and companions are secondary operations — if they fail, the reservation
+      // must still appear in the board. Errors here are shown as warnings without
+      // rolling back the already-saved reservation.
       if (pendingCharges.length > 0) {
         const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-        for (const charge of pendingCharges) {
-          const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
-          await apiRequest("POST", "/api/charges", {
-            description: charge.description,
-            amount: totalAmt,
-            category: charge.category,
-            reservationId: created.id,
-            date: todayStr,
+        try {
+          for (const charge of pendingCharges) {
+            const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
+            await apiRequest("POST", "/api/charges", {
+              description: charge.description,
+              amount: totalAmt,
+              category: charge.category,
+              reservationId: created.id,
+              date: todayStr,
+            });
+          }
+        } catch {
+          toast({
+            title: "Reserva creada — cargos pendientes",
+            description: "La reserva fue guardada pero no se pudieron agregar los cargos adicionales. Podés agregarlos desde el folio.",
+            variant: "destructive",
+            duration: 8000,
           });
         }
       }
       if (pendingCompanions.length > 0) {
-        for (const comp of pendingCompanions) {
-          const body: any = { ...comp, reservationId: created.id };
-          if (!body.dateOfBirth) delete body.dateOfBirth;
-          await apiRequest("POST", `/api/reservations/${created.id}/companions`, body);
+        try {
+          for (const comp of pendingCompanions) {
+            const body: any = { ...comp, reservationId: created.id };
+            if (!body.dateOfBirth) delete body.dateOfBirth;
+            await apiRequest("POST", `/api/reservations/${created.id}/companions`, body);
+          }
+        } catch {
+          toast({
+            title: "Reserva creada — acompañantes pendientes",
+            description: "La reserva fue guardada pero no se pudieron registrar los acompañantes. Podés agregarlos desde la reserva.",
+            variant: "destructive",
+            duration: 8000,
+          });
         }
       }
       return created;
@@ -647,9 +669,10 @@ export function ReservationFormDialog({
         }
       } catch {}
       toast({
-        title: "Error",
+        title: isEditing ? "Error al actualizar la reserva" : "Error al crear la reserva",
         description: message,
         variant: "destructive",
+        duration: 8000,
       });
     },
   });

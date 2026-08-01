@@ -193,12 +193,21 @@ export function QuickReservationDialog({
       });
       if (pendingCharges.length > 0 && createdRes?.id) {
         const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-        for (const charge of pendingCharges) {
-          const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
-          await apiRequest("POST", "/api/charges", { description: charge.description, amount: totalAmt, category: charge.category, reservationId: createdRes.id, date: todayStr });
+        try {
+          for (const charge of pendingCharges) {
+            const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
+            await apiRequest("POST", "/api/charges", { description: charge.description, amount: totalAmt, category: charge.category, reservationId: createdRes.id, date: todayStr });
+          }
+        } catch {
+          toast({
+            title: "Reserva creada — cargos pendientes",
+            description: "La reserva fue guardada pero no se pudieron agregar los cargos adicionales. Podés agregarlos desde el folio.",
+            variant: "destructive",
+            duration: 8000,
+          });
         }
       }
-    } catch { /* errors handled in mutation.onError */ }
+    } catch { /* reservation creation errors handled in mutation.onError */ }
   };
 
   if (!reservationData) return null;
