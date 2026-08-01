@@ -220,7 +220,14 @@ const paymentMethodLabels: Record<string, string> = {
   cuenta_corriente: "Cuenta Corriente",
 };
 
-const receiptTypes = ["Ticket", "Factura A", "Factura B", "Factura C", "Nota Credito", "Voucher (No Fiscal)"];
+const receiptTypeOptions = [
+  { value: "ticket", label: "Ticket" },
+  { value: "factura_a", label: "Factura A (IVA Resp. Inscripto)" },
+  { value: "factura_b", label: "Factura B (Consumidor Final)" },
+  { value: "factura_c", label: "Factura C (Monotributista)" },
+  { value: "nota_credito", label: "Nota Crédito" },
+  { value: "voucher_no_fiscal", label: "Voucher (No Fiscal)" },
+];
 
 function safeFormatDate(dateStr: string, fmt: string, opts?: any): string {
   try {
@@ -298,6 +305,9 @@ export default function EventsPage() {
   const [deleteEventConfirmOpen, setDeleteEventConfirmOpen] = useState(false);
   const [eventToDelete, setEventToDelete] = useState<HotelEvent | null>(null);
   const [folioReceiptType, setFolioReceiptType] = useState("");
+  const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
+  const [invoiceCustomerCuit, setInvoiceCustomerCuit] = useState("");
+  const [invoiceCustomerDni, setInvoiceCustomerDni] = useState("");
   const [activeTab, setActiveTab] = useState("details");
   const [isTableFolioOpen, setIsTableFolioOpen] = useState(false);
   const [selectedTable, setSelectedTable] = useState<EventTableType | null>(null);
@@ -601,12 +611,30 @@ export default function EventsPage() {
   });
 
   const closeEventMutation = useMutation({
-    mutationFn: ({ eventId, receiptType }: { eventId: string; receiptType: string }) =>
-      apiRequest("POST", `/api/events/${eventId}/close`, { receiptType }),
-    onSuccess: async () => {
+    mutationFn: async ({ eventId, receiptType, customerName, customerCuit, customerDni }: { eventId: string; receiptType: string; customerName?: string; customerCuit?: string; customerDni?: string }) => {
+      const res = await apiRequest("POST", `/api/events/${eventId}/close`, {
+        receiptType,
+        customerRazonSocial: customerName || undefined,
+        customerCuit: customerCuit || undefined,
+        customerDni: customerDni || undefined,
+      });
+      return res.json();
+    },
+    onSuccess: async (data: any, variables) => {
       await refreshSelectedEvent();
       queryClient.invalidateQueries({ queryKey: ["/api/events/planning"] });
-      toast({ title: "Evento facturado exitosamente" });
+      const wasFactura = ["factura_a", "factura_b", "factura_c"].includes(variables.receiptType);
+      if (wasFactura && !data?.invoiceId) {
+        toast({ title: "Evento cerrado, pero la factura AFIP no pudo emitirse — verificar con administración", variant: "destructive" });
+      } else if (data?.invoiceId) {
+        toast({ title: "Evento facturado y Factura AFIP emitida correctamente" });
+      } else {
+        toast({ title: "Evento facturado exitosamente" });
+      }
+      setFolioReceiptType("");
+      setInvoiceCustomerName("");
+      setInvoiceCustomerCuit("");
+      setInvoiceCustomerDni("");
     },
     onError: (error: any) => {
       toast({ title: error?.message || "Error al cerrar el evento", variant: "destructive" });
@@ -844,7 +872,13 @@ export default function EventsPage() {
 
   const handleCloseEvent = () => {
     if (!selectedEvent || !folioReceiptType) return;
-    closeEventMutation.mutate({ eventId: selectedEvent.id, receiptType: folioReceiptType });
+    closeEventMutation.mutate({
+      eventId: selectedEvent.id,
+      receiptType: folioReceiptType,
+      customerName: invoiceCustomerName || undefined,
+      customerCuit: invoiceCustomerCuit || undefined,
+      customerDni: invoiceCustomerDni || undefined,
+    });
   };
 
   const handleAddTableCharge = () => {
@@ -2222,16 +2256,52 @@ export default function EventsPage() {
                         {/* Close event */}
                         <div className="space-y-2 pt-2 border-t">
                           <p className="text-sm font-medium">Cerrar Evento</p>
-                          <Select value={folioReceiptType} onValueChange={setFolioReceiptType}>
+                          <Select value={folioReceiptType} onValueChange={(v) => { setFolioReceiptType(v); setInvoiceCustomerName(""); setInvoiceCustomerCuit(""); setInvoiceCustomerDni(""); }}>
                             <SelectTrigger data-testid="select-receipt-type">
                               <SelectValue placeholder="Tipo de comprobante" />
                             </SelectTrigger>
                             <SelectContent>
-                              {receiptTypes.map((rt) => (
-                                <SelectItem key={rt} value={rt}>{rt}</SelectItem>
+                              {receiptTypeOptions.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
+                          {["factura_a", "factura_b", "factura_c"].includes(folioReceiptType) && (
+                            <div className="space-y-2 p-3 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                              <p className="text-xs font-medium text-blue-800 dark:text-blue-200">Datos del cliente para la factura AFIP</p>
+                              <div>
+                                <label className="text-xs text-muted-foreground">Razón Social / Nombre</label>
+                                <Input
+                                  placeholder={folioReceiptType === "factura_a" || folioReceiptType === "factura_c" ? "Razón social" : "Nombre y apellido"}
+                                  value={invoiceCustomerName}
+                                  onChange={(e) => setInvoiceCustomerName(e.target.value)}
+                                  data-testid="input-invoice-customer-name"
+                                />
+                              </div>
+                              {(folioReceiptType === "factura_a" || folioReceiptType === "factura_c") && (
+                                <div>
+                                  <label className="text-xs text-muted-foreground">CUIT</label>
+                                  <Input
+                                    placeholder="XX-XXXXXXXX-X"
+                                    value={invoiceCustomerCuit}
+                                    onChange={(e) => setInvoiceCustomerCuit(e.target.value)}
+                                    data-testid="input-invoice-customer-cuit"
+                                  />
+                                </div>
+                              )}
+                              {folioReceiptType === "factura_b" && (
+                                <div>
+                                  <label className="text-xs text-muted-foreground">DNI (opcional)</label>
+                                  <Input
+                                    placeholder="DNI sin puntos"
+                                    value={invoiceCustomerDni}
+                                    onChange={(e) => setInvoiceCustomerDni(e.target.value)}
+                                    data-testid="input-invoice-customer-dni"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <Button
                             className="w-full"
                             variant="default"
@@ -2745,8 +2815,8 @@ export default function EventsPage() {
                             <SelectValue placeholder="Tipo de comprobante" />
                           </SelectTrigger>
                           <SelectContent>
-                            {receiptTypes.map((rt) => (
-                              <SelectItem key={rt} value={rt}>{rt}</SelectItem>
+                            {receiptTypeOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>

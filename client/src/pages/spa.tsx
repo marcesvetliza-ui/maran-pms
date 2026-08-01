@@ -266,6 +266,9 @@ export default function SpaPage() {
   const [chargeType, setChargeType] = useState("service");
   const [receiptType, setReceiptType] = useState("");
   const [folioRoomChargeId, setFolioRoomChargeId] = useState("");
+  const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
+  const [invoiceCustomerCuit, setInvoiceCustomerCuit] = useState("");
+  const [invoiceCustomerDni, setInvoiceCustomerDni] = useState("");
   const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
   const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
@@ -582,11 +585,17 @@ export default function SpaPage() {
   });
 
   const closeAccountMutation = useMutation({
-    mutationFn: async ({ accountId, receiptType }: { accountId: string; receiptType: string }) => {
+    mutationFn: async ({ accountId, receiptType, customerName, customerCuit, customerDni }: { accountId: string; receiptType: string; customerName?: string; customerCuit?: string; customerDni?: string }) => {
       const res = await fetch(`/api/spa/accounts/${accountId}/close`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chargedTo: "direct", receiptType }),
+        body: JSON.stringify({
+          chargedTo: "direct",
+          receiptType,
+          customerRazonSocial: customerName || undefined,
+          customerCuit: customerCuit || undefined,
+          customerDni: customerDni || undefined,
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -594,17 +603,27 @@ export default function SpaPage() {
       }
       return res.json();
     },
-    onSuccess: async () => {
+    onSuccess: async (data, variables) => {
       if (selectedAppointment) {
         await updateAppointmentMutation.mutateAsync({ id: selectedAppointment.id, status: "completed" });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
-      toast({ title: "Folio cerrado correctamente" });
+      const wasFactura = ["factura_a", "factura_b", "factura_c"].includes(variables.receiptType);
+      if (wasFactura && !data?.invoiceId) {
+        toast({ title: "Folio cerrado, pero la factura AFIP no pudo emitirse — verificar con administración", variant: "destructive" });
+      } else if (data?.invoiceId) {
+        toast({ title: "Folio cerrado y Factura AFIP emitida correctamente" });
+      } else {
+        toast({ title: "Folio cerrado correctamente" });
+      }
       setIsFolioOpen(false);
       setSelectedAppointment(null);
       setReceiptType("");
       setFolioRoomChargeId("");
+      setInvoiceCustomerName("");
+      setInvoiceCustomerCuit("");
+      setInvoiceCustomerDni("");
     },
     onError: (error: Error) => {
       toast({ title: error.message, variant: "destructive" });
@@ -2261,12 +2280,49 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="cierre_spa">Cierre de SPA</SelectItem>
-                              <SelectItem value="factura_a">Factura A</SelectItem>
-                              <SelectItem value="factura_b">Factura B</SelectItem>
+                              <SelectItem value="factura_a">Factura A (IVA Resp. Inscripto)</SelectItem>
+                              <SelectItem value="factura_b">Factura B (Consumidor Final)</SelectItem>
+                              <SelectItem value="factura_c">Factura C (Monotributista)</SelectItem>
                               <SelectItem value="cargo_habitacion">Cargo a Habitación</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
+                        {["factura_a", "factura_b", "factura_c"].includes(receiptType) && (
+                          <div className="space-y-2 p-3 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                            <p className="text-xs font-medium text-blue-800 dark:text-blue-200">Datos del cliente para la factura AFIP</p>
+                            <div>
+                              <label className="text-xs text-muted-foreground">Razón Social / Nombre</label>
+                              <Input
+                                placeholder={receiptType === "factura_a" || receiptType === "factura_c" ? "Razón social" : "Nombre y apellido"}
+                                value={invoiceCustomerName}
+                                onChange={(e) => setInvoiceCustomerName(e.target.value)}
+                                data-testid="input-invoice-customer-name"
+                              />
+                            </div>
+                            {(receiptType === "factura_a" || receiptType === "factura_c") && (
+                              <div>
+                                <label className="text-xs text-muted-foreground">CUIT</label>
+                                <Input
+                                  placeholder="XX-XXXXXXXX-X"
+                                  value={invoiceCustomerCuit}
+                                  onChange={(e) => setInvoiceCustomerCuit(e.target.value)}
+                                  data-testid="input-invoice-customer-cuit"
+                                />
+                              </div>
+                            )}
+                            {receiptType === "factura_b" && (
+                              <div>
+                                <label className="text-xs text-muted-foreground">DNI (opcional)</label>
+                                <Input
+                                  placeholder="DNI sin puntos"
+                                  value={invoiceCustomerDni}
+                                  onChange={(e) => setInvoiceCustomerDni(e.target.value)}
+                                  data-testid="input-invoice-customer-dni"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {receiptType === "cargo_habitacion" && (
                           <div>
                             <label className="text-sm font-medium">Habitación</label>
@@ -2315,6 +2371,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           closeAccountMutation.mutate({
                             accountId: selectedAccount.id,
                             receiptType: selectedAccount.payments.some(p => p.method === "room_charge") ? "cierre_spa" : receiptType,
+                            customerName: invoiceCustomerName || undefined,
+                            customerCuit: invoiceCustomerCuit || undefined,
+                            customerDni: invoiceCustomerDni || undefined,
                           });
                         }
                       }}

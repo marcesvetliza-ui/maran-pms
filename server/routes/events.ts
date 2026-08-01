@@ -5,6 +5,7 @@ import { eventPayments } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, and } from "drizzle-orm";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "../eventPdfs";
+import { emitirFactura } from "../billing/invoiceService";
 
 export function registerEventsRoutes(app: Express) {
   // Event Rooms
@@ -441,7 +442,7 @@ export function registerEventsRoutes(app: Express) {
 
   app.post("/api/events/:eventId/close", async (req, res) => {
     try {
-      const { receiptType } = req.body;
+      const { receiptType, customerRazonSocial, customerCuit, customerDni, vatCondition, pvOverride } = req.body;
       if (!receiptType) {
         return res.status(400).json({ error: "receiptType es requerido" });
       }
@@ -474,16 +475,64 @@ export function registerEventsRoutes(app: Express) {
         }
       }
 
+      // Normalise receiptType: accept both snake_case ("factura_a") and legacy display strings ("Factura A")
+      const normalizedReceiptType = receiptType === "Factura A" ? "factura_a"
+        : receiptType === "Factura B" ? "factura_b"
+        : receiptType === "Factura C" ? "factura_c"
+        : receiptType;
+
       await storage.updateEvent(req.params.eventId, {
         status: "invoiced",
-        receiptType,
+        receiptType: normalizedReceiptType,
         closedAt: new Date(),
         totalAmount: totalCharges.toFixed(2),
         totalPaid: totalPayments.toFixed(2),
       } as any);
 
+      // Emitir factura AFIP si se solicitó un comprobante fiscal
+      let invoiceId: number | undefined;
+      if (["factura_a", "factura_b", "factura_c"].includes(normalizedReceiptType || "")) {
+        try {
+          const tipo = normalizedReceiptType === "factura_a" ? "FA" : normalizedReceiptType === "factura_b" ? "FB" : "FC";
+          const condicion = vatCondition || (normalizedReceiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+
+          const invoiceItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21"; subtotalNeto: number; subtotal: number }[] = [];
+          for (const charge of chargesList) {
+            const gross = parseFloat(charge.totalAmount);
+            if (gross <= 0.001) continue;
+            const qty = charge.quantity || 1;
+            const grossUnit = parseFloat((gross / qty).toFixed(2));
+            const netUnit = parseFloat((grossUnit / 1.21).toFixed(4));
+            const netTotal = parseFloat((netUnit * qty).toFixed(4));
+            const grossTotal = parseFloat((grossUnit * qty).toFixed(2));
+            invoiceItems.push({ descripcion: charge.description, cantidad: qty, precioUnitario: netUnit, alicuotaIva: "21" as const, subtotalNeto: netTotal, subtotal: grossTotal });
+          }
+          if (invoiceItems.length === 0) {
+            const gross = parseFloat(totalCharges.toFixed(2));
+            const net = parseFloat((gross / 1.21).toFixed(4));
+            invoiceItems.push({ descripcion: `Evento: ${event.name}`, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross });
+          }
+
+          const invoice = await emitirFactura({
+            tipoComprobante: tipo as "FA" | "FB" | "FC",
+            cliente: {
+              razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
+              cuit: customerCuit || undefined,
+              dni: customerDni || undefined,
+              condicionIva: condicion,
+            },
+            items: invoiceItems,
+            operador: (req as any).user?.fullName || (req as any).user?.username,
+            puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
+          });
+          invoiceId = invoice.id;
+        } catch (e) {
+          console.error("[Billing] Error emitiendo factura Evento:", e);
+        }
+      }
+
       const updated = await storage.getEvent(req.params.eventId);
-      res.json(updated);
+      res.json({ ...updated, invoiceId });
     } catch (error) {
       res.status(500).json({ error: "Error closing event" });
     }

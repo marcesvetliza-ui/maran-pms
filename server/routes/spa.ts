@@ -5,6 +5,7 @@ import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests } fro
 import { requireAuth } from "../auth";
 import { eq, desc } from "drizzle-orm";
 import { generateConfirmacionTurnoSpaPdf } from "../spaPdfs";
+import { emitirFactura } from "../billing/invoiceService";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -425,7 +426,7 @@ export function registerSpaRoutes(app: Express) {
 
   app.post("/api/spa/accounts/:id/close", async (req, res) => {
     try {
-      const { chargedTo, receiptType } = req.body;
+      const { chargedTo, receiptType, customerRazonSocial, customerCuit, customerDni, vatCondition, pvOverride } = req.body;
 
       if (!chargedTo || !receiptType) {
         return res.status(400).json({ error: "chargedTo and receiptType are required" });
@@ -452,7 +453,49 @@ export function registerSpaRoutes(app: Express) {
         console.warn("[SPA] Error deducting stock:", err)
       );
 
-      res.json(account);
+      // Emitir factura AFIP si se solicitó un comprobante fiscal
+      let invoiceId: number | undefined;
+      if (["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
+        try {
+          const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
+          const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+
+          const invoiceItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21"; subtotalNeto: number; subtotal: number }[] = [];
+          for (const item of accountData.items) {
+            const gross = parseFloat(item.subtotal);
+            if (gross <= 0.001) continue;
+            const qty = item.quantity || 1;
+            const grossUnit = parseFloat((gross / qty).toFixed(2));
+            const netUnit = parseFloat((grossUnit / 1.21).toFixed(4));
+            const netTotal = parseFloat((netUnit * qty).toFixed(4));
+            const grossTotal = parseFloat((grossUnit * qty).toFixed(2));
+            invoiceItems.push({ descripcion: item.description, cantidad: qty, precioUnitario: netUnit, alicuotaIva: "21" as const, subtotalNeto: netTotal, subtotal: grossTotal });
+          }
+          if (invoiceItems.length === 0) {
+            const gross = parseFloat(totalAmount.toFixed(2));
+            const net = parseFloat((gross / 1.21).toFixed(4));
+            invoiceItems.push({ descripcion: "Servicios SPA", cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross });
+          }
+
+          const invoice = await emitirFactura({
+            tipoComprobante: tipo as "FA" | "FB" | "FC",
+            cliente: {
+              razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
+              cuit: customerCuit || undefined,
+              dni: customerDni || undefined,
+              condicionIva: condicion,
+            },
+            items: invoiceItems,
+            operador: (req as any).user?.fullName || (req as any).user?.username,
+            puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
+          });
+          invoiceId = invoice.id;
+        } catch (e) {
+          console.error("[Billing] Error emitiendo factura SPA:", e);
+        }
+      }
+
+      res.json({ ...account, invoiceId });
     } catch (error) {
       res.status(500).json({ error: "Error closing spa account" });
     }
