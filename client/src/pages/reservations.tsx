@@ -1967,6 +1967,7 @@ function ReservationDetailDialog({
     setCoCompanyId("");
     setCoAgencyId("");
     setShowFacturar(false);
+    setShowFacturarMode("billing");
     setShowFacturarPrompt(false);
     setUninvoicedWarningAction(null);
     setShowUninvoicedWarning(false);
@@ -1975,27 +1976,8 @@ function ReservationDetailDialog({
   }, [reservation.id]);
 
   const openCheckoutWizard = () => {
-    coPendingPaymentIdRef.current = "";
-    setCoPayAmount("");
-    setCoReceiptType("cierre_habitacion");
-    setCoIsFacturarSolo(false);
-    if (reservation.companyId) {
-      setCoPayMethod("cuenta_corriente");
-      setCoBillingTarget("company");
-      setCoCompanyId(reservation.companyId);
-      setCoAgencyId("");
-    } else if (reservation.agencyId) {
-      setCoPayMethod("cuenta_corriente");
-      setCoBillingTarget("agency");
-      setCoAgencyId(reservation.agencyId);
-      setCoCompanyId("");
-    } else {
-      setCoPayMethod("efectivo");
-      setCoBillingTarget("guest");
-      setCoCompanyId("");
-      setCoAgencyId("");
-    }
-    setCoWizardStep(1);
+    setShowFacturarMode("checkout");
+    setShowFacturar(true);
   };
 
   const openFacturarSolo = () => {
@@ -2154,6 +2136,7 @@ function ReservationDetailDialog({
 
   // Factura desde folio
   const [showFacturar, setShowFacturar] = useState(false);
+  const [showFacturarMode, setShowFacturarMode] = useState<"billing" | "checkout">("billing");
   const [facturaEmitida, setFacturaEmitida] = useState(false);
   const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
 
@@ -5030,13 +5013,13 @@ function ReservationDetailDialog({
         <NotaCreditoDialog invoiceId={ncForInvoiceId} onClose={() => setNcForInvoiceId(null)} />
       )}
 
-      {/* Prefactura / Facturar Saldo desde folio */}
+      {/* Prefactura / Facturar Saldo / Check-out desde folio */}
       <PrefacturaDialog
         open={showFacturar}
         onClose={() => setShowFacturar(false)}
         reservationId={reservation.id}
         reservation={reservation}
-        mode="billing"
+        mode={showFacturarMode}
         onCheckoutComplete={() => setFacturaEmitida(true)}
       />
     </Dialog>
