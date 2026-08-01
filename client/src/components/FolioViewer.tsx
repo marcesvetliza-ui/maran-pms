@@ -393,6 +393,43 @@ function ReservationDetailPanel({ reservationId }: { reservationId: string }) {
 
 // ─── Expandable movement row ──────────────────────────────────────────────────
 
+// ─── Transfer description renderer ───────────────────────────────────────────
+
+function TransferDescriptionText({ description, type }: { description: string; type: string }) {
+  const isOut = type === "transfer_out";
+  // Clean machine-readable tags for display
+  const clean = description
+    .replace(/\s*\[xfer:[^\]]+\]/g, "")
+    .replace(/\s*\[corr:[^\]]+\]/g, "")
+    .replace(/\s*\[rev:[^\]]+\]/g, "")
+    .replace(/\s*\[res:[^\]]+\]/g, "")
+    .trim();
+  // Extract paired reservation ID
+  const resMatch = description.match(/\[res:([^\]]+)\]/);
+  const pairedResId = resMatch ? resMatch[1] : null;
+  if (!pairedResId) return <span className="text-sm font-medium truncate">{clean}</span>;
+  const roomMatch = clean.match(/(.*?)(Hab\.\S+)(.*)/);
+  if (!roomMatch) return <span className="text-sm font-medium truncate">{clean}</span>;
+  const [, before, roomPart, after] = roomMatch;
+  return (
+    <span className="text-sm font-medium">
+      {before}
+      <a
+        href={`/reservations?view=${pairedResId}`}
+        onClick={e => e.stopPropagation()}
+        className="inline-flex items-center gap-0.5 font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity"
+        style={{ color: isOut ? "#c2410c" : "#1d4ed8" }}
+        title="Ver folio de la reserva relacionada"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {roomPart}
+      </a>
+      {after}
+    </span>
+  );
+}
+
 function MovementRow({
   mov, canVoid, onVoidClick,
 }: {
@@ -403,6 +440,7 @@ function MovementRow({
   const [expanded, setExpanded] = useState(false);
   const debit = isDebit(mov.type);
   const hasSource = !!mov.sourceId && mov.sourceType === "restaurant_order";
+  const isTransferMov = mov.type === "transfer_in" || mov.type === "transfer_out";
 
   return (
     <div className="border-b last:border-0">
@@ -413,7 +451,9 @@ function MovementRow({
         <div className="mt-0.5 shrink-0">{movementIcon(mov.type)}</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-sm font-medium truncate">{mov.description}</span>
+            {isTransferMov
+              ? <TransferDescriptionText description={mov.description} type={mov.type} />
+              : <span className="text-sm font-medium truncate">{mov.description}</span>}
             <div className="flex items-center gap-2 shrink-0">
               {canVoid && (
                 <Button

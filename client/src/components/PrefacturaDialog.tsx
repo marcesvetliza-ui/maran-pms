@@ -1793,7 +1793,38 @@ function ChargeRow({
     .replace(/\s*\[xfer:[^\]]+\]/g, "")
     .replace(/\s*\[corr:[^\]]+\]/g, "")
     .replace(/\s*\[rev:[^\]]+\]/g, "")
+    .replace(/\s*\[res:[^\]]+\]/g, "")
     .trim();
+
+  // Parse paired reservation ID for transfer entries (embedded as [res:ID])
+  const pairedResMatch = isTransfer ? description.match(/\[res:([^\]]+)\]/) : null;
+  const pairedResId = pairedResMatch ? pairedResMatch[1] : null;
+
+  // Render transfer description with the room number portion as a clickable link
+  function renderTransferDescription() {
+    if (!pairedResId) return <span className="text-sm">{cleanDescription}</span>;
+    // Match "Hab.XXX" in the clean description and wrap it in a link
+    const roomMatch = cleanDescription.match(/(.*?)(Hab\.\S+)(.*)/);
+    if (!roomMatch) return <span className="text-sm">{cleanDescription}</span>;
+    const [, before, roomPart, after] = roomMatch;
+    return (
+      <span className="text-sm">
+        {before}
+        <a
+          href={`/reservations?view=${pairedResId}`}
+          onClick={e => e.stopPropagation()}
+          className="inline-flex items-center gap-0.5 font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity"
+          style={{ color: isTransferOut ? "#c2410c" : "#1d4ed8" }}
+          title="Ver folio de la reserva relacionada"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {roomPart}
+        </a>
+        {after}
+      </span>
+    );
+  }
 
   const rowCls = isTransfer
     ? (isTransferOut
@@ -1835,7 +1866,7 @@ function ChargeRow({
                 Revertida
               </Badge>
             )}
-            <span className="text-sm">{cleanDescription}</span>
+            {isTransfer ? renderTransferDescription() : <span className="text-sm">{cleanDescription}</span>}
             {date && <span className="text-xs text-muted-foreground">{formatDateAR(date)}</span>}
             {!isTransfer && (
               <Button

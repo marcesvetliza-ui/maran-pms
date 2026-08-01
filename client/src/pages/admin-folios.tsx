@@ -24,6 +24,41 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FolioViewer from "@/components/FolioViewer";
 
+// ─── Transfer description link helper ────────────────────────────────────────
+
+function TransferDescriptionCell({ description, type }: { description: string; type: string }) {
+  const isOut = type === "transfer_out";
+  const clean = description
+    .replace(/\s*\[xfer:[^\]]+\]/g, "")
+    .replace(/\s*\[corr:[^\]]+\]/g, "")
+    .replace(/\s*\[rev:[^\]]+\]/g, "")
+    .replace(/\s*\[res:[^\]]+\]/g, "")
+    .trim();
+  const resMatch = description.match(/\[res:([^\]]+)\]/);
+  const pairedResId = resMatch ? resMatch[1] : null;
+  if (!pairedResId) return <p className="text-sm font-medium truncate max-w-[220px]">{clean}</p>;
+  const roomMatch = clean.match(/(.*?)(Hab\.\S+)(.*)/);
+  if (!roomMatch) return <p className="text-sm font-medium truncate max-w-[220px]">{clean}</p>;
+  const [, before, roomPart, after] = roomMatch;
+  return (
+    <p className="text-sm font-medium max-w-[220px]">
+      {before}
+      <a
+        href={`/reservations?view=${pairedResId}`}
+        onClick={e => e.stopPropagation()}
+        className="font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity"
+        style={{ color: isOut ? "#c2410c" : "#1d4ed8" }}
+        title="Ver folio de la reserva relacionada"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {roomPart}
+      </a>
+      {after}
+    </p>
+  );
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Folio {
@@ -390,7 +425,10 @@ function MovimientosDiaTab({
                           <div className="flex items-center gap-2">
                             {movementIcon(mov.type)}
                             <div className="min-w-0">
-                              <p className="text-sm font-medium truncate max-w-[220px]">{mov.description}</p>
+                              {(mov.type === "transfer_in" || mov.type === "transfer_out")
+                                ? <TransferDescriptionCell description={mov.description} type={mov.type} />
+                                : <p className="text-sm font-medium truncate max-w-[220px]">{mov.description}</p>
+                              }
                               <p className="text-xs text-muted-foreground">
                                 {MOVEMENT_TYPE_LABELS[mov.type] ?? mov.type}
                                 {mov.registeredBy && ` · ${mov.registeredBy}`}

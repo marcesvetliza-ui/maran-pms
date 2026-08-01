@@ -1634,8 +1634,8 @@ export function registerReservationsRoutes(app: Express) {
         // Correlation ID links both sides so reversal can find the counterpart deterministically
         const corrId = randomUUID();
         xferRef = "accommodation";
-        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:accommodation] [corr:${corrId}]`;
-        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${sourceGuest}) [corr:${corrId}]`;
+        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:accommodation] [corr:${corrId}] [res:${targetReservationId}]`;
+        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${sourceGuest}) [corr:${corrId}] [res:${sourceId}]`;
       } else {
         // Validate charge belongs to this reservation
         const charge = await storage.getCharge(chargeId);
@@ -1658,8 +1658,8 @@ export function registerReservationsRoutes(app: Express) {
         // Correlation ID links both sides so reversal can find the counterpart deterministically
         const corrId = randomUUID();
         xferRef = charge.id;
-        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:${charge.id}] [corr:${corrId}]`;
-        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${charge.description}) [corr:${corrId}]`;
+        sourceDescription = `Transferencia salida → Hab.${targetRoom} [xfer:${charge.id}] [corr:${corrId}] [res:${targetReservationId}]`;
+        targetDescription = `Transferencia entrada desde Hab.${sourceRoom} (${charge.description}) [corr:${corrId}] [res:${sourceId}]`;
       }
 
       // 1. Create negative charge on source (reduces source balance)
