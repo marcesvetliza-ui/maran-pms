@@ -96,7 +96,8 @@ export default function BillingPage() {
   const [prefacturaResId, setPrefacturaResId] = useState<number | null>(null);
 
   const { data: allReservations = [] } = useQuery<any[]>({
-    queryKey: ["/api/reservations"],
+    queryKey: ["/api/reservations", "picker-all"],
+    queryFn: () => fetch("/api/reservations?dateMode=all", { credentials: "include" }).then(r => r.json()),
     enabled: showResPicker,
   });
 
