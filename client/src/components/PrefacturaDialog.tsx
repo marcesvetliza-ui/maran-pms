@@ -433,7 +433,8 @@ export function PrefacturaDialog({
     try {
       const receiptType = RECEIPT_TYPE_MAP[tipo] || "cierre_habitacion";
 
-      // 1. Register each payment row
+      // 1. Register each payment row — collect IDs for invoice linking
+      const createdPaymentIds: number[] = [];
       for (const row of paymentRows) {
         const netAmount = parseFloat(row.amount) || 0;
         const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
@@ -456,6 +457,7 @@ export function PrefacturaDialog({
         });
         const resBody = await res.json();
         if (!res.ok) throw new Error(resBody?.error || "Error al registrar pago");
+        if (resBody?.id) createdPaymentIds.push(resBody.id);
       }
 
       // 2. Emit invoice/comprobante
@@ -479,6 +481,21 @@ export function PrefacturaDialog({
         if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
         invoiceData = invoiceBody;
         setTimeout(() => window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"), 300);
+
+        // 2.5 Link each newly-created payment to this invoice (fire-and-forget, non-blocking)
+        const invoiceRef = {
+          id: invoiceData.id,
+          tipoComprobante: invoiceData.tipo_comprobante,
+          puntoVenta: invoiceData.punto_venta,
+          numero: invoiceData.numero,
+          cae: invoiceData.cae,
+          total: invoiceData.monto_total,
+        };
+        for (const payId of createdPaymentIds) {
+          apiRequest("PATCH", `/api/payments/${payId}/invoice`, { invoiceData: invoiceRef }).catch((e) =>
+            console.warn("[PrefacturaDialog] invoice link failed for payment", payId, e)
+          );
+        }
       }
 
       // 3. Checkout if applicable
