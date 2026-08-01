@@ -1869,8 +1869,10 @@ export function registerReservationsRoutes(app: Express) {
       const cleanDesc = charge.description
         .replace(/\s*\[xfer:[^\]]+\]/g, "")
         .replace(/\s*\[corr:[^\]]+\]/g, "")
+        .replace(/\s*\[res:[^\]]+\]/g, "")
         .trim();
-      const thisCounterDesc = `Reversa de transferencia (${cleanDesc}) [rev:${chargeId}]`;
+      const thisResTag = pairedReservationId ? ` [res:${pairedReservationId}]` : "";
+      const thisCounterDesc = `Reversa de transferencia (${cleanDesc}) [rev:${chargeId}]${thisResTag}`;
       const thisCounterCategory: "transfer_out" | "transfer_in" =
         charge.category === "transfer_out" ? "transfer_in" : "transfer_out";
 
@@ -1897,8 +1899,9 @@ export function registerReservationsRoutes(app: Express) {
         const pairedCleanDesc = (pairedCharge.description as string)
           .replace(/\s*\[xfer:[^\]]+\]/g, "")
           .replace(/\s*\[corr:[^\]]+\]/g, "")
+          .replace(/\s*\[res:[^\]]+\]/g, "")
           .trim();
-        const pairedCounterDesc = `Reversa de transferencia (${pairedCleanDesc}) [rev:${pairedChargeId}]`;
+        const pairedCounterDesc = `Reversa de transferencia (${pairedCleanDesc}) [rev:${pairedChargeId}] [res:${reservationId}]`;
         const pairedCounterCategory: "transfer_out" | "transfer_in" =
           pairedCharge.category === "transfer_out" ? "transfer_in" : "transfer_out";
 
