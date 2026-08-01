@@ -732,6 +732,7 @@ export const events = pgTable("events", {
   closedAt: timestamp("closed_at"),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
   totalPaid: decimal("total_paid", { precision: 10, scale: 2 }),
+  invoiceId: integer("invoice_id"),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -1485,6 +1486,7 @@ export const spaAccounts = pgTable("spa_accounts", {
   closedAt: timestamp("closed_at"),
   closedBy: text("closed_by"),
   chargedTo: text("charged_to"),
+  invoiceId: integer("invoice_id"),
 });
 
 export const insertSpaAccountSchema = createInsertSchema(spaAccounts).omit({ id: true });

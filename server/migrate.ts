@@ -1220,5 +1220,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  await withTimeout("spa_accounts.invoice_id", T, () =>
+    db.execute(sql`ALTER TABLE spa_accounts ADD COLUMN IF NOT EXISTS invoice_id integer`)
+  );
+
+  await withTimeout("events.invoice_id", T, () =>
+    db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS invoice_id integer`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

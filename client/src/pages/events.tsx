@@ -151,6 +151,7 @@ type HotelEvent = {
   closedAt: string | null;
   totalAmount: string | null;
   totalPaid: string | null;
+  invoiceId?: number | null;
   createdAt: string;
   eventRoom?: EventRoom;
   charges?: EventCharge[];
@@ -380,6 +381,18 @@ export default function EventsPage() {
     refetchInterval: 30000,
   });
   const eventsShiftActive = !!(eventsShift && eventsShift.openedBy && eventsShift.status === "open");
+
+  // Invoice data for invoiced events that emitted an AFIP factura
+  const { data: eventInvoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", selectedEvent?.invoiceId],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices/${selectedEvent!.invoiceId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!selectedEvent?.invoiceId,
+    staleTime: 60000,
+  });
 
   // Void adjustments from folio_movements for the selected event (written when an NC voids a payment)
   const { data: eventFolioData } = useQuery<any>({
@@ -2074,6 +2087,34 @@ export default function EventsPage() {
                         <p className="text-xl font-bold text-green-600">${selectedEvent.totalPaid || "0.00"}</p>
                       </div>
                     </div>
+                    {eventInvoice && (
+                      <div className="mt-4 mx-auto max-w-sm p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-sm text-left space-y-2" data-testid="event-invoice-badge">
+                        <div className="flex items-center gap-2 font-semibold text-purple-800 dark:text-purple-200">
+                          <FileText className="h-4 w-4 shrink-0" />
+                          <span>
+                            {eventInvoice.tipo_comprobante === "FA" ? "Factura A" : eventInvoice.tipo_comprobante === "FB" ? "Factura B" : eventInvoice.tipo_comprobante === "FC" ? "Factura C" : eventInvoice.tipo_comprobante}
+                            {" "}
+                            {String(eventInvoice.punto_venta ?? 1).padStart(4, "0")}-{String(eventInvoice.numero ?? 0).padStart(8, "0")}
+                          </span>
+                        </div>
+                        {eventInvoice.cae && (
+                          <p className="text-xs text-purple-700 dark:text-purple-300">
+                            CAE: <span className="font-mono">{eventInvoice.cae}</span>
+                          </p>
+                        )}
+                        {eventInvoice.cliente_razon_social && (
+                          <p className="text-xs text-muted-foreground">Cliente: {eventInvoice.cliente_razon_social}</p>
+                        )}
+                        <a
+                          href={`/api/billing/invoices/${selectedEvent.invoiceId}/pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs text-purple-600 dark:text-purple-400 hover:underline"
+                        >
+                          <FileText className="h-3.5 w-3.5" /> Ver factura PDF
+                        </a>
+                      </div>
+                    )}
                   </div>
                 ) : selectedEvent.status === "cancelled" ? (
                   <div className="text-center py-6 text-muted-foreground">

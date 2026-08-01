@@ -150,6 +150,7 @@ type SpaAccount = {
   closedAt: string | null;
   closedBy: string | null;
   chargedTo: string | null;
+  invoiceId?: number | null;
   items: SpaAccountItem[];
   payments: SpaPayment[];
 };
@@ -384,6 +385,18 @@ export default function SpaPage() {
     },
     enabled: !!selectedAppointment,
     staleTime: 0,
+  });
+
+  // Invoice data for closed folios that emitted an AFIP factura
+  const { data: spaInvoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", selectedAccount?.invoiceId],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices/${selectedAccount!.invoiceId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!selectedAccount?.invoiceId,
+    staleTime: 60000,
   });
 
   // Void adjustments from folio_movements (written when an NC voids a payment)
@@ -2091,7 +2104,34 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     )}
                   </div>
                   {selectedAccount.status === "closed" && (
-                    <Badge className="mt-2" variant="secondary">Folio cerrado</Badge>
+                    <div className="mt-3 space-y-2">
+                      <Badge variant="secondary">Folio cerrado</Badge>
+                      {spaInvoice && (
+                        <div className="p-2 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-xs space-y-1" data-testid="spa-invoice-badge">
+                          <div className="flex items-center gap-1.5 font-medium text-purple-800 dark:text-purple-200">
+                            <FileText className="h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              {spaInvoice.tipo_comprobante === "FA" ? "Factura A" : spaInvoice.tipo_comprobante === "FB" ? "Factura B" : spaInvoice.tipo_comprobante === "FC" ? "Factura C" : spaInvoice.tipo_comprobante}
+                              {" "}
+                              {String(spaInvoice.punto_venta ?? 1).padStart(4, "0")}-{String(spaInvoice.numero ?? 0).padStart(8, "0")}
+                            </span>
+                          </div>
+                          {spaInvoice.cae && (
+                            <div className="text-purple-700 dark:text-purple-300">
+                              CAE: <span className="font-mono">{spaInvoice.cae}</span>
+                            </div>
+                          )}
+                          <a
+                            href={`/api/billing/invoices/${selectedAccount.invoiceId}/pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400 hover:underline"
+                          >
+                            <Printer className="h-3 w-3" /> Ver factura PDF
+                          </a>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

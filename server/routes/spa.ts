@@ -494,6 +494,8 @@ export function registerSpaRoutes(app: Express) {
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
           invoiceId = invoice.id;
+          // Persist the invoice link on the account record
+          await storage.updateSpaAccount(req.params.id, { invoiceId } as any);
         } catch (e) {
           console.error("[Billing] Error emitiendo factura SPA:", e);
         }

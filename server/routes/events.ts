@@ -535,6 +535,8 @@ export function registerEventsRoutes(app: Express) {
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
           invoiceId = invoice.id;
+          // Persist the invoice link on the event record
+          await storage.updateEvent(req.params.eventId, { invoiceId } as any);
         } catch (e) {
           console.error("[Billing] Error emitiendo factura Evento:", e);
         }
