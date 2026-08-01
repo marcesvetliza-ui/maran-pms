@@ -848,7 +848,7 @@ export function registerReservationsRoutes(app: Express) {
                monto_total, monto_acreditado, estado, items, cae, modo_ficticio
         FROM sales_invoices
         WHERE reserva_id = ${req.params.id}
-          AND tipo_comprobante IN ('FA', 'FB', 'FC')
+          AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
           AND estado IN ('emitida', 'parcial')
         ORDER BY created_at DESC
       `);

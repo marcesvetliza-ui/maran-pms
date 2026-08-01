@@ -10,6 +10,7 @@ import {
   Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -574,6 +575,12 @@ export function PrefacturaDialog({
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
+  // Invoices eligible for a Nota de Débito (only FA / FB / FC / FT / FM)
+  const ndEligibleInvoices = emittedInvoices.filter((inv: any) =>
+    ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante)
+  );
+  const ndDisabled = ndEligibleInvoices.length === 0;
+
   const reservationData = reservation as any;
   const isHistorical = reservationData?.checkOutDate < getLocalToday();
   const isEarlyCheckout = reservationData?.checkOutDate > getLocalToday();
@@ -885,14 +892,28 @@ export function PrefacturaDialog({
                   >
                     <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-blue-700 border-blue-300 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-700 dark:hover:bg-blue-950/30"
-                    onClick={() => setNdDialogOpen(true)}
-                  >
-                    <PlusCircle className="h-4 w-4 mr-1" />Nota de Débito
-                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={ndDisabled ? 0 : undefined}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-blue-700 border-blue-300 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-700 dark:hover:bg-blue-950/30 disabled:pointer-events-none"
+                            onClick={() => setNdDialogOpen(true)}
+                            disabled={ndDisabled}
+                          >
+                            <PlusCircle className="h-4 w-4 mr-1" />Nota de Débito
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {ndDisabled && (
+                        <TooltipContent side="top">
+                          No hay facturas (FA/FB/FC/FT/FM) emitidas para esta reserva. La Nota de Débito requiere al menos una factura base.
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
                 </>
               )}
               <Button
@@ -1270,7 +1291,7 @@ export function PrefacturaDialog({
         open={ndDialogOpen}
         onClose={() => setNdDialogOpen(false)}
         reservationId={reservationId}
-        invoices={emittedInvoices.filter((inv: any) => ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante))}
+        invoices={ndEligibleInvoices}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
