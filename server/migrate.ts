@@ -1136,5 +1136,89 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  // Backfill folio_movements for Nota de Débito invoices emitted before the ND
+  // folio-charge feature was added. Finds every ND (NDA/NDB/NDC/NDT/NDM) that
+  // has a reserva_id but no matching folio_movements row (source_type='nota_debito',
+  // source_id=<invoice id>), resolves the folio via the reservation, and inserts
+  // the missing charge so old folio PDFs show the ND amount.
+  await withTimeout("folio_movements.backfill_nd_charges", T, async () => {
+    const ndRows = await db.execute(sql`
+      SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero,
+             si.monto_total, si.reserva_id, si.created_at
+      FROM sales_invoices si
+      WHERE si.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+        AND si.reserva_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM folio_movements fm
+          WHERE fm.source_type = 'nota_debito'
+            AND fm.source_id = si.id::text
+        )
+    `);
+
+    if (ndRows.rows.length === 0) return;
+
+    let inserted = 0;
+    for (const nd of ndRows.rows as any[]) {
+      // Resolve folio UUID from the reservation
+      const folioRow = await db.execute(sql`
+        SELECT id FROM folios
+        WHERE entity_type = 'reservation' AND entity_id = ${String(nd.reserva_id)}
+        LIMIT 1
+      `);
+      const folioId = (folioRow.rows[0] as any)?.id;
+      if (!folioId) continue;
+
+      const pv = String(nd.punto_venta ?? 1).padStart(4, "0");
+      const nro = String(nd.numero ?? 0).padStart(8, "0");
+      const nroND = `${nd.tipo_comprobante} ${pv}-${nro}`;
+      const monto = parseFloat(String(nd.monto_total ?? "0"));
+      if (monto <= 0) continue;
+
+      await db.execute(sql`
+        INSERT INTO folio_movements (id, folio_id, type, amount, description, source_type, source_id, receipt_type, registered_by, created_at)
+        VALUES (
+          gen_random_uuid(),
+          ${folioId},
+          'charge',
+          ${monto.toFixed(2)},
+          ${"Nota de Débito " + nroND},
+          'nota_debito',
+          ${String(nd.id)},
+          ${nd.tipo_comprobante},
+          'backfill',
+          ${nd.created_at ?? new Date()}
+        )
+      `);
+
+      // Recalc folio balance
+      await db.execute(sql`
+        UPDATE folios SET
+          total_charges = (
+            SELECT COALESCE(SUM(amount::numeric), 0)
+            FROM folio_movements
+            WHERE folio_id = ${folioId} AND type IN ('charge', 'transfer_in')
+          ),
+          total_payments = (
+            SELECT COALESCE(SUM(amount::numeric), 0)
+            FROM folio_movements
+            WHERE folio_id = ${folioId} AND type IN ('payment', 'advance', 'discount', 'transfer_out', 'void')
+          ),
+          balance = (
+            SELECT COALESCE(SUM(CASE WHEN type IN ('charge','transfer_in') THEN amount::numeric
+                                     ELSE -amount::numeric END), 0)
+            FROM folio_movements
+            WHERE folio_id = ${folioId} AND type IN ('charge','transfer_in','payment','advance','discount','transfer_out','void')
+          )
+        WHERE id = ${folioId}
+      `);
+
+      inserted++;
+    }
+
+    if (inserted > 0) {
+      logger.info(`Backfill: ${inserted} folio_movements de Nota de Débito insertados.`);
+    }
+  });
+
   logger.info("Migraciones incrementales completadas.");
 }
