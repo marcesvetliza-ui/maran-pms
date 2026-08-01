@@ -615,7 +615,7 @@ function CostosReport() {
                   {(data.departamentos ?? []).map((_: any, i: number) => <Cell key={i} fill={COLORS_DEPTO[i % COLORS_DEPTO.length]} />)}
                 </Pie>
                 <Tooltip formatter={(v: number) => `$${fPeso(v)}`} />
-                <Legend formatter={(v) => v.substring(0, 18)} />
+                <Legend formatter={(v) => (v ? String(v).substring(0, 18) : "")} />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
