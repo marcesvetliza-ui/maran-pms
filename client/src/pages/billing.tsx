@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -90,7 +91,27 @@ function AmbienteBadge({ ambiente }: { ambiente: AmbienteMode | undefined }) {
 
 export default function BillingPage() {
   const [activeTab, setActiveTab] = useState("facturas");
-  const [showEmitir, setShowEmitir] = useState(false);
+  const [showResPicker, setShowResPicker] = useState(false);
+  const [resPickerSearch, setResPickerSearch] = useState("");
+  const [prefacturaResId, setPrefacturaResId] = useState<number | null>(null);
+
+  const { data: allReservations = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations"],
+    enabled: showResPicker,
+  });
+
+  const pickerReservations = useMemo(() => {
+    const src = (allReservations as any[]).filter(r =>
+      ["confirmed", "checked_in", "checked_out"].includes(r.status)
+    );
+    if (!resPickerSearch.trim()) return src.slice(0, 10);
+    const q = resPickerSearch.toLowerCase().trim();
+    return src.filter(r => {
+      const name = `${r.guest?.firstName || ""} ${r.guest?.lastName || ""}`.toLowerCase();
+      return name.includes(q) || String(r.id).includes(q) ||
+        String(r.room?.number || r.roomNumber || "").includes(q);
+    }).slice(0, 15);
+  }, [allReservations, resPickerSearch]);
   const [showNC, setShowNC] = useState<number | null>(null);
   const [filtroDesde, setFiltroDesde] = useState(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd"));
   const [filtroHasta, setFiltroHasta] = useState(today());
@@ -139,7 +160,7 @@ export default function BillingPage() {
               <Settings className="w-4 h-4 mr-1" />
               Configuración
             </Button>
-            <Button onClick={() => setShowEmitir(true)} data-testid="btn-emitir-factura">
+            <Button onClick={() => { setResPickerSearch(""); setShowResPicker(true); }} data-testid="btn-emitir-factura">
               <Plus className="w-4 h-4 mr-1" />
               Emitir Factura
             </Button>
@@ -283,7 +304,68 @@ export default function BillingPage() {
         </Tabs>
       </div>
 
-      <EmitirFacturaDialog open={showEmitir} onClose={() => setShowEmitir(false)} config={config} />
+      {/* Selector de reserva → PrefacturaDialog */}
+      <Dialog open={showResPicker} onOpenChange={v => { if (!v) setShowResPicker(false); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Emitir comprobante — seleccioná una reserva</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <Input
+              placeholder="Buscar por huésped, habitación o ID..."
+              value={resPickerSearch}
+              onChange={e => setResPickerSearch(e.target.value)}
+              autoFocus
+              data-testid="input-res-picker-search"
+            />
+            <div className="max-h-72 overflow-y-auto divide-y rounded-md border">
+              {pickerReservations.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-6">Sin reservas encontradas</p>
+              )}
+              {pickerReservations.map((r: any) => {
+                const name = [r.guest?.firstName, r.guest?.lastName].filter(Boolean).join(" ") || "Sin huésped";
+                const room = r.room?.number || r.roomNumber || "—";
+                const ci = r.checkInDate ? r.checkInDate.slice(8, 10) + "/" + r.checkInDate.slice(5, 7) : "";
+                const co = r.checkOutDate ? r.checkOutDate.slice(8, 10) + "/" + r.checkOutDate.slice(5, 7) : "";
+                const statusLabel: Record<string, string> = {
+                  confirmed: "Confirmada", checked_in: "Check-in", checked_out: "Check-out"
+                };
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="w-full text-left px-3 py-2.5 hover:bg-muted/50 transition-colors"
+                    onClick={() => {
+                      setShowResPicker(false);
+                      setPrefacturaResId(r.id);
+                    }}
+                    data-testid={`row-res-picker-${r.id}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="font-medium text-sm">{name}</span>
+                        <span className="text-xs text-muted-foreground ml-2">Hab. {room}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">{ci}–{co}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">{statusLabel[r.status] || r.status} · ID {r.id}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {prefacturaResId !== null && (
+        <PrefacturaDialog
+          open={prefacturaResId !== null}
+          onClose={() => setPrefacturaResId(null)}
+          reservationId={prefacturaResId}
+          mode="billing"
+        />
+      )}
+
       {showNC !== null && <NotaCreditoDialog invoiceId={showNC} onClose={() => setShowNC(null)} />}
     </div>
   );
@@ -321,7 +403,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   paymentId?: string;
 }) {
   const { toast } = useToast();
-  const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB", "FC"];
+  const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
   const [tipo, setTipo] = useState<string>(tipos.includes("FB") ? "FB" : tipos[0]);
   const [cashFormaPago, setCashFormaPago] = useState("efectivo");
   const [ccEntityType, setCcEntityType] = useState<"company" | "agency">("company");
@@ -752,7 +834,6 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             <SelectContent>
               {tipos.includes("FA") && <SelectItem value="FA">Factura A</SelectItem>}
               {tipos.includes("FB") && <SelectItem value="FB">Factura B</SelectItem>}
-              {tipos.includes("FC") && <SelectItem value="FC">Factura C — Monotributista</SelectItem>}
               {tipos.filter(t => NON_FISCAL_TIPOS_SET.has(t)).map(t => (
                 <SelectItem key={t} value={t}>{NON_FISCAL_LABELS[t] ?? t}</SelectItem>
               ))}
