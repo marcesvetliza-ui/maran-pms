@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
-import { salesInvoices, invoiceCounters } from "@shared/schema";
+import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData } from "./invoicePdf";
@@ -668,6 +668,42 @@ export function registerBillingRoutes(app: Express) {
         }
       } catch (cashErr) {
         console.error("[ND] Error registrando movimiento de caja:", cashErr);
+      }
+
+      // Add folio charge movement so the ND amount appears in the folio PDF.
+      // sales_invoices.folio_id is an integer (not the folio UUID), so we resolve
+      // the actual folio UUID via the reservation entity when reserva_id is present.
+      let actualFolioId: string | null = null;
+      if (original.reserva_id) {
+        try {
+          const folioRow = await db.execute(sql`
+            SELECT id FROM folios
+            WHERE entity_type = 'reservation' AND entity_id = ${String(original.reserva_id)}
+            LIMIT 1
+          `);
+          actualFolioId = (folioRow.rows?.[0] as any)?.id ?? null;
+        } catch (e) {
+          console.error("[ND] Error resolving folio by reserva_id:", e);
+        }
+      }
+      if (actualFolioId) {
+        try {
+          const nroND = `${nd.tipoComprobante} ${String(nd.puntoVenta).padStart(4, "0")}-${String(nd.numero).padStart(8, "0")}`;
+          const totalND = parseFloat(String((nd as any).montoTotal || "0"));
+          await db.insert(folioMovements).values({
+            folioId: actualFolioId,
+            type: "charge",
+            amount: totalND.toFixed(2),
+            description: `Nota de Débito ${nroND}${motivo ? ` — ${motivo}` : ""}`,
+            sourceType: "nota_debito",
+            sourceId: String(nd.id),
+            receiptType: nd.tipoComprobante,
+            registeredBy: user?.fullName || user?.username || null,
+          });
+          await (storage as any).recalcFolioBalance(actualFolioId);
+        } catch (folioErr) {
+          console.error("[ND] Error adding folio movement:", folioErr);
+        }
       }
 
       res.status(201).json(nd);

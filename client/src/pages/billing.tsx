@@ -56,6 +56,9 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
   FC:  { nombre: "Factura C",    color: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300" },
   NCA: { nombre: "Nota Créd. A", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
   NCB: { nombre: "Nota Créd. B", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
+  NDA: { nombre: "Nota Déb. A",  color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300" },
+  NDB: { nombre: "Nota Déb. B",  color: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300" },
+  NDC: { nombre: "Nota Déb. C",  color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
   ticket: { nombre: "Ticket", color: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300" },
   voucher_justo: { nombre: "Voucher Justo", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
   voucher_pedidos_ya: { nombre: "Voucher PedidosYa", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
@@ -172,6 +175,8 @@ export default function BillingPage() {
                   <SelectItem value="FC">Factura C</SelectItem>
                   <SelectItem value="NCA">NC A</SelectItem>
                   <SelectItem value="NCB">NC B</SelectItem>
+                  <SelectItem value="NDA">ND A</SelectItem>
+                  <SelectItem value="NDB">ND B</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={filtroArea || "__all__"} onValueChange={(v) => setFiltroArea(v === "__all__" ? "" : v)}>
@@ -253,7 +258,7 @@ export default function BillingPage() {
                                   <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
                                     <Download className="w-3.5 h-3.5" />
                                   </Button>
-                                  {f.estado === "emitida" && !f.tipo_comprobante?.startsWith("NC") && (
+                                  {f.estado === "emitida" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700" onClick={() => setShowNC(f.id)} title="Emitir Nota de Crédito" data-testid={`btn-nc-${f.id}`}>
                                       <XCircle className="w-3.5 h-3.5" />
                                     </Button>

@@ -33,6 +33,11 @@ const MOVEMENT_LABELS: Record<string, string> = {
   void: "Anulación",
 };
 
+function getMovementLabel(m: { type: string; sourceType?: string | null; receiptType?: string | null }): string {
+  if (m.sourceType === "nota_debito" || m.receiptType?.startsWith("ND")) return "Nota de Débito";
+  return MOVEMENT_LABELS[m.type] ?? m.type;
+}
+
 const PAYMENT_LABELS: Record<string, string> = {
   efectivo: "Efectivo",
   cash: "Efectivo",
@@ -175,17 +180,20 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
         const isTransferOut = m.type === "transfer_out";
         const isTransferIn = m.type === "transfer_in";
         const isTransfer = isTransferOut || isTransferIn;
-        const rowBg = isTransferOut ? "#fff7ed" : isTransferIn ? "#eff6ff" : (i % 2 === 0 ? "#ffffff" : "#fafafa");
+        const isNotaDebito = (m as any).sourceType === "nota_debito" || (m as any).receiptType?.startsWith("ND");
+        const rowBg = isTransferOut ? "#fff7ed" : isTransferIn ? "#eff6ff" : isNotaDebito ? "#eff6ff" : (i % 2 === 0 ? "#ffffff" : "#fafafa");
         doc.rect(L, y, cW, ROW_H).fill(rowBg).stroke("#eeeeee");
-        // Left accent stripe for transfer rows
+        // Left accent stripe for transfer rows and ND rows
         if (isTransfer) {
           doc.rect(L, y, 3, ROW_H).fill(isTransferOut ? "#f97316" : "#3b82f6");
+        } else if (isNotaDebito) {
+          doc.rect(L, y, 3, ROW_H).fill("#0369a1");
         }
 
         doc.font("Helvetica").fontSize(8).fillColor(MUTED)
            .text(fmtDate(m.createdAt ?? ""), COL.date + 4, y + 5, { width: 92 });
-        doc.fillColor(isTransferOut ? "#c2410c" : isTransferIn ? "#1d4ed8" : DARK)
-           .text(MOVEMENT_LABELS[m.type] ?? m.type, COL.type + 4, y + 5, { width: 90 });
+        doc.fillColor(isTransferOut ? "#c2410c" : isTransferIn ? "#1d4ed8" : isNotaDebito ? "#0369a1" : DARK)
+           .text(getMovementLabel(m as any), COL.type + 4, y + 5, { width: 90 });
         const payLabel = m.paymentMethod ? (PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod) : "—";
         doc.fillColor(MUTED)
            .text(payLabel, COL.method + 4, y + 5, { width: 100 });
