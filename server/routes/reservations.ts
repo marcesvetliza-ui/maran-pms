@@ -801,7 +801,7 @@ export function registerReservationsRoutes(app: Express) {
         nights: reservation.nights ?? 1,
         roomRate: parseFloat(reservation.finalRatePerNight || "0"),
         roomTotal,
-        charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount })),
+        charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount, category: c.category ?? undefined })),
         payments: activePayments.map(p => ({ date: p.date, method: p.method, amount: p.amount, reference: p.reference, notes: p.notes })),
         grandTotal,
         totalPayments,
