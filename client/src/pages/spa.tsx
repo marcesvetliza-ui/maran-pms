@@ -386,6 +386,18 @@ export default function SpaPage() {
     staleTime: 0,
   });
 
+  // Void adjustments from folio_movements (written when an NC voids a payment)
+  const { data: spaFolioData } = useQuery<any>({
+    queryKey: ["/api/folios", "spa_account", selectedAccount?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/folios/spa_account/${selectedAccount!.id}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!selectedAccount?.id && isFolioOpen,
+  });
+  const spaFolioVoidMovements: any[] = (spaFolioData?.movements ?? []).filter((m: any) => m.type === "void");
+
   const { data: spaInventoryItems = [] } = useQuery<InventoryItemWithDetails[]>({
     queryKey: ["/api/inventory/items", "spa"],
     queryFn: async () => {
@@ -2246,23 +2258,34 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   )}
                 </div>
                 <div className="space-y-2">
-                  {selectedAccount.payments.length === 0 ? (
+                  {selectedAccount.payments.length === 0 && spaFolioVoidMovements.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-4">Sin pagos registrados</p>
                   ) : (
-                    selectedAccount.payments.map((payment) => (
-                      <div key={payment.id} className="flex items-center justify-between p-2 border rounded text-sm" data-testid={`payment-${payment.id}`}>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span>{paymentMethodLabels[payment.method] || payment.method}</span>
-                            {payment.isAdvance === "true" && (
-                              <Badge variant="secondary" className="text-[10px] bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">SEÑA</Badge>
-                            )}
+                    <>
+                      {selectedAccount.payments.map((payment) => (
+                        <div key={payment.id} className="flex items-center justify-between p-2 border rounded text-sm" data-testid={`payment-${payment.id}`}>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span>{paymentMethodLabels[payment.method] || payment.method}</span>
+                              {payment.isAdvance === "true" && (
+                                <Badge variant="secondary" className="text-[10px] bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">SEÑA</Badge>
+                              )}
+                            </div>
+                            {payment.notes && <p className="text-xs text-muted-foreground">{payment.notes}</p>}
                           </div>
-                          {payment.notes && <p className="text-xs text-muted-foreground">{payment.notes}</p>}
+                          <span className="font-medium text-green-600">${parseFloat(payment.amount).toLocaleString()}</span>
                         </div>
-                        <span className="font-medium text-green-600">${parseFloat(payment.amount).toLocaleString()}</span>
-                      </div>
-                    ))
+                      ))}
+                      {spaFolioVoidMovements.map((mov: any) => (
+                        <div key={mov.id} className="flex items-center justify-between p-2 border border-orange-200 rounded text-sm bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-700" data-testid={`void-movement-${mov.id}`}>
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <Badge className="text-[10px] shrink-0 bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300">Anulación</Badge>
+                            <span className="truncate text-muted-foreground">{mov.description || "Ajuste por Nota de Crédito"}</span>
+                          </div>
+                          <span className="font-medium text-orange-600 shrink-0 ml-2">−${parseFloat(mov.amount).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </>
                   )}
                 </div>
 

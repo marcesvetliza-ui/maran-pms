@@ -2233,6 +2233,17 @@ function ReservationDetailDialog({
     },
   });
 
+  // Void adjustments from folio_movements (written when an NC voids a payment)
+  const { data: reservationFolioData } = useQuery<any>({
+    queryKey: ["/api/folios", "reservation", reservation.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/folios/reservation/${reservation.id}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+  });
+  const folioVoidMovements: any[] = (reservationFolioData?.movements ?? []).filter((m: any) => m.type === "void");
+
   const addChargeMutation = useMutation({
     mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string; isRecurring?: boolean; unitAmount?: string }) => {
       return apiRequest("POST", "/api/charges", chargeData);
@@ -3905,15 +3916,25 @@ function ReservationDetailDialog({
                 isAnulado: f.estado === "anulada",
                 id: `factura-${f.id}`,
               }));
-              const allItems = [...chargeItems, ...paymentItems, ...invoiceItems].sort((a, b) => b.sortDate - a.sortDate);
+              const voidItems = folioVoidMovements.map((m: any) => ({
+                sortDate: new Date(m.createdAt || 0).getTime(),
+                dateLabel: (() => { const d = new Date(m.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                type: "anulacion" as const,
+                label: m.description || "Ajuste por Nota de Crédito",
+                amount: parseFloat(m.amount || "0"),
+                isAnulado: false,
+                id: `void-${m.id}`,
+              }));
+              const allItems = [...chargeItems, ...paymentItems, ...invoiceItems, ...voidItems].sort((a, b) => b.sortDate - a.sortDate);
               if (allItems.length === 0) return null;
               const colorMap = {
-                cargo:   "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
-                pago:    "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
-                factura: "border-purple-200 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-800",
+                cargo:    "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
+                pago:     "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
+                factura:  "border-purple-200 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-800",
+                anulacion:"border-orange-200 bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-800",
               };
-              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura" };
-              const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300" };
+              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura", anulacion: "Anulación" };
+              const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300", anulacion: "text-orange-600 dark:text-orange-400" };
               return (
                 <div className="border rounded-lg">
                   <div className="p-3 border-b bg-muted/50 flex items-center gap-2">
@@ -3925,7 +3946,11 @@ function ReservationDetailDialog({
                     {allItems.map((item) => (
                       <div key={item.id} className={`flex items-center gap-2 text-xs p-1.5 rounded border ${colorMap[item.type]} ${item.isAnulado ? "opacity-40 line-through" : ""}`} data-testid={`timeline-${item.id}`}>
                         <span className="text-muted-foreground shrink-0 w-14">{item.dateLabel}</span>
-                        <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4">{labelMap[item.type]}</Badge>
+                        {item.type === "anulacion" ? (
+                          <Badge className="text-[10px] shrink-0 px-1 py-0 h-4 bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700">{labelMap[item.type]}</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4">{labelMap[item.type]}</Badge>
+                        )}
                         <span className="flex-1 truncate">{item.label}</span>
                         {(item as any).invBadge && !item.isAnulado && (
                           <Badge variant="secondary" className="text-[10px] shrink-0 px-1 py-0 h-4 text-blue-700 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
@@ -3933,7 +3958,7 @@ function ReservationDetailDialog({
                           </Badge>
                         )}
                         <span className={`font-medium shrink-0 ${amtColor[item.type]}`}>
-                          {item.type === "pago" ? "−" : ""}${item.amount.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {(item.type === "pago" || item.type === "anulacion") ? "−" : ""}${item.amount.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                     ))}

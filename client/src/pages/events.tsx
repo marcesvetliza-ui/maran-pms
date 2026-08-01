@@ -381,6 +381,18 @@ export default function EventsPage() {
   });
   const eventsShiftActive = !!(eventsShift && eventsShift.openedBy && eventsShift.status === "open");
 
+  // Void adjustments from folio_movements for the selected event (written when an NC voids a payment)
+  const { data: eventFolioData } = useQuery<any>({
+    queryKey: ["/api/folios", "event", selectedEvent?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/folios/event/${selectedEvent!.id}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!selectedEvent?.id && activeTab === "folio",
+  });
+  const eventFolioVoidMovements: any[] = (eventFolioData?.movements ?? []).filter((m: any) => m.type === "void");
+
   const eventsMap = planningData?.events || {};
   const cellEventsMap = planningData?.cellEvents || {};
 
@@ -2135,9 +2147,18 @@ export default function EventsPage() {
                           </div>
                           );
                         })}
-                        {(!selectedEvent.payments || selectedEvent.payments.length === 0) && (
+                        {(!selectedEvent.payments || selectedEvent.payments.length === 0) && eventFolioVoidMovements.length === 0 && (
                           <p className="text-sm text-muted-foreground text-center py-4">Sin pagos</p>
                         )}
+                        {eventFolioVoidMovements.map((mov: any) => (
+                          <div key={mov.id} className="flex items-center justify-between p-2 rounded border border-orange-200 bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-700 text-sm" data-testid={`void-movement-${mov.id}`}>
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <Badge className="text-[10px] shrink-0 bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300">Anulación</Badge>
+                              <span className="truncate text-muted-foreground">{mov.description || "Ajuste por Nota de Crédito"}</span>
+                            </div>
+                            <span className="font-medium text-orange-600 shrink-0 ml-2">−${parseFloat(mov.amount).toLocaleString()}</span>
+                          </div>
+                        ))}
                       </div>
 
                       <div className="mt-3 pt-3 border-t space-y-3">
