@@ -2060,7 +2060,7 @@ function ChargeRow({
 
 // ─── RevertTransferDialog sub-component ──────────────────────────────────────
 
-function RevertTransferDialog({
+export function RevertTransferDialog({
   open, onClose, reservationId, charge, onSuccess,
 }: {
   open: boolean;
