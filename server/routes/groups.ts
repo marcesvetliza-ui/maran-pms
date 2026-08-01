@@ -644,6 +644,8 @@ export function registerGroupsRoutes(app: Express) {
         balanceDiff = totalAmount - totalGroupDebt;
       }
 
+      const createdPaymentIds: string[] = [];
+
       if (distribution === "proportional") {
         let totalCost = 0;
         const costs: { id: string; cost: number; balance: number }[] = [];
@@ -665,7 +667,7 @@ export function registerGroupsRoutes(app: Express) {
             paymentAmt = totalAmount * proportion;
           }
           if (paymentAmt > 0.001) {
-            await storage.createPayment({
+            const p = await storage.createPayment({
               reservationId: item.id,
               amount: paymentAmt.toFixed(2),
               method,
@@ -673,6 +675,7 @@ export function registerGroupsRoutes(app: Express) {
               date: today,
               ...(method === "cuenta_corriente" ? { billingTarget: ccEntityType } : {}),
             });
+            if (p?.id) createdPaymentIds.push(String(p.id));
             const reservation = activeReservations.find((r: any) => r.id === item.id);
             if (reservation) await registerCcMovement(reservation, paymentAmt);
           }
@@ -680,7 +683,7 @@ export function registerGroupsRoutes(app: Express) {
       } else {
         const perRoom = totalAmount / activeReservations.length;
         for (const reservation of activeReservations) {
-          await storage.createPayment({
+          const p = await storage.createPayment({
             reservationId: reservation.id,
             amount: perRoom.toFixed(2),
             method,
@@ -688,6 +691,7 @@ export function registerGroupsRoutes(app: Express) {
             date: today,
             ...(method === "cuenta_corriente" ? { billingTarget: ccEntityType } : {}),
           });
+          if (p?.id) createdPaymentIds.push(String(p.id));
           await registerCcMovement(reservation, perRoom);
         }
       }
@@ -739,6 +743,8 @@ export function registerGroupsRoutes(app: Express) {
         distributed: activeReservations.length,
         checkoutCount,
         balanceDiff: closeAllRooms ? balanceDiff : undefined,
+        paymentIds: createdPaymentIds,
+        paymentId: createdPaymentIds[0] ?? null,
       });
     } catch (error) {
       console.error("Error processing group payment:", error);

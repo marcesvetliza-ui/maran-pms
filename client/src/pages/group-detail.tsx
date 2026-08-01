@@ -675,6 +675,7 @@ export default function GroupDetailPage() {
   const [groupPaymentCcEntityType, setGroupPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [groupPaymentCcEntityId, setGroupPaymentCcEntityId] = useState("");
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
+  const [pendingGroupPaymentId, setPendingGroupPaymentId] = useState<string>("");
   const [showCancelledRes, setShowCancelledRes] = useState(false);
 
   // Cambiar habitación
@@ -955,6 +956,18 @@ export default function GroupDetailPage() {
       queryClient.invalidateQueries({ predicate: (q) =>
         Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning"
       });
+
+      const needsFactura = groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b";
+      const needsVoucher = groupPaymentReceiptType === "cierre_habitacion";
+
+      if (needsFactura || needsVoucher) {
+        // Close the payment dialog and open the invoice dialog with the payment ID
+        setShowGroupPaymentDialog(false);
+        setPendingGroupPaymentId(data.paymentId ? String(data.paymentId) : "");
+        setShowGroupFacturaDialog(true);
+        return;
+      }
+
       if (groupPaymentCloseAll) {
         if (data.balanceDiff && Math.abs(data.balanceDiff) > 0.01) {
           toast({
@@ -2717,11 +2730,7 @@ export default function GroupDetailPage() {
                   toast({ title: `Seleccione ${groupPaymentCcEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
                   return;
                 }
-                if (groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b" || groupPaymentReceiptType === "cierre_habitacion") {
-                  setShowGroupFacturaDialog(true);
-                } else {
-                  groupPaymentMutation.mutate();
-                }
+                groupPaymentMutation.mutate();
               }}
               disabled={!groupPaymentAmount || !groupPaymentMethod || groupPaymentMutation.isPending}
               data-testid="button-confirm-group-payment"
@@ -2736,7 +2745,10 @@ export default function GroupDetailPage() {
       {showGroupFacturaDialog && (
         <EmitirFacturaDialog
           open={showGroupFacturaDialog}
-          onClose={() => setShowGroupFacturaDialog(false)}
+          onClose={() => {
+            setShowGroupFacturaDialog(false);
+            setPendingGroupPaymentId("");
+          }}
           config={billingConfig}
           allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] : ["FB"]}
           initialValues={{
@@ -2747,9 +2759,26 @@ export default function GroupDetailPage() {
               : group?.name ?? "",
             items: [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }],
           }}
+          paymentId={pendingGroupPaymentId || undefined}
           onSuccess={() => {
             setShowGroupFacturaDialog(false);
-            groupPaymentMutation.mutate();
+            setPendingGroupPaymentId("");
+            setGroupPaymentAmount("");
+            setGroupPaymentMethod("");
+            setGroupPaymentReference("");
+            setGroupPaymentReceiptType("");
+            setGroupPaymentDistribution("equal");
+            setGroupPaymentCloseAll(false);
+            setGroupPaymentCcEntityType("company");
+            setGroupPaymentCcEntityId("");
+            if (showInvoiceDialog) {
+              loadInvoice();
+            }
+            if (groupPaymentCloseAll) {
+              toast({ title: "Pago grupal registrado — grupo cerrado" });
+            } else {
+              toast({ title: "Pago grupal registrado exitosamente" });
+            }
           }}
         />
       )}
