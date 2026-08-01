@@ -432,6 +432,10 @@ export function registerSpaRoutes(app: Express) {
         return res.status(400).json({ error: "chargedTo and receiptType are required" });
       }
 
+      if (["factura_a", "factura_c"].includes(receiptType) && !customerCuit?.trim()) {
+        return res.status(400).json({ error: "El CUIT es obligatorio para Factura A/C" });
+      }
+
       const accountData = await storage.getSpaAccount(req.params.id);
       if (!accountData) return res.status(404).json({ error: "Account not found" });
 

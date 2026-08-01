@@ -2328,6 +2328,7 @@ export default function EventsPage() {
                             disabled={
                               !folioReceiptType ||
                               calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent) > 0.01 ||
+                              (["factura_a", "factura_c"].includes(folioReceiptType) && !invoiceCustomerCuit.trim()) ||
                               closeEventMutation.isPending
                             }
                             onClick={handleCloseEvent}
@@ -2340,6 +2341,11 @@ export default function EventsPage() {
                           {calculateEventTotal(selectedEvent) - calculateEventPaid(selectedEvent) > 0.01 && (
                             <p className="text-xs text-red-500 text-center">
                               Debe saldar el balance para facturar
+                            </p>
+                          )}
+                          {["factura_a", "factura_c"].includes(folioReceiptType) && !invoiceCustomerCuit.trim() && (
+                            <p className="text-xs text-red-500 text-center" data-testid="cuit-required-msg">
+                              El CUIT es obligatorio para Factura A/C
                             </p>
                           )}
                         </div>

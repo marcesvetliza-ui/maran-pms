@@ -446,6 +446,15 @@ export function registerEventsRoutes(app: Express) {
       if (!receiptType) {
         return res.status(400).json({ error: "receiptType es requerido" });
       }
+
+      // Normalise early so validation uses the canonical form
+      const normalizedForValidation = receiptType === "Factura A" ? "factura_a"
+        : receiptType === "Factura C" ? "factura_c"
+        : receiptType;
+      if (["factura_a", "factura_c"].includes(normalizedForValidation) && !customerCuit?.trim()) {
+        return res.status(400).json({ error: "El CUIT es obligatorio para Factura A/C" });
+      }
+
       const event = await storage.getEvent(req.params.eventId);
       if (!event) return res.status(404).json({ error: "Event not found" });
 

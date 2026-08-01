@@ -2370,12 +2370,18 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         )}
                       </div>
                     )}
+                    {(["factura_a", "factura_c"].includes(receiptType) && !invoiceCustomerCuit.trim()) && (
+                      <p className="text-xs text-red-500 text-center" data-testid="cuit-required-msg">
+                        El CUIT es obligatorio para Factura A/C
+                      </p>
+                    )}
                     <Button
                       className="w-full"
                       disabled={
                         (receiptType !== "cargo_habitacion" && accountBalance > 0) ||
                         (!receiptType && !selectedAccount.payments.some(p => p.method === "room_charge")) ||
                         (receiptType === "cargo_habitacion" && !folioRoomChargeId) ||
+                        (["factura_a", "factura_c"].includes(receiptType) && !invoiceCustomerCuit.trim()) ||
                         closeAccountMutation.isPending ||
                         addPaymentMutation.isPending
                       }
