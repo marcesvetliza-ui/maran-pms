@@ -2248,6 +2248,9 @@ function ReservationDetailDialog({
     },
   });
   const folioVoidMovements: any[] = (reservationFolioData?.movements ?? []).filter((m: any) => m.type === "void");
+  const folioNdMovements: any[] = (reservationFolioData?.movements ?? []).filter((m: any) =>
+    m.sourceType === "nota_debito" || (m.receiptType && (m.receiptType as string).startsWith("ND"))
+  );
 
   const addChargeMutation = useMutation({
     mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string; isRecurring?: boolean; unitAmount?: string }) => {
@@ -3930,16 +3933,27 @@ function ReservationDetailDialog({
                 isAnulado: false,
                 id: `void-${m.id}`,
               }));
-              const allItems = [...chargeItems, ...paymentItems, ...invoiceItems, ...voidItems].sort((a, b) => b.sortDate - a.sortDate);
+              const ndItems = folioNdMovements.map((m: any) => ({
+                sortDate: new Date(m.createdAt || 0).getTime(),
+                dateLabel: (() => { const d = new Date(m.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                type: "nota_debito" as const,
+                label: m.description || "Nota de Débito",
+                ndReceiptCode: (m.receiptType as string | undefined) ?? "ND",
+                amount: parseFloat(m.amount || "0"),
+                isAnulado: false,
+                id: `nd-${m.id}`,
+              }));
+              const allItems = [...chargeItems, ...paymentItems, ...invoiceItems, ...voidItems, ...ndItems].sort((a, b) => b.sortDate - a.sortDate);
               if (allItems.length === 0) return null;
               const colorMap = {
-                cargo:    "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
-                pago:     "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
-                factura:  "border-purple-200 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-800",
-                anulacion:"border-orange-200 bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-800",
+                cargo:       "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
+                pago:        "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
+                factura:     "border-purple-200 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-800",
+                anulacion:   "border-orange-200 bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-800",
+                nota_debito: "border-sky-200 bg-sky-50/50 dark:bg-sky-900/10 dark:border-sky-800",
               };
-              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura", anulacion: "Anulación" };
-              const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300", anulacion: "text-orange-600 dark:text-orange-400" };
+              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura", anulacion: "Anulación", nota_debito: "Nota de Débito" };
+              const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300", anulacion: "text-orange-600 dark:text-orange-400", nota_debito: "text-sky-700 dark:text-sky-300" };
               return (
                 <div className="border rounded-lg">
                   <div className="p-3 border-b bg-muted/50 flex items-center gap-2">
@@ -3953,10 +3967,17 @@ function ReservationDetailDialog({
                         <span className="text-muted-foreground shrink-0 w-14">{item.dateLabel}</span>
                         {item.type === "anulacion" ? (
                           <Badge className="text-[10px] shrink-0 px-1 py-0 h-4 bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700">{labelMap[item.type]}</Badge>
+                        ) : item.type === "nota_debito" ? (
+                          <Badge className="text-[10px] shrink-0 px-1 py-0 h-4 bg-sky-100 text-sky-700 border border-sky-300 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-700">{labelMap[item.type]}</Badge>
                         ) : (
                           <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4">{labelMap[item.type]}</Badge>
                         )}
                         <span className="flex-1 truncate">{item.label}</span>
+                        {item.type === "nota_debito" && (item as any).ndReceiptCode && (
+                          <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4 font-semibold bg-sky-50 text-sky-700 border-sky-300 dark:bg-sky-950/20 dark:text-sky-300 dark:border-sky-700">
+                            {(item as any).ndReceiptCode}
+                          </Badge>
+                        )}
                         {(item as any).invBadge && !item.isAnulado && (
                           <Badge variant="secondary" className="text-[10px] shrink-0 px-1 py-0 h-4 text-blue-700 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
                             <FileText className="h-2.5 w-2.5 mr-0.5" />{(item as any).invBadge}
