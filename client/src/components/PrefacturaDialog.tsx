@@ -76,7 +76,6 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 const TIPO_OPTIONS = [
   { value: "FA", label: "Factura A", fiscal: true },
   { value: "FB", label: "Factura B", fiscal: true },
-  { value: "FC", label: "Factura C (Monotributista)", fiscal: true },
   { value: "NCA", label: "Nota de Crédito A", fiscal: true },
   { value: "NCB", label: "Nota de Crédito B", fiscal: true },
   { value: "cierre_habitacion", label: "Cierre de habitación (no fiscal)", fiscal: false },
@@ -146,7 +145,7 @@ function buildInvoiceItems(
 function suggestTipo(cuit: string, condicionIva: string): string {
   if (!cuit) return "cierre_habitacion";
   if (condicionIva === "Responsable Inscripto" || condicionIva === "Exento") return "FA";
-  if (condicionIva === "Monotributista") return "FC";
+  if (condicionIva === "Monotributista") return "FB";
   return "FB";
 }
 

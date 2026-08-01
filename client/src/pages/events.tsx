@@ -224,7 +224,6 @@ const receiptTypeOptions = [
   { value: "ticket", label: "Ticket" },
   { value: "factura_a", label: "Factura A (IVA Resp. Inscripto)" },
   { value: "factura_b", label: "Factura B (Consumidor Final)" },
-  { value: "factura_c", label: "Factura C (Monotributista)" },
   { value: "nota_credito", label: "Nota Crédito" },
   { value: "voucher_no_fiscal", label: "Voucher (No Fiscal)" },
 ];

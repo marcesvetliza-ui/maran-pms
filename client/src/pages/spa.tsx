@@ -2282,7 +2282,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                               <SelectItem value="cierre_spa">Cierre de SPA</SelectItem>
                               <SelectItem value="factura_a">Factura A (IVA Resp. Inscripto)</SelectItem>
                               <SelectItem value="factura_b">Factura B (Consumidor Final)</SelectItem>
-                              <SelectItem value="factura_c">Factura C (Monotributista)</SelectItem>
                               <SelectItem value="cargo_habitacion">Cargo a Habitación</SelectItem>
                             </SelectContent>
                           </Select>

@@ -3141,7 +3141,6 @@ export default function RestaurantPage() {
                       <SelectItem value="todos">Todos</SelectItem>
                       <SelectItem value="FA">Factura A</SelectItem>
                       <SelectItem value="FB">Factura B</SelectItem>
-                      <SelectItem value="FC">Factura C</SelectItem>
                       <SelectItem value="NCA">NC A</SelectItem>
                       <SelectItem value="NCB">NC B</SelectItem>
                     </SelectContent>
