@@ -441,6 +441,8 @@ function MovementRow({
   const debit = isDebit(mov.type);
   const hasSource = !!mov.sourceId && mov.sourceType === "restaurant_order";
   const isTransferMov = mov.type === "transfer_in" || mov.type === "transfer_out";
+  const isNotaDebito = mov.sourceType === "nota_debito" || (mov.receiptType?.startsWith("ND") ?? false);
+  const ndReceiptCode = isNotaDebito ? (mov.receiptType ?? "ND") : null;
 
   return (
     <div className="border-b last:border-0">
@@ -474,8 +476,16 @@ function MovementRow({
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-muted-foreground">
-              {MOVEMENT_LABELS[mov.type] ?? mov.type}
+              {isNotaDebito ? "Nota de Débito" : (MOVEMENT_LABELS[mov.type] ?? mov.type)}
             </span>
+            {isNotaDebito && ndReceiptCode && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 h-4 font-semibold bg-sky-50 text-sky-700 border-sky-300 dark:bg-sky-950/20 dark:text-sky-300 dark:border-sky-700"
+              >
+                {ndReceiptCode}
+              </Badge>
+            )}
             {mov.paymentMethod && (
               <>
                 <span className="text-xs text-muted-foreground">·</span>
