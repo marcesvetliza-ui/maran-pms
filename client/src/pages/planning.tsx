@@ -36,6 +36,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package, BedType } from "@shared/schema";
@@ -1391,6 +1392,23 @@ export default function PlanningPage() {
           setNewReservationDefaults(null);
           queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+        }}
+        onError={() => {
+          const params = new URLSearchParams();
+          if (newReservationDefaults?.roomId) params.set("roomId", newReservationDefaults.roomId);
+          if (newReservationDefaults?.checkInDate) params.set("checkInDate", newReservationDefaults.checkInDate);
+          const url = `/reservations${params.toString() ? `?${params.toString()}` : ""}`;
+          toast({
+            title: "No se pudo crear la reserva desde el planning",
+            description: "Podés intentarlo desde el formulario completo de reservas.",
+            variant: "destructive",
+            duration: 12000,
+            action: (
+              <ToastAction altText="Ir a Reservas" onClick={() => navigate(url)}>
+                Ir a Reservas
+              </ToastAction>
+            ),
+          });
         }}
       />
 
