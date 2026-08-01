@@ -1941,38 +1941,15 @@ function ReservationDetailDialog({
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
-  const [coWizardStep, setCoWizardStep] = useState(0);
-  const [coReceiptType, setCoReceiptType] = useState("cierre_habitacion");
-  const [coPayMethod, setCoPayMethod] = useState("efectivo");
-  const [coPayAmount, setCoPayAmount] = useState("");
-  const [coBillingTarget, setCoBillingTarget] = useState<"guest" | "company" | "agency">("guest");
-  const [coCompanyId, setCoCompanyId] = useState("");
-  const [coAgencyId, setCoAgencyId] = useState("");
-  const [coShowFacturar, setCoShowFacturar] = useState(false);
-  const coPendingPaymentIdRef = useRef<string>("");
-  const [coPendingInvoice, setCoPendingInvoice] = useState(false);
-  const [showFacturarPrompt, setShowFacturarPrompt] = useState(false);
-  const [coIsFacturarSolo, setCoIsFacturarSolo] = useState(false);
   const [showUninvoicedWarning, setShowUninvoicedWarning] = useState(false);
   const [uninvoicedWarningAction, setUninvoicedWarningAction] = useState<"facturar" | "checkout" | null>(null);
 
-  // Reset all wizard/billing state whenever a different reservation is opened
+  // Reset billing state whenever a different reservation is opened
   useEffect(() => {
-    setCoWizardStep(0);
-    setCoIsFacturarSolo(false);
-    setCoPayAmount("");
-    setCoReceiptType("cierre_habitacion");
-    setCoPayMethod("efectivo");
-    setCoBillingTarget("guest");
-    setCoCompanyId("");
-    setCoAgencyId("");
     setShowFacturar(false);
     setShowFacturarMode("billing");
-    setShowFacturarPrompt(false);
     setUninvoicedWarningAction(null);
     setShowUninvoicedWarning(false);
-    coPendingPaymentIdRef.current = "";
-    setCoPendingInvoice(false);
   }, [reservation.id]);
 
   const openCheckoutWizard = () => {
@@ -2015,58 +1992,6 @@ function ReservationDetailDialog({
     },
   });
 
-  const checkoutProperMutation = useMutation({
-    mutationFn: async () => apiRequest("POST", `/api/reservations/${reservation.id}/check-out`, { forceCheckout: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
-      queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
-      setCoWizardStep(0);
-      onOpenChange(false);
-      toast({ title: "Check-out realizado", description: "La habitación quedó en estado Sucia." });
-      if (coPendingInvoice) {
-        setCoPendingInvoice(false);
-        setShowFacturar(true);
-      }
-    },
-    onError: (error: any) => {
-      let msg = "No se pudo realizar el check-out.";
-      try {
-        const raw = error?.message || "";
-        const j = raw.indexOf("{");
-        if (j !== -1) { const b = JSON.parse(raw.slice(j)); msg = b?.error || b?.message || msg; }
-      } catch {}
-      toast({ title: "Error en check-out", description: msg, variant: "destructive" });
-    },
-  });
-
-  const coAddPaymentMutation = useMutation({
-    mutationFn: async (data: { amount: string; method: string; receiptType: string; billingTarget: string; companyId?: string; agencyId?: string }) => {
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-      const res = await apiRequest("POST", "/api/payments", { ...data, reservationId: reservation.id, date: today });
-      return res.json();
-    },
-    onSuccess: (data, variables) => {
-      // Only track payment ID for ARCA receipt types that will open the invoice dialog
-      const isArca = ["factura_a", "factura_b", "factura_c"].includes(variables.receiptType);
-      if (isArca && data?.id) {
-        coPendingPaymentIdRef.current = String(data.id);
-      } else {
-        coPendingPaymentIdRef.current = "";
-      }
-      refetchCharges();
-      refetchPayments();
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] });
-      toast({ title: "Pago registrado" });
-    },
-    onError: (error: any) => {
-      const msg = error?.data?.error || error?.message || "No se pudo registrar el pago";
-      toast({ title: "Error al registrar pago", description: msg, variant: "destructive" });
-    },
-  });
 
   const printConfirmation = () => {
     window.open(`/api/reservations/${reservation.id}/confirmation-pdf`, "_blank");
@@ -2274,8 +2199,6 @@ function ReservationDetailDialog({
   });
 
   // Always-loaded for billing fallback (guest's default company/agency)
-  const { data: allCompanies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
-  const { data: allAgencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
 
   // Invoices linked to this reservation (for timeline)
   const { data: folioInvoices = [] } = useQuery<any[]>({
@@ -2565,326 +2488,26 @@ function ReservationDetailDialog({
   const balance = totalToPay - totalPayments;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { setCoWizardStep(0); setCoIsFacturarSolo(false); coPendingPaymentIdRef.current = ""; } onOpenChange(o); }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[95vw] max-w-[680px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {coWizardStep > 0
-              ? (coIsFacturarSolo
-                  ? <><FileText className="h-5 w-5 text-blue-500" />Facturar Saldo — Hab. {reservation.room?.roomNumber}</>
-                  : <><LogOut className="h-5 w-5 text-orange-500" />Check-out — Hab. {reservation.room?.roomNumber}</>)
-              : <>Reserva {reservation.reservationCode}<ReservationStatusBadge status={reservation.status} /></>
-            }
+            <>Reserva {reservation.reservationCode}<ReservationStatusBadge status={reservation.status} /></>
           </DialogTitle>
           <DialogDescription>
-            {coWizardStep > 0
-              ? <>{reservation.guest?.lastName} {reservation.guest?.firstName} · {reservation.reservationCode}</>
-              : "Detalle de la reservación"
-            }
+            Detalle de la reservación
           </DialogDescription>
         </DialogHeader>
 
-        {/* ── Checkout / Facturar wizard (inline, replaces normal content) ── */}
-        {coWizardStep > 0 && (
-          <div className="space-y-4 py-1">
-            {/* Step indicator */}
-            {coIsFacturarSolo ? (
-              <p className="text-xs text-muted-foreground text-center">Pago y comprobante</p>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  {[1,2,3].map(s => (
-                    <div key={s} className={`flex-1 h-1.5 rounded-full ${s <= coWizardStep ? "bg-primary" : "bg-muted"}`} />
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground text-center -mt-2">
-                  Paso {coWizardStep} de 3: {coWizardStep === 1 ? "Resumen de cuenta" : coWizardStep === 2 ? "Pago y comprobante" : "Confirmar check-out"}
-                </p>
-              </>
-            )}
 
-            {/* Step 1: Resumen */}
-            {coWizardStep === 1 && (() => {
-              const activePayments = payments?.filter((p: any) => p.status !== "anulado") || [];
-              const invoicedPayments = activePayments.filter((p: any) => !!p.invoiceRef);
-              const nonInvoicedPayments = activePayments.filter((p: any) => !p.invoiceRef);
-              const invoicedAmt = invoicedPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-              const nonInvoicedAmt = nonInvoicedPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-              const totalPaymentsAmt = invoicedAmt + nonInvoicedAmt;
-              const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-              const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
-              const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
-              const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
-              const totalAmount = subtotalRoom + totalChargesAmt;
-              const balance = totalAmount - totalPaymentsAmt;
-              const activeCharges = consumptionCharges.filter((c: any) => c.status !== "anulado");
-              return (
-                <div className="space-y-3">
-                  <div className="rounded-md border overflow-hidden text-sm">
-                    <div className="px-3 py-1.5 bg-muted/60 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Cargos</div>
-                    <div className="divide-y max-h-64 overflow-y-auto">
-                      <div className="flex justify-between items-start px-3 py-2">
-                        <div>
-                          <div>Habitación {reservation.room?.roomNumber}</div>
-                          <div className="text-xs text-muted-foreground">{reservation.nights} noche{reservation.nights !== 1 ? "s" : ""} × ${parseFloat(reservation.finalRatePerNight || "0").toLocaleString("es-AR", { minimumFractionDigits: 0 })}/noche</div>
-                        </div>
-                        <span className="font-medium shrink-0">${parseFloat(reservation.totalRoomAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                      </div>
-                      {earlyChg > 0 && (
-                        <div className="flex justify-between items-center px-3 py-2 text-amber-600 dark:text-amber-400">
-                          <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
-                          <span className="shrink-0">${fmtMoney(earlyChg)}</span>
-                        </div>
-                      )}
-                      {lateChg > 0 && (
-                        <div className="flex justify-between items-center px-3 py-2 text-amber-600 dark:text-amber-400">
-                          <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
-                          <span className="shrink-0">${fmtMoney(lateChg)}</span>
-                        </div>
-                      )}
-                      {activeCharges.map((c: any) => (
-                        <div key={c.id} className="flex justify-between items-start px-3 py-2 gap-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1">
-                              <Badge variant="outline" className="text-xs py-0 shrink-0">{categoryLabels[c.category] || c.category}</Badge>
-                              <span className="truncate text-muted-foreground">{c.description}</span>
-                            </div>
-                          </div>
-                          <span className="shrink-0">${parseFloat(c.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="divide-y border-t bg-muted/20">
-                      {invoicedAmt > 0 && (
-                        <div className="flex justify-between items-center px-3 py-1.5 text-xs text-green-600 dark:text-green-400">
-                          <span className="flex items-center gap-1"><FileText className="h-3 w-3" />Anticipos facturados</span>
-                          <span>-${invoicedAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      {nonInvoicedAmt > 0 && (
-                        <div className="flex justify-between items-center px-3 py-1.5 text-xs text-green-600 dark:text-green-400">
-                          <span>Anticipos s/factura</span>
-                          <span>-${nonInvoicedAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      {totalPaymentsAmt > 0 && invoicedAmt > 0 && nonInvoicedAmt > 0 && (
-                        <div className="flex justify-between items-center px-3 py-1.5 text-sm text-green-600 dark:text-green-400 font-medium">
-                          <span>Total pagado</span>
-                          <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      {totalPaymentsAmt > 0 && !(invoicedAmt > 0 && nonInvoicedAmt > 0) && (
-                        <div className="flex justify-between items-center px-3 py-2 text-sm text-green-600 dark:text-green-400">
-                          <span>Pagado</span>
-                          <span>-${totalPaymentsAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center px-3 py-2 font-bold text-sm">
-                        <span>Saldo</span>
-                        <span className={balance > 0 ? "text-destructive" : "text-green-600"}>${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setCoWizardStep(0)}>Cancelar</Button>
-                    <Button size="sm" onClick={() => setCoWizardStep(2)} data-testid="button-co-step1-next">
-                      Siguiente →
-                    </Button>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Step 2: Pago + Comprobante */}
-            {coWizardStep === 2 && (() => {
-              const activePayments2 = payments?.filter((p: any) => p.status !== "anulado") || [];
-              const invoicedPayments2 = activePayments2.filter((p: any) => !!p.invoiceRef);
-              const nonInvoicedPayments2 = activePayments2.filter((p: any) => !p.invoiceRef);
-              const invoicedAmt2 = invoicedPayments2.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-              const nonInvoicedAmt2 = nonInvoicedPayments2.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-              const totalPaymentsAll = invoicedAmt2 + nonInvoicedAmt2;
-              const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-              const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
-              const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
-              const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
-              const totalAmount = subtotalRoom + totalChargesAmt;
-              // Invoiced advances are already settled via their own ARCA invoice; 
-              // non-invoiced ones will be covered by the checkout invoice.
-              // Balance to collect NOW = totalAmount - all active payments
-              const balance = totalAmount - totalPaymentsAll;
-              return (
-                <div className="space-y-3">
-                  {nonInvoicedAmt2 > 0 && (
-                    <div className="p-2 bg-green-50/80 dark:bg-green-950/20 border border-green-200 dark:border-green-700 rounded-md text-xs text-green-800 dark:text-green-300">
-                      <span className="font-medium">Anticipos s/factura:</span> ${nonInvoicedAmt2.toLocaleString("es-AR", { minimumFractionDigits: 2 })} — incluidos en el comprobante de salida
-                    </div>
-                  )}
-                  {invoicedAmt2 > 0 && (
-                    <div className="p-2 bg-blue-50/80 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-700 rounded-md text-xs text-blue-800 dark:text-blue-300">
-                      <span className="font-medium flex items-center gap-1"><FileText className="h-3 w-3" />Anticipos facturados:</span> ${invoicedAmt2.toLocaleString("es-AR", { minimumFractionDigits: 2 })} — ya cubiertos por su propia factura
-                    </div>
-                  )}
-                  {balance > 0 && (
-                    <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-md text-sm">
-                      Saldo pendiente: <span className="font-bold">${balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  {balance > 0 && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Monto</Label>
-                        <Input type="number" min={0} step="0.01" value={coPayAmount || String(balance.toFixed(2))} onChange={(e) => setCoPayAmount(e.target.value)} data-testid="input-co-amount" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Método de pago</Label>
-                        <Select value={coPayMethod} onValueChange={setCoPayMethod}>
-                          <SelectTrigger data-testid="select-co-method"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="efectivo">Efectivo</SelectItem>
-                            <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                            <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                            <SelectItem value="transferencia">Transferencia</SelectItem>
-                            <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                            <SelectItem value="cuenta_corriente">Cta. Corriente</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  )}
-                  {balance > 0 && coPayMethod === "cuenta_corriente" && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Facturar a</Label>
-                        <Select value={coBillingTarget} onValueChange={(v) => { setCoBillingTarget(v as "guest" | "company" | "agency"); setCoCompanyId(""); setCoAgencyId(""); }}>
-                          <SelectTrigger data-testid="select-co-billing"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="guest">Huésped</SelectItem>
-                            <SelectItem value="company">Empresa</SelectItem>
-                            <SelectItem value="agency">Agencia</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {coBillingTarget === "company" && (
-                        <div className="space-y-1">
-                          <Label className="text-xs">Empresa</Label>
-                          <Select value={coCompanyId} onValueChange={setCoCompanyId}>
-                            <SelectTrigger data-testid="select-co-company"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
-                            <SelectContent>
-                              {companiesForCC.filter((c: any) => c.id).map((c: any) => (
-                                <SelectItem key={c.id} value={c.id}>{(c as any).razonSocial || (c as any).nombreFantasia || c.id}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                      {coBillingTarget === "agency" && (
-                        <div className="space-y-1">
-                          <Label className="text-xs">Agencia</Label>
-                          <Select value={coAgencyId} onValueChange={setCoAgencyId}>
-                            <SelectTrigger data-testid="select-co-agency"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
-                            <SelectContent>
-                              {agenciesForCC.filter((a: any) => a.id).map((a: any) => (
-                                <SelectItem key={a.id} value={a.id}>{(a as any).razonSocial || (a as any).nombreFantasia || a.id}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div className="space-y-1">
-                    <Label className="text-xs">Tipo de comprobante</Label>
-                    <Select value={coReceiptType} onValueChange={setCoReceiptType}>
-                      <SelectTrigger data-testid="select-co-receipt"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cierre_habitacion">Cierre de habitación</SelectItem>
-                        <SelectItem value="ticket">Ticket</SelectItem>
-                        <SelectItem value="factura_a">Factura A</SelectItem>
-                        <SelectItem value="factura_b">Factura B</SelectItem>
-                        <SelectItem value="factura_c">Factura C</SelectItem>
-                        <SelectItem value="voucher">Voucher (No Fiscal)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => { if (coIsFacturarSolo) { setCoWizardStep(0); setCoIsFacturarSolo(false); } else setCoWizardStep(1); }}>Atrás</Button>
-                    {balance > 0 && (
-                      <Button size="sm" onClick={() => {
-                        const amount = coPayAmount || balance.toFixed(2);
-                        if (!amount || parseFloat(amount) <= 0) { toast({ title: "Ingresá un monto válido", variant: "destructive" }); return; }
-                        if (coPayMethod === "cuenta_corriente" && coBillingTarget === "company" && !coCompanyId && !reservation.companyId) {
-                          toast({ title: "Seleccioná una empresa", variant: "destructive" }); return;
-                        }
-                        if (coPayMethod === "cuenta_corriente" && coBillingTarget === "agency" && !coAgencyId && !reservation.agencyId) {
-                          toast({ title: "Seleccioná una agencia", variant: "destructive" }); return;
-                        }
-                        const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
-                        coAddPaymentMutation.mutate({
-                          amount,
-                          method: coPayMethod,
-                          receiptType: coReceiptType,
-                          billingTarget: coBillingTarget,
-                          companyId: coBillingTarget === "company" ? (coCompanyId || reservation.companyId || undefined) : undefined,
-                          agencyId: coBillingTarget === "agency" ? (coAgencyId || reservation.agencyId || undefined) : undefined,
-                        }, { onSuccess: () => {
-                          if (coIsFacturarSolo) {
-                            setCoWizardStep(0);
-                            setCoIsFacturarSolo(false);
-                            if (isArca) setShowFacturar(true);
-                          } else {
-                            if (isArca) setCoPendingInvoice(true);
-                            setCoWizardStep(3);
-                          }
-                        } });
-                      }} disabled={coAddPaymentMutation.isPending} data-testid="button-co-pay">
-                        {coAddPaymentMutation.isPending ? "Procesando..." : "Registrar Pago"}
-                      </Button>
-                    )}
-                    <Button variant={balance > 0 ? "ghost" : "default"} size="sm" onClick={() => {
-                      if (coIsFacturarSolo) {
-                        const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
-                        setCoWizardStep(0);
-                        setCoIsFacturarSolo(false);
-                        if (isArca) setShowFacturar(true);
-                      } else {
-                        setCoWizardStep(3);
-                      }
-                    }} data-testid="button-co-skip">
-                      {balance > 0 ? "Omitir pago" : "Siguiente"}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Step 3: Confirmar checkout */}
-            {coWizardStep === 3 && (
-              <div className="space-y-3">
-                <div className="p-3 bg-muted/50 rounded-md text-sm space-y-1">
-                  <p>Se realizará el check-out de <span className="font-bold">{reservation.guest?.lastName} {reservation.guest?.firstName}</span>.</p>
-                  <p>Habitación <span className="font-bold">{reservation.room?.roomNumber}</span> quedará en estado <Badge variant="outline" className="text-orange-700">Sucia</Badge>.</p>
-                  <p>Se creará una tarea de limpieza en Housekeeping.</p>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setCoWizardStep(2)}>Atrás</Button>
-                  <Button variant="destructive" size="sm" onClick={() => checkoutProperMutation.mutate()} disabled={checkoutProperMutation.isPending} data-testid="button-co-confirm">
-                    {checkoutProperMutation.isPending ? "Procesando..." : "Confirmar Check-out"}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Normal dialog content (hidden while wizard is active) ── */}
-        {coWizardStep === 0 && isLocked && (
+        {isLocked && (
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md text-sm text-amber-700 dark:text-amber-300" data-testid="banner-locked-reservation">
             <Lock className="h-4 w-4 shrink-0" />
             <span>Reserva cerrada — no se puede modificar (solo lectura)</span>
           </div>
         )}
 
-        {coWizardStep === 0 && <Tabs defaultValue="datos" className="w-full">
+        <Tabs defaultValue="datos" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
             <TabsTrigger value="folio" data-testid="tab-folio">Folio</TabsTrigger>
@@ -4197,7 +3820,7 @@ function ReservationDetailDialog({
                           setUninvoicedWarningAction("facturar");
                           setShowUninvoicedWarning(true);
                         } else {
-                          setShowFacturarPrompt(true);
+                          openFacturarSolo();
                         }
                       }}
                       data-testid="button-facturar-folio"
@@ -4328,9 +3951,9 @@ function ReservationDetailDialog({
               </div>
             )}
           </TabsContent>
-        </Tabs>}
+        </Tabs>
 
-        {coWizardStep === 0 && <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="gap-2 sm:justify-between">
           <div className="flex gap-2 flex-wrap">
             <Button
               variant="outline"
@@ -4389,7 +4012,7 @@ function ReservationDetailDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cerrar
           </Button>
-        </DialogFooter>}
+        </DialogFooter>
       </DialogContent>
 
       {/* Warning: anticipos sin factura */}
@@ -4420,7 +4043,7 @@ function ReservationDetailDialog({
               className="bg-amber-600 hover:bg-amber-700 text-white"
               onClick={() => {
                 setShowUninvoicedWarning(false);
-                if (uninvoicedWarningAction === "facturar") setShowFacturarPrompt(true);
+                if (uninvoicedWarningAction === "facturar") openFacturarSolo();
                 else if (uninvoicedWarningAction === "checkout") openCheckoutWizard();
               }}
               data-testid="button-uninvoiced-proceed"
@@ -4430,95 +4053,6 @@ function ReservationDetailDialog({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Prompt: ¿Hacer check-out también? */}
-      <Dialog open={showFacturarPrompt} onOpenChange={(open) => { if (!open) setShowFacturarPrompt(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-blue-500" />
-              Facturar Saldo — Hab. {reservation.room?.roomNumber}
-            </DialogTitle>
-            <DialogDescription>
-              {reservation.guest?.lastName} {reservation.guest?.firstName} · {reservation.reservationCode}
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">¿Desea realizar el check-out al mismo tiempo?</p>
-          <div className="flex flex-col gap-2">
-            <Button className="w-full" onClick={() => { setShowFacturarPrompt(false); openCheckoutWizard(); }} data-testid="button-facturar-con-checkout">
-              <LogOut className="h-4 w-4 mr-2" /> Sí, facturar y hacer check-out
-            </Button>
-            <Button variant="outline" className="w-full" onClick={() => { setShowFacturarPrompt(false); openFacturarSolo(); }} data-testid="button-facturar-sin-checkout">
-              <FileText className="h-4 w-4 mr-2" /> No, solo facturar
-            </Button>
-            <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => setShowFacturarPrompt(false)}>
-              Cancelar
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Factura desde checkout wizard */}
-      {coShowFacturar && (() => {
-        const g = reservation.guest;
-        const isJuridica = (g as any)?.tipoPersona === "juridica";
-        const guestName = isJuridica
-          ? (g?.firstName || "")
-          : [g?.lastName, g?.firstName].filter(Boolean).join(" ");
-        // Fallback: guest's default company/agency if reservation has none linked
-        const guestComp = !(reservation.company) && (g as any)?.companyId ? allCompanies.find((c: any) => c.id === (g as any).companyId) as any : null;
-        const guestAg = !(reservation.agency) && !guestComp && (g as any)?.agencyId ? allAgencies.find((a: any) => a.id === (g as any).agencyId) as any : null;
-        const companyName = (reservation.company as any)?.razonSocial || (reservation.company as any)?.name || guestComp?.razonSocial || guestComp?.nombreFantasia || "";
-        const agencyName = (reservation.agency as any)?.razonSocial || (reservation.agency as any)?.nombreFantasia || guestAg?.razonSocial || guestAg?.nombreFantasia || "";
-        const razonSocial = companyName || agencyName || guestName;
-        const cuit = (reservation.company as any)?.cuilCuit || (reservation.agency as any)?.cuilCuit || guestComp?.cuilCuit || guestAg?.cuilCuit || g?.cuilCuit || "";
-        const dni = !cuit && g?.documentNumber ? g.documentNumber : "";
-        const vatMap: Record<string, string> = {
-          responsable_inscripto: "Responsable Inscripto",
-          monotributista: "Monotributista",
-          exento: "Exento",
-          consumidor_final: "Consumidor Final",
-          no_responsable: "No Responsable",
-          no_categorizado: "No Categorizado (Extranjero)",
-        };
-        const guestVat = (g as any)?.vatCondition || "consumidor_final";
-        const companyCondIva = (reservation.company as any)?.condicionIva || guestComp?.condicionIva || "";
-        const agencyCondIva = (reservation.agency as any)?.condicionIva || guestAg?.condicionIva || "";
-        const condicionIva = companyCondIva || agencyCondIva || (cuit
-          ? (vatMap[guestVat] || "Responsable Inscripto")
-          : (vatMap[guestVat] || "Consumidor Final"));
-        const companyDom = (reservation.company as any)?.domicilio || guestComp?.domicilio || "";
-        const agencyDom = (reservation.agency as any)?.domicilio || guestAg?.domicilio || "";
-        const domicilioParts = [g?.direccion, g?.localidad].filter(Boolean);
-        const domicilio = companyDom || agencyDom || domicilioParts.join(", ");
-        const roomNum = reservation.room?.roomNumber || "";
-        const totalChargesAmt = consumptionCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-        const earlyChg = parseFloat(reservation.earlyCheckInCharge || "0");
-        const lateChg = parseFloat(reservation.lateCheckOutCharge || "0");
-        const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyChg + lateChg;
-        const totalPaymentsAmt = payments?.filter((p: any) => p.status !== "anulado").reduce((s: number, p: any) => s + parseFloat(p.amount), 0) || 0;
-        const amount = Math.max((subtotalRoom + totalChargesAmt) - totalPaymentsAmt, 0);
-        const desc = `Alojamiento Hab. ${roomNum} — ${reservation.checkInDate} al ${reservation.checkOutDate} (${reservation.nights} noche${reservation.nights !== 1 ? "s" : ""})`;
-        const initialValues: EmitirFacturaInitialValues = {
-          razonSocial,
-          cuit,
-          dni,
-          condicionIva,
-          domicilio,
-          items: [{ descripcion: desc, precioUnitario: amount }],
-        };
-        return (
-          <EmitirFacturaDialog
-            open={coShowFacturar}
-            onClose={() => { setCoShowFacturar(false); coPendingPaymentIdRef.current = ""; }}
-            config={billingConfig}
-            initialValues={initialValues}
-            paymentId={coPendingPaymentIdRef.current || undefined}
-            onSuccess={() => { setFacturaEmitida(true); setCoShowFacturar(false); coPendingPaymentIdRef.current = ""; }}
-            cashArea="recepcion"
-          />
-        );
-      })()}
 
       {/* Transfer Charge Dialog */}
       <Dialog open={transferringChargeId !== null} onOpenChange={(open) => {
