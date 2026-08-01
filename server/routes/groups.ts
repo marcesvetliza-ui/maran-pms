@@ -1056,9 +1056,10 @@ export function registerGroupsRoutes(app: Express) {
       // Apply individual room payments based on distribution
       // Store group_payment_id so invoice_ref can be deterministically propagated later
       let distributed = 0;
+      const createdPaymentIds: string[] = [];
       for (const [reservationId, amt] of Object.entries(distribution)) {
         if (amt > 0.005) {
-          await storage.createPayment({
+          const p = await storage.createPayment({
             reservationId,
             amount: amt.toFixed(2),
             method,
@@ -1066,6 +1067,7 @@ export function registerGroupsRoutes(app: Express) {
             date: paymentDate,
             groupPaymentId: groupPayment.id,
           } as any);
+          if (p?.id) createdPaymentIds.push(String(p.id));
           distributed++;
         }
       }
@@ -1075,7 +1077,13 @@ export function registerGroupsRoutes(app: Express) {
         { entityType: "group", entityId: req.params.groupId }
       );
 
-      res.json({ success: true, groupPayment, distributed });
+      res.json({
+        success: true,
+        groupPayment,
+        paymentId: createdPaymentIds[0] ?? null,
+        paymentIds: createdPaymentIds,
+        distributed,
+      });
     } catch (error: any) {
       console.error("master-payment error:", error);
       res.status(500).json({ error: "Error al registrar pago maestro" });

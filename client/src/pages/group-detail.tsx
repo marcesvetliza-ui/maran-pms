@@ -710,6 +710,9 @@ export default function GroupDetailPage() {
   const [masterPaymentAmount, setMasterPaymentAmount] = useState("");
   const [masterPaymentMethod, setMasterPaymentMethod] = useState("cash");
   const [masterPaymentReference, setMasterPaymentReference] = useState("");
+  const [masterPaymentReceiptType, setMasterPaymentReceiptType] = useState("");
+  const [showMasterFacturaDialog, setShowMasterFacturaDialog] = useState(false);
+  const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
 
   // Edit rate + late checkout
@@ -1085,15 +1088,26 @@ export default function GroupDetailPage() {
         method: masterPaymentMethod,
         reference: masterPaymentReference || undefined,
       }),
-    onSuccess: () => {
+    onSuccess: async (res) => {
+      const data = await res.json().catch(() => ({}));
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+
+      const needsFactura = masterPaymentReceiptType === "factura_a" || masterPaymentReceiptType === "factura_b";
+      if (needsFactura) {
+        setShowMasterPaymentDialog(false);
+        setPendingMasterPaymentId(data.paymentId ? String(data.paymentId) : "");
+        setShowMasterFacturaDialog(true);
+        return;
+      }
+
       toast({ title: "Pago al Folio Maestro registrado exitosamente" });
       setShowMasterPaymentDialog(false);
       setMasterPaymentAmount("");
       setMasterPaymentMethod("cash");
       setMasterPaymentReference("");
+      setMasterPaymentReceiptType("");
     },
     onError: () => toast({ title: "Error al registrar pago maestro", variant: "destructive" }),
   });
@@ -2801,7 +2815,7 @@ export default function GroupDetailPage() {
       {/* ─── Dialog: Pago al Folio Maestro ─── */}
       <Dialog open={showMasterPaymentDialog} onOpenChange={(open) => {
         setShowMasterPaymentDialog(open);
-        if (!open) { setMasterPaymentAmount(""); setMasterPaymentMethod("cash"); setMasterPaymentReference(""); }
+        if (!open) { setMasterPaymentAmount(""); setMasterPaymentMethod("cash"); setMasterPaymentReference(""); setMasterPaymentReceiptType(""); }
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -2864,6 +2878,19 @@ export default function GroupDetailPage() {
                   data-testid="input-master-payment-reference"
                 />
               </div>
+              <div>
+                <Label>Comprobante fiscal (opcional)</Label>
+                <Select value={masterPaymentReceiptType} onValueChange={setMasterPaymentReceiptType}>
+                  <SelectTrigger data-testid="select-master-payment-receipt-type">
+                    <SelectValue placeholder="Sin comprobante" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin comprobante</SelectItem>
+                    <SelectItem value="factura_a">Factura A</SelectItem>
+                    <SelectItem value="factura_b">Factura B</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -2878,6 +2905,32 @@ export default function GroupDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {showMasterFacturaDialog && (
+        <EmitirFacturaDialog
+          open={showMasterFacturaDialog}
+          onClose={() => {
+            setShowMasterFacturaDialog(false);
+            setPendingMasterPaymentId("");
+          }}
+          config={billingConfig}
+          allowedTipos={masterPaymentReceiptType === "factura_a" ? ["FA"] : ["FB"]}
+          initialValues={{
+            razonSocial: group?.name ?? "",
+            items: [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: parseFloat(masterPaymentAmount) || 0 }],
+          }}
+          paymentId={pendingMasterPaymentId || undefined}
+          onSuccess={() => {
+            setShowMasterFacturaDialog(false);
+            setPendingMasterPaymentId("");
+            setMasterPaymentAmount("");
+            setMasterPaymentMethod("cash");
+            setMasterPaymentReference("");
+            setMasterPaymentReceiptType("");
+            toast({ title: "Pago al Folio Maestro registrado exitosamente" });
+          }}
+        />
+      )}
 
       {/* ─── Dialog: Agregar cargo al folio grupal ─── */}
       <Dialog open={showAddGroupChargeDialog} onOpenChange={setShowAddGroupChargeDialog}>
