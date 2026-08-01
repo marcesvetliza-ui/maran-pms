@@ -1981,27 +1981,7 @@ function ReservationDetailDialog({
   };
 
   const openFacturarSolo = () => {
-    coPendingPaymentIdRef.current = "";
-    setCoPayAmount("");
-    setCoReceiptType("cierre_habitacion");
-    setCoIsFacturarSolo(true);
-    if (reservation.companyId) {
-      setCoPayMethod("cuenta_corriente");
-      setCoBillingTarget("company");
-      setCoCompanyId(reservation.companyId);
-      setCoAgencyId("");
-    } else if (reservation.agencyId) {
-      setCoPayMethod("cuenta_corriente");
-      setCoBillingTarget("agency");
-      setCoAgencyId(reservation.agencyId);
-      setCoCompanyId("");
-    } else {
-      setCoPayMethod("efectivo");
-      setCoBillingTarget("guest");
-      setCoCompanyId("");
-      setCoAgencyId("");
-    }
-    setCoWizardStep(2);
+    setShowFacturar(true);
   };
 
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean; allowRecurring: boolean }[]>({
@@ -2049,7 +2029,7 @@ function ReservationDetailDialog({
       toast({ title: "Check-out realizado", description: "La habitación quedó en estado Sucia." });
       if (coPendingInvoice) {
         setCoPendingInvoice(false);
-        setCoShowFacturar(true);
+        setShowFacturar(true);
       }
     },
     onError: (error: any) => {
@@ -2849,7 +2829,7 @@ function ReservationDetailDialog({
                           if (coIsFacturarSolo) {
                             setCoWizardStep(0);
                             setCoIsFacturarSolo(false);
-                            if (isArca) setCoShowFacturar(true);
+                            if (isArca) setShowFacturar(true);
                           } else {
                             if (isArca) setCoPendingInvoice(true);
                             setCoWizardStep(3);
@@ -2864,7 +2844,7 @@ function ReservationDetailDialog({
                         const isArca = ["factura_a", "factura_b", "factura_c"].includes(coReceiptType);
                         setCoWizardStep(0);
                         setCoIsFacturarSolo(false);
-                        if (isArca) setCoShowFacturar(true);
+                        if (isArca) setShowFacturar(true);
                       } else {
                         setCoWizardStep(3);
                       }
