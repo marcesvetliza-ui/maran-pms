@@ -594,6 +594,16 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "No se puede emitir una ND sobre una factura anulada" });
       }
 
+      // AFIP rule: NDs may only reference original invoices (FA/FB/FC), not NCs or other NDs
+      const NC_TYPES = new Set(["NCA", "NCB", "NCC"]);
+      const ND_TYPES = new Set(["NDA", "NDB", "NDC"]);
+      if (NC_TYPES.has(original.tipo_comprobante)) {
+        return res.status(400).json({ error: "No se puede emitir una Nota de Débito sobre una Nota de Crédito" });
+      }
+      if (ND_TYPES.has(original.tipo_comprobante)) {
+        return res.status(400).json({ error: "No se puede emitir una Nota de Débito sobre otra Nota de Débito" });
+      }
+
       const { motivo, monto } = req.body;
       if (!monto || parseFloat(monto) <= 0) {
         return res.status(400).json({ error: "El monto de la Nota de Débito debe ser mayor a $0" });

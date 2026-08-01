@@ -1160,7 +1160,7 @@ export function PrefacturaDialog({
         open={ndDialogOpen}
         onClose={() => setNdDialogOpen(false)}
         reservationId={reservationId}
-        invoices={emittedInvoices}
+        invoices={emittedInvoices.filter((inv: any) => inv.tipo_comprobante === "FA" || inv.tipo_comprobante === "FB" || inv.tipo_comprobante === "FC")}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
