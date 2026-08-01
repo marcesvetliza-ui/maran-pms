@@ -713,6 +713,8 @@ export default function GroupDetailPage() {
   const [masterPaymentReceiptType, setMasterPaymentReceiptType] = useState("");
   const [showMasterFacturaDialog, setShowMasterFacturaDialog] = useState(false);
   const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
+  const [masterPaymentCcEntityType, setMasterPaymentCcEntityType] = useState<"company" | "agency">("company");
+  const [masterPaymentCcEntityId, setMasterPaymentCcEntityId] = useState("");
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
 
   // Edit rate + late checkout
@@ -2845,7 +2847,7 @@ export default function GroupDetailPage() {
       {/* ─── Dialog: Pago al Folio Maestro ─── */}
       <Dialog open={showMasterPaymentDialog} onOpenChange={(open) => {
         setShowMasterPaymentDialog(open);
-        if (!open) { setMasterPaymentAmount(""); setMasterPaymentMethod("cash"); setMasterPaymentReference(""); setMasterPaymentReceiptType(""); }
+        if (!open) { setMasterPaymentAmount(""); setMasterPaymentMethod("cash"); setMasterPaymentReference(""); setMasterPaymentReceiptType(""); setMasterPaymentCcEntityType("company"); setMasterPaymentCcEntityId(""); }
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -2920,6 +2922,33 @@ export default function GroupDetailPage() {
                     <SelectItem value="factura_b">Factura B</SelectItem>
                   </SelectContent>
                 </Select>
+                {masterPaymentReceiptType === "factura_a" && (
+                  <div className="mt-2 space-y-2">
+                    <Label className="text-xs text-muted-foreground">Empresa / Agencia (para Factura A)</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Select value={masterPaymentCcEntityType} onValueChange={v => { setMasterPaymentCcEntityType(v as "company" | "agency"); setMasterPaymentCcEntityId(""); }}>
+                        <SelectTrigger data-testid="select-master-cc-entity-type"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="company">Empresa</SelectItem>
+                          <SelectItem value="agency">Agencia</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={masterPaymentCcEntityId} onValueChange={setMasterPaymentCcEntityId}>
+                        <SelectTrigger data-testid="select-master-cc-entity-id">
+                          <SelectValue placeholder={masterPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(masterPaymentCcEntityType === "company" ? companies : agencies).map((e: any) => (
+                            <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Al registrar el pago se abrirá el formulario de emisión con CAE real de ARCA.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2946,7 +2975,11 @@ export default function GroupDetailPage() {
           config={billingConfig}
           allowedTipos={masterPaymentReceiptType === "factura_a" ? ["FA"] : ["FB"]}
           initialValues={{
-            razonSocial: group?.name ?? "",
+            razonSocial: masterPaymentReceiptType === "factura_a" && masterPaymentCcEntityId
+              ? ((masterPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === masterPaymentCcEntityId) as any)?.razonSocial
+                ?? ((masterPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === masterPaymentCcEntityId) as any)?.nombreFantasia
+                ?? group?.name ?? ""
+              : group?.name ?? "",
             items: [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: parseFloat(masterPaymentAmount) || 0 }],
           }}
           paymentId={pendingMasterPaymentId || undefined}
@@ -2957,6 +2990,8 @@ export default function GroupDetailPage() {
             setMasterPaymentMethod("cash");
             setMasterPaymentReference("");
             setMasterPaymentReceiptType("");
+            setMasterPaymentCcEntityType("company");
+            setMasterPaymentCcEntityId("");
             toast({ title: "Pago al Folio Maestro registrado exitosamente" });
           }}
         />
