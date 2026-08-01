@@ -1726,7 +1726,10 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(400).json({ error: "El cargo ya fue revertido o cancelado" });
       }
       // Reject reversal of a reversal counter-charge
-      if (charge.description.includes("[rev:")) {
+      if (
+        charge.description.startsWith("Reversa de transferencia") ||
+        charge.description.includes("[rev:")
+      ) {
         return res.status(400).json({ error: "Este cargo ya es una reversa — no se puede revertir nuevamente" });
       }
 
