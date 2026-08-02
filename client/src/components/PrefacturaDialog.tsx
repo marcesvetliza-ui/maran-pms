@@ -218,6 +218,11 @@ export function PrefacturaDialog({
   // Partial payment warning
   const [showPartialWarning, setShowPartialWarning] = useState(false);
 
+  // True when a folio re-fetch (after NC/ND/reversal) changed the balance while the
+  // user already had multiple payment rows — we leave the rows untouched but surface
+  // a visible notice so staff know they need to re-balance their split.
+  const [splitBalanceChanged, setSplitBalanceChanged] = useState(false);
+
   // Reversal confirmation
   const [revertCharge, setRevertCharge] = useState<{ id: string; description: string; amount: number; category: string } | null>(null);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
@@ -278,6 +283,7 @@ export function PrefacturaDialog({
       setSubmitError(null);
       setItemDescriptions({});
       setEditingId(null);
+      setSplitBalanceChanged(false);
       folioInitializedRef.current = false;
     }
   }, [open]);
@@ -326,6 +332,8 @@ export function PrefacturaDialog({
 
       // Update payment amount only when there is exactly one payment row so we
       // do not silently discard a custom multi-row split the user already set up.
+      // When the user has multiple rows we leave them untouched and instead show
+      // a visible notice so staff know they need to re-balance their split.
       setPaymentRows(prev => {
         if (prev.length === 1) {
           return [{
@@ -333,6 +341,8 @@ export function PrefacturaDialog({
             amount: folio.balance > 0.01 ? String(folio.balance.toFixed(2)) : prev[0].amount,
           }];
         }
+        // Multiple rows — flag the mismatch but leave amounts intact
+        setSplitBalanceChanged(true);
         return prev;
       });
     }
@@ -421,6 +431,8 @@ export function PrefacturaDialog({
   // Payment row helpers
   function updateRow(id: string, field: keyof PaymentRow, value: any) {
     setPaymentRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+    // Any edit to an amount row dismisses the split-balance-changed notice
+    if (field === "amount") setSplitBalanceChanged(false);
   }
   function addRow() {
     setPaymentRows(prev => [...prev, {
@@ -1163,6 +1175,17 @@ export function PrefacturaDialog({
                 <Plus className="h-4 w-4 mr-1" />Agregar forma de pago
               </Button>
             </div>
+            )}
+
+            {/* Split-balance-changed notice — shown when a reversal/NC changed the
+                folio balance after the user already split into multiple rows */}
+            {splitBalanceChanged && paymentRows.length > 1 && (folio?.balance ?? 0) > 0.01 && (
+              <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
+                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                <p className="text-sm text-amber-800 dark:text-amber-300">
+                  El balance del folio cambió. Revisá los montos de pago.
+                </p>
+              </div>
             )}
 
             {/* Running totals — only shown when there is an outstanding balance */}
