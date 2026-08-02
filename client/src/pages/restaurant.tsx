@@ -1013,6 +1013,18 @@ export default function RestaurantPage() {
   });
   const closeOrderTable = tables.find(t => t.id === closeOrderTableId);
   const closeOrderArea = closeOrderTable ? areas.find(a => a.id === closeOrderTable.areaId) : null;
+
+  // Void adjustments from folio_movements (written when an NC voids a payment for a restaurant order)
+  const { data: restaurantOrderFolioData } = useQuery<any>({
+    queryKey: ["/api/folios", "restaurant_order", currentOrder?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/folios/restaurant_order/${currentOrder!.id}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!currentOrder?.id && isOrderDialogOpen,
+  });
+  const restaurantOrderVoidMovements: any[] = (restaurantOrderFolioData?.movements ?? []).filter((m: any) => m.type === "void");
   const eventTableAdvance = closeOrderArea?.areaType === "event"
     ? parseFloat((closeOrderTable as any)?.eventAdvanceAmount || "0")
     : 0;
@@ -4192,6 +4204,22 @@ export default function RestaurantPage() {
                       ${parseFloat(getUpdatedOrder()?.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
+                </div>
+              )}
+
+              {/* Void adjustments from NC reversals */}
+              {restaurantOrderVoidMovements.length > 0 && (
+                <div className="space-y-2 pt-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Ajustes por Anulación</p>
+                  {restaurantOrderVoidMovements.map((mov: any) => (
+                    <div key={mov.id} className="flex items-center justify-between p-2 border border-orange-200 rounded text-sm bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-700" data-testid={`void-movement-${mov.id}`}>
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <Badge className="text-[10px] shrink-0 bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300">Anulación</Badge>
+                        <span className="truncate text-muted-foreground">{mov.description || "Ajuste por Nota de Crédito"}</span>
+                      </div>
+                      <span className="font-medium text-orange-600 shrink-0 ml-2">−${parseFloat(mov.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  ))}
                 </div>
               )}
 
