@@ -2531,7 +2531,8 @@ function ReservationDetailDialog({
   const earlyCharge = parseFloat(reservation.earlyCheckInCharge || "0");
   const lateCharge = parseFloat(reservation.lateCheckOutCharge || "0");
   const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyCharge + lateCharge;
-  const totalToPay = subtotalRoom + totalConsumptions;
+  const totalNdAmount = folioNdMovements.reduce((sum: number, m: any) => sum + parseFloat(m.amount || "0"), 0);
+  const totalToPay = subtotalRoom + totalConsumptions + totalNdAmount;
   const balance = totalToPay - totalPayments;
 
   return (
@@ -3846,6 +3847,12 @@ function ReservationDetailDialog({
                   <span>+ Consumos</span>
                   <span>${fmtMoney(totalConsumptions)}</span>
                 </div>
+                {totalNdAmount > 0 && (
+                  <div className="flex justify-between text-sm mb-1 text-sky-700 dark:text-sky-300">
+                    <span>+ Notas de Débito</span>
+                    <span>${fmtMoney(totalNdAmount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm mb-2 border-b pb-2">
                   <span>- Pagos/Anticipos</span>
                   <span className="text-green-600">-${fmtMoney(totalPayments)}</span>
