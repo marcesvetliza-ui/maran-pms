@@ -94,6 +94,7 @@ export default function BillingPage() {
   const [showResPicker, setShowResPicker] = useState(false);
   const [resPickerSearch, setResPickerSearch] = useState("");
   const [prefacturaResId, setPrefacturaResId] = useState<number | null>(null);
+  const [prefacturaRes, setPrefacturaRes] = useState<any | null>(null);
 
   const { data: allReservations = [] } = useQuery<any[]>({
     queryKey: ["/api/reservations", "picker-all"],
@@ -345,6 +346,7 @@ export default function BillingPage() {
                     onClick={() => {
                       setShowResPicker(false);
                       setPrefacturaResId(r.id);
+                      setPrefacturaRes(r);
                     }}
                     data-testid={`row-res-picker-${r.id}`}
                   >
@@ -367,8 +369,9 @@ export default function BillingPage() {
       {prefacturaResId !== null && (
         <PrefacturaDialog
           open={prefacturaResId !== null}
-          onClose={() => setPrefacturaResId(null)}
+          onClose={() => { setPrefacturaResId(null); setPrefacturaRes(null); }}
           reservationId={prefacturaResId}
+          reservation={prefacturaRes}
           mode="billing"
         />
       )}
