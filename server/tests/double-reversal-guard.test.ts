@@ -147,6 +147,26 @@ const ACTIVE_TRANSFER_OUT = {
   date: "2026-01-15",
 };
 
+const ACTIVE_EVENTOS_TRANSFER_OUT = {
+  id: "charge-eventos-1",
+  reservationId: "res-200",
+  category: "transfer_out" as const,
+  amount: "-120.00",
+  description: "Cargo Eventos → Hab.205 [corr:uuid-eventos] [xfer:ev1]",
+  status: "active",
+  date: "2026-01-20",
+};
+
+const ACTIVE_RESTAURANT_TRANSFER_OUT = {
+  id: "charge-restaurant-1",
+  reservationId: "res-300",
+  category: "transfer_out" as const,
+  amount: "-75.50",
+  description: "Cargo Restaurante → Hab.310 [corr:uuid-rest] [xfer:rst1]",
+  status: "active",
+  date: "2026-01-22",
+};
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("double-reversal guard — /api/reservations/:id/reverse-transfer-charge", () => {
@@ -279,6 +299,180 @@ describe("double-reversal guard — /api/reservations/:id/reverse-transfer-charg
 
     expect(status).toBe(400);
     expect(body.error).toMatch(/solo se pueden revertir cargos de transferencia/i);
+
+    close();
+  });
+
+  // ─── Eventos area transfer charges ───────────────────────────────────────────
+
+  it("[Eventos] returns 409 when a reversal for this eventos charge already exists in the DB", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-200",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_EVENTOS_TRANSFER_OUT);
+
+    // Simulate: a reversal row with [rev:charge-eventos-1] was already created.
+    mockDbExecute.mockResolvedValue({ rows: [{ id: "charge-rev-eventos-done" }] });
+
+    const { status, body } = await postReversal(baseUrl, "res-200", ACTIVE_EVENTOS_TRANSFER_OUT.id);
+
+    expect(status).toBe(409);
+    expect(body.error).toMatch(/ya fue revertida anteriormente/i);
+
+    close();
+  });
+
+  it("[Eventos] returns 200 for a valid first reversal of an active eventos transfer charge", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-200",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_EVENTOS_TRANSFER_OUT);
+    mockStorage.createCharge.mockResolvedValue({
+      id: "charge-rev-eventos-1",
+      reservationId: "res-200",
+      category: "transfer_in",
+      amount: "120.00",
+      description: `Reversa de transferencia (Cargo Eventos) [rev:${ACTIVE_EVENTOS_TRANSFER_OUT.id}]`,
+      status: "active",
+    });
+
+    // No existing reversal row → guard passes.
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-200", ACTIVE_EVENTOS_TRANSFER_OUT.id);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+
+    close();
+  });
+
+  it("[Eventos] returns 400 when the eventos charge status is already reversed", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-200",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue({
+      ...ACTIVE_EVENTOS_TRANSFER_OUT,
+      status: "reversed",
+    });
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-200", ACTIVE_EVENTOS_TRANSFER_OUT.id);
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/revertido o cancelado/i);
+
+    close();
+  });
+
+  it("[Eventos] returns 400 when staff tries to reverse an eventos reversal counter-charge", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-200",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue({
+      ...ACTIVE_EVENTOS_TRANSFER_OUT,
+      id: "charge-rev-eventos-99",
+      description: `Reversa de transferencia (Cargo Eventos) [rev:charge-eventos-1]`,
+      category: "transfer_in",
+      amount: "120.00",
+    });
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-200", "charge-rev-eventos-99");
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/ya es una reversa/i);
+
+    close();
+  });
+
+  // ─── Restaurant area transfer charges ─────────────────────────────────────────
+
+  it("[Restaurant] returns 409 when a reversal for this restaurant charge already exists in the DB", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-300",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_RESTAURANT_TRANSFER_OUT);
+
+    // Simulate: a reversal row with [rev:charge-restaurant-1] was already created.
+    mockDbExecute.mockResolvedValue({ rows: [{ id: "charge-rev-restaurant-done" }] });
+
+    const { status, body } = await postReversal(baseUrl, "res-300", ACTIVE_RESTAURANT_TRANSFER_OUT.id);
+
+    expect(status).toBe(409);
+    expect(body.error).toMatch(/ya fue revertida anteriormente/i);
+
+    close();
+  });
+
+  it("[Restaurant] returns 200 for a valid first reversal of an active restaurant transfer charge", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-300",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_RESTAURANT_TRANSFER_OUT);
+    mockStorage.createCharge.mockResolvedValue({
+      id: "charge-rev-restaurant-1",
+      reservationId: "res-300",
+      category: "transfer_in",
+      amount: "75.50",
+      description: `Reversa de transferencia (Cargo Restaurante) [rev:${ACTIVE_RESTAURANT_TRANSFER_OUT.id}]`,
+      status: "active",
+    });
+
+    // No existing reversal row → guard passes.
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-300", ACTIVE_RESTAURANT_TRANSFER_OUT.id);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+
+    close();
+  });
+
+  it("[Restaurant] returns 400 when the restaurant charge status is already reversed", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-300",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue({
+      ...ACTIVE_RESTAURANT_TRANSFER_OUT,
+      status: "reversed",
+    });
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-300", ACTIVE_RESTAURANT_TRANSFER_OUT.id);
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/revertido o cancelado/i);
+
+    close();
+  });
+
+  it("[Restaurant] returns 400 when staff tries to reverse a restaurant reversal counter-charge", async () => {
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-300",
+      status: "checked_in",
+    });
+    mockStorage.getCharge.mockResolvedValue({
+      ...ACTIVE_RESTAURANT_TRANSFER_OUT,
+      id: "charge-rev-restaurant-99",
+      description: `Reversa de transferencia (Cargo Restaurante) [rev:charge-restaurant-1]`,
+      category: "transfer_in",
+      amount: "75.50",
+    });
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-300", "charge-rev-restaurant-99");
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/ya es una reversa/i);
 
     close();
   });
