@@ -28,8 +28,8 @@
  *
  * Note on error format: apiRequest() calls throwIfResNotOk() which throws
  *   new Error(`${status}: ${bodyText}`) before returning the Response.
- * So err.message in the catch block is '400: {"error":"..."}' — the toast title
- * contains (not equals) the server's error string. Tests assert with stringContaining.
+ * The catch block in handleRevert() parses this status-prefixed string and extracts
+ * the inner .error field, so the toast title equals the clean Spanish message exactly.
  */
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -137,7 +137,7 @@ describe('Double-reversal block — POST /api/reservations/:id/reverse-transfer-
       );
     });
 
-    it("shows a destructive error toast containing the 400 error message", async () => {
+    it("shows a destructive error toast with the exact 400 error message", async () => {
       const user = userEvent.setup();
       renderDialog(reversalCharge);
 
@@ -148,9 +148,7 @@ describe('Double-reversal block — POST /api/reservations/:id/reverse-transfer-
         () =>
           expect(toastSpy).toHaveBeenCalledWith(
             expect.objectContaining({
-              title: expect.stringContaining(
-                "Este cargo ya es una reversa — no se puede revertir nuevamente"
-              ),
+              title: "Este cargo ya es una reversa — no se puede revertir nuevamente",
               variant: "destructive",
             })
           ),
@@ -206,7 +204,7 @@ describe('Double-reversal block — POST /api/reservations/:id/reverse-transfer-
       );
     });
 
-    it("shows a destructive error toast containing the 400 error message", async () => {
+    it("shows a destructive error toast with the exact 400 error message", async () => {
       const user = userEvent.setup();
       renderDialog(revTagCharge);
 
@@ -217,9 +215,7 @@ describe('Double-reversal block — POST /api/reservations/:id/reverse-transfer-
         () =>
           expect(toastSpy).toHaveBeenCalledWith(
             expect.objectContaining({
-              title: expect.stringContaining(
-                "Este cargo ya es una reversa — no se puede revertir nuevamente"
-              ),
+              title: "Este cargo ya es una reversa — no se puede revertir nuevamente",
               variant: "destructive",
             })
           ),
@@ -278,7 +274,7 @@ describe('Double-reversal block — POST /api/reservations/:id/reverse-transfer-
       );
     });
 
-    it("shows a destructive error toast containing the 409 error message", async () => {
+    it("shows a destructive error toast with the exact 409 error message", async () => {
       const user = userEvent.setup();
       renderDialog(normalTransferCharge);
 
@@ -289,9 +285,7 @@ describe('Double-reversal block — POST /api/reservations/:id/reverse-transfer-
         () =>
           expect(toastSpy).toHaveBeenCalledWith(
             expect.objectContaining({
-              title: expect.stringContaining(
-                "Esta transferencia ya fue revertida anteriormente"
-              ),
+              title: "Esta transferencia ya fue revertida anteriormente",
               variant: "destructive",
             })
           ),

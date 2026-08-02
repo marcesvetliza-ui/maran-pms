@@ -2134,7 +2134,19 @@ export function RevertTransferDialog({
         onClose();
       }
     } catch (err: any) {
-      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+      let msg: string = err.message || "Error inesperado";
+      // apiRequest wraps server errors as "STATUS: bodyText" — extract the inner .error
+      const statusPrefixMatch = msg.match(/^\d+:\s*(.+)$/s);
+      if (statusPrefixMatch) {
+        try {
+          const parsed = JSON.parse(statusPrefixMatch[1]);
+          if (parsed?.error) msg = parsed.error;
+        } catch {
+          // body wasn't JSON — use trimmed body text as-is
+          msg = statusPrefixMatch[1].trim() || msg;
+        }
+      }
+      toast({ title: msg, variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
