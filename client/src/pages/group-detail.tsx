@@ -2862,14 +2862,30 @@ export default function GroupDetailPage() {
           }}
           config={billingConfig}
           allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] : ["FB"]}
-          initialValues={{
-            razonSocial: groupPaymentMethod === "cuenta_corriente" && groupPaymentCcEntityId
-              ? ((groupPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === groupPaymentCcEntityId) as any)?.razonSocial
-                ?? ((groupPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === groupPaymentCcEntityId) as any)?.nombreFantasia
-                ?? group?.name ?? ""
-              : group?.name ?? "",
-            items: [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }],
-          }}
+          initialValues={(() => {
+            const condicionIvaMap: Record<string, string> = {
+              responsable_inscripto: "Responsable Inscripto",
+              consumidor_final: "Consumidor Final",
+              monotributo: "Monotributista",
+              monotributista: "Monotributista",
+              exento: "Exento",
+            };
+            const entityList = groupPaymentCcEntityType === "company" ? companies : agencies;
+            const entity = groupPaymentMethod === "cuenta_corriente" && groupPaymentCcEntityId
+              ? (entityList as any[]).find((e: any) => e.id === groupPaymentCcEntityId)
+              : null;
+            return {
+              razonSocial: entity
+                ? (entity.razonSocial ?? entity.nombreFantasia ?? group?.name ?? "")
+                : (group?.name ?? ""),
+              cuit: entity?.cuilCuit ? String(entity.cuilCuit).replace(/-/g, "") : undefined,
+              condicionIva: entity?.condicionIva
+                ? (condicionIvaMap[entity.condicionIva] ?? entity.condicionIva)
+                : (entity?.cuilCuit ? "Responsable Inscripto" : undefined),
+              domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
+              items: [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }],
+            };
+          })()}
           paymentId={pendingGroupPaymentId || undefined}
           onSuccess={() => {
             setShowGroupFacturaDialog(false);
@@ -3024,14 +3040,30 @@ export default function GroupDetailPage() {
           }}
           config={billingConfig}
           allowedTipos={masterPaymentReceiptType === "factura_a" ? ["FA"] : ["FB"]}
-          initialValues={{
-            razonSocial: masterPaymentReceiptType === "factura_a" && masterPaymentCcEntityId
-              ? ((masterPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === masterPaymentCcEntityId) as any)?.razonSocial
-                ?? ((masterPaymentCcEntityType === "company" ? companies : agencies).find((e: any) => e.id === masterPaymentCcEntityId) as any)?.nombreFantasia
-                ?? group?.name ?? ""
-              : group?.name ?? "",
-            items: [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: parseFloat(masterPaymentAmount) || 0 }],
-          }}
+          initialValues={(() => {
+            const condicionIvaMap: Record<string, string> = {
+              responsable_inscripto: "Responsable Inscripto",
+              consumidor_final: "Consumidor Final",
+              monotributo: "Monotributista",
+              monotributista: "Monotributista",
+              exento: "Exento",
+            };
+            const entityList = masterPaymentCcEntityType === "company" ? companies : agencies;
+            const entity = masterPaymentReceiptType === "factura_a" && masterPaymentCcEntityId
+              ? (entityList as any[]).find((e: any) => e.id === masterPaymentCcEntityId)
+              : null;
+            return {
+              razonSocial: entity
+                ? (entity.razonSocial ?? entity.nombreFantasia ?? group?.name ?? "")
+                : (group?.name ?? ""),
+              cuit: entity?.cuilCuit ? String(entity.cuilCuit).replace(/-/g, "") : undefined,
+              condicionIva: entity?.condicionIva
+                ? (condicionIvaMap[entity.condicionIva] ?? entity.condicionIva)
+                : (entity?.cuilCuit ? "Responsable Inscripto" : undefined),
+              domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
+              items: [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: parseFloat(masterPaymentAmount) || 0 }],
+            };
+          })()}
           paymentId={pendingMasterPaymentId || undefined}
           onSuccess={() => {
             setShowMasterFacturaDialog(false);
