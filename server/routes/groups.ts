@@ -759,6 +759,7 @@ export function registerGroupsRoutes(app: Express) {
       res.json(folio);
     } catch (error: any) {
       if (error.message === "Grupo no encontrado") return res.status(404).json({ error: error.message });
+      console.error("[folio-grupal] Error:", error);
       res.status(500).json({ error: "Error al obtener folio grupal" });
     }
   });

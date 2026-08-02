@@ -1676,10 +1676,10 @@ export class DatabaseStorage implements IStorage {
     // Fetch void folio_movements for all reservation folios in this group
     let voidMovementsWithContext: GroupFolioData["voidMovements"] = [];
     if (resIds.length > 0) {
-      const resFolioRows = await db.execute(
-        sql`SELECT id, entity_id FROM folios WHERE entity_type = 'reservation' AND entity_id = ANY(${resIds})`
-      );
-      const resFolioIds = (resFolioRows.rows as any[]).map((r) => r.id as string);
+      const resFolioRows = await db.select({ id: folios.id, entityId: folios.entityId })
+        .from(folios)
+        .where(and(eq(folios.entityType, "reservation"), inArray(folios.entityId, resIds)));
+      const resFolioIds = resFolioRows.map((r) => r.id);
       if (resFolioIds.length > 0) {
         const voidRows = await db.select().from(folioMovements).where(
           and(
@@ -1689,7 +1689,7 @@ export class DatabaseStorage implements IStorage {
         );
         // Build folio → reservationId map for context lookup
         const folioToResId = new Map<string, string>(
-          (resFolioRows.rows as any[]).map((r) => [r.id as string, r.entity_id as string])
+          resFolioRows.map((r) => [r.id, r.entityId])
         );
         // Build reservationId → context map
         const resContextMap = new Map<string, { guestName: string; roomNumber: string }>(

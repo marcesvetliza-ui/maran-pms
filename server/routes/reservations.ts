@@ -2266,19 +2266,16 @@ export function registerReservationsRoutes(app: Express) {
       // ── 1. Contraasiento en el folio de la reserva ────────────────────────
       if (pay.reservation_id) {
         try {
-          const folioRows = await db.execute(sql`SELECT id FROM folios WHERE entity_type = 'reservation' AND entity_id = ${pay.reservation_id} LIMIT 1`);
-          const folio = folioRows.rows?.[0] as any;
-          if (folio) {
-            const methodLabel: Record<string, string> = {
-              efectivo: "Efectivo", tarjeta_debito: "Tarj. Débito", tarjeta_credito: "Tarj. Crédito",
-              transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente",
-            };
-            await storage.addFolioAdjustment(
-              folio.id, "void", parseFloat(pay.amount),
-              `Anulación pago ${methodLabel[pay.method] || pay.method} — ${motivoAnulacion}`,
-              operator, undefined, motivoAnulacion
-            );
-          }
+          const folio = await storage.getOrCreateFolio("reservation", pay.reservation_id);
+          const methodLabel: Record<string, string> = {
+            efectivo: "Efectivo", tarjeta_debito: "Tarj. Débito", tarjeta_credito: "Tarj. Crédito",
+            transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente",
+          };
+          await storage.addFolioAdjustment(
+            folio.id, "void", parseFloat(pay.amount),
+            `Anulación pago ${methodLabel[pay.method] || pay.method} — ${motivoAnulacion}`,
+            operator, undefined, motivoAnulacion
+          );
         } catch (e) { console.error("[anular-pago] folio void:", e); }
 
         // ── 2. Contraasiento en caja (reversal de ingreso) ────────────────
