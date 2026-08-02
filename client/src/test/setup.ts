@@ -42,3 +42,12 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   writable: true,
   value: () => {},
 });
+
+// Radix Select / Tooltip use ResizeObserver
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

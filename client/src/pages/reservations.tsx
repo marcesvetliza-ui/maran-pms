@@ -629,16 +629,21 @@ export function ReservationFormDialog({
         }
       }
       if (pendingCompanions.length > 0) {
-        try {
-          for (const comp of pendingCompanions) {
+        const failedCompanions: string[] = [];
+        for (const comp of pendingCompanions) {
+          try {
             const body: any = { ...comp, reservationId: created.id };
             if (!body.dateOfBirth) delete body.dateOfBirth;
             await apiRequest("POST", `/api/reservations/${created.id}/companions`, body);
+          } catch {
+            failedCompanions.push(`${comp.firstName} ${comp.lastName}`.trim() || "Acompañante");
           }
-        } catch {
+        }
+        if (failedCompanions.length > 0) {
+          const names = failedCompanions.join(", ");
           toast({
             title: "Reserva creada — acompañantes pendientes",
-            description: "La reserva fue guardada pero no se pudieron registrar los acompañantes. Podés agregarlos desde la reserva.",
+            description: `La reserva fue guardada pero no se pudieron registrar los siguientes acompañantes: ${names}. Podés agregarlos desde la reserva.`,
             variant: "destructive",
             duration: 8000,
           });
