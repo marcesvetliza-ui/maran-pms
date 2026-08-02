@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Plus, ShoppingCart, XCircle } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -13,6 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { toArgentinaDateStr, fmtMoney } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
@@ -41,6 +43,7 @@ export function QuickReservationDialog({
   guests: Guest[];
 }) {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [guestId, setGuestId] = useState("");
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [checkOutDate, setCheckOutDate] = useState("");
@@ -125,7 +128,22 @@ export function QuickReservationDialog({
       resetForm();
     },
     onError: () => {
-      toast({ title: "Error", description: "No se pudo crear la reserva. Intente nuevamente.", variant: "destructive" });
+      const roomId = reservationData?.roomId;
+      const checkIn = reservationData?.checkInDate;
+      const params = new URLSearchParams();
+      if (roomId) params.set("roomId", roomId);
+      if (checkIn) params.set("checkIn", checkIn);
+      const href = `/reservations?${params.toString()}`;
+      toast({
+        title: "Error",
+        description: "No se pudo crear la reserva. Intente nuevamente.",
+        variant: "destructive",
+        action: (
+          <ToastAction altText="Ir a Reservas" onClick={() => navigate(href)}>
+            Ir a Reservas
+          </ToastAction>
+        ),
+      });
     },
   });
 
