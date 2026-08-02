@@ -6195,18 +6195,30 @@ export default function RestaurantPage() {
                     const _splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
                     const _hasRoomChargeSplit = closePaymentSplits.some(s => s.method === "cuenta_habitacion");
                     const _roomChargeExcess = _hasRoomChargeSplit && Math.round((_splitTotal - _finalTotal) * 100) / 100 > 0;
+                    // CUIT guard for Factura A / Factura C
+                    const _effReceipt = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
+                    const _needsCuit = !_hasRoomChargeSplit && ["factura_a", "factura_c"].includes(_effReceipt);
+                    const _cuitMissing = _needsCuit && !closeBillingClient?.cuit;
                     return (
-                      <Button
-                        variant="destructive"
-                        onClick={handleConfirmClose}
-                        disabled={closeOrderMutation.isPending || _roomChargeExcess}
-                        title={_roomChargeExcess ? `El monto excede el total a cobrar ($${_finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}). Corrija el monto de "Cargo a Habitación".` : undefined}
-                        className="w-full sm:w-auto"
-                        data-testid="button-confirm-close"
-                      >
-                        {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        Confirmar Cierre
-                      </Button>
+                      <>
+                        {_cuitMissing && (
+                          <p className="text-xs text-destructive flex items-center gap-1 w-full sm:w-auto" data-testid="msg-cuit-required-close">
+                            <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                            CUIT requerido para {_effReceipt === "factura_a" ? "Factura A" : "Factura C"}. Seleccioná un cliente con CUIT.
+                          </p>
+                        )}
+                        <Button
+                          variant="destructive"
+                          onClick={handleConfirmClose}
+                          disabled={closeOrderMutation.isPending || _roomChargeExcess || _cuitMissing}
+                          title={_roomChargeExcess ? `El monto excede el total a cobrar ($${_finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}). Corrija el monto de "Cargo a Habitación".` : _cuitMissing ? `CUIT requerido para ${_effReceipt === "factura_a" ? "Factura A" : "Factura C"}` : undefined}
+                          className="w-full sm:w-auto"
+                          data-testid="button-confirm-close"
+                        >
+                          {closeOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Confirmar Cierre
+                        </Button>
+                      </>
                     );
                   })()}
                 </>

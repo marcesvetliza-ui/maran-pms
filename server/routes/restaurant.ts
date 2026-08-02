@@ -289,6 +289,12 @@ export function registerRestaurantRoutes(app: Express) {
       if (!order) return res.status(404).json({ error: "Order not found" });
 
       const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId } = req.body;
+
+      // CUIT is mandatory when actually emitting Factura A / Factura C
+      if (emitInvoice && ["factura_a", "factura_c"].includes(receiptType || "") && !(customerCuit || "").trim()) {
+        return res.status(400).json({ error: "CUIT es requerido para emitir Factura A o Factura C" });
+      }
+
       const effectiveReservationId = reservationId || roomReservationId;
       const primarySplit = Array.isArray(paymentSplits) && paymentSplits.length > 0 ? paymentSplits[0] : null;
       const effectivePrimaryMethod = primarySplit ? primarySplit.method : (paymentMethod || "cash");
