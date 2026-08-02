@@ -1640,6 +1640,19 @@ function NotaCreditoDialog({
                       {PAYMENT_METHOD_LABELS[p.method] || p.method}
                       {p.date ? <span className="text-xs text-muted-foreground ml-2">{formatDateAR(p.date)}</span> : null}
                       {p.reference ? <span className="text-xs text-muted-foreground ml-2">({p.reference})</span> : null}
+                      {p.invoiceRef ? (() => {
+                        try {
+                          const ref = JSON.parse(p.invoiceRef);
+                          const label = `${ref.tipo_comprobante ?? ref.tipoComprobante ?? "FAC"} ${String(ref.punto_venta ?? ref.puntoVenta ?? 0).padStart(4,"0")}-${String(ref.numero ?? 0).padStart(8,"0")}`;
+                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium">{label}</span>;
+                        } catch {
+                          // invoiceRef unparseable — try matching by id in loaded invoices list
+                          const inv = invoices.find((i: NcInvoice) => String(i.id) === String(p.invoiceRef));
+                          if (!inv) return null;
+                          const label = `${inv.tipo_comprobante} ${String(inv.punto_venta).padStart(4,"0")}-${String(inv.numero).padStart(8,"0")}`;
+                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium">{label}</span>;
+                        }
+                      })() : null}
                     </span>
                     <span className="text-sm font-medium text-amber-900 dark:text-amber-200">${fmtMoney(p.amount)}</span>
                   </label>
