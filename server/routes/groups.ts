@@ -1205,6 +1205,11 @@ export function registerGroupsRoutes(app: Express) {
       const gCharges = await storage.getGroupCharges(req.params.groupId);
       const gPayments = await storage.getGroupPayments(req.params.groupId);
 
+      // Fetch void movements via the group folio helper
+      const folioData = await storage.getGroupFolio(req.params.groupId);
+      const voidMovements = folioData?.voidMovements ?? [];
+      const voidMovementsTotal = folioData?.voidMovementsTotal ?? 0;
+
       // Build per-room data
       let masterAccommodation = 0;
       let masterExtras = 0;
@@ -1216,13 +1221,16 @@ export function registerGroupsRoutes(app: Express) {
         const resPayments = await storage.getPayments(reservation.id);
         const accommodation = parseFloat((reservation as any).totalRoomAmount || "0");
         const extras = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-        const paid = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+        // Exclude voided payments from balance so voids restore the owed amount (mirrors on-screen folio)
+        const activePmts = resPayments.filter((p: any) => p.status !== "anulado");
+        const paid = activePmts.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
         const individualPayments = resPayments.map((p: any) => ({
           amount: parseFloat(p.amount),
           method: p.method || "",
           reference: p.reference || null,
           invoiceRef: (p as any).invoiceRef ?? null,
           date: p.date || null,
+          status: (p as any).status || null,
         }));
         masterAccommodation += accommodation;
         if (config === "all") masterExtras += extras;
@@ -1231,9 +1239,9 @@ export function registerGroupsRoutes(app: Express) {
 
       const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal;
-      const indivPaid = roomRows.reduce((s: number, r: any) => s + r.paid, 0);
-      const gPaid = gPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-      const masterPaid = Math.max(gPaid, indivPaid);
+      // Use active reservation payments as the authoritative paid amount (mirrors getGroupFolio).
+      // gPayments is kept for display/audit only; it is not void-aware and must not drive the balance.
+      const masterPaid = roomRows.reduce((s: number, r: any) => s + r.paid, 0);
       const masterBalance = masterTotal - masterPaid;
 
       // Generate PDF
@@ -1400,6 +1408,7 @@ export function registerGroupsRoutes(app: Express) {
         ...(groupChargesTotal > 0 ? [["Cargos grupales", `$${groupChargesTotal.toLocaleString("es-AR")}`]] : []),
         ["TOTAL FOLIO MAESTRO", `$${masterTotal.toLocaleString("es-AR")}`],
         ["Pagado", `$${masterPaid.toLocaleString("es-AR")}`],
+        ...(voidMovementsTotal > 0 ? [["Anulaciones (NC)", `$${voidMovementsTotal.toLocaleString("es-AR")}`]] : []),
         ["SALDO PENDIENTE", `$${masterBalance.toLocaleString("es-AR")}`],
       ];
 
@@ -1424,6 +1433,43 @@ export function registerGroupsRoutes(app: Express) {
             .text(`$${parseFloat(p.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
           y += 14;
         }
+      }
+
+      // Anulaciones (NC void movements)
+      if (voidMovements.length > 0) {
+        y += 8;
+        doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
+        y += 12;
+        doc.fontSize(9).font("Helvetica-Bold").fillColor("#b91c1c").text("Anulaciones:", 40, y);
+        doc.fillColor("#000000");
+        y += 14;
+        // Column headers
+        doc.fontSize(8).font("Helvetica-Bold").fillColor("#555555")
+          .text("HAB.", 50, y)
+          .text("DESCRIPCIÓN", 90, y)
+          .text("IMPORTE", 455, y, { align: "right", width: 100 });
+        doc.fillColor("#000000");
+        y += 4;
+        doc.moveTo(50, y).lineTo(555, y).lineWidth(0.3).stroke("#dddddd");
+        y += 8;
+        for (const vm of voidMovements) {
+          if (y > 740) { doc.addPage(); y = 40; }
+          const desc = vm.description || (vm.voidReason ? `Anulación: ${vm.voidReason}` : "Anulación NC");
+          doc.fontSize(9).font("Helvetica")
+            .text(vm.roomNumber || "-", 50, y)
+            .text(desc.substring(0, 55), 90, y)
+            .text(`$${parseFloat(vm.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+          y += 14;
+        }
+        // Subtotal line
+        y += 2;
+        doc.moveTo(300, y).lineTo(555, y).lineWidth(0.3).stroke("#dddddd");
+        y += 6;
+        doc.fontSize(9).font("Helvetica-Bold").fillColor("#b91c1c")
+          .text("Total anulaciones", 300, y)
+          .text(`$${voidMovementsTotal.toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+        doc.fillColor("#000000");
+        y += 4;
       }
 
       // Footer
