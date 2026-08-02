@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 }
-import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull } from "drizzle-orm";
+import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, getTableColumns } from "drizzle-orm";
 import { db, pool } from "./db";
 import { IStorage } from "./storage";
 import {
@@ -510,10 +510,17 @@ export class DatabaseStorage implements IStorage {
     dateTo?: string;
     dateMode?: string;
     dateField?: string;
+    /** Filter to only these statuses at DB level */
+    statuses?: string[];
+    /** Server-side text search: guest name, room number, or reservation ID — applied via SQL JOIN + ILIKE */
+    search?: string;
+    /** SQL-level LIMIT applied before enrichment (default: unlimited) */
+    limit?: number;
   }): Promise<ReservationWithDetails[]> {
     const conditions = [];
 
     if (options?.dateMode === "all") {
+      // no date filter
     } else if (options?.dateField === "createdAt" && (options?.dateFrom || options?.dateTo)) {
       if (options.dateFrom) {
         conditions.push(sql`DATE(${reservations.createdAt}) >= ${options.dateFrom}`);
@@ -541,13 +548,49 @@ export class DatabaseStorage implements IStorage {
       );
     }
 
-    let query = db.select().from(reservations);
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as any;
+    // Status filter at DB level
+    if (options?.statuses && options.statuses.length > 0) {
+      conditions.push(inArray(reservations.status, options.statuses));
     }
 
-    const allRes = await (query.orderBy(asc(reservations.checkInDate)) as any);
-    return this.enrichReservations(allRes);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const limitVal = options?.limit && options.limit > 0 ? options.limit : undefined;
+
+    let rawRows: any[];
+
+    if (options?.search && options.search.trim()) {
+      // Push search into SQL via LEFT JOIN on guests + rooms, with ILIKE conditions.
+      // Use getTableColumns(reservations) so the result set contains only reservation
+      // columns, keeping the shape compatible with enrichReservations.
+      const q = `%${options.search.trim()}%`;
+      const searchCondition = or(
+        sql`CAST(${reservations.id} AS TEXT) ILIKE ${q}`,
+        sql`CONCAT(COALESCE(${guests.firstName}, ''), ' ', COALESCE(${guests.lastName}, '')) ILIKE ${q}`,
+        ilike(rooms.roomNumber, q)
+      );
+      const combinedWhere = whereClause ? and(whereClause, searchCondition) : searchCondition;
+
+      const joinQuery = db
+        .select(getTableColumns(reservations))
+        .from(reservations)
+        .leftJoin(guests, eq(reservations.guestId, guests.id))
+        .leftJoin(rooms, eq(reservations.roomId, rooms.id))
+        .where(combinedWhere)
+        .orderBy(desc(reservations.checkInDate));
+
+      rawRows = limitVal ? await joinQuery.limit(limitVal) : await joinQuery;
+    } else {
+      // No text search: simple query with optional LIMIT.
+      const simpleQuery = db
+        .select()
+        .from(reservations)
+        .where(whereClause)
+        .orderBy(asc(reservations.checkInDate));
+
+      rawRows = limitVal ? await (simpleQuery as any).limit(limitVal) : await simpleQuery;
+    }
+
+    return this.enrichReservations(rawRows);
   }
 
   async getReservation(id: string): Promise<ReservationWithDetails | undefined> {

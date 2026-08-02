@@ -45,12 +45,19 @@ export function registerReservationsRoutes(app: Express) {
   // Reservations
   app.get("/api/reservations", async (req, res) => {
     try {
-      const { dateFrom, dateTo, dateMode, dateField } = req.query;
+      const { dateFrom, dateTo, dateMode, dateField, search, statuses, limit } = req.query;
+      const parsedStatuses = statuses
+        ? String(statuses).split(",").map(s => s.trim()).filter(Boolean)
+        : undefined;
+      const parsedLimit = limit ? parseInt(String(limit), 10) : undefined;
       const reservationList = await storage.getReservations({
         dateFrom: dateFrom as string | undefined,
         dateTo: dateTo as string | undefined,
         dateMode: dateMode as string | undefined,
         dateField: dateField as string | undefined,
+        search: search ? String(search) : undefined,
+        statuses: parsedStatuses,
+        limit: parsedLimit && !isNaN(parsedLimit) ? parsedLimit : undefined,
       });
       res.json(reservationList);
     } catch (error) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -96,24 +96,26 @@ export default function BillingPage() {
   const [prefacturaResId, setPrefacturaResId] = useState<number | null>(null);
   const [prefacturaRes, setPrefacturaRes] = useState<any | null>(null);
 
-  const { data: allReservations = [] } = useQuery<any[]>({
-    queryKey: ["/api/reservations", "picker-all"],
-    queryFn: () => fetch("/api/reservations?dateMode=all", { credentials: "include" }).then(r => r.json()),
-    enabled: showResPicker,
-  });
+  // Debounced search: only send a request after the user stops typing for 300 ms.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(resPickerSearch), 300);
+    return () => clearTimeout(id);
+  }, [resPickerSearch]);
 
-  const pickerReservations = useMemo(() => {
-    const src = (allReservations as any[]).filter(r =>
-      ["confirmed", "checked_in", "checked_out"].includes(r.status)
-    );
-    if (!resPickerSearch.trim()) return src.slice(0, 10);
-    const q = resPickerSearch.toLowerCase().trim();
-    return src.filter(r => {
-      const name = `${r.guest?.firstName || ""} ${r.guest?.lastName || ""}`.toLowerCase();
-      return name.includes(q) || String(r.id).includes(q) ||
-        String(r.room?.number || r.roomNumber || "").includes(q);
-    }).slice(0, 15);
-  }, [allReservations, resPickerSearch]);
+  const pickerQs = new URLSearchParams({
+    dateMode: "all",
+    statuses: "confirmed,checked_in,checked_out",
+    limit: debouncedSearch.trim() ? "15" : "10",
+    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+  }).toString();
+
+  const { data: pickerReservations = [], isFetching: pickerFetching } = useQuery<any[]>({
+    queryKey: ["/api/reservations", "picker", pickerQs],
+    queryFn: () => fetch(`/api/reservations?${pickerQs}`, { credentials: "include" }).then(r => r.json()),
+    enabled: showResPicker,
+    staleTime: 30_000,
+  });
   const [showNC, setShowNC] = useState<number | null>(null);
   const [filtroDesde, setFiltroDesde] = useState(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd"));
   const [filtroHasta, setFiltroHasta] = useState(today());
@@ -327,9 +329,11 @@ export default function BillingPage() {
               data-testid="input-res-picker-search"
             />
             <div className="max-h-72 overflow-y-auto divide-y rounded-md border">
-              {pickerReservations.length === 0 && (
+              {pickerFetching ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Buscando...</p>
+              ) : pickerReservations.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-6">Sin reservas encontradas</p>
-              )}
+              ) : null}
               {pickerReservations.map((r: any) => {
                 const name = [r.guest?.firstName, r.guest?.lastName].filter(Boolean).join(" ") || "Sin huésped";
                 const room = r.room?.number || r.roomNumber || "—";
