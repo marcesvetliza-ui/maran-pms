@@ -476,4 +476,78 @@ describe("double-reversal guard — /api/reservations/:id/reverse-transfer-charg
 
     close();
   });
+
+  // ─── Locked-reservation guard (isReservationLocked) ───────────────────────
+
+  /**
+   * Guard layer 5 (server/routes/reservations.ts ~line 1866):
+   *   isReservationLocked(thisRes) → 403 "No se puede revertir un cargo de una reserva cerrada"
+   *
+   * When the reservation that owns the charge is checked_out, the endpoint must
+   * refuse with 403 regardless of whether the charge itself is still "active".
+   */
+  it("returns 403 when the reservation is checked_out (this folio is locked)", async () => {
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_TRANSFER_OUT);
+
+    // Override: this reservation is checked_out.
+    mockStorage.getReservation.mockResolvedValue({
+      id: "res-100",
+      status: "checked_out",
+    });
+
+    // Step 2 idempotency guard → no prior reversal.
+    // Step 3 corr lookup (charge description has [corr:uuid-abc]) → no paired charge found.
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-100", ACTIVE_TRANSFER_OUT.id);
+
+    expect(status).toBe(403);
+    expect(body.error).toMatch(/reserva cerrada/i);
+
+    close();
+  });
+
+  /**
+   * Guard layer 4 (server/routes/reservations.ts ~line 1856):
+   *   isReservationLocked(pairedRes) → 400
+   *   "No se puede revertir: la reserva del otro folio ya está cerrada o cancelada"
+   *
+   * When the paired reservation (the transfer counterpart) is checked_out the
+   * endpoint must refuse with 400 to avoid creating an orphaned reversal.
+   */
+  it("returns 400 when the paired reservation is checked_out (paired folio is locked)", async () => {
+    // Charge has [corr:uuid-abc] so the deterministic corr-lookup path is used.
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_TRANSFER_OUT);
+
+    // This reservation is open; the paired one is locked.
+    mockStorage.getReservation.mockImplementation(async (id: string) => {
+      if (id === "res-paired") return { id: "res-paired", status: "checked_out" };
+      return { id, status: "checked_in" };
+    });
+
+    // db.execute calls in order:
+    //   1. Idempotency guard (step 2) → no prior reversal.
+    //   2. Corr lookup (step 3)       → one paired charge on "res-paired".
+    mockDbExecute
+      .mockResolvedValueOnce({ rows: [] }) // step 2 — idempotency guard
+      .mockResolvedValueOnce({             // step 3 — corr lookup
+        rows: [
+          {
+            id: "charge-paired-1",
+            reservation_id: "res-paired",
+            amount: "50.00",
+            description: "Cargo HAB.101 desde SPA [corr:uuid-abc]",
+            category: "transfer_in",
+            status: "active",
+          },
+        ],
+      });
+
+    const { status, body } = await postReversal(baseUrl, "res-100", ACTIVE_TRANSFER_OUT.id);
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/otro folio.*cerrada|cerrada.*otro folio/i);
+
+    close();
+  });
 });
