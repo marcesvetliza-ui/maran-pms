@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -558,7 +558,7 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
       });
     },
     onError: (err: any) => {
-      toast({ title: "Error al anular", description: err.message, variant: "destructive" });
+      toast({ title: "Error al anular", description: parseApiError(err), variant: "destructive" });
     },
   });
 

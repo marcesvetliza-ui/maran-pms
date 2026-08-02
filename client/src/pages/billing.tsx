@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
@@ -624,7 +624,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         onClose(); resetForm();
       }
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error", description: parseApiError(e), variant: "destructive" }),
   });
 
   function resetForm() {
@@ -1127,7 +1127,7 @@ export function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; o
       onClose();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error", description: parseApiError(e), variant: "destructive" }),
   });
 
   if (!invoice) return null;
@@ -1224,7 +1224,7 @@ function BillingConfigPanel({ config }: { config: any }) {
       queryClient.invalidateQueries({ queryKey: ["/api/billing/config"] });
       toast({ title: "Configuración guardada" });
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error", description: parseApiError(e), variant: "destructive" }),
   });
 
   function readFile(file: File): Promise<string> {

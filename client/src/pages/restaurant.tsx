@@ -4,7 +4,7 @@ import { useAuth } from "@/App";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -1365,7 +1365,7 @@ export default function RestaurantPage() {
       setIsCloseDialogOpen(false);
       toast({ title: "Ítems transferidos", description: "Los ítems se movieron a la otra comanda." });
     },
-    onError: (err: any) => toast({ title: "Error al mover ítems", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Error al mover ítems", description: parseApiError(err), variant: "destructive" }),
   });
 
   const payItemsMutation = useMutation({
@@ -1385,7 +1385,7 @@ export default function RestaurantPage() {
         toast({ title: "Ítems cobrados", description: `$${parseFloat(data?.amount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })} procesado. Saldo pendiente: $${parseFloat(data?.remainingTotal || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}` });
       }
     },
-    onError: (err: any) => toast({ title: "Error al cobrar ítems", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Error al cobrar ítems", description: parseApiError(err), variant: "destructive" }),
   });
 
   const createSplitMutation = useMutation({
@@ -1709,7 +1709,7 @@ export default function RestaurantPage() {
       setNewClientRazonSocial(""); setNewClientCuit(""); setNewClientCondicionIva("exento");
       toast({ title: "Cliente creado y seleccionado", description: `${fullName} registrado como huésped` });
     },
-    onError: (e: any) => toast({ title: "Error al crear cliente", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al crear cliente", description: parseApiError(e), variant: "destructive" }),
   });
 
   const emitirComprobanteMutation = useMutation({
@@ -1728,7 +1728,7 @@ export default function RestaurantPage() {
       setCompItems([{ descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 }]);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
     },
-    onError: (e: any) => toast({ title: "Error al emitir comprobante", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al emitir comprobante", description: parseApiError(e), variant: "destructive" }),
   });
 
   const emitirNCMutation = useMutation({
@@ -1749,7 +1749,7 @@ export default function RestaurantPage() {
       });
     },
     onError: (e: any) => {
-      toast({ title: "Error al emitir NC", description: e.message, variant: "destructive" });
+      toast({ title: "Error al emitir NC", description: parseApiError(e), variant: "destructive" });
     },
   });
 

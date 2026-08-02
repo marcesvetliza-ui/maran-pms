@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -550,7 +550,7 @@ export default function EventsPage() {
       toast({ title: "Evento eliminado correctamente" });
     },
     onError: (error: any) => {
-      toast({ title: error?.message || "Error al eliminar el evento", variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -631,7 +631,7 @@ export default function EventsPage() {
       toast({ title: "Pago eliminado" });
     },
     onError: (error: any) => {
-      toast({ title: error?.message || "Error al eliminar el pago", variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -645,7 +645,7 @@ export default function EventsPage() {
       toast({ title: "Pago anulado" });
     },
     onError: (error: any) => {
-      toast({ title: error?.message || "Error al anular el pago", variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
       console.error("Anular event payment error:", error);
     },
   });
@@ -677,7 +677,7 @@ export default function EventsPage() {
       setInvoiceCustomerDni("");
     },
     onError: (error: any) => {
-      toast({ title: error?.message || "Error al cerrar el evento", variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -761,7 +761,7 @@ export default function EventsPage() {
       if (data) setSelectedTable((prev) => prev ? { ...prev, status: data.status || "invoiced", receiptType: data.receiptType, invoiceId: data.invoiceId, closedAt: data.closedAt } : prev);
     },
     onError: (error: any) => {
-      toast({ title: error?.message || "Error al cerrar mesa", variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -788,7 +788,7 @@ export default function EventsPage() {
       toast({ title: "Mesa eliminada" });
     },
     onError: (error: any) => {
-      toast({ title: error?.message || "Error al eliminar mesa", variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 

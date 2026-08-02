@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -487,7 +487,7 @@ export default function SpaPage() {
       setTimeout(() => printComandaTermica(createdApt), 300);
     },
     onError: (error: Error) => {
-      toast({ title: error.message, variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -536,7 +536,7 @@ export default function SpaPage() {
       setSelectedSpaGuest(null);
     },
     onError: (error: Error) => {
-      toast({ title: error.message, variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -651,7 +651,7 @@ export default function SpaPage() {
       setInvoiceCustomerDni("");
     },
     onError: (error: Error) => {
-      toast({ title: error.message, variant: "destructive" });
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 

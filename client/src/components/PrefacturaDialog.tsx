@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getLocalToday, fmtMoney, formatDateAR } from "@/lib/utils";
 import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
@@ -1589,7 +1589,7 @@ function NotaCreditoDialog({
       // Auto-open PDF
       setTimeout(() => window.open(`/api/billing/invoices/${body.id}/pdf`, "_blank"), 300);
     } catch (err: any) {
-      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+      toast({ title: parseApiError(err), variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -1899,7 +1899,7 @@ function NotaDebitoDialog({
       // Auto-open PDF
       setTimeout(() => window.open(`/api/billing/invoices/${body.id}/pdf`, "_blank"), 300);
     } catch (err: any) {
-      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+      toast({ title: parseApiError(err), variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -2261,19 +2261,7 @@ export function RevertTransferDialog({
         onClose();
       }
     } catch (err: any) {
-      let msg: string = err.message || "Error inesperado";
-      // apiRequest wraps server errors as "STATUS: bodyText" — extract the inner .error
-      const statusPrefixMatch = msg.match(/^\d+:\s*(.+)$/s);
-      if (statusPrefixMatch) {
-        try {
-          const parsed = JSON.parse(statusPrefixMatch[1]);
-          if (parsed?.error) msg = parsed.error;
-        } catch {
-          // body wasn't JSON — use trimmed body text as-is
-          msg = statusPrefixMatch[1].trim() || msg;
-        }
-      }
-      toast({ title: msg, variant: "destructive" });
+      toast({ title: parseApiError(err), variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -2444,7 +2432,7 @@ function BulkTransferDialog({
       toast({ title: `Transferencia realizada: ${parts.join(" y ")} → otra habitación` });
       onSuccess();
     } catch (err: any) {
-      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+      toast({ title: parseApiError(err), variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -2668,7 +2656,7 @@ function TransferChargeDialog({
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast({ title: err.message || "Error inesperado", variant: "destructive" });
+      toast({ title: parseApiError(err), variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }

@@ -49,6 +49,28 @@ export const getQueryFn: <T>(options: {
     return await res.json();
   };
 
+/**
+ * Parses an error thrown by apiRequest / throwIfResNotOk.
+ *
+ * throwIfResNotOk wraps server errors as "${status}: ${bodyText}".
+ * When bodyText is JSON with an `.error` field we extract that field so
+ * staff see a readable message instead of machine-readable noise.
+ * Falls back gracefully to the raw message when parsing fails.
+ */
+export function parseApiError(err: unknown): string {
+  const raw: string = (err as any)?.message || "Error inesperado";
+  const match = raw.match(/^\d+:\s*([\s\S]+)$/);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (parsed?.error) return String(parsed.error);
+    } catch {
+      return match[1].trim() || raw;
+    }
+  }
+  return raw;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
