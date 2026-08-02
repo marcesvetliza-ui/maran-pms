@@ -1217,9 +1217,16 @@ export function registerGroupsRoutes(app: Express) {
         const accommodation = parseFloat((reservation as any).totalRoomAmount || "0");
         const extras = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
         const paid = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+        const individualPayments = resPayments.map((p: any) => ({
+          amount: parseFloat(p.amount),
+          method: p.method || "",
+          reference: p.reference || null,
+          invoiceRef: (p as any).invoiceRef ?? null,
+          date: p.date || null,
+        }));
         masterAccommodation += accommodation;
         if (config === "all") masterExtras += extras;
-        roomRows.push({ reservation, accommodation, extras, paid });
+        roomRows.push({ reservation, accommodation, extras, paid, individualPayments });
       }
 
       const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
@@ -1317,7 +1324,53 @@ export function registerGroupsRoutes(app: Express) {
           .text(`$${row.accommodation.toLocaleString("es-AR")}`, 350, y, { align: "right", width: 80 })
           .text(config !== "none" ? `$${row.extras.toLocaleString("es-AR")}` : "-", 440, y, { align: "right", width: 60 })
           .text(`$${row.paid.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });
-        y += 16;
+        y += 14;
+
+        // Per-payment sub-rows with invoice badge
+        if (row.individualPayments && row.individualPayments.length > 0) {
+          for (const pmt of row.individualPayments) {
+            if (y > 740) { doc.addPage(); y = 40; }
+            const methodLabel = pmt.method
+              ? pmt.method.charAt(0).toUpperCase() + pmt.method.slice(1).replace(/_/g, " ")
+              : "";
+            let pmtLabel = methodLabel;
+            if (pmt.reference) pmtLabel += ` (${pmt.reference})`;
+            doc.fontSize(7.5).font("Helvetica").fillColor("#555555")
+              .text("", 80, y) // indent
+              .text(`  • ${pmtLabel}`, 90, y, { width: 300 });
+            if (pmt.invoiceRef) {
+              // Parse JSON invoiceRef and format as human-readable fiscal badge
+              let badgeText: string | null = null;
+              try {
+                const ref = typeof pmt.invoiceRef === "string" ? JSON.parse(pmt.invoiceRef) : pmt.invoiceRef;
+                const tipo = ref.tipo_comprobante ?? ref.tipoComprobante ?? "FAC";
+                const pv = String(ref.punto_venta ?? ref.puntoVenta ?? 0).padStart(4, "0");
+                const num = String(ref.numero ?? 0).padStart(8, "0");
+                badgeText = `${tipo} ${pv}-${num}`;
+              } catch {
+                // unparseable — skip badge
+              }
+              if (badgeText) {
+                const badgeX = 395;
+                const badgeW = Math.min(doc.widthOfString(badgeText, { fontSize: 7 }) + 10, 150);
+                doc.save()
+                  .roundedRect(badgeX, y - 1, badgeW, 11, 3)
+                  .fillAndStroke("#e8f4fd", "#3b82f6")
+                  .restore();
+                doc.fontSize(7).font("Helvetica-Bold").fillColor("#1d4ed8")
+                  .text(badgeText, badgeX + 5, y + 1, { width: badgeW - 10 });
+                doc.fillColor("#555555");
+              }
+            }
+            doc.fontSize(7.5).font("Helvetica").fillColor("#555555")
+              .text(`$${pmt.amount.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });
+            doc.fillColor("#000000");
+            y += 12;
+          }
+          y += 2;
+        } else {
+          y += 2;
+        }
       }
 
       y += 4;
