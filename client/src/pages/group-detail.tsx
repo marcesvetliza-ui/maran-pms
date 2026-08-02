@@ -40,6 +40,7 @@ import {
   Pencil,
   Unlink,
   Clock,
+  FileX,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmitirFacturaDialog } from "./billing";
@@ -2208,6 +2209,49 @@ export default function GroupDetailPage() {
                     })
                   )}
 
+                  {/* Anulaciones / Reversiones NC */}
+                  {folio && folio.voidMovements.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <FileX className="h-3.5 w-3.5 text-orange-500" />
+                        Anulaciones de pagos (NC)
+                      </p>
+                      <div className="rounded-lg border border-orange-200 dark:border-orange-800 divide-y divide-orange-100 dark:divide-orange-900 overflow-hidden">
+                        {folio.voidMovements.map((vm) => (
+                          <div
+                            key={vm.id}
+                            className="flex items-center justify-between px-3 py-2 text-sm bg-orange-50/60 dark:bg-orange-950/10"
+                            data-testid={`row-void-movement-${vm.id}`}
+                          >
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 border-orange-300 dark:border-orange-700 text-xs">
+                                <FileX className="h-3 w-3 mr-1" />
+                                Anulación
+                              </Badge>
+                              <span className="font-medium text-xs">Hab. {vm.roomNumber}</span>
+                              {vm.guestName && <span className="text-muted-foreground text-xs">{vm.guestName}</span>}
+                              <span className="text-xs text-muted-foreground">{vm.description}</span>
+                              {vm.voidReason && (
+                                <span className="text-xs text-orange-600 dark:text-orange-400 italic">— {vm.voidReason}</span>
+                              )}
+                            </div>
+                            <span className="font-semibold text-orange-600 dark:text-orange-400 tabular-nums whitespace-nowrap">
+                              +${parseFloat(vm.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        ))}
+                        {folio.voidMovements.length > 1 && (
+                          <div className="flex items-center justify-between px-3 py-2 text-sm font-semibold bg-orange-100/60 dark:bg-orange-900/20 border-t border-orange-200 dark:border-orange-800">
+                            <span className="text-orange-700 dark:text-orange-300">Total anulado</span>
+                            <span className="text-orange-600 dark:text-orange-400 tabular-nums">
+                              +${folio.voidMovementsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Totales resumen */}
                   {folio && masterFolio.rooms.length > 0 && (
                     <div className="mt-3 rounded-lg border bg-muted/30 px-4 py-3">
@@ -2224,6 +2268,12 @@ export default function GroupDetailPage() {
                           <p className="text-xs text-muted-foreground">Total pagos</p>
                           <p className="font-bold text-green-600">${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
                         </div>
+                        {folio.voidMovementsTotal > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Anulaciones</p>
+                            <p className="font-bold text-orange-600">+${folio.totals.voids.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                          </div>
+                        )}
                         <div>
                           <p className="text-xs text-muted-foreground">Saldo total grupo</p>
                           <p className={`font-bold ${folio.totals.balance > 0.01 ? "text-red-600" : "text-green-600"}`}>

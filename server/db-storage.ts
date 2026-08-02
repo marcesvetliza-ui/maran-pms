@@ -1630,6 +1630,53 @@ export class DatabaseStorage implements IStorage {
       paymentsMap.get(p.reservationId!)!.push(p);
     }
 
+    // Fetch void folio_movements for all reservation folios in this group
+    let voidMovementsWithContext: GroupFolioData["voidMovements"] = [];
+    if (resIds.length > 0) {
+      const resFolioRows = await db.execute(
+        sql`SELECT id, entity_id FROM folios WHERE entity_type = 'reservation' AND entity_id = ANY(${resIds})`
+      );
+      const resFolioIds = (resFolioRows.rows as any[]).map((r) => r.id as string);
+      if (resFolioIds.length > 0) {
+        const voidRows = await db.select().from(folioMovements).where(
+          and(
+            inArray(folioMovements.folioId, resFolioIds),
+            eq(folioMovements.type, "void")
+          )
+        );
+        // Build folio → reservationId map for context lookup
+        const folioToResId = new Map<string, string>(
+          (resFolioRows.rows as any[]).map((r) => [r.id as string, r.entity_id as string])
+        );
+        // Build reservationId → context map
+        const resContextMap = new Map<string, { guestName: string; roomNumber: string }>(
+          activeReservations.map((r: any) => [
+            r.id,
+            {
+              guestName: `${r.guest?.lastName || ""} ${r.guest?.firstName || ""}`.trim(),
+              roomNumber: r.room?.roomNumber || "-",
+            },
+          ])
+        );
+        voidMovementsWithContext = voidRows.map((vm) => {
+          const resId = folioToResId.get(vm.folioId) ?? "";
+          const ctx = resContextMap.get(resId) ?? { guestName: "", roomNumber: "-" };
+          return {
+            id: vm.id,
+            amount: vm.amount,
+            description: vm.description,
+            voidReason: vm.voidReason,
+            registeredBy: vm.registeredBy,
+            createdAt: vm.createdAt,
+            reservationId: resId,
+            guestName: ctx.guestName,
+            roomNumber: ctx.roomNumber,
+          };
+        });
+      }
+    }
+    const voidMovementsTotal = voidMovementsWithContext.reduce((s, vm) => s + parseFloat(vm.amount), 0);
+
     const groupChargesTotal = gCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
     const groupPaymentsTotal = gPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
 
@@ -1642,7 +1689,9 @@ export class DatabaseStorage implements IStorage {
       const resPayments = paymentsMap.get(res.id) || [];
       const accTotal = parseFloat(res.totalRoomAmount || "0");
       const extTotal = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-      const payTotal = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      // Exclude voided (anulado) payments from the balance so voids restore the owed amount
+      const activeResPayments = resPayments.filter((p: any) => p.status !== "anulado");
+      const payTotal = activeResPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
       const nights = res.nights || 0;
 
       accommodationTotal += accTotal;
@@ -1674,11 +1723,14 @@ export class DatabaseStorage implements IStorage {
       reservations: resRows,
       groupPayments: gPayments,
       groupPaymentsTotal,
+      voidMovements: voidMovementsWithContext,
+      voidMovementsTotal,
       totals: {
         accommodation: accommodationTotal,
         groupCharges: groupChargesTotal,
         extras: extrasTotal,
         payments: totalPayments,
+        voids: voidMovementsTotal,
         balance,
       },
     };

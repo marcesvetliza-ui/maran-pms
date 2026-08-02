@@ -631,11 +631,24 @@ export type GroupFolioData = {
   }>;
   groupPayments: GroupPayment[];
   groupPaymentsTotal: number;
+  voidMovements: Array<{
+    id: string;
+    amount: string;
+    description: string;
+    voidReason: string | null;
+    registeredBy: string | null;
+    createdAt: Date | null;
+    reservationId: string;
+    guestName: string;
+    roomNumber: string;
+  }>;
+  voidMovementsTotal: number;
   totals: {
     accommodation: number;
     groupCharges: number;
     extras: number;
     payments: number;
+    voids: number;
     balance: number;
   };
 };
