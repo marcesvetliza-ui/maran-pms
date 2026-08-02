@@ -3950,6 +3950,38 @@ function ReservationDetailDialog({
               }));
               const allItems = [...chargeItems, ...paymentItems, ...invoiceItems, ...voidItems, ...ndItems].sort((a, b) => b.sortDate - a.sortDate);
               if (allItems.length === 0) return null;
+              // Render a label that may contain machine-readable transfer tags ([res:], [xfer:], etc.)
+              // If a [res:pairedResId] tag is present and the clean text contains Hab.XXX, render a clickable link.
+              const renderLabel = (rawLabel: string) => {
+                const resMatch = rawLabel.match(/\[res:([^\]]+)\]/);
+                if (!resMatch) return <span className="flex-1 truncate">{rawLabel}</span>;
+                const pairedResId = resMatch[1];
+                const clean = rawLabel
+                  .replace(/\s*\[xfer:[^\]]+\]/g, "")
+                  .replace(/\s*\[corr:[^\]]+\]/g, "")
+                  .replace(/\s*\[rev:[^\]]+\]/g, "")
+                  .replace(/\s*\[res:[^\]]+\]/g, "")
+                  .trim();
+                const roomMatch = clean.match(/(.*?)(Hab\.\S+)(.*)/);
+                if (!roomMatch) return <span className="flex-1 truncate">{clean}</span>;
+                const [, before, roomPart, after] = roomMatch;
+                return (
+                  <span className="flex-1 min-w-0 truncate">
+                    {before}
+                    <a
+                      href={`/reservations?view=${pairedResId}`}
+                      onClick={e => e.stopPropagation()}
+                      className="font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity text-blue-700 dark:text-blue-400"
+                      title="Ver folio de la reserva relacionada"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {roomPart}
+                    </a>
+                    {after}
+                  </span>
+                );
+              };
               const colorMap = {
                 cargo:       "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
                 pago:        "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
@@ -3977,7 +4009,7 @@ function ReservationDetailDialog({
                         ) : (
                           <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4">{labelMap[item.type]}</Badge>
                         )}
-                        <span className="flex-1 truncate">{item.label}</span>
+                        {renderLabel(item.label)}
                         {item.type === "nota_debito" && (item as any).ndReceiptCode && (
                           <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4 font-semibold bg-sky-50 text-sky-700 border-sky-300 dark:bg-sky-950/20 dark:text-sky-300 dark:border-sky-700">
                             {(item as any).ndReceiptCode}
