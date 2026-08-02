@@ -361,9 +361,30 @@ export function registerBillingRoutes(app: Express) {
           storage.getPayments(reservaId),
         ]);
         if (reservation) {
+          // Fetch void adjustments from folio_movements (written when an NC voids a payment)
+          let voidAdjustments: Array<{ description: string; date: string; amount: string }> = [];
+          try {
+            const folioRow = await db.execute(
+              sql`SELECT id FROM folios WHERE entity_type = 'reservation' AND entity_id = ${reservaId} LIMIT 1`
+            );
+            const folioRec = (folioRow.rows as any[])?.[0];
+            if (folioRec) {
+              const movRows = await db.execute(
+                sql`SELECT description, amount, created_at FROM folio_movements WHERE folio_id = ${folioRec.id} AND type = 'void' ORDER BY created_at ASC`
+              );
+              voidAdjustments = (movRows.rows as any[]).map((r) => ({
+                description: r.description as string,
+                date: (r.created_at instanceof Date ? r.created_at : new Date(r.created_at)).toISOString().split("T")[0],
+                amount: String(r.amount),
+              }));
+            }
+          } catch (adjErr: any) {
+            console.warn("[voucher-pdf] could not load void adjustments (non-fatal):", adjErr?.message);
+          }
+
           const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
           const grandTotal = roomTotal + chargesList.reduce((s, c) => s + parseFloat(c.amount), 0);
-          const totalPayments = paymentsList.reduce((s, p) => s + parseFloat(p.amount), 0);
+          const totalPayments = paymentsList.filter(p => p.status === "active").reduce((s, p) => s + parseFloat(p.amount), 0);
           const voucherData: VoucherHabitacionData = {
             numero: Number(factura.numero),
             puntoVenta: Number(factura.punto_venta),
@@ -378,6 +399,7 @@ export function registerBillingRoutes(app: Express) {
             roomTotal,
             charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount, category: c.category ?? undefined })),
             payments: paymentsList.filter(p => p.status === "active").map(p => ({ date: p.date, method: p.method, amount: p.amount, reference: p.reference, notes: p.notes })),
+            adjustments: voidAdjustments.length > 0 ? voidAdjustments : undefined,
             grandTotal,
             totalPayments,
             balance: grandTotal - totalPayments,

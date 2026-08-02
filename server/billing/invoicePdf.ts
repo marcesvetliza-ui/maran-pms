@@ -251,6 +251,8 @@ export interface VoucherHabitacionData {
   roomTotal: number;
   charges: Array<{ description: string; date: string; amount: string; category?: string }>;
   payments: Array<{ date: string; method: string; amount: string; reference?: string | null; notes?: string | null }>;
+  /** Void adjustments written when a Nota de Crédito voids a payment */
+  adjustments?: Array<{ description: string; date: string; amount: string }>;
   grandTotal: number;
   totalPayments: number;
   balance: number;
@@ -385,6 +387,31 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
       .text("TOTAL CARGOS", x0 + 302, y, { width: 100 })
       .text(`$ ${fPeso(data.grandTotal)}`, x0 + 402, y, { width: 125, align: "right" });
     y += 18;
+
+    // ── Ajustes / Anulaciones (NC void adjustments) ────────────
+    if (data.adjustments && data.adjustments.length > 0) {
+      if (y > 720) { doc.addPage(); y = 40; }
+      doc.rect(x0, y, W, 16).fillColor("#fff3e0").fill().rect(x0, y, W, 16).strokeColor("#e65100").lineWidth(0.5).stroke();
+      doc.fillColor("#e65100").font("Helvetica-Bold").fontSize(7.5);
+      doc.text("Ajustes / Anulaciones", x0 + 4, y + 4, { width: 300 });
+      doc.text("Fecha", x0 + 308, y + 4, { width: 90, align: "center" });
+      doc.text("Importe", x0 + 402, y + 4, { width: 125, align: "right" });
+      y += 16;
+
+      doc.font("Helvetica").fontSize(7.5);
+      for (const adj of data.adjustments) {
+        if (y > 720) { doc.addPage(); y = 40; }
+        doc.rect(x0, y, W, 14).fillColor("#fff8f0").fill()
+          .rect(x0, y, W, 14).strokeColor("#ffcc80").stroke();
+        doc.fillColor("#bf360c");
+        doc.text(adj.description, x0 + 4, y + 3, { width: 300 });
+        doc.text(fDate(adj.date), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`$ ${fPeso(adj.amount)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+        doc.fillColor("#000");
+        y += 14;
+      }
+      y += 6;
+    }
 
     // ── Pagos ──────────────────────────────────────────────────
     if (data.payments.length > 0) {
