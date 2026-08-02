@@ -32,6 +32,7 @@ export interface NewInvoiceData {
   };
   items: InvoiceItem[];
   reservaId?: string;
+  restaurantOrderId?: string;
   folioId?: number;
   facturaOriginalId?: number; // para NC
   operador?: string;
@@ -262,6 +263,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     modoFicticio,
     estado: "emitida",
     reservaId: data.reservaId || null,
+    restaurantOrderId: data.restaurantOrderId || null,
     folioId: data.folioId || null,
     notaCreditoId: data.facturaOriginalId || null,
     concepto: "2",

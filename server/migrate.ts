@@ -1229,6 +1229,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await withTimeout("sales_invoices.restaurant_order_id", T, () =>
+    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS restaurant_order_id varchar`)
+  );
+
   await withTimeout("spa_accounts.invoice_id", T, () =>
     db.execute(sql`ALTER TABLE spa_accounts ADD COLUMN IF NOT EXISTS invoice_id integer`)
   );

@@ -647,6 +647,29 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
+      // Write void movement to restaurant_order folio when the NC reverses a restaurant invoice
+      if (original.restaurant_order_id) {
+        try {
+          const operador = user?.fullName || user?.username || "sistema";
+          const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+          const voidDesc = `Anulación — ${nroNC}${motivo ? ` — ${motivo}` : ""}`;
+          const folioRow = await db.execute(sql`
+            SELECT id FROM folios
+            WHERE entity_type = 'restaurant_order' AND entity_id = ${String(original.restaurant_order_id)}
+            LIMIT 1
+          `);
+          const folioRec = (folioRow.rows?.[0] as any);
+          if (folioRec) {
+            await storage.addFolioAdjustment(
+              folioRec.id, "void", parseFloat(String((nc as any).montoTotal || montoNC)),
+              voidDesc, operador, undefined, voidDesc
+            );
+          }
+        } catch (e) {
+          console.error("[nc-void-restaurant] folio void adjustment:", e);
+        }
+      }
+
       res.status(201).json({ ...nc, voidedPaymentIds });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

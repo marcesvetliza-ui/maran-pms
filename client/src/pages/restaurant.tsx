@@ -1023,6 +1023,7 @@ export default function RestaurantPage() {
       return res.json();
     },
     enabled: !!currentOrder?.id && isOrderDialogOpen,
+    refetchInterval: 30000, // poll every 30s so NC void movements appear without page reload
   });
   const restaurantOrderVoidMovements: any[] = (restaurantOrderFolioData?.movements ?? []).filter((m: any) => m.type === "void");
   const eventTableAdvance = closeOrderArea?.areaType === "event"

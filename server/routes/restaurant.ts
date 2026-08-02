@@ -569,6 +569,7 @@ export function registerRestaurantRoutes(app: Express) {
               condicionIva: condicion,
             },
             items: invoiceItems,
+            restaurantOrderId: req.params.id,
             operador: (req as any).user?.fullName || (req as any).user?.username,
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });

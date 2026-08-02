@@ -2308,6 +2308,7 @@ export const salesInvoices = pgTable("sales_invoices", {
   reservaId: varchar("reserva_id"),
   folioId: integer("folio_id"),
   notaCreditoId: integer("nota_credito_id"),
+  restaurantOrderId: varchar("restaurant_order_id"),
   montoAcreditado: numeric("monto_acreditado", { precision: 14, scale: 2 }).default("0"),
   concepto: text("concepto").default("2"),
   items: jsonb("items"),
