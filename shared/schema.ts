@@ -815,6 +815,7 @@ export const eventTables = pgTable("event_tables", {
   status: text("status").notNull().default("open"),
   reservationId: varchar("reservation_id"),
   receiptType: text("receipt_type"),
+  invoiceId: integer("invoice_id"),
   closedAt: timestamp("closed_at"),
   createdAt: timestamp("created_at"),
 });

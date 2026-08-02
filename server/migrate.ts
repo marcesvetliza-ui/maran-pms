@@ -1237,5 +1237,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS invoice_id integer`)
   );
 
+  await withTimeout("event_tables.invoice_id", T, () =>
+    db.execute(sql`ALTER TABLE event_tables ADD COLUMN IF NOT EXISTS invoice_id integer`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

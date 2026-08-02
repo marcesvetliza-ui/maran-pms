@@ -124,6 +124,7 @@ type EventTableType = {
   status: string;
   reservationId: string | null;
   receiptType: string | null;
+  invoiceId?: number | null;
   closedAt: string | null;
   createdAt: string;
   charges: EventTableCharge[];
@@ -312,6 +313,9 @@ export default function EventsPage() {
   const [isTableFolioOpen, setIsTableFolioOpen] = useState(false);
   const [selectedTable, setSelectedTable] = useState<EventTableType | null>(null);
   const [tableFolioReceiptType, setTableFolioReceiptType] = useState("");
+  const [tableInvoiceCustomerName, setTableInvoiceCustomerName] = useState("");
+  const [tableInvoiceCustomerCuit, setTableInvoiceCustomerCuit] = useState("");
+  const [tableInvoiceCustomerDni, setTableInvoiceCustomerDni] = useState("");
   const [isAddTableOpen, setIsAddTableOpen] = useState(false);
   const [newTableNumber, setNewTableNumber] = useState(1);
   const [newTableLabel, setNewTableLabel] = useState("");
@@ -391,6 +395,18 @@ export default function EventsPage() {
       return res.json();
     },
     enabled: !!selectedEvent?.invoiceId,
+    staleTime: 60000,
+  });
+
+  // Invoice data for a closed table folio that emitted an AFIP factura
+  const { data: tableInvoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", selectedTable?.invoiceId],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices/${selectedTable!.invoiceId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!selectedTable?.invoiceId,
     staleTime: 60000,
   });
 
@@ -727,13 +743,22 @@ export default function EventsPage() {
   });
 
   const closeTableMutation = useMutation({
-    mutationFn: ({ eventId, tableId, receiptType }: { eventId: string; tableId: string; receiptType: string }) =>
-      apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/close`, { receiptType }),
-    onSuccess: async () => {
+    mutationFn: async ({ eventId, tableId, receiptType, customerRazonSocial, customerCuit, customerDni }: { eventId: string; tableId: string; receiptType: string; customerRazonSocial?: string; customerCuit?: string; customerDni?: string }) => {
+      const res = await apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/close`, { receiptType, customerRazonSocial, customerCuit, customerDni });
+      return res.json();
+    },
+    onSuccess: async (data: any) => {
       await refetchTables();
-      setIsTableFolioOpen(false);
-      setSelectedTable(null);
-      toast({ title: "Mesa cerrada exitosamente" });
+      const wasFactura = ["factura_a", "factura_b", "factura_c"].includes(data?.receiptType);
+      if (wasFactura && !data?.invoiceId) {
+        toast({ title: "Mesa cerrada, pero la factura AFIP no pudo emitirse — verificar con administración", variant: "destructive" });
+      } else if (data?.invoiceId) {
+        toast({ title: "Mesa cerrada y Factura AFIP emitida correctamente" });
+      } else {
+        toast({ title: "Mesa cerrada exitosamente" });
+      }
+      // Update selectedTable so the badge shows without reopening the dialog
+      if (data) setSelectedTable((prev) => prev ? { ...prev, status: data.status || "invoiced", receiptType: data.receiptType, invoiceId: data.invoiceId, closedAt: data.closedAt } : prev);
     },
     onError: (error: any) => {
       toast({ title: error?.message || "Error al cerrar mesa", variant: "destructive" });
@@ -934,6 +959,9 @@ export default function EventsPage() {
       eventId: selectedEvent.id,
       tableId: selectedTable.id,
       receiptType: tableFolioReceiptType,
+      customerRazonSocial: tableInvoiceCustomerName || undefined,
+      customerCuit: tableInvoiceCustomerCuit || undefined,
+      customerDni: tableInvoiceCustomerDni || undefined,
     });
   };
 
@@ -2005,6 +2033,9 @@ export default function EventsPage() {
                               onClick={() => {
                                 setSelectedTable(table);
                                 setTableFolioReceiptType("");
+                                setTableInvoiceCustomerName("");
+                                setTableInvoiceCustomerCuit("");
+                                setTableInvoiceCustomerDni("");
                                 setIsTableFolioOpen(true);
                               }}
                               data-testid={`table-card-${table.id}`}
@@ -2816,6 +2847,45 @@ export default function EventsPage() {
                     );
                   })()}
 
+                  {selectedTable.status !== "open" && (
+                    <div className="pt-2 border-t space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Comprobante: <span className="font-medium">{selectedTable.receiptType || "—"}</span>
+                        {selectedTable.closedAt && (
+                          <> · Cerrada: {safeFormatDate(selectedTable.closedAt, "d MMM yyyy HH:mm", { locale: es })}</>
+                        )}
+                      </p>
+                      {tableInvoice && (
+                        <div className="p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-sm space-y-2" data-testid="table-invoice-badge">
+                          <div className="flex items-center gap-2 font-semibold text-purple-800 dark:text-purple-200">
+                            <FileText className="h-4 w-4 shrink-0" />
+                            <span>
+                              {tableInvoice.tipo_comprobante === "FA" ? "Factura A" : tableInvoice.tipo_comprobante === "FB" ? "Factura B" : tableInvoice.tipo_comprobante === "FC" ? "Factura C" : tableInvoice.tipo_comprobante}
+                              {" "}
+                              {String(tableInvoice.punto_venta ?? 1).padStart(4, "0")}-{String(tableInvoice.numero ?? 0).padStart(8, "0")}
+                            </span>
+                          </div>
+                          {tableInvoice.cae && (
+                            <p className="text-xs text-purple-700 dark:text-purple-300">
+                              CAE: <span className="font-mono">{tableInvoice.cae}</span>
+                            </p>
+                          )}
+                          {tableInvoice.cliente_razon_social && (
+                            <p className="text-xs text-muted-foreground">Cliente: {tableInvoice.cliente_razon_social}</p>
+                          )}
+                          <a
+                            href={`/api/billing/invoices/${selectedTable.invoiceId}/pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-purple-600 dark:text-purple-400 hover:underline"
+                          >
+                            <FileText className="h-3.5 w-3.5" /> Ver factura PDF
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {selectedTable.status === "open" && (
                     <>
                       <div className="space-y-2 pt-2 border-t">
@@ -2877,7 +2947,7 @@ export default function EventsPage() {
 
                       <div className="space-y-2 pt-2 border-t">
                         <p className="text-sm font-medium">Cerrar Mesa</p>
-                        <Select value={tableFolioReceiptType} onValueChange={setTableFolioReceiptType}>
+                        <Select value={tableFolioReceiptType} onValueChange={(v) => { setTableFolioReceiptType(v); setTableInvoiceCustomerName(""); setTableInvoiceCustomerCuit(""); setTableInvoiceCustomerDni(""); }}>
                           <SelectTrigger data-testid="select-table-receipt-type">
                             <SelectValue placeholder="Tipo de comprobante" />
                           </SelectTrigger>
@@ -2887,12 +2957,49 @@ export default function EventsPage() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {["factura_a", "factura_b", "factura_c"].includes(tableFolioReceiptType) && (
+                          <div className="space-y-2 p-3 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                            <p className="text-xs font-medium text-blue-800 dark:text-blue-200">Datos del cliente para la factura AFIP</p>
+                            <div>
+                              <label className="text-xs text-muted-foreground">Razón Social / Nombre</label>
+                              <Input
+                                placeholder={tableFolioReceiptType === "factura_b" ? "Nombre y apellido" : "Razón social"}
+                                value={tableInvoiceCustomerName}
+                                onChange={(e) => setTableInvoiceCustomerName(e.target.value)}
+                                data-testid="input-table-invoice-customer-name"
+                              />
+                            </div>
+                            {(tableFolioReceiptType === "factura_a" || tableFolioReceiptType === "factura_c") && (
+                              <div>
+                                <label className="text-xs text-muted-foreground">CUIT</label>
+                                <Input
+                                  placeholder="XX-XXXXXXXX-X"
+                                  value={tableInvoiceCustomerCuit}
+                                  onChange={(e) => setTableInvoiceCustomerCuit(e.target.value)}
+                                  data-testid="input-table-invoice-customer-cuit"
+                                />
+                              </div>
+                            )}
+                            {tableFolioReceiptType === "factura_b" && (
+                              <div>
+                                <label className="text-xs text-muted-foreground">DNI (opcional)</label>
+                                <Input
+                                  placeholder="DNI sin puntos"
+                                  value={tableInvoiceCustomerDni}
+                                  onChange={(e) => setTableInvoiceCustomerDni(e.target.value)}
+                                  data-testid="input-table-invoice-customer-dni"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <Button
                           className="w-full"
                           disabled={
                             !tableFolioReceiptType ||
                             selectedTable.charges.reduce((s, c) => s + parseFloat(c.total), 0) - 
                             selectedTable.payments.reduce((s, p) => s + parseFloat(p.amount), 0) > 0.01 ||
+                            (["factura_a", "factura_c"].includes(tableFolioReceiptType) && !tableInvoiceCustomerCuit.trim()) ||
                             closeTableMutation.isPending
                           }
                           onClick={handleCloseTable}
@@ -2902,6 +3009,11 @@ export default function EventsPage() {
                           <Receipt className="h-4 w-4 mr-2" />
                           Cerrar Mesa
                         </Button>
+                        {["factura_a", "factura_c"].includes(tableFolioReceiptType) && !tableInvoiceCustomerCuit.trim() && (
+                          <p className="text-xs text-red-500 text-center" data-testid="table-cuit-required-msg">
+                            El CUIT es obligatorio para Factura A/C
+                          </p>
+                        )}
                       </div>
                     </>
                   )}
