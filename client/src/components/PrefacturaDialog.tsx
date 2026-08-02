@@ -202,6 +202,9 @@ export function PrefacturaDialog({
   // Step 3: result
   const [emittedInvoice, setEmittedInvoice] = useState<any>(null);
   const [checkoutDone, setCheckoutDone] = useState(false);
+  // True when payment+invoice succeeded but the checkout API call itself failed —
+  // staff must complete checkout manually; the folio data is already persisted.
+  const [checkoutFailed, setCheckoutFailed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -271,6 +274,7 @@ export function PrefacturaDialog({
       setStep(1);
       setEmittedInvoice(null);
       setCheckoutDone(false);
+      setCheckoutFailed(false);
       setSubmitError(null);
       setItemDescriptions({});
       setEditingId(null);
@@ -581,19 +585,31 @@ export function PrefacturaDialog({
       }
 
       // 3. Checkout if applicable
+      // Use a local flag so we can gate onCheckoutComplete reliably within this
+      // async function (React state updates are async and not readable immediately).
+      let checkoutSucceeded = false;
       if (mode === "checkout" && doCheckout) {
-        const coRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
-        if (!coRes.ok) {
-          const coBody = await coRes.json().catch(() => ({}));
-          throw new Error(coBody?.error || "Error al realizar check-out");
+        try {
+          const coRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+          if (!coRes.ok) {
+            const coBody = await coRes.json().catch(() => ({}));
+            throw new Error(coBody?.error || "Error al realizar check-out");
+          }
+          checkoutSucceeded = true;
+          setCheckoutDone(true);
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+          queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
+          queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+        } catch (coErr: any) {
+          // Payment and invoice already persisted — do NOT re-throw.
+          // Advance to step 3 with a warning so staff know to fix checkout manually.
+          // checkoutSucceeded remains false, so onCheckoutComplete will NOT fire.
+          setCheckoutFailed(true);
+          console.error("[PrefacturaDialog] checkout failed after payment/invoice:", coErr);
         }
-        setCheckoutDone(true);
-        queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-        queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
-        queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
@@ -603,7 +619,13 @@ export function PrefacturaDialog({
       await refetchFolio();
       setEmittedInvoice(invoiceData);
       setStep(3);
-      onCheckoutComplete?.();
+      // Only signal checkout completion to the parent when checkout actually succeeded.
+      // When checkout failed (checkoutSucceeded=false), skip the callback so callers
+      // don't close the dialog or update state as if the room were already released —
+      // staff need to see the amber warning and complete checkout manually.
+      if (mode !== "checkout" || !doCheckout || checkoutSucceeded) {
+        onCheckoutComplete?.();
+      }
 
     } catch (err: any) {
       setSubmitError(err.message || "Error inesperado");
@@ -1204,19 +1226,31 @@ export function PrefacturaDialog({
         {/* ── STEP 3: Resultado ──────────────────────────────────────────────── */}
         {step === 3 && (
           <div className="space-y-4">
-            {/* Success banner */}
-            <Card className="border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10">
+            {/* Success / partial-success banner */}
+            <Card className={checkoutFailed
+              ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/10"
+              : "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10"
+            }>
               <CardContent className="flex items-center gap-4 p-5">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40 shrink-0">
-                  <CircleCheck className="h-7 w-7 text-green-600 dark:text-green-400" />
+                <div className={`flex h-12 w-12 items-center justify-center rounded-full shrink-0 ${
+                  checkoutFailed
+                    ? "bg-amber-100 dark:bg-amber-900/40"
+                    : "bg-green-100 dark:bg-green-900/40"
+                }`}>
+                  {checkoutFailed
+                    ? <AlertTriangle className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+                    : <CircleCheck className="h-7 w-7 text-green-600 dark:text-green-400" />
+                  }
                 </div>
                 <div>
                   {checkoutDone
                     ? <p className="font-bold text-green-700 dark:text-green-400">Check-out completado</p>
-                    : <p className="font-bold text-green-700 dark:text-green-400">Cobro registrado</p>
+                    : checkoutFailed
+                      ? <p className="font-bold text-amber-700 dark:text-amber-400">Cobro e factura registrados — check-out pendiente</p>
+                      : <p className="font-bold text-green-700 dark:text-green-400">Cobro registrado</p>
                   }
                   {emittedInvoice && (
-                    <p className="text-sm text-green-700 dark:text-green-300 mt-0.5">
+                    <p className={`text-sm mt-0.5 ${checkoutFailed ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>
                       {emittedInvoice.tipo_comprobante} {padNum(emittedInvoice.punto_venta, 4)}-{padNum(emittedInvoice.numero, 8)}
                       {emittedInvoice.cae ? ` — CAE: ${emittedInvoice.cae}` : " (sin CAE)"}
                     </p>
@@ -1224,6 +1258,17 @@ export function PrefacturaDialog({
                 </div>
               </CardContent>
             </Card>
+
+            {/* Checkout-failed warning: payment & invoice are saved, checkout needs manual completion */}
+            {checkoutFailed && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/20 px-4 py-3 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <div className="text-sm text-amber-800 dark:text-amber-300 space-y-1">
+                  <p className="font-semibold">El cobro y el comprobante ya fueron registrados correctamente.</p>
+                  <p>Sin embargo, el check-out no pudo completarse automáticamente. Para liberar la habitación, realizá el check-out manualmente desde el folio de la reserva.</p>
+                </div>
+              </div>
+            )}
 
             {/* Result table */}
             {folio && (
