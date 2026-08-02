@@ -418,19 +418,26 @@ export function PrefacturaDialog({
 
   // Gate: warn if user enters less than the full balance before actually submitting
   function handleSubmit() {
-    if (paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
-      toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
-      return;
-    }
-    if (saldoRestante > 0.01) {
-      setShowPartialWarning(true);
-      return;
+    const balanceOwed = folio?.balance ?? 0;
+    // When the folio is already fully covered (zero or negative balance), skip the
+    // "must enter an amount" guard — no new payment is needed.
+    if (balanceOwed > 0.01) {
+      if (paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
+        toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
+        return;
+      }
+      if (saldoRestante > 0.01) {
+        setShowPartialWarning(true);
+        return;
+      }
     }
     doSubmit();
   }
 
   async function doSubmit() {
-    if (paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
+    const balanceOwed = folio?.balance ?? 0;
+    // Same guard: only require amounts when there is an actual outstanding balance.
+    if (balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
       toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
       return;
     }
@@ -461,10 +468,12 @@ export function PrefacturaDialog({
       const receiptType = RECEIPT_TYPE_MAP[tipo] || "cierre_habitacion";
 
       // 1. Register each payment row — collect IDs for invoice linking
+      // Skip rows with zero amounts (happens when balance is already fully covered).
       const createdPaymentIds: number[] = [];
       for (const row of paymentRows) {
         const netAmount = parseFloat(row.amount) || 0;
         const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
+        if (netAmount <= 0 && retMonto <= 0) continue; // nothing to register
         const grossAmount = (netAmount + retMonto).toFixed(2);
         const notes = retMonto > 0
           ? JSON.stringify({ retencion: { tipo: row.retencionTipo, monto: retMonto, neto: netAmount } })
@@ -978,7 +987,18 @@ export function PrefacturaDialog({
               </div>
             </div>
 
-            {/* Payment rows */}
+            {/* Zero-balance notice: no new payment required */}
+            {(folio?.balance ?? 0) <= 0.01 && (
+              <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
+                <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+                <p className="text-sm text-green-800 dark:text-green-300">
+                  El saldo está cubierto por pagos anteriores — no es necesario registrar un nuevo cobro. Podés confirmar directamente.
+                </p>
+              </div>
+            )}
+
+            {/* Payment rows — only shown when there is an outstanding balance */}
+            {(folio?.balance ?? 0) > 0.01 && (
             <div>
               <Label className="text-sm font-medium mb-2 block">Formas de cobro</Label>
               <div className="space-y-3">
@@ -1075,8 +1095,10 @@ export function PrefacturaDialog({
                 <Plus className="h-4 w-4 mr-1" />Agregar forma de pago
               </Button>
             </div>
+            )}
 
-            {/* Running totals */}
+            {/* Running totals — only shown when there is an outstanding balance */}
+            {(folio?.balance ?? 0) > 0.01 && (
             <Card className={saldoRestante > 0.01 ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10" : "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10"}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between text-sm">
@@ -1096,6 +1118,7 @@ export function PrefacturaDialog({
                 </div>
               </CardContent>
             </Card>
+            )}
 
             {submitError && (
               <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/20 px-4 py-3 flex items-start gap-2">
