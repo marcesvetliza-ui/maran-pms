@@ -167,6 +167,10 @@ export function PrefacturaDialog({
 }: PrefacturaDialogProps) {
   const { toast } = useToast();
 
+  // Tracks whether the folio has been initialized for the current open session
+  // (false = first load, true = subsequent re-fetches after NC/ND/reversal)
+  const folioInitializedRef = useRef(false);
+
   // Steps
   const [step, setStep] = useState(1);
 
@@ -261,7 +265,7 @@ export function PrefacturaDialog({
     enabled: open && !!reservationId,
   });
 
-  // On open: reset step
+  // On open: reset step and mark folio as not-yet-initialized for this session
   useEffect(() => {
     if (open) {
       setStep(1);
@@ -270,27 +274,69 @@ export function PrefacturaDialog({
       setSubmitError(null);
       setItemDescriptions({});
       setEditingId(null);
+      folioInitializedRef.current = false;
     }
   }, [open]);
 
-  // When folio loads: select all billable items (exclude transfer entries), pre-fill payment amount
+  // When folio loads or balance changes: sync selected items and payment amount.
+  //
+  // Initial load (folioInitializedRef = false): full reset — select all billable
+  // items and create a fresh single payment row for the full balance.
+  //
+  // Subsequent re-fetches (folioInitializedRef = true, triggered by NC/ND/reversal
+  // actions inside the dialog): keep the user's existing payment rows (method,
+  // reference, etc.) but update the amount so the row always reflects the current
+  // balance.  If the user split into multiple rows we leave them untouched and let
+  // the saldoRestante indicator surface any mismatch — they can adjust manually.
   useEffect(() => {
     if (!folio || !open) return;
-    const allIds = new Set<string>(["accommodation"]);
-    (folio.charges || []).forEach((c: any) => {
-      if (c.category !== "transfer_out" && c.category !== "transfer_in") {
-        allIds.add(String(c.id));
+
+    if (!folioInitializedRef.current) {
+      // ── Initial load ────────────────────────────────────────────────────────
+      folioInitializedRef.current = true;
+
+      const allIds = new Set<string>(["accommodation"]);
+      (folio.charges || []).forEach((c: any) => {
+        if (c.category !== "transfer_out" && c.category !== "transfer_in") {
+          allIds.add(String(c.id));
+        }
+      });
+      setSelectedIds(allIds);
+
+      if (folio.balance > 0.01) {
+        setPaymentRows([{
+          id: newRowId(), amount: String(folio.balance.toFixed(2)), method: "efectivo",
+          reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "",
+        }]);
       }
-    });
-    setSelectedIds(allIds);
-    if (folio.balance > 0.01) {
-      setPaymentRows([{
-        id: newRowId(), amount: String(folio.balance.toFixed(2)), method: "efectivo",
-        reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "",
-      }]);
+    } else {
+      // ── Re-fetch after NC / ND / reversal ───────────────────────────────────
+      // Also re-sync selected items in case new charges appeared or were voided.
+      const allIds = new Set<string>(["accommodation"]);
+      (folio.charges || []).forEach((c: any) => {
+        if (c.category !== "transfer_out" && c.category !== "transfer_in") {
+          allIds.add(String(c.id));
+        }
+      });
+      setSelectedIds(allIds);
+
+      // Update payment amount only when there is exactly one payment row so we
+      // do not silently discard a custom multi-row split the user already set up.
+      setPaymentRows(prev => {
+        if (prev.length === 1) {
+          return [{
+            ...prev[0],
+            amount: folio.balance > 0.01 ? String(folio.balance.toFixed(2)) : prev[0].amount,
+          }];
+        }
+        return prev;
+      });
     }
+  // folio?.balance drives both the payment pre-fill and the saldoRestante display;
+  // using it (rather than grandTotal) ensures a balance change from a voided charge
+  // or NC that leaves grandTotal unchanged still triggers a re-sync.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folio?.grandTotal, open]);
+  }, [folio?.balance, open]);
 
   // When reservation loads: auto-fill client data
   useEffect(() => {
