@@ -1,5 +1,14 @@
 import { useState } from "react";
 import { fmtMoney } from "@/lib/utils";
+
+/** Strip machine-readable transfer/reversal tags from a charge description before display. */
+function stripTransferTags(description: string): string {
+  return description
+    .replace(/\s*\[xfer:[^\]]+\]/g, "")
+    .replace(/\s*\[corr:[^\]]+\]/g, "")
+    .replace(/\s*\[res:[^\]]+\]/g, "")
+    .trim();
+}
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import {
@@ -1932,7 +1941,7 @@ export default function GroupDetailPage() {
                             <div key={gc.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-charge-${gc.id}`}>
                               <div className="flex items-center gap-3">
                                 <Badge variant="outline" className="text-xs">{gc.category}</Badge>
-                                <span className="font-medium">{gc.description}</span>
+                                <span className="font-medium">{stripTransferTags(gc.description)}</span>
                                 <span className="text-xs text-muted-foreground">{fmtDate(gc.date)}</span>
                               </div>
                               <div className="flex items-center gap-2">
@@ -2103,7 +2112,7 @@ export default function GroupDetailPage() {
                                       <div key={c.id} className="flex items-center justify-between text-sm bg-background rounded px-2 py-1.5">
                                         <div className="flex items-center gap-2">
                                           <Badge variant="outline" className="text-xs">{c.category}</Badge>
-                                          <span>{c.description}</span>
+                                          <span>{stripTransferTags(c.description)}</span>
                                           <span className="text-xs text-muted-foreground">{fmtDate(c.date)}</span>
                                           {masterFolio.config === "all" && (
                                             <Badge className="bg-primary/10 text-primary text-xs border-0">Folio Maestro</Badge>
@@ -2391,7 +2400,7 @@ export default function GroupDetailPage() {
                           <p className="text-muted-foreground">Consumos:</p>
                           {res.charges.map((c: any, i: number) => (
                             <div key={i} className="flex justify-between">
-                              <span>{c.description}</span>
+                              <span>{stripTransferTags(c.description)}</span>
                               <span>${fmtMoney(c.amount)}</span>
                             </div>
                           ))}
@@ -2430,7 +2439,7 @@ export default function GroupDetailPage() {
                     <CardContent className="pt-4 space-y-1 text-sm">
                       {invoiceData.groupCharges.map((c: any, i: number) => (
                         <div key={i} className="flex justify-between">
-                          <span>{c.description}{c.category ? <span className="text-muted-foreground ml-1">({c.category})</span> : null}</span>
+                          <span>{stripTransferTags(c.description)}{c.category ? <span className="text-muted-foreground ml-1">({c.category})</span> : null}</span>
                           <span className="font-medium">${fmtMoney(c.amount)}</span>
                         </div>
                       ))}
