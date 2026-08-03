@@ -357,8 +357,18 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
       const isTransferOut = charge.category === "transfer_out";
       const isTransferIn  = charge.category === "transfer_in";
       const isTransfer    = isTransferOut || isTransferIn;
+      const isND          = charge.category === "nota_debito";
 
-      if (isTransfer) {
+      if (isND) {
+        doc.rect(x0, y, W, 14).fillColor("#fef3e2").fill()
+          .rect(x0, y, W, 14).strokeColor("#f59e0b").lineWidth(0.5).stroke();
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#92400e");
+        doc.text(charge.description, x0 + 4, y + 3, { width: 300 });
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#92400e");
+        doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
+        doc.text(`$ ${fPeso(charge.amount)}`, x0 + 402, y + 3, { width: 125, align: "right" });
+        doc.font("Helvetica").fillColor("#000");
+      } else if (isTransfer) {
         doc.rect(x0, y, W, 14).fillColor("#e8f4fd").fill()
           .rect(x0, y, W, 14).strokeColor("#b3d4f5").stroke();
         const cleanDesc = cleanTransferDesc(charge.description);
