@@ -136,6 +136,22 @@ async function postReversal(
   return { status: res.status, body: (await res.json()) as any };
 }
 
+async function postReversalWithBody(
+  baseUrl: string,
+  reservationId: string,
+  body: Record<string, unknown>
+) {
+  const res = await fetch(
+    `${baseUrl}/api/reservations/${reservationId}/reverse-transfer-charge`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  return { status: res.status, body: (await res.json()) as any };
+}
+
 // ─── Base charge fixture (an active transfer_out from area folio) ─────────────
 const ACTIVE_TRANSFER_OUT = {
   id: "charge-spa-1",
@@ -201,6 +217,35 @@ describe("double-reversal guard — /api/reservations/:id/reverse-transfer-charg
   // Tear down after each test.
   // Using `afterEach` is not imported — call close inline via try/finally in
   // each test, or just call it here using a finalizer approach.
+
+  // ── Guard layer 0: chargeId missing from request body ────────────────────
+  it("returns 400 with a clear message when chargeId is absent from the request body", async () => {
+    // No storage mocks needed — the route must reject before touching the DB.
+    const { status, body } = await postReversalWithBody(baseUrl, "res-100", {});
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/chargeId|se requiere/i);
+
+    close();
+  });
+
+  it("returns 400 when chargeId is explicitly null in the request body", async () => {
+    const { status, body } = await postReversalWithBody(baseUrl, "res-100", { chargeId: null });
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/chargeId|se requiere/i);
+
+    close();
+  });
+
+  it("returns 400 when chargeId is an empty string in the request body", async () => {
+    const { status, body } = await postReversalWithBody(baseUrl, "res-100", { chargeId: "" });
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/chargeId|se requiere/i);
+
+    close();
+  });
 
   // ── Guard layer 1: charge.status !== "active" ──────────────────────────────
   it("returns 400 when the charge has already been cancelled/reversed (status !== active)", async () => {
