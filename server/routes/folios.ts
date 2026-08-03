@@ -185,18 +185,18 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
         const isTransferIn = m.type === "transfer_in";
         const isTransfer = isTransferOut || isTransferIn;
         const isNotaDebito = (m as any).sourceType === "nota_debito" || (m as any).receiptType?.startsWith("ND");
-        const rowBg = isTransferOut ? "#fff7ed" : isTransferIn ? "#eff6ff" : isNotaDebito ? "#eff6ff" : (i % 2 === 0 ? "#ffffff" : "#fafafa");
+        const rowBg = isTransferOut ? "#fff7ed" : isTransferIn ? "#eff6ff" : isNotaDebito ? "#fffbeb" : (i % 2 === 0 ? "#ffffff" : "#fafafa");
         doc.rect(L, y, cW, ROW_H).fill(rowBg).stroke("#eeeeee");
         // Left accent stripe for transfer rows and ND rows
         if (isTransfer) {
           doc.rect(L, y, 3, ROW_H).fill(isTransferOut ? "#f97316" : "#3b82f6");
         } else if (isNotaDebito) {
-          doc.rect(L, y, 3, ROW_H).fill("#0369a1");
+          doc.rect(L, y, 3, ROW_H).fill("#d97706");
         }
 
         doc.font("Helvetica").fontSize(8).fillColor(MUTED)
            .text(fmtDate(m.createdAt ?? ""), COL.date + 4, y + 5, { width: 92 });
-        doc.fillColor(isTransferOut ? "#c2410c" : isTransferIn ? "#1d4ed8" : isNotaDebito ? "#0369a1" : DARK)
+        doc.fillColor(isTransferOut ? "#c2410c" : isTransferIn ? "#1d4ed8" : isNotaDebito ? "#92400e" : DARK)
            .text(getMovementLabel(m as any), COL.type + 4, y + 5, { width: 90 });
         const payLabel = m.paymentMethod ? (PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod) : "—";
         doc.fillColor(MUTED)
