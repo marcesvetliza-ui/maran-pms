@@ -3915,15 +3915,20 @@ function ReservationDetailDialog({
 
             {/* ── Movimientos cronológicos del folio ─────────────── */}
             {(() => {
-              const chargeItems = consumptionCharges.map((c: any) => ({
-                sortDate: new Date(c.date || c.createdAt || 0).getTime(),
-                dateLabel: (() => { const d = new Date(c.date || c.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
-                type: "cargo" as const,
-                label: c.description,
-                amount: parseFloat(c.amount || "0"),
-                isAnulado: c.status === "anulado",
-                id: `cargo-${c.id}`,
-              }));
+              const chargeItems = consumptionCharges.map((c: any) => {
+                const isXferIn  = c.category === "transfer_in";
+                const isXferOut = c.category === "transfer_out";
+                const itemType  = isXferIn ? "transfer_in" : isXferOut ? "transfer_out" : "cargo";
+                return {
+                  sortDate: new Date(c.date || c.createdAt || 0).getTime(),
+                  dateLabel: (() => { const d = new Date(c.date || c.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                  type: itemType as "cargo" | "transfer_in" | "transfer_out",
+                  label: c.description,
+                  amount: parseFloat(c.amount || "0"),
+                  isAnulado: c.status === "anulado",
+                  id: `cargo-${c.id}`,
+                };
+              });
               const paymentItems = (payments || []).map((p: any) => {
                 const invRef = (() => { try { return p.invoiceRef ? JSON.parse(p.invoiceRef) : null; } catch { return null; } })();
                 const invBadge = invRef
@@ -3972,9 +3977,17 @@ function ReservationDetailDialog({
               if (allItems.length === 0) return null;
               // Render a label that may contain machine-readable transfer tags ([res:], [xfer:], etc.)
               // If a [res:pairedResId] tag is present and the clean text contains Hab.XXX, render a clickable link.
+              // Otherwise, strip any remaining machine-readable tags before display.
               const renderLabel = (rawLabel: string) => {
                 const resMatch = rawLabel.match(/\[res:([^\]]+)\]/);
-                if (!resMatch) return <span className="flex-1 truncate">{rawLabel}</span>;
+                if (!resMatch) {
+                  const cleanFallback = rawLabel
+                    .replace(/\s*\[xfer:[^\]]+\]/g, "")
+                    .replace(/\s*\[corr:[^\]]+\]/g, "")
+                    .replace(/\s*\[rev:[^\]]+\]/g, "")
+                    .trim();
+                  return <span className="flex-1 truncate">{cleanFallback}</span>;
+                }
                 const pairedResId = resMatch[1];
                 const clean = rawLabel
                   .replace(/\s*\[xfer:[^\]]+\]/g, "")
@@ -4003,14 +4016,16 @@ function ReservationDetailDialog({
                 );
               };
               const colorMap = {
-                cargo:       "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
-                pago:        "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
-                factura:     "border-purple-200 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-800",
-                anulacion:   "border-orange-200 bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-800",
-                nota_debito: "border-sky-200 bg-sky-50/50 dark:bg-sky-900/10 dark:border-sky-800",
+                cargo:        "border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800",
+                pago:         "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800",
+                factura:      "border-purple-200 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-800",
+                anulacion:    "border-orange-200 bg-orange-50/50 dark:bg-orange-900/10 dark:border-orange-800",
+                nota_debito:  "border-sky-200 bg-sky-50/50 dark:bg-sky-900/10 dark:border-sky-800",
+                transfer_in:  "border-violet-200 bg-violet-50/50 dark:bg-violet-900/10 dark:border-violet-800",
+                transfer_out: "border-violet-200 bg-violet-50/50 dark:bg-violet-900/10 dark:border-violet-800",
               };
-              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura", anulacion: "Anulación", nota_debito: "Nota de Débito" };
-              const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300", anulacion: "text-orange-600 dark:text-orange-400", nota_debito: "text-sky-700 dark:text-sky-300" };
+              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura", anulacion: "Anulación", nota_debito: "Nota de Débito", transfer_in: "Transferencia ↓", transfer_out: "Transferencia ↑" };
+              const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300", anulacion: "text-orange-600 dark:text-orange-400", nota_debito: "text-sky-700 dark:text-sky-300", transfer_in: "text-violet-700 dark:text-violet-300", transfer_out: "text-violet-700 dark:text-violet-300" };
               return (
                 <div className="border rounded-lg">
                   <div className="p-3 border-b bg-muted/50 flex items-center gap-2">
@@ -4026,6 +4041,8 @@ function ReservationDetailDialog({
                           <Badge className="text-[10px] shrink-0 px-1 py-0 h-4 bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700">{labelMap[item.type]}</Badge>
                         ) : item.type === "nota_debito" ? (
                           <Badge className="text-[10px] shrink-0 px-1 py-0 h-4 bg-sky-100 text-sky-700 border border-sky-300 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-700">{labelMap[item.type]}</Badge>
+                        ) : item.type === "transfer_in" || item.type === "transfer_out" ? (
+                          <Badge className="text-[10px] shrink-0 px-1 py-0 h-4 bg-violet-100 text-violet-700 border border-violet-300 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-700">{labelMap[item.type]}</Badge>
                         ) : (
                           <Badge variant="outline" className="text-[10px] shrink-0 px-1 py-0 h-4">{labelMap[item.type]}</Badge>
                         )}
