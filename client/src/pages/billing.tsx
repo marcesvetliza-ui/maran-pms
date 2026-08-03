@@ -649,6 +649,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const isFC = tipo === "FC" || tipo === "FT";
   const isNonFiscal = NON_FISCAL_TIPOS_SET.has(tipo);
   const ambiente: AmbienteMode = config?.arcaAmbiente ?? "ficticio";
+  const faNeedsCuit = isFA && !cuit.replace(/-/g, ""); // FA/FM requires a CUIT before proceeding
 
   function handleClose() {
     if (linkPending || linkError) {
@@ -881,6 +882,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
               Homologación — CAE real de ARCA pero sin efecto fiscal (ambiente de pruebas)
             </p>
           )}
+          {faNeedsCuit && (
+            <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>Factura A requiere <strong>CUIT</strong>. Buscá la empresa o agencia en el buscador de abajo para autocompletar, o ingresá el CUIT manualmente.</span>
+            </div>
+          )}
         </div>
 
         {cashArea && (
@@ -1080,7 +1087,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={mutation.isPending} data-testid="btn-emitir-confirmar">
+          <Button onClick={handleSubmit} disabled={mutation.isPending || faNeedsCuit} data-testid="btn-emitir-confirmar">
             Revisar →
           </Button>
         </DialogFooter>

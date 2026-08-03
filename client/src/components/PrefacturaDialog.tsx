@@ -470,6 +470,8 @@ export function PrefacturaDialog({
 
   const saldoRestante = (folio?.balance || 0) - totalPayments;
   const isFiscalTipo = !NON_FISCAL.has(tipo);
+  const isFacturaA = tipo === "FA" || tipo === "FM"; // Factura A and MiPyme A require a company/agency entity with CUIT
+  const facturaANeedsEntity = isFacturaA && billingTarget === "guest";
   const ambiente: string = billingConfig?.arcaAmbiente ?? "ficticio";
 
   // Description editing helpers
@@ -509,6 +511,10 @@ export function PrefacturaDialog({
     // Same guard: only require amounts when there is an actual outstanding balance.
     if (balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
       toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
+      return;
+    }
+    if (isFacturaA && billingTarget === "guest") {
+      toast({ title: "Factura A requiere una empresa o agencia", description: "Cambiá el destinatario a Empresa o Agencia y seleccioná el receptor.", variant: "destructive" });
       return;
     }
     if (billingTarget === "company" && !billingEntityId) {
@@ -951,6 +957,12 @@ export function PrefacturaDialog({
                   {!isFiscalTipo && (
                     <p className="text-xs text-muted-foreground mt-1">Comprobante interno, sin CAE</p>
                   )}
+                  {facturaANeedsEntity && (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                      <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                      <span>Factura A requiere facturar a una <strong>empresa</strong> o <strong>agencia</strong>. Cambiá el destinatario arriba y seleccioná el receptor para poder continuar.</span>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Punto de venta</Label>
@@ -1052,7 +1064,7 @@ export function PrefacturaDialog({
               </Button>
               <Button
                 onClick={() => setStep(2)}
-                disabled={folioLoading || selectedIds.size === 0}
+                disabled={folioLoading || selectedIds.size === 0 || facturaANeedsEntity}
               >
                 Siguiente — Cobro <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
