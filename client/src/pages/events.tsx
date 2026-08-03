@@ -126,6 +126,7 @@ type EventTableType = {
   receiptType: string | null;
   invoiceId?: number | null;
   invoiceRef?: string | null;
+  ncId?: number | null;
   closedAt: string | null;
   createdAt: string;
   charges: EventTableCharge[];
@@ -408,6 +409,18 @@ export default function EventsPage() {
       return res.json();
     },
     enabled: !!selectedTable?.invoiceId,
+    staleTime: 60000,
+  });
+
+  // NC invoice data for a table that had its factura reversed
+  const { data: tableNcInvoice, refetch: refetchTableNcInvoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", selectedTable?.ncId],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices/${selectedTable!.ncId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!selectedTable?.ncId,
     staleTime: 60000,
   });
 
@@ -760,6 +773,24 @@ export default function EventsPage() {
       }
       // Update selectedTable so the badge shows without reopening the dialog
       if (data) setSelectedTable((prev) => prev ? { ...prev, status: data.status || "invoiced", receiptType: data.receiptType, invoiceId: data.invoiceId, closedAt: data.closedAt } : prev);
+    },
+    onError: (error: any) => {
+      toast({ title: parseApiError(error), variant: "destructive" });
+    },
+  });
+
+  const emitTableNcMutation = useMutation({
+    mutationFn: async ({ eventId, tableId }: { eventId: string; tableId: string }) => {
+      const res = await apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/nc`, {});
+      return res.json();
+    },
+    onSuccess: async (data: any) => {
+      await refetchTables();
+      if (data?.ncId) {
+        setSelectedTable((prev) => prev ? { ...prev, ncId: data.ncId } : prev);
+        await refetchTableNcInvoice();
+        toast({ title: "Nota de Crédito emitida correctamente" });
+      }
     },
     onError: (error: any) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -2888,6 +2919,47 @@ export default function EventsPage() {
                             className="inline-flex items-center gap-1.5 text-xs text-purple-600 dark:text-purple-400 hover:underline"
                           >
                             <FileText className="h-3.5 w-3.5" /> Ver factura PDF
+                          </a>
+                          {!selectedTable.ncId && (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="w-full mt-1"
+                              disabled={emitTableNcMutation.isPending}
+                              onClick={() => emitTableNcMutation.mutate({ eventId: selectedEvent!.id, tableId: selectedTable.id })}
+                              data-testid="button-emit-table-nc"
+                            >
+                              {emitTableNcMutation.isPending ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo NC...</>
+                              ) : (
+                                <><Ban className="h-4 w-4 mr-2" />Emitir NC (Anular Factura)</>
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {tableNcInvoice && (
+                        <div className="p-3 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm space-y-2" data-testid="table-nc-badge">
+                          <div className="flex items-center gap-2 font-semibold text-red-800 dark:text-red-200">
+                            <Ban className="h-4 w-4 shrink-0" />
+                            <span>
+                              {tableNcInvoice.tipo_comprobante === "NCA" ? "Nota de Crédito A" : tableNcInvoice.tipo_comprobante === "NCB" ? "Nota de Crédito B" : tableNcInvoice.tipo_comprobante}
+                              {" "}
+                              {String(tableNcInvoice.punto_venta ?? 1).padStart(4, "0")}-{String(tableNcInvoice.numero ?? 0).padStart(8, "0")}
+                            </span>
+                          </div>
+                          {tableNcInvoice.cae && (
+                            <p className="text-xs text-red-700 dark:text-red-300">
+                              CAE: <span className="font-mono">{tableNcInvoice.cae}</span>
+                            </p>
+                          )}
+                          <a
+                            href={`/api/billing/invoices/${selectedTable.ncId}/pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400 hover:underline"
+                          >
+                            <FileText className="h-3.5 w-3.5" /> Ver NC PDF
                           </a>
                         </div>
                       )}

@@ -816,6 +816,7 @@ export const eventTables = pgTable("event_tables", {
   reservationId: varchar("reservation_id"),
   receiptType: text("receipt_type"),
   invoiceId: integer("invoice_id"),
+  ncId: integer("nc_id"),
   closedAt: timestamp("closed_at"),
   createdAt: timestamp("created_at"),
 });

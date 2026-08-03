@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { eventPayments } from "@shared/schema";
+import { eventPayments, salesInvoices } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, and } from "drizzle-orm";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "../eventPdfs";
@@ -798,6 +798,66 @@ export function registerEventsRoutes(app: Express) {
       res.json({ ...updated, invoiceId });
     } catch (error) {
       res.status(500).json({ error: "Error closing table" });
+    }
+  });
+
+  // Emit Nota de Crédito for a table-level AFIP invoice
+  app.post("/api/events/:eventId/tables/:tableId/nc", requireAuth, async (req, res) => {
+    try {
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Mesa no encontrada" });
+      if (!table.invoiceId) {
+        return res.status(400).json({ error: "La mesa no tiene una factura AFIP emitida" });
+      }
+      if ((table as any).ncId) {
+        return res.status(400).json({ error: "Esta mesa ya tiene una Nota de Crédito emitida" });
+      }
+
+      // Fetch original invoice
+      const [originalInvoice] = await db.select().from(salesInvoices).where(eq(salesInvoices.id, table.invoiceId));
+      if (!originalInvoice) return res.status(404).json({ error: "Factura original no encontrada" });
+
+      // Determine NC tipo: FA→NCA, FB/FC→NCB
+      const ncTipo: "NCA" | "NCB" = originalInvoice.tipoComprobante === "FA" ? "NCA" : "NCB";
+
+      // Build NC items from original invoice items
+      const originalItems = (originalInvoice.items as any[]) || [];
+      let ncItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21" | "10.5" | "exento" | "no_gravado"; subtotalNeto: number; subtotal: number }[];
+      if (originalItems.length > 0) {
+        ncItems = originalItems.map((item: any) => ({
+          descripcion: item.descripcion || "Anulación",
+          cantidad: item.cantidad || 1,
+          precioUnitario: item.precioUnitario || 0,
+          alicuotaIva: (item.alicuotaIva || "21") as "21" | "10.5" | "exento" | "no_gravado",
+          subtotalNeto: item.subtotalNeto || 0,
+          subtotal: item.subtotal || 0,
+        }));
+      } else {
+        const gross = parseFloat(originalInvoice.montoTotal || "0");
+        const net = parseFloat((gross / 1.21).toFixed(4));
+        ncItems = [{ descripcion: `NC Mesa ${table.tableNumber}`, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross }];
+      }
+
+      const nc = await emitirFactura({
+        tipoComprobante: ncTipo,
+        cliente: {
+          razonSocial: originalInvoice.clienteRazonSocial || "CONSUMIDOR FINAL",
+          cuit: originalInvoice.clienteCuit || undefined,
+          dni: originalInvoice.clienteDni || undefined,
+          condicionIva: originalInvoice.clienteCondicionIva || "consumidor_final",
+        },
+        items: ncItems,
+        facturaOriginalId: originalInvoice.id,
+        operador: (req as any).user?.fullName || (req as any).user?.username,
+      });
+
+      // Persist NC id on the table record
+      await storage.updateEventTable(req.params.tableId, { ncId: nc.id } as any);
+
+      res.json({ ncId: nc.id, nc });
+    } catch (e: any) {
+      console.error("[Billing] Error emitiendo NC mesa evento:", e);
+      res.status(500).json({ error: e?.message || "Error al emitir la Nota de Crédito" });
     }
   });
 
