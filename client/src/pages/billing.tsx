@@ -300,7 +300,15 @@ export default function BillingPage() {
                                     <Download className="w-3.5 h-3.5" />
                                   </Button>
                                   {f.estado === "emitida" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700" onClick={() => setShowNC(f.id)} title="Emitir Nota de Crédito" data-testid={`btn-nc-${f.id}`}>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className={`h-7 w-7 p-0 ${f.nota_credito_id != null ? "text-muted-foreground opacity-50" : "text-orange-600 hover:text-orange-700"}`}
+                                      onClick={() => { if (f.nota_credito_id == null) setShowNC(f.id); }}
+                                      title={f.nota_credito_id != null ? "Ya existe una NC en curso para este comprobante" : "Emitir Nota de Crédito"}
+                                      disabled={f.nota_credito_id != null}
+                                      data-testid={`btn-nc-${f.id}`}
+                                    >
                                       <XCircle className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
@@ -1147,6 +1155,24 @@ export function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; o
   });
 
   if (!invoice) return null;
+
+  // Guard: if an active NC already exists for this invoice, block the dialog entirely
+  if (invoice.nota_credito_id != null && invoice.estado !== "anulada") {
+    return (
+      <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Nota de Crédito</DialogTitle></DialogHeader>
+          <div className="p-3 rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-300 text-sm text-amber-800 dark:text-amber-200">
+            Ya existe una NC en curso para este comprobante. No es posible emitir una segunda nota de crédito.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   const tipoNC: Record<string, string> = { FA: "Nota de Crédito A", FT: "Nota de Crédito T", FM: "Nota de Crédito MiPyme A" };
   const tipoNCLabel = tipoNC[invoice.tipo_comprobante] ?? "Nota de Crédito B";
   const totalOriginal = parseFloat(invoice.monto_total) || 0;
