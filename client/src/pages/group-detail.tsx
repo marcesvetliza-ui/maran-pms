@@ -2781,6 +2781,35 @@ export default function GroupDetailPage() {
                   Al registrar el pago se abrirá el formulario de emisión con CAE real de ARCA.
                 </p>
               )}
+              {groupPaymentReceiptType === "factura_a" && groupPaymentMethod !== "cuenta_corriente" && (
+                <div className="mt-2 space-y-2">
+                  <Label className="text-xs text-muted-foreground">Empresa / Agencia (requerido para Factura A)</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Select value={groupPaymentCcEntityType} onValueChange={v => { setGroupPaymentCcEntityType(v as "company" | "agency"); setGroupPaymentCcEntityId(""); }}>
+                      <SelectTrigger data-testid="select-group-factura-entity-type"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="company">Empresa</SelectItem>
+                        <SelectItem value="agency">Agencia</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={groupPaymentCcEntityId} onValueChange={setGroupPaymentCcEntityId}>
+                      <SelectTrigger data-testid="select-group-factura-entity-id">
+                        <SelectValue placeholder={groupPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(groupPaymentCcEntityType === "company" ? companies : agencies).map((e: any) => (
+                          <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {!groupPaymentCcEntityId && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      Seleccione una empresa o agencia para poder emitir Factura A.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
@@ -2843,7 +2872,7 @@ export default function GroupDetailPage() {
                 }
                 groupPaymentMutation.mutate();
               }}
-              disabled={!groupPaymentAmount || !groupPaymentMethod || groupPaymentMutation.isPending}
+              disabled={!groupPaymentAmount || !groupPaymentMethod || groupPaymentMutation.isPending || (groupPaymentReceiptType === "factura_a" && !groupPaymentCcEntityId)}
               data-testid="button-confirm-group-payment"
             >
               <CreditCard className="mr-2 h-4 w-4" />
@@ -2871,7 +2900,7 @@ export default function GroupDetailPage() {
               exento: "Exento",
             };
             const entityList = groupPaymentCcEntityType === "company" ? companies : agencies;
-            const entity = groupPaymentMethod === "cuenta_corriente" && groupPaymentCcEntityId
+            const entity = (groupPaymentMethod === "cuenta_corriente" || groupPaymentReceiptType === "factura_a") && groupPaymentCcEntityId
               ? (entityList as any[]).find((e: any) => e.id === groupPaymentCcEntityId)
               : null;
             return {
@@ -3010,9 +3039,15 @@ export default function GroupDetailPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Al registrar el pago se abrirá el formulario de emisión con CAE real de ARCA.
-                    </p>
+                    {masterPaymentCcEntityId ? (
+                      <p className="text-xs text-muted-foreground">
+                        Al registrar el pago se abrirá el formulario de emisión con CAE real de ARCA.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        Seleccione una empresa o agencia para poder emitir Factura A.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -3022,7 +3057,7 @@ export default function GroupDetailPage() {
             <Button variant="outline" onClick={() => setShowMasterPaymentDialog(false)}>Cancelar</Button>
             <Button
               onClick={() => masterPaymentMutation.mutate()}
-              disabled={!masterPaymentAmount || parseFloat(masterPaymentAmount) <= 0 || masterPaymentMutation.isPending}
+              disabled={!masterPaymentAmount || parseFloat(masterPaymentAmount) <= 0 || masterPaymentMutation.isPending || (masterPaymentReceiptType === "factura_a" && !masterPaymentCcEntityId)}
               data-testid="button-confirm-master-payment"
             >
               {masterPaymentMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : "Registrar pago"}
