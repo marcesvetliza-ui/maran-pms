@@ -271,9 +271,9 @@ function GroupFormDialog({
           });
           successBlocks++;
           // Don't add successful blocks to updatedBlocks - they're done
-        } catch {
+        } catch (blockErr: any) {
           failedBlocks++;
-          updatedBlocks.push({ ...block, error: "Error al crear bloque - intente de nuevo" });
+          updatedBlocks.push({ ...block, error: parseApiError(blockErr) || "Error al crear bloque - intente de nuevo" });
         }
       }
 
