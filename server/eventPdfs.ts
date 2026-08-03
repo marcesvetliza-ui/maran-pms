@@ -95,6 +95,188 @@ function desglosarAsistentes(event: EventWithDetails): string {
 const fmtMoney = (v: string | number) =>
   parseFloat(String(v)).toLocaleString("es-AR", { minimumFractionDigits: 2 });
 
+export interface TableSummaryRow {
+  tableNumber: number;
+  label: string | null;
+  seats: number | null;
+  status: string;
+  receiptType: string | null;
+  invoiceRef: string | null;
+  ncId: number | null;
+  totalCharges: number;
+  totalPayments: number;
+  balance: number;
+}
+
+export async function generateTablesResumenPdf(
+  eventName: string,
+  eventCode: string,
+  tables: TableSummaryRow[],
+): Promise<Buffer> {
+  return new Promise((resolve) => {
+    const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end",  () => resolve(Buffer.concat(chunks)));
+
+    const pageW    = 595;
+    const pageH    = 842;
+    const margin   = 36;
+    const contentW = pageW - margin * 2;
+    const FOOTER_H = 60;
+    const safeBottom = pageH - FOOTER_H - 10;
+
+    const drawContinuationHeader = () => {
+      doc.rect(0, 0, pageW, 28).fill(NAVY);
+      doc.rect(0, 28, pageW, 3).fill(ORANGE);
+      doc.fillColor("#ffffff").fontSize(8).font("Helvetica-Bold")
+        .text(`RESUMEN DE MESAS — ${eventName} (${eventCode}) — continuación`, margin, 9, { width: contentW });
+      return 31 + 8;
+    };
+
+    let y = 0;
+
+    const checkOverflow = (neededHeight: number) => {
+      if (y + neededHeight > safeBottom) {
+        pdfBrandedFooter(doc, pageW, pageH, margin, contentW);
+        doc.addPage();
+        y = drawContinuationHeader();
+      }
+    };
+
+    // ── HEADER ──────────────────────────────────────────────────────────────
+    const stripeEnd = pdfBrandedHeader(doc, pageW, "RESUMEN DE MESAS");
+    const titleY = stripeEnd + 10;
+
+    doc.fillColor("#888888").fontSize(6.5).font("Helvetica")
+      .text("RESUMEN DE MESAS — USO INTERNO", margin, titleY, { characterSpacing: 2 });
+    doc.fillColor("#1a1a1a").fontSize(15).font("Helvetica-Bold")
+      .text(HOTEL_NAME, margin, titleY + 10, { width: 340 });
+    doc.fillColor("#666666").fontSize(8).font("Helvetica")
+      .text("Hotel & Spa · Paraná, Entre Ríos", margin, titleY + 28);
+
+    const codeBoxW = 130;
+    const codeBoxX = pageW - margin - codeBoxW;
+    doc.roundedRect(codeBoxX, titleY, codeBoxW, 40, 5).fillAndStroke("#f8f4ef", ORANGE);
+    doc.fillColor("#888888").fontSize(6.5).font("Helvetica")
+      .text("CÓDIGO DE EVENTO", codeBoxX, titleY + 6, { width: codeBoxW, align: "center", characterSpacing: 0.3 });
+    doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
+      .text(eventCode, codeBoxX, titleY + 17, { width: codeBoxW, align: "center" });
+    doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
+      .text(new Date().toLocaleDateString("es-AR"), codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
+
+    y = titleY + 48;
+    doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+    y += 8;
+
+    doc.fillColor("#1a1a1a").fontSize(12).font("Helvetica-Bold")
+      .text(eventName, margin, y);
+    y += 18;
+
+    // ── TABLE HEADER ROW ─────────────────────────────────────────────────────
+    checkOverflow(60);
+    const colMesa  = margin;
+    const colEstado = margin + 60;
+    const colComp  = margin + 130;
+    const colCargos = margin + 280;
+    const colPagado = margin + 360;
+    const colSaldo  = margin + 440;
+
+    doc.roundedRect(margin, y, contentW, 18, 3).fill(NAVY);
+    doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
+    const hY = y + 5;
+    doc.text("Mesa",      colMesa,   hY, { width: 55 });
+    doc.text("Estado",    colEstado, hY, { width: 65 });
+    doc.text("Comprobante", colComp, hY, { width: 150 });
+    doc.text("Cargos",    colCargos, hY, { width: 75, align: "right" });
+    doc.text("Pagado",    colPagado, hY, { width: 75, align: "right" });
+    doc.text("Saldo",     colSaldo,  hY, { width: contentW - (colSaldo - margin), align: "right" });
+    y += 20;
+
+    // ── TABLE ROWS ───────────────────────────────────────────────────────────
+    const statusLabel = (s: string) =>
+      s === "open" ? "Abierta" : s === "invoiced" ? "Facturada" : "Cerrada";
+
+    let totalChargesAll = 0;
+    let totalPaymentsAll = 0;
+
+    for (const t of tables) {
+      const rowH = t.ncId ? 26 : 18;
+      checkOverflow(rowH + 2);
+
+      const isEven = tables.indexOf(t) % 2 === 0;
+      doc.rect(margin, y, contentW, rowH).fill(isEven ? "#fafafa" : "#f3f3f3").stroke("#e8e8e8");
+
+      const rowY = y + (rowH === 26 ? 3 : 4);
+
+      // Mesa number + label
+      doc.fillColor("#1a1a1a").fontSize(8.5).font("Helvetica-Bold")
+        .text(`Mesa ${t.tableNumber}${t.label ? ` – ${t.label}` : ""}`, colMesa + 4, rowY, { width: 52 });
+
+      // Estado
+      doc.fillColor(t.status === "open" ? "#2563eb" : "#555555").fontSize(8).font("Helvetica")
+        .text(statusLabel(t.status), colEstado, rowY, { width: 64 });
+
+      // NC badge (second line if present)
+      if (t.ncId) {
+        doc.roundedRect(colEstado, rowY + 12, 46, 10, 2).fill("#fff7ed").stroke("#f97316");
+        doc.fillColor("#c2410c").fontSize(6.5).font("Helvetica-Bold")
+          .text("NC EMITIDA", colEstado + 2, rowY + 14, { width: 42 });
+      }
+
+      // Comprobante / invoice ref
+      const receiptDisplay = t.receiptType
+        ? t.receiptType === "factura_a" ? "Factura A"
+          : t.receiptType === "factura_b" ? "Factura B"
+          : t.receiptType === "factura_c" ? "Factura C"
+          : t.receiptType === "ticket" ? "Ticket"
+          : t.receiptType === "voucher_no_fiscal" ? "Voucher"
+          : t.receiptType
+        : "—";
+      doc.fillColor("#333333").fontSize(8).font("Helvetica")
+        .text(receiptDisplay, colComp, rowY, { width: 90 });
+      if (t.invoiceRef) {
+        doc.fillColor("#888888").fontSize(7).font("Helvetica")
+          .text(t.invoiceRef, colComp + 94, rowY, { width: 56 });
+      }
+
+      // Amounts
+      doc.fillColor("#1a1a1a").fontSize(8.5).font("Helvetica")
+        .text(`$${fmtMoney(t.totalCharges)}`, colCargos, rowY, { width: 75, align: "right" });
+      doc.text(`$${fmtMoney(t.totalPayments)}`, colPagado, rowY, { width: 75, align: "right" });
+
+      if (t.balance > 0.01) {
+        doc.fillColor("#dc2626").font("Helvetica-Bold")
+          .text(`$${fmtMoney(t.balance)}`, colSaldo, rowY, { width: contentW - (colSaldo - margin), align: "right" });
+      } else {
+        doc.fillColor("#16a34a").font("Helvetica")
+          .text("—", colSaldo, rowY, { width: contentW - (colSaldo - margin), align: "right" });
+      }
+
+      totalChargesAll += t.totalCharges;
+      totalPaymentsAll += t.totalPayments;
+      y += rowH + 2;
+    }
+
+    // ── TOTALS ROW ───────────────────────────────────────────────────────────
+    checkOverflow(28);
+    y += 4;
+    doc.roundedRect(margin + contentW - 280, y, 280, 22, 3).fill(NAVY);
+    doc.fillColor("white").fontSize(9).font("Helvetica-Bold");
+    const totY = y + 6;
+    doc.text("TOTAL:", colCargos - 40, totY, { width: 113, align: "right" });
+    doc.text(`$${fmtMoney(totalChargesAll)}`, colCargos, totY, { width: 75, align: "right" });
+    doc.text(`$${fmtMoney(totalPaymentsAll)}`, colPagado, totY, { width: 75, align: "right" });
+    const totalBalance = totalChargesAll - totalPaymentsAll;
+    doc.text(totalBalance > 0.01 ? `$${fmtMoney(totalBalance)}` : "—", colSaldo, totY, { width: contentW - (colSaldo - margin), align: "right" });
+    y += 26;
+
+    // ── FOOTER ───────────────────────────────────────────────────────────────
+    pdfBrandedFooter(doc, pageW, pageH, margin, contentW);
+    doc.end();
+  });
+}
+
 export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });

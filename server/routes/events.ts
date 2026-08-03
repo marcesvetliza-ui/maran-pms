@@ -4,7 +4,7 @@ import { db } from "../db";
 import { eventPayments, salesInvoices } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, and } from "drizzle-orm";
-import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "../eventPdfs";
+import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf } from "../eventPdfs";
 import { emitirFactura } from "../billing/invoiceService";
 
 export function registerEventsRoutes(app: Express) {
@@ -873,6 +873,9 @@ export function registerEventsRoutes(app: Express) {
           label: table.label,
           seats: table.seats,
           status: table.status,
+          receiptType: table.receiptType ?? null,
+          invoiceRef: table.invoiceRef ?? null,
+          ncId: (table as any).ncId ?? null,
           totalCharges,
           totalPayments,
           balance: totalCharges - totalPayments,
@@ -890,6 +893,37 @@ export function registerEventsRoutes(app: Express) {
       });
     } catch (error) {
       res.status(500).json({ error: "Error fetching tables summary" });
+    }
+  });
+
+  app.get("/api/events/:eventId/tables-summary-pdf", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      const tables = await storage.getEventTables(req.params.eventId);
+      const tableRows = tables.map((table: any) => {
+        const totalCharges = table.charges.reduce((sum: number, c: any) => sum + parseFloat(c.total), 0);
+        const totalPayments = table.payments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+        return {
+          tableNumber: table.tableNumber,
+          label: table.label ?? null,
+          seats: table.seats ?? null,
+          status: table.status,
+          receiptType: table.receiptType ?? null,
+          invoiceRef: table.invoiceRef ?? null,
+          ncId: (table as any).ncId ?? null,
+          totalCharges,
+          totalPayments,
+          balance: totalCharges - totalPayments,
+        };
+      });
+      const pdfBuffer = await generateTablesResumenPdf(event.name, event.eventCode, tableRows);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="mesas-${event.eventCode}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("Error generating tables summary PDF:", error);
+      res.status(500).json({ error: "Error generating PDF" });
     }
   });
 

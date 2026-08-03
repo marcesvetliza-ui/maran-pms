@@ -2030,21 +2030,40 @@ export default function EventsPage() {
                 <TabsContent value="tables" className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="font-medium">Mesas del Evento</h4>
-                    {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setNewTableNumber(eventTables.length + 1);
-                          setNewTableLabel("");
-                          setNewTableSeats(4);
-                          setIsAddTableOpen(true);
-                        }}
-                        data-testid="button-add-table"
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Agregar Mesa
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {eventTables.length > 0 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          asChild
+                          data-testid="button-tables-summary-pdf"
+                        >
+                          <a
+                            href={`/api/events/${selectedEvent.id}/tables-summary-pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <FileText className="h-4 w-4 mr-2" />
+                            Imprimir Resumen
+                          </a>
+                        </Button>
+                      )}
+                      {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setNewTableNumber(eventTables.length + 1);
+                            setNewTableLabel("");
+                            setNewTableSeats(4);
+                            setIsAddTableOpen(true);
+                          }}
+                          data-testid="button-add-table"
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Agregar Mesa
+                        </Button>
+                      )}
+                    </div>
                   </div>
 
                   {eventTables.length === 0 ? (
