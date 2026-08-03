@@ -444,7 +444,12 @@ export function PrefacturaDialog({
     }]);
   }
   function removeRow(id: string) {
-    setPaymentRows(prev => prev.length > 1 ? prev.filter(r => r.id !== id) : prev);
+    setPaymentRows(prev => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter(r => r.id !== id);
+      if (next.length === 1) setSplitBalanceChanged(false);
+      return next;
+    });
   }
 
   // Computed totals
