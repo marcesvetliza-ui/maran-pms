@@ -3359,20 +3359,53 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async enrichEventTable(table: EventTable): Promise<EventTableWithDetails> {
-    const [chargesList, paymentsList, invoiceRows] = await Promise.all([
-      db.select().from(eventTableCharges).where(eq(eventTableCharges.eventTableId, table.id)),
-      db.select().from(eventTablePayments).where(eq(eventTablePayments.eventTableId, table.id)),
-      table.invoiceId
-        ? db.select({ puntoVenta: salesInvoices.puntoVenta, numero: salesInvoices.numero })
-            .from(salesInvoices)
-            .where(eq(salesInvoices.id, table.invoiceId))
-        : Promise.resolve([] as { puntoVenta: number | null; numero: number | null }[]),
-    ]);
-    const inv = invoiceRows[0];
-    const invoiceRef = inv
-      ? String(inv.puntoVenta).padStart(4, "0") + "-" + String(inv.numero).padStart(8, "0")
-      : null;
-    return { ...table, charges: chargesList, payments: paymentsList, invoiceRef };
+    // Single round-trip: correlated subqueries aggregate charges and payments as JSON arrays;
+    // the invoice is resolved via a LEFT JOIN on the same query.
+    const result = await db.execute(sql`
+      SELECT
+        (
+          SELECT COALESCE(json_agg(jsonb_build_object(
+            'id',           c.id,
+            'eventTableId', c.event_table_id,
+            'description',  c.description,
+            'quantity',     c.quantity,
+            'unitPrice',    c.unit_price,
+            'total',        c.total,
+            'createdAt',    c.created_at
+          )), '[]'::json)
+          FROM event_table_charges c
+          WHERE c.event_table_id = ${table.id}
+        ) AS charges,
+        (
+          SELECT COALESCE(json_agg(jsonb_build_object(
+            'id',            p.id,
+            'eventTableId',  p.event_table_id,
+            'amount',        p.amount,
+            'method',        p.method,
+            'isAdvance',     p.is_advance,
+            'reservationId', p.reservation_id,
+            'receiptType',   p.receipt_type,
+            'paidAt',        p.paid_at,
+            'createdAt',     p.created_at
+          )), '[]'::json)
+          FROM event_table_payments p
+          WHERE p.event_table_id = ${table.id}
+        ) AS payments,
+        CASE WHEN inv.id IS NOT NULL
+          THEN lpad(inv.punto_venta::text, 4, '0') || '-' || lpad(inv.numero::text, 8, '0')
+          ELSE NULL
+        END AS invoice_ref
+      FROM event_tables t
+      LEFT JOIN sales_invoices inv ON inv.id = t.invoice_id
+      WHERE t.id = ${table.id}
+    `);
+    const row = result.rows[0] as any;
+    return {
+      ...table,
+      charges: (row?.charges as EventTableCharge[]) ?? [],
+      payments: (row?.payments as EventTablePayment[]) ?? [],
+      invoiceRef: (row?.invoice_ref as string | null) ?? null,
+    };
   }
 
   async createEventTable(table: InsertEventTable): Promise<EventTable> {
