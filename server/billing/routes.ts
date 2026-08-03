@@ -514,6 +514,11 @@ export function registerBillingRoutes(app: Express) {
       const esParcial = montoParcial !== undefined && !isNaN(montoParcial) && montoParcial > 0
         && montoParcial < saldoPendiente - 0.009;
 
+      // Guard: invoice already fully credited
+      if (montoYaAcreditado >= montoTotal - 0.009) {
+        return res.status(400).json({ error: "La factura ya fue acreditada en su totalidad" });
+      }
+
       // Validate partial amount doesn't exceed pending balance
       if (montoParcial !== undefined && montoParcial > saldoPendiente + 0.009) {
         return res.status(400).json({ error: `El monto a acreditar ($${montoParcial.toFixed(2)}) supera el saldo pendiente de la factura ($${saldoPendiente.toFixed(2)})` });
