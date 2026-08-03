@@ -499,6 +499,14 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "La factura ya fue anulada completamente" });
       }
 
+      // Guard: reject if there is already an open/pending NC linked to this invoice.
+      // This prevents two staff members from concurrently issuing NCs on the same partially-credited invoice.
+      if (original.nota_credito_id != null && original.estado !== "anulada") {
+        return res.status(409).json({
+          error: "Ya existe una Nota de Crédito en curso para esta factura. Verifique el estado del comprobante antes de emitir otra.",
+        });
+      }
+
       const { motivo, items, monto, paymentIdsToVoid, folioMovementIdsToVoid } = req.body;
       const tipoNC =
         original.tipo_comprobante === "FA" ? "NCA" :
