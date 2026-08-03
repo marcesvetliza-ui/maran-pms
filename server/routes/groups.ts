@@ -919,17 +919,32 @@ export function registerGroupsRoutes(app: Express) {
 
       // If the group charge originated from a reservation transfer, recreate
       // the charge on that reservation so the room folio remains complete.
+      // Guard: skip recreation if an active charge with the same reservationId,
+      // amount, and description already exists (e.g. the source charge was never
+      // deleted during the original transfer), to prevent duplicate entries.
       let recreated = false;
+      let alreadyExists = false;
       if (charge.reservationId) {
-        await storage.createCharge({
-          reservationId: charge.reservationId,
-          description: charge.description,
-          amount: charge.amount,
-          date: charge.date,
-          category: (charge.category as any) || "otros",
-          status: "active",
-        });
-        recreated = true;
+        const existingCharges = await storage.getCharges(charge.reservationId);
+        const duplicate = existingCharges.find(
+          (c: any) =>
+            c.status !== "anulado" &&
+            c.description === charge.description &&
+            String(c.amount) === String(charge.amount)
+        );
+        if (duplicate) {
+          alreadyExists = true;
+        } else {
+          await storage.createCharge({
+            reservationId: charge.reservationId,
+            description: charge.description,
+            amount: charge.amount,
+            date: charge.date,
+            category: (charge.category as any) || "otros",
+            status: "active",
+          });
+          recreated = true;
+        }
       }
 
       await audit(req, "delete", "groups",
@@ -937,7 +952,7 @@ export function registerGroupsRoutes(app: Express) {
         { entityType: "group", entityId: groupId }
       );
 
-      res.json({ success: true, reversed: parseFloat(charge.amount), recreated });
+      res.json({ success: true, reversed: parseFloat(charge.amount), recreated, alreadyExists });
     } catch (error) {
       console.error("[reverse-group-charge] Error:", error);
       res.status(500).json({ error: "Error al revertir el cargo grupal" });

@@ -300,6 +300,40 @@ describe("group-folio reversal guard — POST /api/groups/:groupId/reverse-trans
     close();
   });
 
+  // ── Duplicate guard: charge already present on reservation ───────────────
+
+  it("skips recreation and returns alreadyExists:true when an active matching charge already exists on the reservation", async () => {
+    mockDbSelectRows = [ACTIVE_GROUP_CHARGE];
+
+    // Simulate the source charge still alive on the reservation (was never deleted)
+    mockStorage.getCharges.mockResolvedValue([
+      {
+        id: "existing-res-charge-001",
+        reservationId: ACTIVE_GROUP_CHARGE.reservationId,
+        description: ACTIVE_GROUP_CHARGE.description,
+        amount: ACTIVE_GROUP_CHARGE.amount,
+        status: "active",
+      },
+    ]);
+
+    const { status, body } = await postGroupReversal(baseUrl, GROUP_ID, {
+      chargeId: ACTIVE_GROUP_CHARGE.id,
+    });
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.recreated).toBe(false);
+    expect(body.alreadyExists).toBe(true);
+
+    // The group charge must still be deleted.
+    expect(mockStorage.deleteGroupCharge).toHaveBeenCalledWith(ACTIVE_GROUP_CHARGE.id);
+
+    // No duplicate must be created.
+    expect(mockStorage.createCharge).not.toHaveBeenCalled();
+
+    close();
+  });
+
   // ── No recreation: manually-added charge (no reservationId) ──────────────
 
   it("succeeds without calling createCharge when the group charge has no reservationId", async () => {
