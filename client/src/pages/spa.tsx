@@ -89,6 +89,8 @@ type SpaClientType = {
   notes: string | null;
   createdAt: string;
   condicionVentaPredeterminada?: string | null;
+  cuilCuit?: string | null;
+  razonSocial?: string | null;
 };
 
 type SpaAppointment = {
@@ -96,6 +98,7 @@ type SpaAppointment = {
   cabinId: string;
   treatmentId: string;
   professionalId: string | null;
+  guestId?: string | null;
   guestName: string;
   guestLastName: string | null;
   guestPhone: string | null;
@@ -2337,7 +2340,23 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       <div className="space-y-3">
                         <div>
                           <label className="text-sm font-medium">Comprobante</label>
-                          <Select value={receiptType} onValueChange={(v) => { setReceiptType(v); if (v !== "cargo_habitacion") setFolioRoomChargeId(""); }}>
+                          <Select value={receiptType} onValueChange={(v) => {
+                            setReceiptType(v);
+                            if (v !== "cargo_habitacion") setFolioRoomChargeId("");
+                            if (["factura_a", "factura_b"].includes(v) && selectedAppointment?.guestId) {
+                              const guest = spaClients.find(c => c.id === selectedAppointment.guestId);
+                              if (guest) {
+                                setInvoiceCustomerName(guest.razonSocial || `${guest.firstName}${guest.lastName ? " " + guest.lastName : ""}`.trim());
+                                setInvoiceCustomerCuit(v === "factura_a" ? (guest.cuilCuit || "") : "");
+                              } else {
+                                setInvoiceCustomerName("");
+                                setInvoiceCustomerCuit("");
+                              }
+                            } else {
+                              setInvoiceCustomerName("");
+                              setInvoiceCustomerCuit("");
+                            }
+                          }}>
                             <SelectTrigger data-testid="select-receipt-type">
                               <SelectValue placeholder="Seleccionar comprobante" />
                             </SelectTrigger>

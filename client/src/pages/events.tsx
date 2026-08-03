@@ -174,6 +174,9 @@ type Reservation = {
 type Company = {
   id: string;
   name: string;
+  razonSocial?: string;
+  nombreFantasia?: string | null;
+  cuilCuit?: string | null;
 };
 
 const eventStatusColors: Record<string, string> = {
@@ -2411,7 +2414,23 @@ export default function EventsPage() {
                         {/* Close event */}
                         <div className="space-y-2 pt-2 border-t">
                           <p className="text-sm font-medium">Cerrar Evento</p>
-                          <Select value={folioReceiptType} onValueChange={(v) => { setFolioReceiptType(v); setInvoiceCustomerName(""); setInvoiceCustomerCuit(""); setInvoiceCustomerDni(""); }}>
+                          <Select value={folioReceiptType} onValueChange={(v) => {
+                            setFolioReceiptType(v);
+                            setInvoiceCustomerDni("");
+                            if (["factura_a", "factura_b"].includes(v) && selectedEvent?.companyId) {
+                              const company = (companies as Company[]).find(c => c.id === selectedEvent.companyId);
+                              if (company) {
+                                setInvoiceCustomerName(company.razonSocial || company.nombreFantasia || company.name || "");
+                                setInvoiceCustomerCuit(v === "factura_a" ? (company.cuilCuit || "") : "");
+                              } else {
+                                setInvoiceCustomerName("");
+                                setInvoiceCustomerCuit("");
+                              }
+                            } else {
+                              setInvoiceCustomerName("");
+                              setInvoiceCustomerCuit("");
+                            }
+                          }}>
                             <SelectTrigger data-testid="select-receipt-type">
                               <SelectValue placeholder="Tipo de comprobante" />
                             </SelectTrigger>
