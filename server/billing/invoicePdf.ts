@@ -414,10 +414,12 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
         doc.rect(x0, y, W, 14).fillColor("#e8f4fd").fill()
           .rect(x0, y, W, 14).strokeColor("#b3d4f5").stroke();
         const cleanDesc = cleanTransferDesc(charge.description);
+        const typeLabel = isTransferIn ? "Transferencia \u2193" : "Transferencia \u2191";
+        const displayDesc = cleanDesc ? `${typeLabel}  ${cleanDesc}` : typeLabel;
         const amt = $n(charge.amount);
         const sign = amt < 0 ? "−" : "+";
         doc.font("Helvetica-Oblique").fontSize(7.5).fillColor("#1a4f8a");
-        doc.text(cleanDesc, x0 + 4, y + 3, { width: 300 });
+        doc.text(displayDesc, x0 + 4, y + 3, { width: 300 });
         doc.font("Helvetica-Oblique").fontSize(7.5).fillColor("#1a4f8a");
         doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
         doc.text(`${sign} $ ${fPeso(Math.abs(amt))}`, x0 + 402, y + 3, { width: 125, align: "right" });
@@ -632,10 +634,12 @@ export async function generarResumenCuentaPDF(data: ResumenCuentaData, config: a
         doc.rect(x0, y, W, 14).fillColor("#e8f4fd").fill()
           .rect(x0, y, W, 14).strokeColor("#b3d4f5").stroke();
         const cleanDesc = cleanTransferDesc(charge.description);
+        const typeLabel = isTransferIn ? "Transferencia \u2193" : "Transferencia \u2191";
+        const displayDesc = cleanDesc ? `${typeLabel}  ${cleanDesc}` : typeLabel;
         const amt = $n(charge.amount);
         const sign = amt < 0 ? "−" : "+";
         doc.font("Helvetica-Oblique").fontSize(7.5).fillColor("#1a4f8a");
-        doc.text(cleanDesc, x0 + 4, y + 3, { width: 300 });
+        doc.text(displayDesc, x0 + 4, y + 3, { width: 300 });
         doc.font("Helvetica-Oblique").fontSize(7.5).fillColor("#1a4f8a");
         doc.text(fDate(charge.date), x0 + 308, y + 3, { width: 90, align: "center" });
         doc.text(`${sign} $ ${fPeso(Math.abs(amt))}`, x0 + 402, y + 3, { width: 125, align: "right" });
