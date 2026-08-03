@@ -628,8 +628,8 @@ export function ReservationFormDialog({
           });
         }
       }
+      const failedCompanions: string[] = [];
       if (pendingCompanions.length > 0) {
-        const failedCompanions: string[] = [];
         for (const comp of pendingCompanions) {
           try {
             const body: any = { ...comp, reservationId: created.id };
@@ -639,29 +639,33 @@ export function ReservationFormDialog({
             failedCompanions.push(`${comp.firstName} ${comp.lastName}`.trim() || "Acompañante");
           }
         }
-        if (failedCompanions.length > 0) {
-          const names = failedCompanions.join(", ");
-          toast({
-            title: "Reserva creada — acompañantes pendientes",
-            description: `La reserva fue guardada pero no se pudieron registrar los siguientes acompañantes: ${names}. Podés agregarlos desde la reserva.`,
-            variant: "destructive",
-            duration: 8000,
-          });
-        }
       }
-      return created;
+      // Return failed companions alongside the reservation so onSuccess can
+      // show the right toast without being overwritten (TOAST_LIMIT = 1).
+      return { ...created, _failedCompanions: failedCompanions };
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       if (isEditing && reservation?.id) {
         queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] });
       }
-      toast({
-        title: isEditing ? "Reserva actualizada" : "Reserva creada",
-        description: `La reserva ha sido ${isEditing ? "actualizada" : "creada"} exitosamente.`,
-      });
+      const failedCompanions: string[] = data?._failedCompanions ?? [];
+      if (failedCompanions.length > 0) {
+        const names = failedCompanions.join(", ");
+        toast({
+          title: "Reserva creada — acompañantes pendientes",
+          description: `La reserva fue guardada pero no se pudieron registrar los siguientes acompañantes: ${names}. Podés agregarlos desde la reserva.`,
+          variant: "destructive",
+          duration: 8000,
+        });
+      } else {
+        toast({
+          title: isEditing ? "Reserva actualizada" : "Reserva creada",
+          description: `La reserva ha sido ${isEditing ? "actualizada" : "creada"} exitosamente.`,
+        });
+      }
       onSuccess();
       onOpenChange(false);
     },
