@@ -551,8 +551,9 @@ export function ReservationFormDialog({
   };
 
   const handleDateChange = (field: "checkInDate" | "checkOutDate", value: string) => {
-    // If the field is cleared, just update the value without recalculating nights/totals
-    if (!value) {
+    // If either date field is empty/cleared, just update the value without recalculating nights/totals
+    const otherField = field === "checkInDate" ? "checkOutDate" : "checkInDate";
+    if (!value || !formData[otherField]) {
       setFormData({ ...formData, [field]: value });
       return;
     }
