@@ -168,26 +168,27 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
     y += ROW_H;
 
     // ── TABLA: rows ───────────────────────────────────────────────────────
-    if (folio.movements.length === 0) {
+    // Separate void/NC movements — they get their own section below totals
+    const regularMovements = folio.movements.filter(m => m.type !== "void");
+    const voidMovements    = folio.movements.filter(m => m.type === "void");
+
+    if (regularMovements.length === 0) {
       doc.rect(L, y, cW, 28).fill(lightBg);
       doc.font("Helvetica").fontSize(9).fillColor(MUTED)
          .text("Sin movimientos registrados.", L + 10, y + 9);
       y += 28;
     } else {
-      for (let i = 0; i < folio.movements.length; i++) {
-        const m = folio.movements[i];
+      for (let i = 0; i < regularMovements.length; i++) {
+        const m = regularMovements[i];
         const isDebit = ["charge", "transfer_in"].includes(m.type);
         const isTransferOut = m.type === "transfer_out";
         const isTransferIn = m.type === "transfer_in";
         const isTransfer = isTransferOut || isTransferIn;
-        const isVoid = m.type === "void";
         const isNotaDebito = (m as any).sourceType === "nota_debito" || (m as any).receiptType?.startsWith("ND");
-        const rowBg = isVoid ? "#fff8f0" : isTransferOut ? "#fff7ed" : isTransferIn ? "#eff6ff" : isNotaDebito ? "#eff6ff" : (i % 2 === 0 ? "#ffffff" : "#fafafa");
-        doc.rect(L, y, cW, ROW_H).fill(rowBg).stroke(isVoid ? "#ffcc80" : "#eeeeee");
-        // Left accent stripe for transfer rows, ND rows, and void/NC rows
-        if (isVoid) {
-          doc.rect(L, y, 3, ROW_H).fill("#e65100");
-        } else if (isTransfer) {
+        const rowBg = isTransferOut ? "#fff7ed" : isTransferIn ? "#eff6ff" : isNotaDebito ? "#eff6ff" : (i % 2 === 0 ? "#ffffff" : "#fafafa");
+        doc.rect(L, y, cW, ROW_H).fill(rowBg).stroke("#eeeeee");
+        // Left accent stripe for transfer rows and ND rows
+        if (isTransfer) {
           doc.rect(L, y, 3, ROW_H).fill(isTransferOut ? "#f97316" : "#3b82f6");
         } else if (isNotaDebito) {
           doc.rect(L, y, 3, ROW_H).fill("#0369a1");
@@ -195,7 +196,7 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
 
         doc.font("Helvetica").fontSize(8).fillColor(MUTED)
            .text(fmtDate(m.createdAt ?? ""), COL.date + 4, y + 5, { width: 92 });
-        doc.fillColor(isVoid ? "#bf360c" : isTransferOut ? "#c2410c" : isTransferIn ? "#1d4ed8" : isNotaDebito ? "#0369a1" : DARK)
+        doc.fillColor(isTransferOut ? "#c2410c" : isTransferIn ? "#1d4ed8" : isNotaDebito ? "#0369a1" : DARK)
            .text(getMovementLabel(m as any), COL.type + 4, y + 5, { width: 90 });
         const payLabel = m.paymentMethod ? (PAYMENT_LABELS[m.paymentMethod] ?? m.paymentMethod) : "—";
         doc.fillColor(MUTED)
@@ -258,6 +259,39 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
        .text(saldoLabel, totalPanelX, y, { width: 100 });
     doc.font("Helvetica-Bold").fontSize(12).fillColor(saldoColor)
        .text(fmtCurrency(balance), totalPanelX + 100, y - 1, { width: 96, align: "right" });
+
+    // ── ANULACIONES / NC section (only when void movements exist) ─────────
+    if (voidMovements.length > 0) {
+      y += 36;
+      if (y > pageH - 120) { doc.addPage(); y = 40; }
+
+      // Section header — orange bar
+      doc.rect(L, y, cW, ROW_H).fill(ORANGE);
+      doc.font("Helvetica-Bold").fontSize(8).fillColor("white");
+      doc.text("Anulaciones / Notas de Crédito", L + 6, y + 5);
+      doc.text("Importe", COL.amt - 55, y + 5, { width: 55, align: "right" });
+      y += ROW_H;
+
+      for (const m of voidMovements) {
+        if (y > pageH - 100) { doc.addPage(); y = 40; }
+        doc.rect(L, y, cW, ROW_H).fill("#fff8f0").stroke("#ffcc80").lineWidth(0.5);
+        doc.rect(L, y, 3, ROW_H).fill("#e65100");
+
+        doc.font("Helvetica").fontSize(8).fillColor(MUTED)
+           .text(fmtDate(m.createdAt ?? ""), COL.date + 4, y + 5, { width: 92 });
+        doc.fillColor("#bf360c").font("Helvetica-Bold").fontSize(8)
+           .text(getMovementLabel(m as any), COL.type + 4, y + 5, { width: 90 });
+        const rawDescV = (m.description || "—").replace(/\s*\[xfer:[^\]]+\]/, "");
+        const descV = rawDescV.length > 40 ? rawDescV.slice(0, 40) + "…" : rawDescV;
+        doc.fillColor("#bf360c").font("Helvetica").fontSize(8)
+           .text(descV, COL.method + 4, y + 5, { width: 195 });
+        doc.font("Helvetica-Bold").fontSize(8).fillColor("#bf360c")
+           .text(fmtCurrency(m.amount), COL.amt - 55, y + 5, { width: 55, align: "right" });
+
+        y += ROW_H;
+      }
+      y += 6;
+    }
 
     // ── FOOTER (mismo que presupuestos) ───────────────────────────────────
     const footerY = pageH - 72;
