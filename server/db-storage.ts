@@ -3312,11 +3312,44 @@ export class DatabaseStorage implements IStorage {
 
   async getEventTables(eventId: string): Promise<EventTableWithDetails[]> {
     const tables = await db.select().from(eventTables).where(eq(eventTables.eventId, eventId));
-    const results: EventTableWithDetails[] = [];
-    for (const table of tables) {
-      results.push(await this.enrichEventTable(table));
+    if (tables.length === 0) return [];
+
+    const tableIds = tables.map(t => t.id);
+    const invoiceIds = [...new Set(tables.map(t => t.invoiceId).filter((id): id is string => Boolean(id)))];
+
+    const [allCharges, allPayments, allInvoices] = await Promise.all([
+      db.select().from(eventTableCharges).where(inArray(eventTableCharges.eventTableId, tableIds)),
+      db.select().from(eventTablePayments).where(inArray(eventTablePayments.eventTableId, tableIds)),
+      invoiceIds.length
+        ? db.select({ id: salesInvoices.id, puntoVenta: salesInvoices.puntoVenta, numero: salesInvoices.numero })
+            .from(salesInvoices)
+            .where(inArray(salesInvoices.id, invoiceIds))
+        : Promise.resolve([]),
+    ]);
+
+    const chargesMap = new Map<string, typeof allCharges>();
+    for (const c of allCharges) {
+      if (!chargesMap.has(c.eventTableId)) chargesMap.set(c.eventTableId, []);
+      chargesMap.get(c.eventTableId)!.push(c);
     }
-    return results;
+    const paymentsMap = new Map<string, typeof allPayments>();
+    for (const p of allPayments) {
+      if (!paymentsMap.has(p.eventTableId)) paymentsMap.set(p.eventTableId, []);
+      paymentsMap.get(p.eventTableId)!.push(p);
+    }
+    const invoiceMap = new Map(
+      allInvoices.map(inv => [
+        inv.id,
+        String(inv.puntoVenta).padStart(4, "0") + "-" + String(inv.numero).padStart(8, "0"),
+      ])
+    );
+
+    return tables.map(table => ({
+      ...table,
+      charges: chargesMap.get(table.id) ?? [],
+      payments: paymentsMap.get(table.id) ?? [],
+      invoiceRef: table.invoiceId ? (invoiceMap.get(table.invoiceId) ?? null) : null,
+    }));
   }
 
   async getEventTable(id: string): Promise<EventTableWithDetails | undefined> {
