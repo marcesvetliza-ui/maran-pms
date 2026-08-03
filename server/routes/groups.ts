@@ -987,7 +987,7 @@ export function registerGroupsRoutes(app: Express) {
           extras,
           charges: activeCharges.map((c: any) => ({
             id: c.id,
-            description: c.description,
+            description: (c.description || "").replace(/\s*\[(xfer|corr|res):[^\]]+\]/g, "").trim(),
             amount: parseFloat(c.amount),
             date: c.date,
             category: c.category,
