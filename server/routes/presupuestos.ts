@@ -393,8 +393,10 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
   }
   y += 8;
 
+  // Totals — guard against footer overlap (footer starts at H - 80)
+  const hockeyTotalsH = 18 + (parseFloat(pres.descuentoGlobal || "0") > 0 ? 18 : 0) + 34;
+  if (y + hockeyTotalsH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
 
-  // Totals
   const totW = 210, totX = M + contentW - totW;
   doc.fillColor(MUTED).fontSize(8).font("Helvetica").text("Subtotal", totX + 6, y + 4, { width: totW / 2 });
   doc.text(`$ ${formatMoney(pres.subtotal)}`, totX, y + 4, { width: totW - 6, align: "right" });
@@ -992,6 +994,10 @@ function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: strin
     });
   }
   y += 8;
+
+  // Totals — guard against footer overlap (footer starts at H - 80)
+  const generalTotalsH = 18 + (parseFloat(pres.descuentoGlobal || "0") > 0 ? 18 : 0) + 30;
+  if (y + generalTotalsH > H - 90) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
 
   const totW = 210, totX = M + contentW - totW;
   doc.fillColor(MUTED).fontSize(8).font("Helvetica").text("Subtotal", totX + 6, y + 4, { width: totW / 2 });
