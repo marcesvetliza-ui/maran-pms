@@ -786,6 +786,7 @@ export default function RestaurantPage() {
   const [closeCcEntityType, setCloseCcEntityType] = useState<"company" | "agency">("company");
   const [closeCcEntityId, setCloseCcEntityId] = useState("");
   const [invoiceForNC, setInvoiceForNC] = useState<any | null>(null);
+  const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [ncMotivo, setNcMotivo] = useState("");
   const [ncParcial, setNcParcial] = useState(false);
   const [ncMontoParcial, setNcMontoParcial] = useState("");
@@ -3266,22 +3267,22 @@ export default function RestaurantPage() {
                                   <TableCell>
                                     {inv.estado === "anulada"
                                       ? (
-                                        <div className="flex flex-col gap-0.5">
-                                          <Badge variant="destructive">Anulada</Badge>
+                                        <div className="flex flex-col gap-1">
+                                          <Badge variant="destructive" className="whitespace-nowrap">ANULADA</Badge>
                                           {linkedNc && (
-                                            <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap">
-                                              {linkedNc.tipo_comprobante} {formatNro(linkedNc)}
+                                            <span className="text-[11px] font-mono font-semibold text-destructive whitespace-nowrap">
+                                              NC N° {formatNro(linkedNc)}
                                             </span>
                                           )}
                                         </div>
                                       )
                                       : inv.estado === "parcial"
                                         ? (
-                                          <div className="flex flex-col gap-0.5">
-                                            <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300">Parcial</Badge>
+                                          <div className="flex flex-col gap-1">
+                                            <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300 whitespace-nowrap">NC PARCIAL</Badge>
                                             {linkedNc && (
-                                              <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap">
-                                                últ. NC: {linkedNc.tipo_comprobante} {formatNro(linkedNc)}
+                                              <span className="text-[11px] font-mono font-semibold text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                                                NC N° {formatNro(linkedNc)}
                                               </span>
                                             )}
                                           </div>
@@ -3290,12 +3291,19 @@ export default function RestaurantPage() {
                                     }
                                   </TableCell>
                                   <TableCell>
-                                    {inv.estado !== "anulada" && (
-                                      <Button size="sm" variant="outline" className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                                        onClick={() => { setInvoiceForNC(inv); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); }} data-testid={`button-emitir-nc-${inv.id}`}>
-                                        <FileX className="h-3.5 w-3.5 mr-1" />Emitir NC
+                                    <div className="flex items-center gap-1">
+                                      <Button size="sm" variant="ghost" title="Ver detalle"
+                                        onClick={() => setSelectedInvoiceDetail({ invoice: inv, linkedNc })}
+                                        data-testid={`button-detail-inv-${inv.id}`}>
+                                        <Eye className="h-3.5 w-3.5" />
                                       </Button>
-                                    )}
+                                      {inv.estado !== "anulada" && (
+                                        <Button size="sm" variant="outline" className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                                          onClick={() => { setInvoiceForNC(inv); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); }} data-testid={`button-emitir-nc-${inv.id}`}>
+                                          <FileX className="h-3.5 w-3.5 mr-1" />Emitir NC
+                                        </Button>
+                                      )}
+                                    </div>
                                   </TableCell>
                                 </TableRow>
                                 );
@@ -6389,6 +6397,104 @@ export default function RestaurantPage() {
             >
               {emitirNCMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo...</> : "Confirmar NC"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invoice Detail Dialog */}
+      <Dialog open={!!selectedInvoiceDetail} onOpenChange={(open) => { if (!open) setSelectedInvoiceDetail(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5" />
+              Detalle del Comprobante
+            </DialogTitle>
+          </DialogHeader>
+          {selectedInvoiceDetail && (() => {
+            const { invoice: inv, linkedNc } = selectedInvoiceDetail;
+            const formatNroLocal = (i: any) => `${String(i.punto_venta || 1).padStart(4, "0")}-${String(i.numero).padStart(8, "0")}`;
+            const montoAcreditado = parseFloat(inv.monto_acreditado || "0");
+            const saldoPendiente = parseFloat(inv.monto_total || "0") - montoAcreditado;
+            return (
+              <div className="space-y-4">
+                {/* Invoice info */}
+                <div className="rounded-lg border p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Comprobante</span>
+                    <span className="font-mono font-semibold">{inv.tipo_comprobante} {formatNroLocal(inv)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Fecha emisión</span>
+                    <span className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Cliente</span>
+                    <span className="text-sm text-right max-w-[200px]">{inv.cliente_razon_social || "Consumidor Final"}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t pt-2">
+                    <span className="text-sm font-medium">Total facturado</span>
+                    <span className="font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {inv.cae && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">CAE</span>
+                      <span className="text-xs font-mono">{inv.modo_ficticio ? <span className="text-amber-600">Ficticio</span> : inv.cae}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* NC section — shown when invoice is anulada or parcial */}
+                {linkedNc && (
+                  <div className={`rounded-lg border-2 p-4 space-y-2 ${inv.estado === "anulada" ? "border-destructive/60 bg-destructive/5" : "border-amber-400/60 bg-amber-50 dark:bg-amber-900/10"}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <FileX className={`h-4 w-4 ${inv.estado === "anulada" ? "text-destructive" : "text-amber-600"}`} />
+                      <span className={`text-sm font-bold uppercase tracking-wide ${inv.estado === "anulada" ? "text-destructive" : "text-amber-700 dark:text-amber-400"}`}>
+                        {inv.estado === "anulada" ? "Anulada por Nota de Crédito" : "Nota de Crédito Parcial"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">NC N°</span>
+                      <span className="font-mono font-bold text-base">{linkedNc.tipo_comprobante} {formatNroLocal(linkedNc)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Fecha NC</span>
+                      <span className="text-sm">{linkedNc.fecha_emision ? format(new Date(linkedNc.fecha_emision), "dd/MM/yyyy") : "-"}</span>
+                    </div>
+                    <div className="flex items-center justify-between border-t pt-2">
+                      <span className="text-sm font-medium">Monto acreditado (NC)</span>
+                      <span className={`font-bold text-base ${inv.estado === "anulada" ? "text-destructive" : "text-amber-700 dark:text-amber-400"}`}>
+                        ${parseFloat(linkedNc.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    {inv.estado === "parcial" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Saldo pendiente</span>
+                        <span className="font-semibold text-amber-700 dark:text-amber-400">
+                          ${saldoPendiente.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Estado badge */}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Estado</span>
+                  {inv.estado === "anulada"
+                    ? <Badge variant="destructive">ANULADA</Badge>
+                    : inv.estado === "parcial"
+                      ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300">NC PARCIAL</Badge>
+                      : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
+                  }
+                </div>
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => window.open(`/api/billing/invoices/${selectedInvoiceDetail?.invoice.id}/pdf`, "_blank")}>
+              <Download className="h-4 w-4 mr-2" />Descargar PDF
+            </Button>
+            <Button onClick={() => setSelectedInvoiceDetail(null)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
