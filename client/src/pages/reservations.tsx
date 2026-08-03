@@ -108,6 +108,15 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, Package } from "@shared/schema";
 
+/** Strip machine-readable transfer/reversal tags from a charge description before display. */
+function stripTransferTags(description: string): string {
+  return description
+    .replace(/\s*\[xfer:[^\]]+\]/g, "")
+    .replace(/\s*\[corr:[^\]]+\]/g, "")
+    .replace(/\s*\[res:[^\]]+\]/g, "")
+    .trim();
+}
+
 function parseReservationError(error: any): string {
   try {
     const raw = error?.message || "";
@@ -3352,7 +3361,7 @@ function ReservationDetailDialog({
                       <Badge variant="outline" className="text-xs shrink-0">{categoryLabels[charge.category]}</Badge>
                       {isAnulado && <Badge variant="destructive" className="text-xs shrink-0">ANULADO</Badge>}
                       {(charge as any).isRecurring && <Badge variant="secondary" className="text-xs shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">×noche</Badge>}
-                      <span className={`truncate ${isAnulado ? "line-through text-muted-foreground" : ""}`}>{charge.description}</span>
+                      <span className={`truncate ${isAnulado ? "line-through text-muted-foreground" : ""}`}>{stripTransferTags(charge.description)}</span>
                       <span className="text-muted-foreground text-xs shrink-0">({formatDateAR(charge.date)})</span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
@@ -4202,7 +4211,7 @@ function ReservationDetailDialog({
                 <div className="p-3 bg-muted rounded-lg">
                   <p className="text-sm font-medium mb-1">Cargo a transferir:</p>
                   <div className="flex justify-between text-sm">
-                    <span>{chargeToTransfer.description}</span>
+                    <span>{stripTransferTags(chargeToTransfer.description)}</span>
                     <span className="font-semibold">${chargeToTransfer.amount}</span>
                   </div>
                 </div>
@@ -4357,7 +4366,7 @@ function ReservationDetailDialog({
                           data-testid={`checkbox-charge-${charge.id}`}
                         />
                         <label htmlFor={`bulk-charge-${charge.id}`} className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
-                          <span className="truncate">{charge.description}</span>
+                          <span className="truncate">{stripTransferTags(charge.description)}</span>
                           <span className="font-medium tabular-nums shrink-0">${Number(charge.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                         </label>
                       </div>
