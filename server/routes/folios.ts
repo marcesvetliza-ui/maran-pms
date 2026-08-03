@@ -263,7 +263,8 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
     // ── ANULACIONES / NC section (only when void movements exist) ─────────
     if (voidMovements.length > 0) {
       y += 36;
-      if (y > pageH - 120) { doc.addPage(); y = 40; }
+      // Tightened threshold: needs room for header row + at least one data row + footer (72px)
+      if (y > pageH - 140) { doc.addPage(); y = 40; }
 
       // Section header — orange bar
       doc.rect(L, y, cW, ROW_H).fill(ORANGE);
@@ -294,7 +295,9 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
     }
 
     // ── FOOTER (mismo que presupuestos) ───────────────────────────────────
+    // Guard: if content y is too close to footer position, push footer to a new page
     const footerY = pageH - 72;
+    if (y > footerY - 20) { doc.addPage(); }
     doc.rect(0, footerY, pageW, 72).fill(FOOTER_BG);
     const logoPath = assetPath("hotel-logo.png");
     if (fs.existsSync(logoPath)) {
