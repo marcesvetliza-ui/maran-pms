@@ -1431,8 +1431,9 @@ export function registerGroupsRoutes(app: Express) {
         y += 14;
         for (const c of gCharges) {
           if (y > 740) { doc.addPage(); y = 40; }
+          const cleanDesc = (c.description || "").replace(/\s*\[(xfer|corr|res):[^\]]+\]/g, "").trim();
           doc.fontSize(9).font("Helvetica")
-            .text(c.description, 50, y)
+            .text(cleanDesc, 50, y)
             .text(`$${parseFloat(c.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
           y += 14;
         }
