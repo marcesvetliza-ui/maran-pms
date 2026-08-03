@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks } from "@shared/schema";
+import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
@@ -887,6 +887,45 @@ export function registerGroupsRoutes(app: Express) {
     } catch (error: any) {
       if (error.message === "Cargo no encontrado") return res.status(404).json({ error: error.message });
       res.status(500).json({ error: "Error al transferir cargo" });
+    }
+  });
+
+  // POST reverse a group-folio charge (undo a transfer-to-group or manually added group charge)
+  // Guard: chargeId must be present in the request body — a missing value must never reach
+  // the DB layer and produce a confusing generic error.
+  app.post("/api/groups/:groupId/reverse-transfer-charge", requireAuth, async (req, res) => {
+    try {
+      const { groupId } = req.params;
+      const { chargeId } = req.body;
+
+      if (!chargeId) return res.status(400).json({ error: "Se requiere chargeId" });
+
+      // Verify the group exists
+      const group = await storage.getGroup(groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      // Fetch the charge and verify it belongs to this group
+      const [charge] = await db
+        .select()
+        .from(groupChargesTable)
+        .where(eq(groupChargesTable.id, chargeId))
+        .limit(1);
+      if (!charge) return res.status(404).json({ error: "Cargo no encontrado" });
+      if (charge.groupId !== groupId) {
+        return res.status(403).json({ error: "El cargo no pertenece a este grupo" });
+      }
+
+      await storage.deleteGroupCharge(chargeId);
+
+      await audit(req, "delete", "groups",
+        `Cargo grupal revertido: ${charge.description} ($${charge.amount})`,
+        { entityType: "group", entityId: groupId }
+      );
+
+      res.json({ success: true, reversed: parseFloat(charge.amount) });
+    } catch (error) {
+      console.error("[reverse-group-charge] Error:", error);
+      res.status(500).json({ error: "Error al revertir el cargo grupal" });
     }
   });
 
