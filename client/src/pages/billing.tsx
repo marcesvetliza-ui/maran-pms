@@ -1275,7 +1275,7 @@ function BillingConfigPanel({ config }: { config: any }) {
         setTestResult({ ok: false, mensaje: data.error ?? "Error de conexión con ARCA" });
       }
     } catch (e: any) {
-      setTestResult({ ok: false, mensaje: e.message });
+      setTestResult({ ok: false, mensaje: parseApiError(e) });
     } finally {
       setTesting(false);
     }

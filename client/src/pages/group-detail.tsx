@@ -85,7 +85,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import type { 
   GroupWithDetails, 
   GroupStatus, 
@@ -187,8 +187,8 @@ function AddBlockDialog({
       setBlockCheckInDate(group.checkInDate);
       setBlockCheckOutDate(group.checkOutDate);
     },
-    onError: () => {
-      toast({ title: "Error al agregar bloque", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al agregar bloque", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -460,10 +460,7 @@ function AssignBlockDialog({
         successCount++;
       } catch (err: any) {
         failCount++;
-        try {
-          const body = JSON.parse(err.message.replace(/^\d+:\s*/, ""));
-          if (body.error) errors.push(body.error);
-        } catch {}
+        errors.push(parseApiError(err));
       }
     }
 
@@ -792,8 +789,8 @@ export default function GroupDetailPage() {
       setIndivChargeQty(1);
       setIndivChargeCategory("otros");
     },
-    onError: () => {
-      toast({ title: "Error al agregar cargo", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al agregar cargo", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -804,8 +801,8 @@ export default function GroupDetailPage() {
       toast({ title: "Bloque eliminado" });
       setDeleteBlockId(null);
     },
-    onError: () => {
-      toast({ title: "Error al eliminar bloque", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al eliminar bloque", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -825,8 +822,8 @@ export default function GroupDetailPage() {
       setEditingLateCheckout(false);
       setEditingLateCheckoutTime("");
     },
-    onError: () => {
-      toast({ title: "Error al actualizar tarifa", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al actualizar tarifa", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -838,8 +835,8 @@ export default function GroupDetailPage() {
       toast({ title: "Habitación desasignada del grupo" });
       setUnassignResId(null);
     },
-    onError: () => {
-      toast({ title: "Error al desasignar habitación", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al desasignar habitación", description: parseApiError(e), variant: "destructive" });
       setUnassignResId(null);
     },
   });
@@ -872,9 +869,7 @@ export default function GroupDetailPage() {
       setChangeRoomId("");
     },
     onError: (err: any) => {
-      let msg = "Error al cambiar habitación";
-      try { const b = JSON.parse(err.message.replace(/^\d+:\s*/, "")); if (b.error) msg = b.error; } catch {}
-      toast({ title: msg, variant: "destructive" });
+      toast({ title: "Error al cambiar habitación", description: parseApiError(err), variant: "destructive" });
     },
   });
 
@@ -904,9 +899,9 @@ export default function GroupDetailPage() {
         });
       }
     },
-    onError: () => {
+    onError: (e: any) => {
       setShowCheckInConfirm(false);
-      toast({ title: "Error en check-in grupal", variant: "destructive" });
+      toast({ title: "Error en check-in grupal", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -935,9 +930,9 @@ export default function GroupDetailPage() {
         });
       }
     },
-    onError: () => {
+    onError: (e: any) => {
       setShowCheckOutConfirm(false);
-      toast({ title: "Error en check-out grupal", variant: "destructive" });
+      toast({ title: "Error en check-out grupal", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -1003,8 +998,8 @@ export default function GroupDetailPage() {
         loadInvoice();
       }
     },
-    onError: () => {
-      toast({ title: "Error al registrar pago grupal", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al registrar pago grupal", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -1025,7 +1020,7 @@ export default function GroupDetailPage() {
       setFolioChargeDate(new Date().toISOString().split("T")[0]);
       setFolioChargeCategory("otros");
     },
-    onError: () => toast({ title: "Error al agregar cargo", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al agregar cargo", description: parseApiError(e), variant: "destructive" }),
   });
 
   const deleteGroupChargeMutation = useMutation({
@@ -1034,7 +1029,7 @@ export default function GroupDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
       toast({ title: "Cargo eliminado" });
     },
-    onError: () => toast({ title: "Error al eliminar cargo", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al eliminar cargo", description: parseApiError(e), variant: "destructive" }),
   });
 
   const folioPaymentMutation = useMutation({
@@ -1058,7 +1053,7 @@ export default function GroupDetailPage() {
       setFolioPaymentDistribution("equal");
       setManualDistribution({});
     },
-    onError: () => toast({ title: "Error al registrar pago", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al registrar pago", description: parseApiError(e), variant: "destructive" }),
   });
 
   const transferChargeMutation = useMutation({
@@ -1070,7 +1065,7 @@ export default function GroupDetailPage() {
       toast({ title: "Cargo transferido al Folio Maestro" });
       setTransferChargeTarget(null);
     },
-    onError: () => toast({ title: "Error al transferir cargo", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al transferir cargo", description: parseApiError(e), variant: "destructive" }),
   });
 
   const updateMasterFolioConfigMutation = useMutation({
@@ -1081,7 +1076,7 @@ export default function GroupDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       toast({ title: "Configuración del Folio Maestro actualizada" });
     },
-    onError: () => toast({ title: "Error al actualizar configuración", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al actualizar configuración", description: parseApiError(e), variant: "destructive" }),
   });
 
   const masterPaymentMutation = useMutation({
@@ -1112,7 +1107,7 @@ export default function GroupDetailPage() {
       setMasterPaymentReference("");
       setMasterPaymentReceiptType("");
     },
-    onError: () => toast({ title: "Error al registrar pago maestro", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al registrar pago maestro", description: parseApiError(e), variant: "destructive" }),
   });
 
   const updatePassengerMutation = useMutation({
@@ -1126,7 +1121,7 @@ export default function GroupDetailPage() {
       toast({ title: "Nombre de pasajero actualizado" });
       setEditingPassengerRes(null);
     },
-    onError: () => toast({ title: "Error al actualizar el nombre", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al actualizar el nombre", description: parseApiError(e), variant: "destructive" }),
   });
 
   const loadInvoice = async () => {

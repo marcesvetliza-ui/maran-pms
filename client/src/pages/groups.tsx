@@ -56,7 +56,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import type { GroupWithDetails, GroupStatus, InsertGroup, RoomType } from "@shared/schema";
 import { Trash2 as TrashIcon } from "lucide-react";
 
@@ -163,8 +163,8 @@ function GroupFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
-      toast({ title: "Error al actualizar grupo", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al actualizar grupo", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -297,8 +297,8 @@ function GroupFormDialog({
         setBlocks([]);
         setCreatedGroupId(null);
       }
-    } catch {
-      toast({ title: "Error al crear grupo", variant: "destructive" });
+    } catch (e: any) {
+      toast({ title: "Error al crear grupo", description: parseApiError(e), variant: "destructive" });
     } finally {
       setIsCreating(false);
     }
@@ -863,8 +863,8 @@ export default function GroupsPage() {
       });
       setDeleteConfirmGroup(null);
     },
-    onError: () => {
-      toast({ title: "Error al eliminar grupo", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al eliminar grupo", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -875,8 +875,8 @@ export default function GroupsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
       toast({ title: "Estado actualizado" });
     },
-    onError: () => {
-      toast({ title: "Error al actualizar estado", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Error al actualizar estado", description: parseApiError(e), variant: "destructive" });
     },
   });
 
