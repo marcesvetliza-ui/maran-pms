@@ -125,6 +125,7 @@ type EventTableType = {
   reservationId: string | null;
   receiptType: string | null;
   invoiceId?: number | null;
+  invoiceRef?: string | null;
   closedAt: string | null;
   createdAt: string;
   charges: EventTableCharge[];
@@ -2043,9 +2044,16 @@ export default function EventsPage() {
                               <CardContent className="p-4">
                                 <div className="flex items-center justify-between mb-2">
                                   <span className="font-bold text-lg">Mesa {table.tableNumber}</span>
-                                  <Badge variant={table.status === "open" ? "default" : "secondary"}>
-                                    {table.status === "open" ? "Abierta" : table.status === "invoiced" ? "Facturada" : "Cerrada"}
-                                  </Badge>
+                                  <div className="flex flex-col items-end gap-0.5">
+                                    <Badge variant={table.status === "open" ? "default" : "secondary"}>
+                                      {table.status === "open" ? "Abierta" : table.status === "invoiced" ? "Facturada" : "Cerrada"}
+                                    </Badge>
+                                    {table.invoiceRef && (
+                                      <span className="text-xs text-muted-foreground font-mono leading-tight">
+                                        {table.invoiceRef}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 {table.label && <p className="text-sm text-muted-foreground mb-1">{table.label}</p>}
                                 {table.seats && <p className="text-xs text-muted-foreground">{table.seats} asientos</p>}

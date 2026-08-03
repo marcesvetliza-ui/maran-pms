@@ -871,6 +871,7 @@ export type EventChargeWithType = EventCharge & {
 export type EventTableWithDetails = EventTable & {
   charges: EventTableCharge[];
   payments: EventTablePayment[];
+  invoiceRef?: string | null; // formatted as "0001-00000012" when an AFIP factura was emitted
 };
 
 // Event Planning types

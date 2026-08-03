@@ -116,6 +116,7 @@ import {
   accountMovements, accountMovementAllocations,
   type AccountRetention, type AccountMovementAllocation, type InsertAccountMovementAllocation,
   folios, folioMovements,
+  salesInvoices,
   reservationCompanions,
   type ReservationCompanion, type InsertReservationCompanion,
   giftVouchers,
@@ -3327,7 +3328,18 @@ export class DatabaseStorage implements IStorage {
   private async enrichEventTable(table: EventTable): Promise<EventTableWithDetails> {
     const chargesList = await db.select().from(eventTableCharges).where(eq(eventTableCharges.eventTableId, table.id));
     const paymentsList = await db.select().from(eventTablePayments).where(eq(eventTablePayments.eventTableId, table.id));
-    return { ...table, charges: chargesList, payments: paymentsList };
+    let invoiceRef: string | null = null;
+    if (table.invoiceId) {
+      const [inv] = await db
+        .select({ puntoVenta: salesInvoices.puntoVenta, numero: salesInvoices.numero })
+        .from(salesInvoices)
+        .where(eq(salesInvoices.id, table.invoiceId));
+      if (inv) {
+        invoiceRef =
+          String(inv.puntoVenta).padStart(4, "0") + "-" + String(inv.numero).padStart(8, "0");
+      }
+    }
+    return { ...table, charges: chargesList, payments: paymentsList, invoiceRef };
   }
 
   async createEventTable(table: InsertEventTable): Promise<EventTable> {
