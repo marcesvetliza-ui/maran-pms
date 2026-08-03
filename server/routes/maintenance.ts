@@ -325,12 +325,15 @@ export function registerMaintenanceRoutes(app: Express) {
       const todayDate = new Date(today + "T00:00:00");
       const overdueDays = Math.max(0, Math.floor((todayDate.getTime() - dueDate.getTime()) / 86400000));
 
+      // Si hay nota nueva la pisamos; si no, conservamos la anterior.
+      // Evitamos pasar null sin tipo explícito para no causar "could not determine data type"
+      const notesValue: string | null = doneNotes ? String(doneNotes) : null;
       const result = await db.execute(sql`
         UPDATE preventive_tasks SET
           last_done_at = ${today},
           last_overdue_days = ${overdueDays},
           next_due_at = ${nextDate},
-          notes = CASE WHEN ${doneNotes || null} IS NOT NULL THEN ${doneNotes || null} ELSE notes END,
+          notes = CASE WHEN ${notesValue}::text IS NOT NULL THEN ${notesValue}::text ELSE notes END,
           updated_at = now()
         WHERE id = ${req.params.id}
         RETURNING *

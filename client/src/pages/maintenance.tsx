@@ -783,7 +783,10 @@ export default function MaintenancePage() {
 
   const sortedOrders = [...filteredOrders].sort((a, b) => {
     const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
-    return (priorityOrder[a.priority] || 2) - (priorityOrder[b.priority] || 2);
+    const pDiff = (priorityOrder[a.priority] || 2) - (priorityOrder[b.priority] || 2);
+    if (pDiff !== 0) return pDiff;
+    // Misma prioridad → más reciente primero
+    return new Date(b.reportedAt).getTime() - new Date(a.reportedAt).getTime();
   });
 
   const handleStatusChange = (order: WorkOrder, newStatus: string) => {
