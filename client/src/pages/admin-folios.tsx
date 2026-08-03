@@ -405,10 +405,11 @@ function MovimientosDiaTab({
                     const debit = isDebitType(mov.type);
                     const EntityIcon = ENTITY_TYPE_ICONS[mov.entityType] ?? ReceiptText;
                     const isSelected = selectedFolio?.entityId === mov.entityId && selectedFolio?.entityType === mov.entityType;
+                    const isNotaDebito = mov.sourceType === "nota_debito" || (mov.receiptType?.startsWith("ND") ?? false);
                     return (
                       <TableRow
                         key={mov.id}
-                        className={`cursor-pointer transition-colors ${isSelected ? "bg-primary/5 border-l-4 border-l-primary" : "hover:bg-muted/40"}`}
+                        className={`cursor-pointer transition-colors ${isSelected ? "bg-primary/5 border-l-4 border-l-primary" : isNotaDebito ? "bg-amber-50/60 hover:bg-amber-100/60 dark:bg-amber-950/10 dark:hover:bg-amber-950/20" : "hover:bg-muted/40"}`}
                         onClick={() => onSelectFolio(isSelected ? null : { entityType: mov.entityType, entityId: mov.entityId, codigo: mov.folioCodigo })}
                         data-testid={`row-movement-${mov.id}`}
                       >
@@ -425,12 +426,22 @@ function MovimientosDiaTab({
                           <div className="flex items-center gap-2">
                             {movementIcon(mov.type)}
                             <div className="min-w-0">
-                              {(mov.type === "transfer_in" || mov.type === "transfer_out")
-                                ? <TransferDescriptionCell description={mov.description} type={mov.type} />
-                                : <p className="text-sm font-medium truncate max-w-[220px]">{mov.description}</p>
-                              }
+                              <div className="flex items-center gap-1.5">
+                                {(mov.type === "transfer_in" || mov.type === "transfer_out")
+                                  ? <TransferDescriptionCell description={mov.description} type={mov.type} />
+                                  : <p className="text-sm font-medium truncate max-w-[220px]">{mov.description}</p>
+                                }
+                                {isNotaDebito && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1.5 py-0 h-4 font-semibold shrink-0 bg-amber-50 text-amber-700 border-amber-400 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-700"
+                                  >
+                                    {mov.receiptType ?? "ND"}
+                                  </Badge>
+                                )}
+                              </div>
                               <p className="text-xs text-muted-foreground">
-                                {MOVEMENT_TYPE_LABELS[mov.type] ?? mov.type}
+                                {isNotaDebito ? "Nota de Débito" : (MOVEMENT_TYPE_LABELS[mov.type] ?? mov.type)}
                                 {mov.registeredBy && ` · ${mov.registeredBy}`}
                               </p>
                             </div>

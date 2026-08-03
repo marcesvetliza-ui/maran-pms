@@ -445,7 +445,7 @@ function MovementRow({
   const ndReceiptCode = isNotaDebito ? (mov.receiptType ?? "ND") : null;
 
   return (
-    <div className="border-b last:border-0">
+    <div className={`border-b last:border-0 ${isNotaDebito ? "bg-amber-50/60 dark:bg-amber-950/10" : ""}`}>
       <div
         className={`flex items-start gap-3 py-2 ${hasSource ? "cursor-pointer hover:bg-muted/30 rounded-md px-1 -mx-1 transition-colors" : ""}`}
         onClick={() => hasSource && setExpanded(v => !v)}
@@ -478,12 +478,12 @@ function MovementRow({
             <span className="text-xs text-muted-foreground">
               {isNotaDebito ? "Nota de Débito" : (MOVEMENT_LABELS[mov.type] ?? mov.type)}
             </span>
-            {isNotaDebito && ndReceiptCode && (
+            {isNotaDebito && (
               <Badge
                 variant="outline"
-                className="text-[10px] px-1.5 py-0 h-4 font-semibold bg-sky-50 text-sky-700 border-sky-300 dark:bg-sky-950/20 dark:text-sky-300 dark:border-sky-700"
+                className="text-[10px] px-1.5 py-0 h-4 font-semibold bg-amber-50 text-amber-700 border-amber-400 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-700"
               >
-                {ndReceiptCode}
+                {ndReceiptCode ?? "ND"}
               </Badge>
             )}
             {mov.paymentMethod && (
