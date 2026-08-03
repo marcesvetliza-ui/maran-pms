@@ -205,6 +205,8 @@ export function PrefacturaDialog({
   // True when payment+invoice succeeded but the checkout API call itself failed —
   // staff must complete checkout manually; the folio data is already persisted.
   const [checkoutFailed, setCheckoutFailed] = useState(false);
+  // True when at least one payment row was actually persisted in this submit.
+  const [paymentRegistered, setPaymentRegistered] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -280,6 +282,7 @@ export function PrefacturaDialog({
       setEmittedInvoice(null);
       setCheckoutDone(false);
       setCheckoutFailed(false);
+      setPaymentRegistered(false);
       setSubmitError(null);
       setItemDescriptions({});
       setEditingId(null);
@@ -557,6 +560,7 @@ export function PrefacturaDialog({
         if (!res.ok) throw new Error(resBody?.error || "Error al registrar pago");
         if (resBody?.id) createdPaymentIds.push(resBody.id);
       }
+      if (createdPaymentIds.length > 0) setPaymentRegistered(true);
 
       // 2. Emit invoice/comprobante
       let invoiceData: any = null;
@@ -1249,38 +1253,65 @@ export function PrefacturaDialog({
         {/* ── STEP 3: Resultado ──────────────────────────────────────────────── */}
         {step === 3 && (
           <div className="space-y-4">
-            {/* Success / partial-success banner */}
-            <Card className={checkoutFailed
-              ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/10"
-              : "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10"
-            }>
-              <CardContent className="flex items-center gap-4 p-5">
-                <div className={`flex h-12 w-12 items-center justify-center rounded-full shrink-0 ${
-                  checkoutFailed
-                    ? "bg-amber-100 dark:bg-amber-900/40"
-                    : "bg-green-100 dark:bg-green-900/40"
-                }`}>
-                  {checkoutFailed
-                    ? <AlertTriangle className="h-7 w-7 text-amber-600 dark:text-amber-400" />
-                    : <CircleCheck className="h-7 w-7 text-green-600 dark:text-green-400" />
-                  }
-                </div>
-                <div>
-                  {checkoutDone
-                    ? <p className="font-bold text-green-700 dark:text-green-400">Check-out completado</p>
-                    : checkoutFailed
-                      ? <p className="font-bold text-amber-700 dark:text-amber-400">Cobro e factura registrados — check-out pendiente</p>
-                      : <p className="font-bold text-green-700 dark:text-green-400">Cobro registrado</p>
-                  }
-                  {emittedInvoice && (
-                    <p className={`text-sm mt-0.5 ${checkoutFailed ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>
-                      {emittedInvoice.tipo_comprobante} {padNum(emittedInvoice.punto_venta, 4)}-{padNum(emittedInvoice.numero, 8)}
-                      {emittedInvoice.cae ? ` — CAE: ${emittedInvoice.cae}` : " (sin CAE)"}
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            {/* Success / partial-success / no-movements banner */}
+            {(() => {
+              const noMovements = !paymentRegistered && !emittedInvoice;
+              const bannerClass = checkoutFailed
+                ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/10"
+                : noMovements
+                  ? "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/10"
+                  : "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10";
+              const iconBg = checkoutFailed
+                ? "bg-amber-100 dark:bg-amber-900/40"
+                : noMovements
+                  ? "bg-blue-100 dark:bg-blue-900/40"
+                  : "bg-green-100 dark:bg-green-900/40";
+              const icon = checkoutFailed
+                ? <AlertTriangle className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+                : noMovements
+                  ? <CircleCheck className="h-7 w-7 text-blue-500 dark:text-blue-400" />
+                  : <CircleCheck className="h-7 w-7 text-green-600 dark:text-green-400" />;
+              const headlineClass = checkoutFailed
+                ? "font-bold text-amber-700 dark:text-amber-400"
+                : noMovements
+                  ? "font-bold text-blue-700 dark:text-blue-400"
+                  : "font-bold text-green-700 dark:text-green-400";
+              const headline = checkoutDone
+                ? "Check-out completado"
+                : checkoutFailed
+                  ? "Cobro e factura registrados — check-out pendiente"
+                  : noMovements
+                    ? "Sin movimientos pendientes"
+                    : "Cobro registrado";
+              const sublineClass = checkoutFailed
+                ? "text-amber-700 dark:text-amber-300"
+                : noMovements
+                  ? "text-blue-600 dark:text-blue-300"
+                  : "text-green-700 dark:text-green-300";
+              return (
+                <Card className={bannerClass}>
+                  <CardContent className="flex items-center gap-4 p-5">
+                    <div className={`flex h-12 w-12 items-center justify-center rounded-full shrink-0 ${iconBg}`}>
+                      {icon}
+                    </div>
+                    <div>
+                      <p className={headlineClass}>{headline}</p>
+                      {noMovements && (
+                        <p className={`text-sm mt-0.5 ${sublineClass}`}>
+                          El saldo de la reserva es cero — no se registró ningún cobro ni se emitió comprobante.
+                        </p>
+                      )}
+                      {emittedInvoice && (
+                        <p className={`text-sm mt-0.5 ${sublineClass}`}>
+                          {emittedInvoice.tipo_comprobante} {padNum(emittedInvoice.punto_venta, 4)}-{padNum(emittedInvoice.numero, 8)}
+                          {emittedInvoice.cae ? ` — CAE: ${emittedInvoice.cae}` : " (sin CAE)"}
+                        </p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* Checkout-failed warning: payment & invoice are saved, checkout needs manual completion */}
             {checkoutFailed && (
