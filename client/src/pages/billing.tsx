@@ -94,7 +94,17 @@ export default function BillingPage() {
   const [showResPicker, setShowResPicker] = useState(false);
   const [resPickerSearch, setResPickerSearch] = useState("");
   const [prefacturaResId, setPrefacturaResId] = useState<number | null>(null);
-  const [prefacturaRes, setPrefacturaRes] = useState<any | null>(null);
+
+  // Fetch the full reservation detail so PrefacturaDialog always receives a
+  // complete object (guest.vatCondition, guest.cuilCuit, company.*, agency.*),
+  // regardless of what the list endpoint returns.
+  const { data: prefacturaRes = null } = useQuery<any | null>({
+    queryKey: ["/api/reservations", prefacturaResId, "detail"],
+    queryFn: () =>
+      fetch(`/api/reservations/${prefacturaResId}`, { credentials: "include" }).then(r => r.json()),
+    enabled: prefacturaResId !== null,
+    staleTime: 0,
+  });
 
   // Debounced search: only send a request after the user stops typing for 300 ms.
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -350,7 +360,6 @@ export default function BillingPage() {
                     onClick={() => {
                       setShowResPicker(false);
                       setPrefacturaResId(r.id);
-                      setPrefacturaRes(r);
                     }}
                     data-testid={`row-res-picker-${r.id}`}
                   >
@@ -373,7 +382,7 @@ export default function BillingPage() {
       {prefacturaResId !== null && (
         <PrefacturaDialog
           open={prefacturaResId !== null}
-          onClose={() => { setPrefacturaResId(null); setPrefacturaRes(null); }}
+          onClose={() => { setPrefacturaResId(null); }}
           reservationId={prefacturaResId}
           reservation={prefacturaRes}
           mode="billing"
