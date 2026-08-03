@@ -4,7 +4,7 @@ import { db } from "../db";
 import { eventPayments, salesInvoices } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, and } from "drizzle-orm";
-import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf } from "../eventPdfs";
+import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf, generateTableReceiptPdf } from "../eventPdfs";
 import { emitirFactura } from "../billing/invoiceService";
 
 export function registerEventsRoutes(app: Express) {
@@ -858,6 +858,48 @@ export function registerEventsRoutes(app: Express) {
     } catch (e: any) {
       console.error("[Billing] Error emitiendo NC mesa evento:", e);
       res.status(500).json({ error: e?.message || "Error al emitir la Nota de Crédito" });
+    }
+  });
+
+  app.get("/api/events/:eventId/tables/:tableId/receipt-pdf", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Event table not found" });
+
+      const pdfBuffer = await generateTableReceiptPdf(event.name, event.eventCode, {
+        tableNumber: table.tableNumber,
+        label: table.label ?? null,
+        seats: table.seats ?? null,
+        status: table.status,
+        receiptType: table.receiptType ?? null,
+        invoiceRef: (table as any).invoiceRef ?? null,
+        ncId: (table as any).ncId ?? null,
+        closedAt: table.closedAt ? String(table.closedAt) : null,
+        charges: table.charges.map((c: any) => ({
+          description: c.description,
+          quantity: c.quantity,
+          unitPrice: c.unitPrice,
+          total: c.total,
+        })),
+        payments: table.payments.map((p: any) => ({
+          amount: p.amount,
+          method: p.method,
+          isAdvance: p.isAdvance,
+          paidAt: p.paidAt ? String(p.paidAt) : "",
+        })),
+      });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="comprobante-mesa-${table.tableNumber}-${event.eventCode}.pdf"`,
+      );
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("Error generating table receipt PDF:", error);
+      res.status(500).json({ error: "Error generating PDF" });
     }
   });
 

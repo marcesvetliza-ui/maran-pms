@@ -2937,6 +2937,16 @@ export default function EventsPage() {
                           <> · Cerrada: {safeFormatDate(selectedTable.closedAt, "d MMM yyyy HH:mm", { locale: es })}</>
                         )}
                       </p>
+                      <a
+                        href={`/api/events/${selectedEvent!.id}/tables/${selectedTable.id}/receipt-pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium ring-offset-background hover:bg-accent hover:text-accent-foreground"
+                        data-testid="button-table-receipt-pdf"
+                      >
+                        <FileText className="h-4 w-4" />
+                        Imprimir comprobante
+                      </a>
                       {tableInvoice && (
                         <div className="p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-sm space-y-2" data-testid="table-invoice-badge">
                           <div className="flex items-center gap-2 font-semibold text-purple-800 dark:text-purple-200">
