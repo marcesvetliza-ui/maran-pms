@@ -344,8 +344,10 @@ export function PrefacturaDialog({
             amount: folio.balance > 0.01 ? String(folio.balance.toFixed(2)) : prev[0].amount,
           }];
         }
-        // Multiple rows — flag the mismatch but leave amounts intact
-        setSplitBalanceChanged(true);
+        // Multiple rows — flag the mismatch but leave amounts intact.
+        // Only show the warning when there is actually a balance to re-split;
+        // if the balance is now zero (e.g. after a full NC) the warning is misleading.
+        if (folio.balance > 0.01) setSplitBalanceChanged(true);
         return prev;
       });
     }
