@@ -3330,12 +3330,30 @@ export default function RestaurantPage() {
                                 <TableHead>Cliente</TableHead>
                                 <TableHead className="text-right">Total</TableHead>
                                 <TableHead>CAE</TableHead>
+                                <TableHead>Factura Orig.</TableHead>
                                 <TableHead>Estado</TableHead>
                                 <TableHead></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {notasCredito.map((inv: any) => (
+                              {notasCredito.map((inv: any) => {
+                                const hasOriginal = inv.original_tipo && inv.original_numero != null;
+                                const originalRef = hasOriginal
+                                  ? `${inv.original_tipo} ${String(inv.original_punto_venta || 1).padStart(4, "0")}-${String(inv.original_numero).padStart(8, "0")}`
+                                  : null;
+                                const originalFactura = hasOriginal ? {
+                                  id: inv.nota_credito_id,
+                                  tipo_comprobante: inv.original_tipo,
+                                  numero: inv.original_numero,
+                                  punto_venta: inv.original_punto_venta,
+                                  fecha_emision: inv.original_fecha_emision,
+                                  monto_total: inv.original_monto_total,
+                                  cliente_razon_social: inv.original_cliente_razon_social,
+                                  cae: inv.original_cae,
+                                  modo_ficticio: inv.original_modo_ficticio,
+                                  estado: inv.original_estado,
+                                } : null;
+                                return (
                                 <TableRow key={inv.id}>
                                   <TableCell className="font-mono text-sm">{formatNro(inv)}</TableCell>
                                   <TableCell><Badge variant="secondary">{inv.tipo_comprobante}</Badge></TableCell>
@@ -3350,18 +3368,32 @@ export default function RestaurantPage() {
                                       </>
                                     ) : "-"}
                                   </TableCell>
+                                  <TableCell className="text-xs font-mono">
+                                    {originalRef
+                                      ? <span className="text-muted-foreground">{originalRef}</span>
+                                      : <span className="text-muted-foreground">—</span>
+                                    }
+                                  </TableCell>
                                   <TableCell>
                                     <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-300">Emitida</Badge>
                                   </TableCell>
                                   <TableCell>
-                                    <Button size="sm" variant="ghost" title="Descargar PDF"
-                                      onClick={() => window.open(`/api/billing/invoices/${inv.id}/pdf`, "_blank")}
-                                      data-testid={`button-nc-pdf-${inv.id}`}>
-                                      <Download className="h-3.5 w-3.5" />
-                                    </Button>
+                                    <div className="flex items-center gap-1">
+                                      <Button size="sm" variant="ghost" title="Ver detalle"
+                                        onClick={() => setSelectedInvoiceDetail({ invoice: inv, linkedNc: originalFactura })}
+                                        data-testid={`button-nc-detail-${inv.id}`}>
+                                        <Eye className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button size="sm" variant="ghost" title="Descargar PDF"
+                                        onClick={() => window.open(`/api/billing/invoices/${inv.id}/pdf`, "_blank")}
+                                        data-testid={`button-nc-pdf-${inv.id}`}>
+                                        <Download className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
                                   </TableCell>
                                 </TableRow>
-                              ))}
+                                );
+                              })}
                             </TableBody>
                           </Table>
                         )}
@@ -6415,6 +6447,7 @@ export default function RestaurantPage() {
             const formatNroLocal = (i: any) => `${String(i.punto_venta || 1).padStart(4, "0")}-${String(i.numero).padStart(8, "0")}`;
             const montoAcreditado = parseFloat(inv.monto_acreditado || "0");
             const saldoPendiente = parseFloat(inv.monto_total || "0") - montoAcreditado;
+            const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(inv.tipo_comprobante);
             return (
               <div className="space-y-4">
                 {/* Invoice info */}
@@ -6432,7 +6465,7 @@ export default function RestaurantPage() {
                     <span className="text-sm text-right max-w-[200px]">{inv.cliente_razon_social || "Consumidor Final"}</span>
                   </div>
                   <div className="flex items-center justify-between border-t pt-2">
-                    <span className="text-sm font-medium">Total facturado</span>
+                    <span className="text-sm font-medium">{isNC ? "Total acreditado" : "Total facturado"}</span>
                     <span className="font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                   </div>
                   {inv.cae && (
@@ -6443,8 +6476,47 @@ export default function RestaurantPage() {
                   )}
                 </div>
 
-                {/* NC section — shown when invoice is anulada or parcial */}
-                {linkedNc && (
+                {/* Original factura section — shown when viewing an NC row */}
+                {isNC && linkedNc && (
+                  <div className="rounded-lg border-2 border-blue-400/60 bg-blue-50 dark:bg-blue-900/10 p-4 space-y-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Receipt className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      <span className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-400">
+                        Factura Original Acreditada
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Comprobante</span>
+                      <span className="font-mono font-bold text-base">{linkedNc.tipo_comprobante} {formatNroLocal(linkedNc)}</span>
+                    </div>
+                    {linkedNc.fecha_emision && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Fecha factura</span>
+                        <span className="text-sm">{format(new Date(linkedNc.fecha_emision), "dd/MM/yyyy")}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between border-t pt-2">
+                      <span className="text-sm font-medium">Total original</span>
+                      <span className="font-bold text-base text-blue-700 dark:text-blue-400">
+                        ${parseFloat(linkedNc.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    {linkedNc.estado && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Estado factura</span>
+                        {linkedNc.estado === "anulada"
+                          ? <Badge variant="destructive">ANULADA</Badge>
+                          : linkedNc.estado === "parcial"
+                            ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300">NC PARCIAL</Badge>
+                            : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
+                        }
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* NC section — shown when viewing an original factura that has an NC */}
+                {!isNC && linkedNc && (
                   <div className={`rounded-lg border-2 p-4 space-y-2 ${inv.estado === "anulada" ? "border-destructive/60 bg-destructive/5" : "border-amber-400/60 bg-amber-50 dark:bg-amber-900/10"}`}>
                     <div className="flex items-center gap-2 mb-1">
                       <FileX className={`h-4 w-4 ${inv.estado === "anulada" ? "text-destructive" : "text-amber-600"}`} />
@@ -6477,16 +6549,18 @@ export default function RestaurantPage() {
                   </div>
                 )}
 
-                {/* Estado badge */}
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Estado</span>
-                  {inv.estado === "anulada"
-                    ? <Badge variant="destructive">ANULADA</Badge>
-                    : inv.estado === "parcial"
-                      ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300">NC PARCIAL</Badge>
-                      : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
-                  }
-                </div>
+                {/* Estado badge — only for original facturas */}
+                {!isNC && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Estado</span>
+                    {inv.estado === "anulada"
+                      ? <Badge variant="destructive">ANULADA</Badge>
+                      : inv.estado === "parcial"
+                        ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300">NC PARCIAL</Badge>
+                        : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
+                    }
+                  </div>
+                )}
               </div>
             );
           })()}

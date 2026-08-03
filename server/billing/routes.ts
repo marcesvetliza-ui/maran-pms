@@ -202,9 +202,21 @@ export function registerBillingRoutes(app: Express) {
       if (reservaId) whereClause = sql`${whereClause} AND si.reserva_id::text = ${reservaId}`;
 
       const rows = await db.execute(sql`
-        SELECT si.*, pc.area AS area_name
+        SELECT si.*, pc.area AS area_name,
+               orig.tipo_comprobante AS original_tipo,
+               orig.numero           AS original_numero,
+               orig.punto_venta      AS original_punto_venta,
+               orig.fecha_emision    AS original_fecha_emision,
+               orig.monto_total      AS original_monto_total,
+               orig.cliente_razon_social AS original_cliente_razon_social,
+               orig.cae              AS original_cae,
+               orig.modo_ficticio    AS original_modo_ficticio,
+               orig.estado           AS original_estado
         FROM sales_invoices si
         LEFT JOIN pos_configs pc ON pc.numero = si.punto_venta
+        LEFT JOIN sales_invoices orig
+               ON orig.id = si.nota_credito_id
+              AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
         WHERE ${whereClause}
         ORDER BY si.created_at DESC
         LIMIT 200
