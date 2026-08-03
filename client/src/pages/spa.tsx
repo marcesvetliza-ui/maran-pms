@@ -413,6 +413,7 @@ export default function SpaPage() {
     enabled: !!selectedAccount?.id && isFolioOpen,
   });
   const spaFolioVoidMovements: any[] = (spaFolioData?.movements ?? []).filter((m: any) => m.type === "void");
+  const spaFolioNdMovements: any[] = (spaFolioData?.movements ?? []).filter((m: any) => m.sourceType === "nota_debito" || (m.receiptType?.startsWith("ND") ?? false));
 
   const { data: spaInventoryItems = [] } = useQuery<InventoryItemWithDetails[]>({
     queryKey: ["/api/inventory/items", "spa"],
@@ -2271,6 +2272,20 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           </Button>
                         )}
                       </div>
+                    </div>
+                  ))}
+                  {spaFolioNdMovements.map((mov: any) => (
+                    <div key={mov.id} className="flex items-center justify-between p-2 border border-amber-200 rounded text-sm bg-amber-50/50 dark:bg-amber-900/10 dark:border-amber-700" data-testid={`nd-movement-${mov.id}`}>
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 h-4 font-semibold shrink-0 bg-amber-50 text-amber-700 border-amber-400 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-700"
+                        >
+                          {mov.receiptType ?? "ND"}
+                        </Badge>
+                        <span className="truncate">{mov.description}</span>
+                      </div>
+                      <span className="font-medium shrink-0 ml-2">${parseFloat(mov.amount).toLocaleString()}</span>
                     </div>
                   ))}
                 </div>

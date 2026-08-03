@@ -438,6 +438,7 @@ export default function EventsPage() {
     enabled: !!selectedEvent?.id && activeTab === "folio",
   });
   const eventFolioVoidMovements: any[] = (eventFolioData?.movements ?? []).filter((m: any) => m.type === "void");
+  const eventFolioNdMovements: any[] = (eventFolioData?.movements ?? []).filter((m: any) => m.sourceType === "nota_debito" || (m.receiptType?.startsWith("ND") ?? false));
 
   const eventsMap = planningData?.events || {};
   const cellEventsMap = planningData?.cellEvents || {};
@@ -2239,7 +2240,21 @@ export default function EventsPage() {
                             <span className="font-medium">${charge.totalAmount}</span>
                           </div>
                         ))}
-                        {(!selectedEvent.charges || selectedEvent.charges.length === 0) && (
+                        {eventFolioNdMovements.map((mov: any) => (
+                          <div key={mov.id} className="flex items-center justify-between p-2 rounded border border-amber-200 text-sm bg-amber-50/50 dark:bg-amber-900/10 dark:border-amber-700" data-testid={`nd-movement-${mov.id}`}>
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 h-4 font-semibold shrink-0 bg-amber-50 text-amber-700 border-amber-400 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-700"
+                              >
+                                {mov.receiptType ?? "ND"}
+                              </Badge>
+                              <span className="truncate font-medium">{mov.description}</span>
+                            </div>
+                            <span className="font-medium shrink-0 ml-2">${parseFloat(mov.amount).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        {(!selectedEvent.charges || selectedEvent.charges.length === 0) && eventFolioNdMovements.length === 0 && (
                           <p className="text-sm text-muted-foreground text-center py-4">Sin cargos</p>
                         )}
                       </div>
