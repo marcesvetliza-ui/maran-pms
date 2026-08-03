@@ -4,7 +4,7 @@ import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
-import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData } from "./invoicePdf";
+import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { storage } from "../db-storage";
 
@@ -424,7 +424,27 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
-      const pdfBuf = await generarFacturaPDF(factura, config);
+      // Fetch linked NC if present
+      let notaCreditoInfo: NotaCreditoInfo | undefined;
+      if (factura.nota_credito_id) {
+        try {
+          const ncRow = await db.execute(sql`SELECT tipo_comprobante, punto_venta, numero, fecha_emision, monto_total FROM sales_invoices WHERE id = ${factura.nota_credito_id}`);
+          const nc = ncRow.rows[0] as any;
+          if (nc) {
+            notaCreditoInfo = {
+              tipoComprobante: nc.tipo_comprobante ?? "",
+              puntoVenta: Number(nc.punto_venta ?? 1),
+              numero: Number(nc.numero ?? 0),
+              fechaEmision: nc.fecha_emision,
+              montoTotal: parseFloat(nc.monto_total ?? "0"),
+            };
+          }
+        } catch (ncErr: any) {
+          console.warn("[invoice-pdf] could not fetch linked NC (non-fatal):", ncErr?.message);
+        }
+      }
+
+      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo);
       const pv = String(factura.punto_venta ?? 1).padStart(4, "0");
       const nro = String(factura.numero ?? 0).padStart(8, "0");
       res.setHeader("Content-Type", "application/pdf");

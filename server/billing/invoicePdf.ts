@@ -34,7 +34,15 @@ const TIPO_LABELS: Record<string, { nombre: string; letra: string; codigo: strin
   NDM: { nombre: "NOTA DE DÉBITO MiPyME", letra: "A", codigo: "202" },
 };
 
-export async function generarFacturaPDF(factura: any, config: any): Promise<Buffer> {
+export interface NotaCreditoInfo {
+  tipoComprobante: string;
+  puntoVenta: number;
+  numero: number;
+  fechaEmision: string;
+  montoTotal: number;
+}
+
+export async function generarFacturaPDF(factura: any, config: any, notaCredito?: NotaCreditoInfo): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 30, size: "A4" });
     const chunks: Buffer[] = [];
@@ -206,6 +214,40 @@ export async function generarFacturaPDF(factura: any, config: any): Promise<Buff
       .text("IMPORTE TOTAL", txL, y + 2, { width: tw - 70 })
       .text(`$ ${fPeso(montoTotal)}`, txL + tw - 70, y + 2, { width: 65, align: "right" });
     y += 22;
+
+    // ── Nota de Crédito / Anulación ──────────────────────────────
+    if (notaCredito) {
+      const ncTipo  = TIPO_LABELS[notaCredito.tipoComprobante] ?? { nombre: "NOTA DE CRÉDITO", letra: "?", codigo: "000" };
+      const ncPV    = padNum(Number(notaCredito.puntoVenta), 4);
+      const ncNRO   = padNum(Number(notaCredito.numero), 8);
+      const ncLabel = `${ncTipo.nombre} ${ncTipo.letra} N° ${ncPV}-${ncNRO} (${fDate(notaCredito.fechaEmision)})`;
+      const saldoNeto = $n(montoTotal) - $n(notaCredito.montoTotal);
+
+      y += 4;
+      // NC row — orange background
+      doc.rect(txL - 4, y - 2, tw + 8, 16).fillColor("#fff3e0").fill()
+        .rect(txL - 4, y - 2, tw + 8, 16).strokeColor("#e65100").lineWidth(0.5).stroke();
+      doc.fillColor("#bf360c").font("Helvetica-Bold").fontSize(7.5)
+        .text("ANULACIÓN NC:", txL, y + 1, { width: tw - 70 });
+      doc.fillColor("#bf360c").font("Helvetica").fontSize(7)
+        .text(`− $ ${fPeso(notaCredito.montoTotal)}`, txL + tw - 70, y + 1, { width: 65, align: "right" });
+      y += 16;
+
+      // NC reference line
+      doc.fillColor("#bf360c").font("Helvetica-Oblique").fontSize(6.5)
+        .text(ncLabel, txL, y, { width: tw });
+      y += 12;
+
+      // Net balance row
+      const netColor = saldoNeto <= 0.01 ? "#2e7d32" : "#c62828";
+      doc.rect(txL - 4, y - 2, tw + 8, 18).fillColor(saldoNeto <= 0.01 ? "#e8f5e9" : "#ffebee").fill()
+        .rect(txL - 4, y - 2, tw + 8, 18).strokeColor(netColor).lineWidth(0.5).stroke();
+      doc.fillColor(netColor).font("Helvetica-Bold").fontSize(9)
+        .text("SALDO NETO", txL, y + 2, { width: tw - 70 })
+        .text(`$ ${fPeso(Math.max(saldoNeto, 0))}`, txL + tw - 70, y + 2, { width: 65, align: "right" });
+      doc.fillColor("#000").lineWidth(0.5);
+      y += 22;
+    }
 
     if (modoFicticio) {
       y += 4;
