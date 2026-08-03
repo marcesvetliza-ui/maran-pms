@@ -50,6 +50,7 @@ import {
   Unlink,
   Clock,
   FileX,
+  Undo2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmitirFacturaDialog } from "./billing";
@@ -1077,6 +1078,17 @@ export default function GroupDetailPage() {
     onError: (e: any) => toast({ title: "Error al transferir cargo", description: parseApiError(e), variant: "destructive" }),
   });
 
+  const reverseGroupChargeMutation = useMutation({
+    mutationFn: (chargeId: string) =>
+      apiRequest("POST", `/api/groups/${groupId}/reverse-transfer-charge`, { chargeId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      toast({ title: "Cargo revertido correctamente" });
+    },
+    onError: (e: any) => toast({ title: "Error al revertir cargo", description: parseApiError(e), variant: "destructive" }),
+  });
+
   const updateMasterFolioConfigMutation = useMutation({
     mutationFn: (config: MasterFolioConfig) =>
       apiRequest("PATCH", `/api/groups/${groupId}`, { masterFolioConfig: config }),
@@ -1946,6 +1958,15 @@ export default function GroupDetailPage() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold">${parseFloat(gc.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                <Button
+                                  variant="ghost" size="icon" className="h-6 w-6"
+                                  title="Revertir cargo"
+                                  onClick={() => reverseGroupChargeMutation.mutate(gc.id)}
+                                  disabled={reverseGroupChargeMutation.isPending}
+                                  data-testid={`button-reverse-group-charge-${gc.id}`}
+                                >
+                                  <Undo2 className="h-3 w-3 text-orange-500" />
+                                </Button>
                                 <Button
                                   variant="ghost" size="icon" className="h-6 w-6"
                                   onClick={() => deleteGroupChargeMutation.mutate(gc.id)}
