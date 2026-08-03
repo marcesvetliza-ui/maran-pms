@@ -789,6 +789,7 @@ export default function RestaurantPage() {
   const [ncMotivo, setNcMotivo] = useState("");
   const [ncParcial, setNcParcial] = useState(false);
   const [ncMontoParcial, setNcMontoParcial] = useState("");
+  const [ncVoidFolioPaymentIds, setNcVoidFolioPaymentIds] = useState<Set<string>>(new Set());
   const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]);
   const [ncTipo, setNcTipo] = useState("todos");
   const [ncCliente, setNcCliente] = useState("");
@@ -1732,9 +1733,20 @@ export default function RestaurantPage() {
     onError: (e: any) => toast({ title: "Error al emitir comprobante", description: parseApiError(e), variant: "destructive" }),
   });
 
+  // Folio payments for the NC dialog — active payment movements on the order's folio
+  const { data: ncFolioPayments = [] } = useQuery<any[]>({
+    queryKey: ["/api/restaurant/orders", invoiceForNC?.restaurant_order_id, "folio-payments"],
+    queryFn: async () => {
+      const res = await fetch(`/api/restaurant/orders/${invoiceForNC!.restaurant_order_id}/folio-payments`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!invoiceForNC?.restaurant_order_id,
+  });
+
   const emitirNCMutation = useMutation({
-    mutationFn: async ({ invoiceId, motivo, monto }: { invoiceId: number; motivo: string; monto?: number }) => {
-      const res = await apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, { motivo, monto });
+    mutationFn: async ({ invoiceId, motivo, monto, folioMovementIdsToVoid }: { invoiceId: number; motivo: string; monto?: number; folioMovementIdsToVoid?: string[] }) => {
+      const res = await apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, { motivo, monto, folioMovementIdsToVoid });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Error al emitir NC"); }
       return res.json();
     },
@@ -1743,10 +1755,16 @@ export default function RestaurantPage() {
       setNcMotivo("");
       setNcParcial(false);
       setNcMontoParcial("");
+      setNcVoidFolioPaymentIds(new Set());
       refetchInvoices();
+      const voidCount = (_data as any)?.voidedFolioMovementIds?.length ?? 0;
       toast({
         title: "Nota de Crédito emitida",
-        description: variables?.monto ? "NC parcial emitida. La factura original permanece vigente." : "La factura original quedó anulada.",
+        description: variables?.monto
+          ? "NC parcial emitida. La factura original permanece vigente."
+          : voidCount > 0
+          ? `La factura original quedó anulada. ${voidCount} pago${voidCount !== 1 ? "s" : ""} anulado${voidCount !== 1 ? "s" : ""} — saldo restaurado.`
+          : "La factura original quedó anulada.",
       });
     },
     onError: (e: any) => {
@@ -6230,7 +6248,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Nota de Crédito Confirmation Dialog */}
-      <Dialog open={!!invoiceForNC} onOpenChange={(open) => { if (!open) { setInvoiceForNC(null); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); } }}>
+      <Dialog open={!!invoiceForNC} onOpenChange={(open) => { if (!open) { setInvoiceForNC(null); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); setNcVoidFolioPaymentIds(new Set()); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
@@ -6283,6 +6301,59 @@ export default function RestaurantPage() {
                       ? "La factura original permanece vigente (no se anula)."
                       : "La factura original quedará anulada."}
                   </div>
+                  {/* Payment void selection — shown when there are active payments on the order's folio */}
+                  {ncFolioPayments.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20 p-3 space-y-2">
+                      <div className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                        <RotateCcw className="h-3 w-3" />
+                        Anular cobros para restaurar el saldo (opcional)
+                      </div>
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        Seleccioná los pagos que deben anularse. El monto volverá a aparecer como deuda pendiente en el folio.
+                      </p>
+                      <div className="space-y-1">
+                        {ncFolioPayments.map((p: any) => (
+                          <label
+                            key={p.id}
+                            className="flex items-center gap-2 cursor-pointer rounded px-2 py-1 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                          >
+                            <Checkbox
+                              checked={ncVoidFolioPaymentIds.has(p.id)}
+                              onCheckedChange={() => {
+                                setNcVoidFolioPaymentIds(prev => {
+                                  const next = new Set(prev);
+                                  next.has(p.id) ? next.delete(p.id) : next.add(p.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span className="text-sm flex-1">
+                              {paymentMethodLabels[p.payment_method as string] || p.payment_method || "Pago"}
+                              {p.receipt_type && p.receipt_type !== "ticket" && (
+                                <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium">
+                                  {receiptTypeLabels[p.receipt_type as string] || p.receipt_type}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                              ${parseFloat(p.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      {ncVoidFolioPaymentIds.size > 0 && (
+                        <div className="text-xs text-amber-800 dark:text-amber-300 pt-1 border-t border-amber-200 dark:border-amber-700">
+                          Se anularán {ncVoidFolioPaymentIds.size} pago{ncVoidFolioPaymentIds.size !== 1 ? "s" : ""} por un total de{" "}
+                          <strong>
+                            ${ncFolioPayments
+                              .filter((p: any) => ncVoidFolioPaymentIds.has(p.id))
+                              .reduce((acc: number, p: any) => acc + parseFloat(p.amount), 0)
+                              .toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <label className="text-sm font-medium">Motivo <span className="text-muted-foreground text-xs">(requerido)</span></label>
                   <Textarea
                     placeholder="Ej: Error en facturación, devolución de consumo..."
@@ -6296,7 +6367,7 @@ export default function RestaurantPage() {
             })()}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setInvoiceForNC(null); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); }}>Cancelar</Button>
+            <Button variant="outline" onClick={() => { setInvoiceForNC(null); setNcMotivo(""); setNcParcial(false); setNcMontoParcial(""); setNcVoidFolioPaymentIds(new Set()); }}>Cancelar</Button>
             <Button
               variant="destructive"
               disabled={(() => {
@@ -6311,6 +6382,7 @@ export default function RestaurantPage() {
                   invoiceId: invoiceForNC.id,
                   motivo: ncMotivo,
                   monto: ncParcial ? parseFloat(ncMontoParcial) : undefined,
+                  folioMovementIdsToVoid: ncVoidFolioPaymentIds.size > 0 ? Array.from(ncVoidFolioPaymentIds) : undefined,
                 });
               }}
               data-testid="button-confirm-nc"

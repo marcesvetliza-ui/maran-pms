@@ -2098,6 +2098,37 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  // GET /api/restaurant/orders/:orderId/folio-payments — active payment folio_movements for NC void selection
+  app.get("/api/restaurant/orders/:orderId/folio-payments", requireAuth, async (req, res) => {
+    try {
+      const { orderId } = req.params;
+      // Find the folio for this order
+      const folioRow = await db.execute(sql`
+        SELECT id FROM folios
+        WHERE entity_type = 'restaurant_order' AND entity_id = ${orderId}
+        LIMIT 1
+      `);
+      const folio = (folioRow.rows?.[0] as any);
+      if (!folio) return res.json([]);
+
+      // Return active payment movements — exclude those already voided
+      const movements = await db.execute(sql`
+        SELECT fm.*
+        FROM folio_movements fm
+        WHERE fm.folio_id = ${folio.id}
+          AND fm.type = 'payment'
+          AND NOT EXISTS (
+            SELECT 1 FROM folio_movements void_m
+            WHERE void_m.voided_movement_id = fm.id
+          )
+        ORDER BY fm.created_at ASC
+      `);
+      res.json(movements.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Advances for a table (used by close dialog to auto-apply credit)
   app.get("/api/restaurant/tables/:tableId/advances", requireAuth, async (req, res) => {
     try {

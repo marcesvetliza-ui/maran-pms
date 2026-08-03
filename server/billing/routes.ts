@@ -478,7 +478,7 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "La factura ya fue anulada completamente" });
       }
 
-      const { motivo, items, monto, paymentIdsToVoid } = req.body;
+      const { motivo, items, monto, paymentIdsToVoid, folioMovementIdsToVoid } = req.body;
       const tipoNC =
         original.tipo_comprobante === "FA" ? "NCA" :
         original.tipo_comprobante === "FT" ? "NCT" :
@@ -683,7 +683,95 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
-      res.status(201).json({ ...nc, voidedPaymentIds });
+      // Void selected restaurant folio payment movements to restore the order's folio balance
+      const voidedFolioMovementIds: string[] = [];
+      if (Array.isArray(folioMovementIdsToVoid) && folioMovementIdsToVoid.length > 0 && original.restaurant_order_id) {
+        try {
+          const operador = user?.fullName || user?.username || "sistema";
+          const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+          const voidMotivo = `Nota de Crédito ${nroNC}${motivo ? ` — ${motivo}` : ""}`;
+
+          // Find the restaurant order's folio (ownership anchor)
+          const orderFolioRow = await db.execute(sql`
+            SELECT id FROM folios
+            WHERE entity_type = 'restaurant_order' AND entity_id = ${String(original.restaurant_order_id)}
+            LIMIT 1
+          `);
+          const orderFolio = (orderFolioRow.rows?.[0] as any);
+
+          if (orderFolio) {
+            const validMovementIds = (folioMovementIdsToVoid as any[]).filter((id: any) =>
+              typeof id === "string" && id.trim()
+            );
+
+            for (const movId of validMovementIds) {
+              try {
+                // Fetch the movement and verify ownership + type
+                const movRow = await db.execute(sql`
+                  SELECT * FROM folio_movements
+                  WHERE id = ${movId} AND folio_id = ${orderFolio.id} AND type = 'payment'
+                  LIMIT 1
+                `);
+                const mov = (movRow.rows?.[0] as any);
+                if (!mov) {
+                  console.warn(`[nc-void-folio-payment] movement ${movId} not found in order folio — skipped`);
+                  continue;
+                }
+
+                // Skip if already voided
+                const alreadyVoided = await db.execute(sql`
+                  SELECT 1 FROM folio_movements
+                  WHERE voided_movement_id = ${movId} AND type = 'void'
+                  LIMIT 1
+                `);
+                if (alreadyVoided.rows.length > 0) {
+                  console.warn(`[nc-void-folio-payment] movement ${movId} already voided — skipped`);
+                  continue;
+                }
+
+                const methodLabel: Record<string, string> = {
+                  efectivo: "Efectivo", tarjeta_debito: "Tarj. Débito", tarjeta_credito: "Tarj. Crédito",
+                  transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente",
+                  gift_voucher: "Voucher Regalo", consumo_interno: "Consumo Interno",
+                };
+                const payLabel = methodLabel[mov.payment_method] || mov.payment_method || "Pago";
+
+                // Insert void folio movement
+                await db.insert(folioMovements).values({
+                  folioId: orderFolio.id,
+                  type: "void",
+                  amount: String(mov.amount),
+                  description: `Anulación ${payLabel} — ${voidMotivo}`,
+                  sourceType: "nc_void",
+                  sourceId: String(nc.id),
+                  paymentMethod: mov.payment_method,
+                  voidedMovementId: movId,
+                  voidReason: voidMotivo,
+                  registeredBy: operador,
+                });
+                voidedFolioMovementIds.push(movId);
+
+                // Cash reversal for the voided restaurant payment
+                try {
+                  await storage.registerCashMovement(
+                    "restaurant", "payment_void", movId,
+                    `Anulación pago restaurante ${payLabel} — ${nroNC}`,
+                    mov.payment_method, String(mov.amount), "expense", operador
+                  );
+                } catch (cashErr) {
+                  console.error("[nc-void-folio-payment] cash reversal:", cashErr);
+                }
+              } catch (e) {
+                console.error(`[nc-void-folio-payment] failed for movement ${movId}:`, e);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[nc-void-folio-payment] outer:", e);
+        }
+      }
+
+      res.status(201).json({ ...nc, voidedPaymentIds, voidedFolioMovementIds });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
