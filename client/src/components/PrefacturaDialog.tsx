@@ -431,6 +431,12 @@ export function PrefacturaDialog({
     if (entity) applyEntity(entity, entityType);
   }
 
+  // Clear the split-balance warning whenever rows drop to a single entry,
+  // regardless of which action caused the transition (removeRow, method change, etc.)
+  useEffect(() => {
+    if (paymentRows.length === 1) setSplitBalanceChanged(false);
+  }, [paymentRows.length]);
+
   // Payment row helpers
   function updateRow(id: string, field: keyof PaymentRow, value: any) {
     setPaymentRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
