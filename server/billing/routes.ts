@@ -701,6 +701,12 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "No se puede emitir una ND sobre una factura anulada" });
       }
 
+      const montoTotalND = parseFloat(original.monto_total || "0");
+      const montoAcreditadoND = parseFloat(original.monto_acreditado || "0");
+      if (montoAcreditadoND >= montoTotalND - 0.009) {
+        return res.status(400).json({ error: "La factura ya fue acreditada en su totalidad mediante una Nota de Crédito" });
+      }
+
       // AFIP rule: NDs may only reference original invoices (FA/FB/FT/FM/FC), not NCs or other NDs
       const NC_TYPES = new Set(["NCA", "NCB", "NCT", "NCM", "NCC"]);
       const ND_TYPES = new Set(["NDA", "NDB", "NDT", "NDM", "NDC"]);
