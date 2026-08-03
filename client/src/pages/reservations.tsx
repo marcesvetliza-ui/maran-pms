@@ -551,6 +551,11 @@ export function ReservationFormDialog({
   };
 
   const handleDateChange = (field: "checkInDate" | "checkOutDate", value: string) => {
+    // If the field is cleared, just update the value without recalculating nights/totals
+    if (!value) {
+      setFormData({ ...formData, [field]: value });
+      return;
+    }
     let newCheckIn = field === "checkInDate" ? value : formData.checkInDate || today;
     let newCheckOut = field === "checkOutDate" ? value : formData.checkOutDate || tomorrow;
     // Auto-advance checkout if checkin moves past it
