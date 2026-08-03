@@ -2079,6 +2079,11 @@ export default function EventsPage() {
                                     <Badge variant={table.status === "open" ? "default" : "secondary"}>
                                       {table.status === "open" ? "Abierta" : table.status === "invoiced" ? "Facturada" : "Cerrada"}
                                     </Badge>
+                                    {table.ncId && (
+                                      <Badge className="text-[10px] bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 hover:bg-orange-100">
+                                        NC Emitida
+                                      </Badge>
+                                    )}
                                     {table.invoiceRef && (
                                       <span className="text-xs text-muted-foreground font-mono leading-tight">
                                         {table.invoiceRef}
