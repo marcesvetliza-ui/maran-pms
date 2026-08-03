@@ -554,10 +554,12 @@ export function ReservationFormDialog({
     let newCheckIn = field === "checkInDate" ? value : formData.checkInDate || today;
     let newCheckOut = field === "checkOutDate" ? value : formData.checkOutDate || tomorrow;
     // Auto-advance checkout if checkin moves past it
-    if (field === "checkInDate" && newCheckOut && value >= newCheckOut) {
+    if (field === "checkInDate" && value && newCheckOut && value >= newCheckOut) {
       const next = new Date(value + "T12:00:00");
-      next.setDate(next.getDate() + 1);
-      newCheckOut = next.toISOString().split("T")[0];
+      if (!isNaN(next.getTime())) {
+        next.setDate(next.getDate() + 1);
+        newCheckOut = next.toISOString().split("T")[0];
+      }
     }
     const nights = calculateNights(newCheckIn, newCheckOut);
     const totals = calculateTotals(
