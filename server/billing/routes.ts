@@ -424,9 +424,10 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
-      // Fetch linked NC if present
+      // Fetch linked NC if present — only for original Factura types, never for NC/ND documents
+      const FACTURA_TIPOS = ["FA", "FB", "FC", "FT", "FM"];
       let notaCreditoInfo: NotaCreditoInfo | undefined;
-      if (factura.nota_credito_id) {
+      if (factura.nota_credito_id && FACTURA_TIPOS.includes(tipo)) {
         try {
           const ncRow = await db.execute(sql`SELECT tipo_comprobante, punto_venta, numero, fecha_emision, monto_total FROM sales_invoices WHERE id = ${factura.nota_credito_id}`);
           const nc = ncRow.rows[0] as any;
