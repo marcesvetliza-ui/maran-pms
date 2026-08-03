@@ -3359,19 +3359,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async enrichEventTable(table: EventTable): Promise<EventTableWithDetails> {
-    const chargesList = await db.select().from(eventTableCharges).where(eq(eventTableCharges.eventTableId, table.id));
-    const paymentsList = await db.select().from(eventTablePayments).where(eq(eventTablePayments.eventTableId, table.id));
-    let invoiceRef: string | null = null;
-    if (table.invoiceId) {
-      const [inv] = await db
-        .select({ puntoVenta: salesInvoices.puntoVenta, numero: salesInvoices.numero })
-        .from(salesInvoices)
-        .where(eq(salesInvoices.id, table.invoiceId));
-      if (inv) {
-        invoiceRef =
-          String(inv.puntoVenta).padStart(4, "0") + "-" + String(inv.numero).padStart(8, "0");
-      }
-    }
+    const [chargesList, paymentsList, invoiceRows] = await Promise.all([
+      db.select().from(eventTableCharges).where(eq(eventTableCharges.eventTableId, table.id)),
+      db.select().from(eventTablePayments).where(eq(eventTablePayments.eventTableId, table.id)),
+      table.invoiceId
+        ? db.select({ puntoVenta: salesInvoices.puntoVenta, numero: salesInvoices.numero })
+            .from(salesInvoices)
+            .where(eq(salesInvoices.id, table.invoiceId))
+        : Promise.resolve([] as { puntoVenta: number | null; numero: number | null }[]),
+    ]);
+    const inv = invoiceRows[0];
+    const invoiceRef = inv
+      ? String(inv.puntoVenta).padStart(4, "0") + "-" + String(inv.numero).padStart(8, "0")
+      : null;
     return { ...table, charges: chargesList, payments: paymentsList, invoiceRef };
   }
 
