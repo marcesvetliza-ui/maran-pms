@@ -917,12 +917,27 @@ export function registerGroupsRoutes(app: Express) {
 
       await storage.deleteGroupCharge(chargeId);
 
+      // If the group charge originated from a reservation transfer, recreate
+      // the charge on that reservation so the room folio remains complete.
+      let recreated = false;
+      if (charge.reservationId) {
+        await storage.createCharge({
+          reservationId: charge.reservationId,
+          description: charge.description,
+          amount: charge.amount,
+          date: charge.date,
+          category: (charge.category as any) || "otros",
+          status: "active",
+        });
+        recreated = true;
+      }
+
       await audit(req, "delete", "groups",
-        `Cargo grupal revertido: ${charge.description} ($${charge.amount})`,
+        `Cargo grupal revertido: ${charge.description} ($${charge.amount})${recreated ? ` (cargo restaurado en reserva ${charge.reservationId})` : ""}`,
         { entityType: "group", entityId: groupId }
       );
 
-      res.json({ success: true, reversed: parseFloat(charge.amount) });
+      res.json({ success: true, reversed: parseFloat(charge.amount), recreated });
     } catch (error) {
       console.error("[reverse-group-charge] Error:", error);
       res.status(500).json({ error: "Error al revertir el cargo grupal" });

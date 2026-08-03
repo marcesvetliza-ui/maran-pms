@@ -1,15 +1,16 @@
 /**
- * Group-folio reversal guard
+ * Group-folio reversal guard + recreation
  *
  * The reverse-transfer-charge route for group folios lives at:
  *   POST /api/groups/:groupId/reverse-transfer-charge
  *
- * This suite verifies that a missing (or empty/null) chargeId in the request
- * body is rejected immediately with a 400 — before any DB or storage call —
- * so a frontend bug never produces a confusing downstream error.
- *
- * Guard tested (see server/routes/groups.ts):
- *   if (!chargeId) → 400 "Se requiere chargeId"
+ * This suite verifies:
+ *  1. A missing (or empty/null) chargeId is rejected with 400 before any DB call.
+ *  2. When the group charge has a reservationId the route recreates a matching
+ *     charge on that reservation (storage.createCharge) so the room folio is
+ *     restored to its original state.
+ *  3. When there is no reservationId (manually-added group charge) the route
+ *     succeeds without calling createCharge.
  */
 
 import express from "express";
@@ -19,14 +20,16 @@ import * as http from "node:http";
 // ─── Module mocks (must be declared before dynamic imports) ──────────────────
 
 // Mock db — controls raw SQL / select results.
-const mockDbSelect = vi.fn();
+// Tests set mockDbSelectRows to control what db.select().from().where().limit() returns.
+let mockDbSelectRows: any[] = [];
+
 vi.mock("../db", () => ({
   db: {
     execute: vi.fn().mockResolvedValue({ rows: [] }),
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: () => Promise.resolve([]),
+          limit: () => Promise.resolve(mockDbSelectRows),
         }),
       }),
     }),
@@ -46,6 +49,7 @@ const mockStorage = {
   deleteGroupCharge: vi.fn().mockResolvedValue(true),
   transferChargeToGroup: vi.fn(),
   deleteCharge: vi.fn(),
+  createCharge: vi.fn().mockResolvedValue({ id: "new-charge-001" }),
   getGroupPayments: vi.fn().mockResolvedValue([]),
   createGroupPayment: vi.fn(),
   distributeGroupPayment: vi.fn().mockResolvedValue({}),
@@ -180,12 +184,18 @@ describe("group-folio reversal guard — POST /api/groups/:groupId/reverse-trans
   beforeEach(async () => {
     vi.clearAllMocks();
 
+    // Default: db.select returns no rows (charge not found).
+    mockDbSelectRows = [];
+
     // Default: group exists.
     mockStorage.getGroup.mockResolvedValue({
       id: GROUP_ID,
       name: "Grupo Test",
       reservations: [],
     });
+
+    // Default: createCharge succeeds.
+    mockStorage.createCharge.mockResolvedValue({ id: "new-charge-001" });
 
     const ctx = await startApp();
     baseUrl = ctx.baseUrl;
@@ -257,6 +267,55 @@ describe("group-folio reversal guard — POST /api/groups/:groupId/reverse-trans
     expect(body.error).toMatch(/cargo no encontrado/i);
 
     expect(mockStorage.deleteGroupCharge).not.toHaveBeenCalled();
+
+    close();
+  });
+
+  // ── Recreation: charge with reservationId recreates on the reservation ────
+
+  it("recreates a matching charge on the reservation when the group charge has a reservationId", async () => {
+    // Make db.select return the charge so the route finds it.
+    mockDbSelectRows = [ACTIVE_GROUP_CHARGE];
+
+    const { status, body } = await postGroupReversal(baseUrl, GROUP_ID, {
+      chargeId: ACTIVE_GROUP_CHARGE.id,
+    });
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.recreated).toBe(true);
+
+    // The group charge must have been deleted.
+    expect(mockStorage.deleteGroupCharge).toHaveBeenCalledWith(ACTIVE_GROUP_CHARGE.id);
+
+    // A new charge must have been recreated on the source reservation.
+    expect(mockStorage.createCharge).toHaveBeenCalledOnce();
+    const created = mockStorage.createCharge.mock.calls[0][0];
+    expect(created.reservationId).toBe(ACTIVE_GROUP_CHARGE.reservationId);
+    expect(created.description).toBe(ACTIVE_GROUP_CHARGE.description);
+    expect(created.amount).toBe(ACTIVE_GROUP_CHARGE.amount);
+    expect(created.date).toBe(ACTIVE_GROUP_CHARGE.date);
+    expect(created.status).toBe("active");
+
+    close();
+  });
+
+  // ── No recreation: manually-added charge (no reservationId) ──────────────
+
+  it("succeeds without calling createCharge when the group charge has no reservationId", async () => {
+    const manualCharge = { ...ACTIVE_GROUP_CHARGE, reservationId: null };
+    mockDbSelectRows = [manualCharge];
+
+    const { status, body } = await postGroupReversal(baseUrl, GROUP_ID, {
+      chargeId: manualCharge.id,
+    });
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.recreated).toBe(false);
+
+    expect(mockStorage.deleteGroupCharge).toHaveBeenCalledWith(manualCharge.id);
+    expect(mockStorage.createCharge).not.toHaveBeenCalled();
 
     close();
   });
