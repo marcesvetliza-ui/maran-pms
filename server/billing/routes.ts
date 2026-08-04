@@ -803,23 +803,62 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
-      // Void selected restaurant folio payment movements to restore the order's folio balance
+      // Void selected folio payment movements (restaurant, SPA, or event) to restore the folio balance
       const voidedFolioMovementIds: string[] = [];
-      if (Array.isArray(folioMovementIdsToVoid) && folioMovementIdsToVoid.length > 0 && original.restaurant_order_id) {
+      if (Array.isArray(folioMovementIdsToVoid) && folioMovementIdsToVoid.length > 0) {
         try {
           const operador = user?.fullName || user?.username || "sistema";
           const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
           const voidMotivo = `Nota de Crédito ${nroNC}${motivo ? ` — ${motivo}` : ""}`;
 
-          // Find the restaurant order's folio (ownership anchor)
-          const orderFolioRow = await db.execute(sql`
-            SELECT id FROM folios
-            WHERE entity_type = 'restaurant_order' AND entity_id = ${String(original.restaurant_order_id)}
-            LIMIT 1
-          `);
-          const orderFolio = (orderFolioRow.rows?.[0] as any);
+          // Resolve the folio for the entity type linked to this invoice
+          let targetFolio: any = null;
+          let cashArea: string = "restaurant";
 
-          if (orderFolio) {
+          if (original.restaurant_order_id) {
+            // Restaurant order folio
+            const row = await db.execute(sql`
+              SELECT id FROM folios
+              WHERE entity_type = 'restaurant_order' AND entity_id = ${String(original.restaurant_order_id)}
+              LIMIT 1
+            `);
+            targetFolio = row.rows?.[0] ?? null;
+            cashArea = "restaurant";
+          } else {
+            // Try SPA account folio
+            const spaRow = await db.execute(sql`
+              SELECT id FROM spa_accounts WHERE invoice_id = ${original.id} LIMIT 1
+            `);
+            const spaAccountId = (spaRow.rows?.[0] as any)?.id;
+            if (spaAccountId) {
+              const folioRow = await db.execute(sql`
+                SELECT id FROM folios
+                WHERE entity_type = 'spa_account' AND entity_id = ${String(spaAccountId)}
+                LIMIT 1
+              `);
+              targetFolio = folioRow.rows?.[0] ?? null;
+              cashArea = "spa";
+            }
+
+            // Try event folio if SPA not found
+            if (!targetFolio) {
+              const eventRow = await db.execute(sql`
+                SELECT id FROM events WHERE invoice_id = ${original.id} LIMIT 1
+              `);
+              const eventId = (eventRow.rows?.[0] as any)?.id;
+              if (eventId) {
+                const folioRow = await db.execute(sql`
+                  SELECT id FROM folios
+                  WHERE entity_type = 'event' AND entity_id = ${String(eventId)}
+                  LIMIT 1
+                `);
+                targetFolio = folioRow.rows?.[0] ?? null;
+                cashArea = "event";
+              }
+            }
+          }
+
+          if (targetFolio) {
             const validMovementIds = (folioMovementIdsToVoid as any[]).filter((id: any) =>
               typeof id === "string" && id.trim()
             );
@@ -829,12 +868,12 @@ export function registerBillingRoutes(app: Express) {
                 // Fetch the movement and verify ownership + type
                 const movRow = await db.execute(sql`
                   SELECT * FROM folio_movements
-                  WHERE id = ${movId} AND folio_id = ${orderFolio.id} AND type = 'payment'
+                  WHERE id = ${movId} AND folio_id = ${targetFolio.id} AND type = 'payment'
                   LIMIT 1
                 `);
                 const mov = (movRow.rows?.[0] as any);
                 if (!mov) {
-                  console.warn(`[nc-void-folio-payment] movement ${movId} not found in order folio — skipped`);
+                  console.warn(`[nc-void-folio-payment] movement ${movId} not found in ${cashArea} folio — skipped`);
                   continue;
                 }
 
@@ -858,7 +897,7 @@ export function registerBillingRoutes(app: Express) {
 
                 // Insert void folio movement
                 await db.insert(folioMovements).values({
-                  folioId: orderFolio.id,
+                  folioId: targetFolio.id,
                   type: "void",
                   amount: String(mov.amount),
                   description: `Anulación ${payLabel} — ${voidMotivo}`,
@@ -871,15 +910,15 @@ export function registerBillingRoutes(app: Express) {
                 });
                 voidedFolioMovementIds.push(movId);
 
-                // Cash reversal for the voided restaurant payment
+                // Cash reversal for the voided payment
                 try {
                   await storage.registerCashMovement(
-                    "restaurant", "payment_void", movId,
-                    `Anulación pago restaurante ${payLabel} — ${nroNC}`,
+                    cashArea, "payment_void", movId,
+                    `Anulación pago ${cashArea} ${payLabel} — ${nroNC}`,
                     mov.payment_method, String(mov.amount), "expense", operador
                   );
                 } catch (cashErr) {
-                  console.error("[nc-void-folio-payment] cash reversal:", cashErr);
+                  console.error(`[nc-void-folio-payment] cash reversal (${cashArea}):`, cashErr);
                 }
               } catch (e) {
                 console.error(`[nc-void-folio-payment] failed for movement ${movId}:`, e);
