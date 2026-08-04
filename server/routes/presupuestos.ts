@@ -187,7 +187,18 @@ function drawGruposPortada(doc: any, year: number) {
   if (fs.existsSync(coverPath)) {
     doc.image(coverPath, pX, pY, { width: pW, height: pH });
   } else {
-    doc.rect(pX, pY, pW, pH).fill("#888888");
+    console.warn(`[presupuestos] Cover image not found: ${coverPath}. Rendering text fallback.`);
+    // Gradient-style fallback: dark background with hotel branding
+    doc.rect(pX, pY, pW, pH).fill("#2a3a5c");
+    // Accent stripe at bottom of photo area
+    doc.rect(pX, pY + pH - 6, pW, 6).fill(ACCENT);
+    // Hotel name centred in the photo area
+    doc.fillColor("#FFFFFF").fontSize(28).font("Helvetica-Bold")
+       .text(HOTEL_NAME, pX, pY + pH / 2 - 42, { width: pW, align: "center" });
+    doc.fillColor(ACCENT).fontSize(13).font("Helvetica")
+       .text(HOTEL_TAGLINE, pX, pY + pH / 2 - 6, { width: pW, align: "center" });
+    doc.fillColor("#AABBCC").fontSize(9).font("Helvetica")
+       .text(HOTEL_ADDRESS, pX, pY + pH / 2 + 24, { width: pW, align: "center" });
   }
   doc.restore();
 
