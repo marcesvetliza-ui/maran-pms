@@ -2955,59 +2955,210 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSpaAccounts(status?: SpaAccountStatus): Promise<SpaAccountWithItems[]> {
-    let accounts: SpaAccount[];
-    if (status) {
-      accounts = await db.select().from(spaAccounts).where(eq(spaAccounts.status, status));
-    } else {
-      accounts = await db.select().from(spaAccounts);
+    const accounts = await (status
+      ? db.select().from(spaAccounts).where(eq(spaAccounts.status, status))
+      : db.select().from(spaAccounts));
+
+    if (accounts.length === 0) return [];
+
+    const accountIds = accounts.map(a => a.id);
+    const appointmentIds = [...new Set(accounts.map(a => a.appointmentId).filter(Boolean))];
+
+    // Three parallel queries instead of five sequential full-table scans
+    const [allItems, allPayments, appointmentRows] = await Promise.all([
+      db.select().from(spaAccountItems).where(inArray(spaAccountItems.accountId, accountIds)),
+      db.select().from(spaPayments).where(inArray(spaPayments.accountId, accountIds)),
+      appointmentIds.length
+        ? db.select({
+            id: spaAppointments.id,
+            cabinId: spaAppointments.cabinId,
+            treatmentId: spaAppointments.treatmentId,
+            professionalId: spaAppointments.professionalId,
+            guestId: spaAppointments.guestId,
+            guestName: spaAppointments.guestName,
+            guestLastName: spaAppointments.guestLastName,
+            guestPhone: spaAppointments.guestPhone,
+            guestEmail: spaAppointments.guestEmail,
+            reservationId: spaAppointments.reservationId,
+            appointmentDate: spaAppointments.appointmentDate,
+            startTime: spaAppointments.startTime,
+            endTime: spaAppointments.endTime,
+            status: spaAppointments.status,
+            notes: spaAppointments.notes,
+            createdAt: spaAppointments.createdAt,
+            cabinName: spaCabins.name,
+            cabinDescription: spaCabins.description,
+            cabinIsActive: spaCabins.isActive,
+            treatmentCategoryId: spaTreatments.categoryId,
+            treatmentName: spaTreatments.name,
+            treatmentDescription: spaTreatments.description,
+            treatmentDurationMinutes: spaTreatments.durationMinutes,
+            treatmentPrice: spaTreatments.price,
+            treatmentIsActive: spaTreatments.isActive,
+          })
+          .from(spaAppointments)
+          .leftJoin(spaCabins, eq(spaCabins.id, spaAppointments.cabinId))
+          .leftJoin(spaTreatments, eq(spaTreatments.id, spaAppointments.treatmentId))
+          .where(inArray(spaAppointments.id, appointmentIds))
+        : Promise.resolve([]),
+    ]);
+
+    const itemsMap = new Map<string, typeof allItems>();
+    for (const item of allItems) {
+      if (!itemsMap.has(item.accountId)) itemsMap.set(item.accountId, []);
+      itemsMap.get(item.accountId)!.push(item);
     }
+    const paymentsMap = new Map<string, typeof allPayments>();
+    for (const pmt of allPayments) {
+      if (!paymentsMap.has(pmt.accountId)) paymentsMap.set(pmt.accountId, []);
+      paymentsMap.get(pmt.accountId)!.push(pmt);
+    }
+    const appointmentMap = new Map(
+      appointmentRows.map(row => [
+        row.id,
+        {
+          id: row.id,
+          cabinId: row.cabinId,
+          treatmentId: row.treatmentId,
+          professionalId: row.professionalId,
+          guestId: row.guestId,
+          guestName: row.guestName,
+          guestLastName: row.guestLastName,
+          guestPhone: row.guestPhone,
+          guestEmail: row.guestEmail,
+          reservationId: row.reservationId,
+          appointmentDate: row.appointmentDate,
+          startTime: row.startTime,
+          endTime: row.endTime,
+          status: row.status,
+          notes: row.notes,
+          createdAt: row.createdAt,
+          cabin: {
+            id: row.cabinId,
+            name: row.cabinName!,
+            description: row.cabinDescription ?? null,
+            isActive: row.cabinIsActive ?? null,
+          } as SpaCabin,
+          treatment: {
+            id: row.treatmentId,
+            categoryId: row.treatmentCategoryId ?? null,
+            name: row.treatmentName!,
+            description: row.treatmentDescription ?? null,
+            durationMinutes: row.treatmentDurationMinutes!,
+            price: row.treatmentPrice!,
+            isActive: row.treatmentIsActive ?? null,
+          } as SpaTreatment,
+        } as SpaAppointmentWithDetails,
+      ])
+    );
 
-    const allItems = await db.select().from(spaAccountItems);
-    const allPayments = await db.select().from(spaPayments);
-    const allAppointments = await db.select().from(spaAppointments);
-    const allCabins = await db.select().from(spaCabins);
-    const allTreatments = await db.select().from(spaTreatments);
-
-    const cabinsMap = new Map(allCabins.map(c => [c.id, c]));
-    const treatmentsMap = new Map(allTreatments.map(t => [t.id, t]));
-    const appointmentsMap = new Map(allAppointments.map(a => [a.id, a]));
-
-    return accounts.map(account => {
-      const items = allItems.filter(i => i.accountId === account.id);
-      const pmts = allPayments.filter(p => p.accountId === account.id);
-      const appointment = appointmentsMap.get(account.appointmentId);
-      return {
-        ...account,
-        items,
-        payments: pmts,
-        appointment: appointment ? {
-          ...appointment,
-          cabin: cabinsMap.get(appointment.cabinId)!,
-          treatment: treatmentsMap.get(appointment.treatmentId)!,
-        } : undefined,
-      };
-    });
+    return accounts.map(account => ({
+      ...account,
+      items: itemsMap.get(account.id) ?? [],
+      payments: paymentsMap.get(account.id) ?? [],
+      appointment: appointmentMap.get(account.appointmentId),
+    }));
   }
 
   async getSpaAccount(id: string): Promise<SpaAccountWithItems | undefined> {
     const [account] = await db.select().from(spaAccounts).where(eq(spaAccounts.id, id));
     if (!account) return undefined;
-    const items = await db.select().from(spaAccountItems).where(eq(spaAccountItems.accountId, id));
-    const pmts = await db.select().from(spaPayments).where(eq(spaPayments.accountId, id));
-    const [appointment] = await db.select().from(spaAppointments).where(eq(spaAppointments.id, account.appointmentId));
-    let appointmentWithDetails;
-    if (appointment) {
-      const [cabin] = await db.select().from(spaCabins).where(eq(spaCabins.id, appointment.cabinId));
-      const [treatment] = await db.select().from(spaTreatments).where(eq(spaTreatments.id, appointment.treatmentId));
-      appointmentWithDetails = { ...appointment, cabin, treatment };
-    }
-    return { ...account, items, payments: pmts, appointment: appointmentWithDetails };
+    return this.enrichSpaAccount(account);
+  }
+
+  private async enrichSpaAccount(account: SpaAccount): Promise<SpaAccountWithItems> {
+    // Single round-trip: correlated subqueries aggregate items and payments as JSON arrays;
+    // appointment with cabin and treatment details resolved via LEFT JOINs.
+    const result = await db.execute(sql`
+      SELECT
+        (
+          SELECT COALESCE(json_agg(jsonb_build_object(
+            'id',          i.id,
+            'accountId',   i.account_id,
+            'description', i.description,
+            'quantity',    i.quantity,
+            'unitPrice',   i.unit_price,
+            'subtotal',    i.subtotal,
+            'itemType',    i.item_type,
+            'notes',       i.notes,
+            'createdAt',   i.created_at
+          )), '[]'::json)
+          FROM spa_account_items i
+          WHERE i.account_id = ${account.id}
+        ) AS items,
+        (
+          SELECT COALESCE(json_agg(jsonb_build_object(
+            'id',              p.id,
+            'accountId',       p.account_id,
+            'amount',          p.amount,
+            'method',          p.method,
+            'isAdvance',       p.is_advance,
+            'appointmentId',   p.appointment_id,
+            'reservationId',   p.reservation_id,
+            'notes',           p.notes,
+            'createdAt',       p.created_at,
+            'status',          p.status,
+            'motivoAnulacion', p.motivo_anulacion,
+            'anuladoAt',       p.anulado_at
+          )), '[]'::json)
+          FROM spa_payments p
+          WHERE p.account_id = ${account.id}
+        ) AS payments,
+        CASE WHEN appt.id IS NOT NULL
+          THEN jsonb_build_object(
+            'id',              appt.id,
+            'cabinId',         appt.cabin_id,
+            'treatmentId',     appt.treatment_id,
+            'professionalId',  appt.professional_id,
+            'guestId',         appt.guest_id,
+            'guestName',       appt.guest_name,
+            'guestLastName',   appt.guest_last_name,
+            'guestPhone',      appt.guest_phone,
+            'guestEmail',      appt.guest_email,
+            'reservationId',   appt.reservation_id,
+            'appointmentDate', appt.appointment_date,
+            'startTime',       appt.start_time,
+            'endTime',         appt.end_time,
+            'status',          appt.status,
+            'notes',           appt.notes,
+            'createdAt',       appt.created_at,
+            'cabin', jsonb_build_object(
+              'id',          cab.id,
+              'name',        cab.name,
+              'description', cab.description,
+              'isActive',    cab.is_active
+            ),
+            'treatment', jsonb_build_object(
+              'id',              tr.id,
+              'categoryId',      tr.category_id,
+              'name',            tr.name,
+              'description',     tr.description,
+              'durationMinutes', tr.duration_minutes,
+              'price',           tr.price,
+              'isActive',        tr.is_active
+            )
+          )
+          ELSE NULL
+        END AS appointment
+      FROM spa_accounts a
+      LEFT JOIN spa_appointments appt ON appt.id = a.appointment_id
+      LEFT JOIN spa_cabins cab ON cab.id = appt.cabin_id
+      LEFT JOIN spa_treatments tr ON tr.id = appt.treatment_id
+      WHERE a.id = ${account.id}
+    `);
+    const row = result.rows[0] as any;
+    return {
+      ...account,
+      items: (row?.items as SpaAccountItem[]) ?? [],
+      payments: (row?.payments as SpaPayment[]) ?? [],
+      appointment: (row?.appointment as SpaAppointmentWithDetails | null) ?? undefined,
+    };
   }
 
   async getSpaAccountByAppointment(appointmentId: string): Promise<SpaAccountWithItems | undefined> {
     const [account] = await db.select().from(spaAccounts).where(eq(spaAccounts.appointmentId, appointmentId));
     if (!account) return undefined;
-    return this.getSpaAccount(account.id);
+    return this.enrichSpaAccount(account);
   }
 
   async createSpaAccount(account: InsertSpaAccount): Promise<SpaAccount> {
