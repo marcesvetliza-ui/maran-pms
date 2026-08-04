@@ -370,6 +370,13 @@ export default function SpaPage() {
     select: (data) => data.filter((r) => r.status === "checked_in"),
   });
 
+  // All reservations (any status) — used to look up the linked reservation's company
+  // regardless of whether the reservation is checked-in yet (e.g. future bookings).
+  // Same query key as above so React Query returns cached data with no extra network call.
+  const { data: allReservations = [] } = useQuery<Reservation[]>({
+    queryKey: ["/api/reservations"],
+  });
+
   const { data: companies = [] } = useQuery<Company[]>({
     queryKey: ["/api/companies"],
   });
@@ -2535,9 +2542,11 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             setReceiptType(v);
                             if (v !== "cargo_habitacion") setFolioRoomChargeId("");
                             if (["factura_a", "factura_b"].includes(v)) {
-                              // Company linked via reservation takes priority over guest profile
+                              // Company linked via reservation takes priority over guest profile.
+                              // Use allReservations (not checkedInReservations) so the lookup
+                              // succeeds even when the reservation is not yet checked-in.
                               const linkedReservation = selectedAppointment?.reservationId
-                                ? checkedInReservations.find(r => r.id === selectedAppointment.reservationId)
+                                ? allReservations.find(r => r.id === selectedAppointment.reservationId)
                                 : null;
                               const linkedCompany = linkedReservation?.companyId
                                 ? (companies as Company[]).find(c => c.id === linkedReservation.companyId)
