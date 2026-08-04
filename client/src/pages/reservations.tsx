@@ -578,7 +578,15 @@ export function ReservationFormDialog({
   };
 
   const handleDiscountChange = (discountType?: DiscountType, discountValue?: string) => {
-    const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+    if (!formData.checkInDate || !formData.checkOutDate) {
+      setFormData({
+        ...formData,
+        ...(discountType !== undefined && { discountType }),
+        ...(discountValue !== undefined && { discountValue }),
+      });
+      return;
+    }
+    const nights = calculateNights(formData.checkInDate, formData.checkOutDate);
     const totals = calculateTotals(
       formData.baseRatePerNight || "0",
       discountType || formData.discountType as DiscountType,
