@@ -1302,9 +1302,10 @@ export function registerGroupsRoutes(app: Express) {
           date: p.date || null,
           status: (p as any).status || null,
         }));
+        const activeCharges = resCharges.filter((c: any) => c.status !== "anulado");
         masterAccommodation += accommodation;
         if (config === "all") masterExtras += extras;
-        roomRows.push({ reservation, accommodation, extras, paid, individualPayments });
+        roomRows.push({ reservation, accommodation, extras, paid, individualPayments, activeCharges });
       }
 
       const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
@@ -1403,6 +1404,30 @@ export function registerGroupsRoutes(app: Express) {
           .text(config !== "none" ? `$${row.extras.toLocaleString("es-AR")}` : "-", 440, y, { align: "right", width: 60 })
           .text(`$${row.paid.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });
         y += 14;
+
+        // Per-charge sub-rows (with ND amber styling)
+        if (config !== "none" && row.activeCharges && row.activeCharges.length > 0) {
+          for (const c of row.activeCharges) {
+            if (y > 740) { doc.addPage(); y = 40; }
+            const cleanDesc = (c.description || "").replace(/\s*\[(xfer|corr|res):[^\]]+\]/g, "").trim();
+            const isND = c.category === "nota_debito";
+            if (isND) {
+              doc.rect(80, y - 1, 475, 13).fillColor("#fef3e2").fill()
+                .rect(80, y - 1, 475, 13).strokeColor("#f59e0b").lineWidth(0.5).stroke();
+              doc.fontSize(8).font("Helvetica-Bold").fillColor("#92400e")
+                .text(`  • ${cleanDesc.substring(0, 40)}`, 90, y, { width: 340 })
+                .text(`$${parseFloat(c.amount).toLocaleString("es-AR")}`, 440, y, { align: "right", width: 60 });
+              doc.font("Helvetica").fillColor("#000000");
+            } else {
+              doc.fontSize(8).font("Helvetica").fillColor("#555555")
+                .text(`  • ${cleanDesc.substring(0, 40)}`, 90, y, { width: 340 })
+                .text(`$${parseFloat(c.amount).toLocaleString("es-AR")}`, 440, y, { align: "right", width: 60 });
+              doc.fillColor("#000000");
+            }
+            y += 12;
+          }
+          y += 2;
+        }
 
         // Per-payment sub-rows with invoice badge
         if (row.individualPayments && row.individualPayments.length > 0) {
