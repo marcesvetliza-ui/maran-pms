@@ -1462,9 +1462,19 @@ export function registerGroupsRoutes(app: Express) {
         for (const c of gCharges) {
           if (y > 740) { doc.addPage(); y = 40; }
           const cleanDesc = (c.description || "").replace(/\s*\[(xfer|corr|res):[^\]]+\]/g, "").trim();
-          doc.fontSize(9).font("Helvetica")
-            .text(cleanDesc, 50, y)
-            .text(`$${parseFloat(c.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+          const isND = (c as any).category === "nota_debito";
+          if (isND) {
+            doc.rect(40, y - 1, 515, 14).fillColor("#fef3e2").fill()
+              .rect(40, y - 1, 515, 14).strokeColor("#f59e0b").lineWidth(0.5).stroke();
+            doc.fontSize(9).font("Helvetica-Bold").fillColor("#92400e")
+              .text(cleanDesc, 50, y)
+              .text(`$${parseFloat(c.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+            doc.font("Helvetica").fillColor("#000000");
+          } else {
+            doc.fontSize(9).font("Helvetica").fillColor("#000000")
+              .text(cleanDesc, 50, y)
+              .text(`$${parseFloat(c.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+          }
           y += 14;
         }
         y += 4;
