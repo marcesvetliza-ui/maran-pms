@@ -42,6 +42,7 @@ const mockStorage = {
   createCharge: vi.fn(),
   getCharges: vi.fn().mockResolvedValue([]),
   getOrCreateFolio: vi.fn().mockResolvedValue({ id: "folio-1" }),
+  getFolioWithMovements: vi.fn().mockResolvedValue({ id: "folio-1", movements: [] }),
   addFolioAdjustment: vi.fn().mockResolvedValue(undefined),
   registerCashMovement: vi.fn().mockResolvedValue(undefined),
   addFolioPayment: vi.fn().mockResolvedValue(undefined),
@@ -666,6 +667,83 @@ describe("double-reversal guard — /api/reservations/:id/reverse-transfer-charg
     expect(mockStorage.createCharge).toHaveBeenCalledOnce();
     const created = mockStorage.createCharge.mock.calls[0][0];
     expect(created.reservationId).toBe("res-paired");
+
+    close();
+  });
+
+  // ── Folio adjustment guard: charge exists but folio adjustment does not ────────
+
+  /**
+   * Retry scenario — charge already present, folio adjustment missing:
+   * The previous attempt created the source counter-charge but crashed before
+   * it could write the folio adjustment. On the retry the charge guard fires
+   * (skips createCharge) but the folio adjustment MUST still be written because
+   * it was never persisted.
+   */
+  it("still writes the source folio adjustment when the source counter-charge already exists but the folio has no matching movement", async () => {
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_TRANSFER_OUT);
+
+    mockStorage.getReservation.mockImplementation(async (id: string) => ({
+      id,
+      status: "checked_in",
+    }));
+
+    const PAIRED_CHARGE_DESC = "Cargo HAB.101 desde SPA [corr:uuid-abc]";
+    mockDbExecute
+      .mockResolvedValueOnce({ rows: [] }) // step 2 — idempotency guard
+      .mockResolvedValueOnce({             // step 3 — corr lookup finds the paired charge
+        rows: [
+          {
+            id: "charge-paired-1",
+            reservation_id: "res-paired",
+            amount: "50.00",
+            description: PAIRED_CHARGE_DESC,
+            category: "transfer_in",
+            status: "active",
+          },
+        ],
+      });
+
+    // cleanDesc strips [corr:…] [xfer:…] → "Cargo SPA → Hab.101"
+    const expectedSourceDesc =
+      "Reversa de transferencia (Cargo SPA → Hab.101) [rev:charge-spa-1] [res:res-paired]";
+
+    // Source reservation already has the counter-charge.
+    mockStorage.getCharges.mockImplementation(async (resId: string) => {
+      if (resId === "res-100") {
+        return [
+          {
+            id: "charge-source-counter-existing",
+            reservationId: "res-100",
+            description: expectedSourceDesc,
+            amount: "50",
+            status: "active",
+          },
+        ];
+      }
+      return [];
+    });
+
+    // The source folio has NO matching movement — adjustment was never written.
+    mockStorage.getFolioWithMovements.mockResolvedValue({ id: "folio-1", movements: [] });
+
+    const { status, body } = await postReversal(baseUrl, "res-100", ACTIVE_TRANSFER_OUT.id);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+
+    // createCharge must NOT have been called for the source reservation.
+    const sourceChargeCalls = mockStorage.createCharge.mock.calls.filter(
+      (call: any[]) => call[0]?.reservationId === "res-100"
+    );
+    expect(sourceChargeCalls).toHaveLength(0);
+
+    // addFolioAdjustment MUST have been called for the source folio despite the
+    // charge already existing — the folio write was missing.
+    expect(mockStorage.addFolioAdjustment).toHaveBeenCalled();
+    const folioAdjCalls: any[][] = mockStorage.addFolioAdjustment.mock.calls;
+    const sourceAdjCall = folioAdjCalls.find((call) => call[3] === expectedSourceDesc);
+    expect(sourceAdjCall).toBeDefined();
 
     close();
   });

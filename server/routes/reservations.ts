@@ -1908,10 +1908,19 @@ export function registerReservationsRoutes(app: Express) {
         });
       }
 
-      // Record on this folio
+      // Record on this folio — guard against duplicates: a prior attempt may have
+      // already written the adjustment even if the charge was skipped above.
       try {
         const thisFolio = await storage.getOrCreateFolio("reservation", reservationId);
-        await storage.addFolioAdjustment(thisFolio.id, thisCounterCategory, absAmount, thisCounterDesc, operator);
+        const thisFolioData = await storage.getFolioWithMovements(thisFolio.id);
+        const thisFolioAdjAlreadyExists = thisFolioData?.movements?.some(
+          (m: any) => m.description === thisCounterDesc
+        );
+        if (thisFolioAdjAlreadyExists) {
+          console.warn(`[reverse-transfer] Folio adjustment already exists on folio ${thisFolio.id} — skipping`);
+        } else {
+          await storage.addFolioAdjustment(thisFolio.id, thisCounterCategory, absAmount, thisCounterDesc, operator);
+        }
       } catch (e) { console.error("[reverse-transfer] this folio adjustment:", e); }
 
       // 7. Reverse the paired charge if found
@@ -1954,12 +1963,22 @@ export function registerReservationsRoutes(app: Express) {
             createdBy: operator,
             status: "active",
           });
-
-          try {
-            const pairedFolio = await storage.getOrCreateFolio("reservation", pairedReservationId);
-            await storage.addFolioAdjustment(pairedFolio.id, pairedCounterCategory, absAmount, pairedCounterDesc, operator);
-          } catch (e) { console.error("[reverse-transfer] paired folio adjustment:", e); }
         }
+
+        // Record on the paired folio — guard against duplicates regardless of whether
+        // the charge was freshly created or was already present from a prior attempt.
+        try {
+          const pairedFolio = await storage.getOrCreateFolio("reservation", pairedReservationId);
+          const pairedFolioData = await storage.getFolioWithMovements(pairedFolio.id);
+          const pairedFolioAdjAlreadyExists = pairedFolioData?.movements?.some(
+            (m: any) => m.description === pairedCounterDesc
+          );
+          if (pairedFolioAdjAlreadyExists) {
+            console.warn(`[reverse-transfer] Paired folio adjustment already exists on folio ${pairedFolio.id} — skipping`);
+          } else {
+            await storage.addFolioAdjustment(pairedFolio.id, pairedCounterCategory, absAmount, pairedCounterDesc, operator);
+          }
+        } catch (e) { console.error("[reverse-transfer] paired folio adjustment:", e); }
       }
 
       res.json({
