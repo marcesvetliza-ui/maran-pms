@@ -963,6 +963,31 @@ export function registerSpaRoutes(app: Express) {
 
       await storage.updateSpaAccount(req.params.accountId, { ncId: nc.id } as any);
 
+      // Write void folio_movements for each payment so the folio balance
+      // correctly reflects the reversal (balance goes back to non-zero).
+      try {
+        const folio = await (storage as any).getFolioByEntity("spa_account", req.params.accountId);
+        if (folio) {
+          const payments: any[] = account.payments || [];
+          for (const payment of payments) {
+            const amt = parseFloat(payment.amount);
+            if (amt > 0) {
+              await (storage as any).addFolioAdjustment(
+                folio.id,
+                "void",
+                amt,
+                `NC SPA - Anulación pago ${payment.method}`,
+                (req as any).user?.username,
+                payment.id,
+                `NC emitida id=${nc.id}`,
+              );
+            }
+          }
+        }
+      } catch (voidErr) {
+        console.error("[Folio] Error escribiendo movimientos void para NC SPA:", voidErr);
+      }
+
       res.json({ ncId: nc.id, nc });
     } catch (e: any) {
       console.error("[Billing] Error emitiendo NC SPA:", e);
