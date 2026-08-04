@@ -1453,6 +1453,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                           {!appointment.ncId && appointment.invoiceId && (
                                             <span className="flex-shrink-0 inline-flex items-center rounded px-1 py-0 text-[9px] font-bold bg-blue-600 text-white leading-tight" title="Factura emitida">F</span>
                                           )}
+                                          {appointment.status === "completed" && !appointment.invoiceId && !appointment.ncId && (
+                                            <AlertTriangle className="flex-shrink-0 h-3 w-3 text-amber-500" title="Sin facturar" />
+                                          )}
                                         </div>
                                         <div className="text-[10px] truncate opacity-75">
                                           {treatments.find(t => t.id === appointment.treatmentId)?.name}
