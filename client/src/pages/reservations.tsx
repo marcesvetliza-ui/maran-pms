@@ -555,6 +555,34 @@ export function ReservationFormDialog({
   };
 
   const handleDateChange = (field: "checkInDate" | "checkOutDate", value: string) => {
+    // Special case: checkInDate is being set while a package is active (creation mode).
+    // Always override checkOutDate with the package duration — even if checkOutDate already
+    // had a stale value — so nights and totals stay consistent with the package.
+    if (value && field === "checkInDate" && !isEditing && selectedPackageId && selectedPackageId !== "__none__") {
+      const pkg = activePackages.find((p: any) => p.id === selectedPackageId);
+      if (pkg) {
+        const roomPrice = pkg.roomPrices?.find((rp: any) => rp.roomTypeId === selectedRoomTypeId);
+        const effectiveBasePrice = roomPrice ? roomPrice.price : pkg.basePrice;
+        const nights = pkg.nights || 1;
+        const totalPrice = parseFloat(effectiveBasePrice);
+        const ratePerNight = (totalPrice / nights).toFixed(2);
+        const d = new Date(value + "T12:00:00");
+        d.setDate(d.getDate() + nights);
+        const newCheckOut = toArgentinaDateStr(d);
+        setFormData(prev => ({
+          ...prev,
+          checkInDate: value,
+          checkOutDate: newCheckOut,
+          nights,
+          baseRatePerNight: ratePerNight,
+          finalRatePerNight: ratePerNight,
+          totalRoomAmount: totalPrice.toFixed(2),
+          discountType: "none",
+          discountValue: "0",
+        }));
+        return;
+      }
+    }
     // If either date field is empty/cleared, just update the value without recalculating nights/totals
     const otherField = field === "checkInDate" ? "checkOutDate" : "checkInDate";
     if (!value || !formData[otherField]) {
@@ -1182,25 +1210,43 @@ export function ReservationFormDialog({
                       } else {
                         // En creación: aplica fechas según duración del paquete
                         const nights = pkg.nights || 1;
-                        const checkIn = formData.checkInDate || today;
-                        const d = new Date(checkIn + "T12:00:00");
-                        d.setDate(d.getDate() + nights);
-                        const newCheckOut = toArgentinaDateStr(d);
                         const totalPrice = parseFloat(effectiveBasePrice);
                         const ratePerNight = (totalPrice / nights).toFixed(2);
-                        setFormData(prev => ({
-                          ...prev,
-                          checkOutDate: newCheckOut,
-                          nights,
-                          baseRatePerNight: ratePerNight,
-                          finalRatePerNight: ratePerNight,
-                          totalRoomAmount: totalPrice.toFixed(2),
-                          discountType: "none",
-                          discountValue: "0",
-                          notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
-                            ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
-                            : `[Paquete: ${pkg.name}]`,
-                        }));
+                        if (!formData.checkInDate) {
+                          // checkInDate aún no fue ingresada: guardamos paquete y precio pero
+                          // limpiamos checkOutDate y nights para evitar carryover de valores
+                          // anteriores. handleDateChange recalculará al ingresar checkInDate.
+                          setFormData(prev => ({
+                            ...prev,
+                            checkOutDate: "",
+                            nights: 0,
+                            baseRatePerNight: ratePerNight,
+                            finalRatePerNight: ratePerNight,
+                            totalRoomAmount: totalPrice.toFixed(2),
+                            discountType: "none",
+                            discountValue: "0",
+                            notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
+                              ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
+                              : `[Paquete: ${pkg.name}]`,
+                          }));
+                        } else {
+                          const d = new Date(formData.checkInDate + "T12:00:00");
+                          d.setDate(d.getDate() + nights);
+                          const newCheckOut = toArgentinaDateStr(d);
+                          setFormData(prev => ({
+                            ...prev,
+                            checkOutDate: newCheckOut,
+                            nights,
+                            baseRatePerNight: ratePerNight,
+                            finalRatePerNight: ratePerNight,
+                            totalRoomAmount: totalPrice.toFixed(2),
+                            discountType: "none",
+                            discountValue: "0",
+                            notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
+                              ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
+                              : `[Paquete: ${pkg.name}]`,
+                          }));
+                        }
                       }
                     }
                   }}
