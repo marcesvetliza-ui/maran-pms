@@ -158,6 +158,7 @@ type HotelEvent = {
   totalAmount: string | null;
   totalPaid: string | null;
   invoiceId?: number | null;
+  ncId?: number | null;
   createdAt: string;
   eventRoom?: EventRoom;
   charges?: EventCharge[];
@@ -418,6 +419,18 @@ export default function EventsPage() {
       return res.json();
     },
     enabled: !!selectedTable?.invoiceId,
+    staleTime: 60000,
+  });
+
+  // NC invoice data for the event main-folio that had its factura reversed
+  const { data: eventNcInvoice, refetch: refetchEventNcInvoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", selectedEvent?.ncId],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices/${selectedEvent!.ncId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!selectedEvent?.ncId,
     staleTime: 60000,
   });
 
@@ -783,6 +796,23 @@ export default function EventsPage() {
       }
       // Update selectedTable so the badge shows without reopening the dialog
       if (data) setSelectedTable((prev) => prev ? { ...prev, status: data.status || "invoiced", receiptType: data.receiptType, invoiceId: data.invoiceId, closedAt: data.closedAt } : prev);
+    },
+    onError: (error: any) => {
+      toast({ title: parseApiError(error), variant: "destructive" });
+    },
+  });
+
+  const emitEventNcMutation = useMutation({
+    mutationFn: async ({ eventId }: { eventId: string }) => {
+      const res = await apiRequest("POST", `/api/events/${eventId}/nc`, {});
+      return res.json();
+    },
+    onSuccess: async (data: any) => {
+      if (data?.ncId) {
+        setSelectedEvent((prev) => prev ? { ...prev, ncId: data.ncId } : prev);
+        await refetchEventNcInvoice();
+        toast({ title: "Nota de Crédito emitida correctamente" });
+      }
     },
     onError: (error: any) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -2231,8 +2261,84 @@ export default function EventsPage() {
                         >
                           <FileText className="h-3.5 w-3.5" /> Ver factura PDF
                         </a>
+                        {!selectedEvent.ncId && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="w-full mt-1"
+                            disabled={emitEventNcMutation.isPending}
+                            onClick={() => emitEventNcMutation.mutate({ eventId: selectedEvent.id })}
+                            data-testid="button-emit-event-nc"
+                          >
+                            {emitEventNcMutation.isPending ? (
+                              <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo NC...</>
+                            ) : (
+                              <><Ban className="h-4 w-4 mr-2" />Emitir NC (Anular Factura)</>
+                            )}
+                          </Button>
+                        )}
                       </div>
                     )}
+                    {eventNcInvoice && (() => {
+                      const hasOriginal = eventNcInvoice.original_tipo && eventNcInvoice.original_numero != null;
+                      const originalRef = hasOriginal
+                        ? `${eventNcInvoice.original_tipo} ${String(eventNcInvoice.original_punto_venta || 1).padStart(4, "0")}-${String(eventNcInvoice.original_numero).padStart(8, "0")}`
+                        : null;
+                      const linkedOriginal = hasOriginal ? {
+                        id: eventNcInvoice.nota_credito_id,
+                        tipo_comprobante: eventNcInvoice.original_tipo,
+                        numero: eventNcInvoice.original_numero,
+                        punto_venta: eventNcInvoice.original_punto_venta,
+                        fecha_emision: eventNcInvoice.original_fecha_emision,
+                        monto_total: eventNcInvoice.original_monto_total,
+                        cliente_razon_social: eventNcInvoice.original_cliente_razon_social,
+                        cae: eventNcInvoice.original_cae,
+                        modo_ficticio: eventNcInvoice.original_modo_ficticio,
+                        estado: eventNcInvoice.original_estado,
+                      } : null;
+                      return (
+                        <div className="mt-3 mx-auto max-w-sm p-3 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm space-y-2" data-testid="event-nc-badge">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 font-semibold text-red-800 dark:text-red-200">
+                              <Ban className="h-4 w-4 shrink-0" />
+                              <span>
+                                {eventNcInvoice.tipo_comprobante === "NCA" ? "Nota de Crédito A" : eventNcInvoice.tipo_comprobante === "NCB" ? "Nota de Crédito B" : eventNcInvoice.tipo_comprobante}
+                                {" "}
+                                {String(eventNcInvoice.punto_venta ?? 1).padStart(4, "0")}-{String(eventNcInvoice.numero ?? 0).padStart(8, "0")}
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-red-700 dark:text-red-300 hover:text-red-900"
+                              title="Ver detalle"
+                              onClick={() => setSelectedInvoiceDetail({ invoice: eventNcInvoice, linkedNc: linkedOriginal })}
+                              data-testid="button-event-nc-detail"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                          {originalRef && (
+                            <p className="text-xs text-muted-foreground">
+                              Factura Orig.: <span className="font-mono font-medium">{originalRef}</span>
+                            </p>
+                          )}
+                          {eventNcInvoice.cae && (
+                            <p className="text-xs text-red-700 dark:text-red-300">
+                              CAE: <span className="font-mono">{eventNcInvoice.cae}</span>
+                            </p>
+                          )}
+                          <a
+                            href={`/api/billing/invoices/${selectedEvent.ncId}/pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400 hover:underline"
+                          >
+                            <FileText className="h-3.5 w-3.5" /> Ver NC PDF
+                          </a>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : selectedEvent.status === "cancelled" ? (
                   <div className="text-center py-6 text-muted-foreground">

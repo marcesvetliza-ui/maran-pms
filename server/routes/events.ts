@@ -802,6 +802,62 @@ export function registerEventsRoutes(app: Express) {
     }
   });
 
+  // Emit Nota de Crédito for the event main-folio AFIP invoice
+  app.post("/api/events/:eventId/nc", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Evento no encontrado" });
+      if (!(event as any).invoiceId) {
+        return res.status(400).json({ error: "El evento no tiene una factura AFIP emitida" });
+      }
+      if ((event as any).ncId) {
+        return res.status(400).json({ error: "Este evento ya tiene una Nota de Crédito emitida" });
+      }
+
+      const [originalInvoice] = await db.select().from(salesInvoices).where(eq(salesInvoices.id, (event as any).invoiceId));
+      if (!originalInvoice) return res.status(404).json({ error: "Factura original no encontrada" });
+
+      const ncTipo: "NCA" | "NCB" = originalInvoice.tipoComprobante === "FA" ? "NCA" : "NCB";
+
+      const originalItems = (originalInvoice.items as any[]) || [];
+      let ncItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21" | "10.5" | "exento" | "no_gravado"; subtotalNeto: number; subtotal: number }[];
+      if (originalItems.length > 0) {
+        ncItems = originalItems.map((item: any) => ({
+          descripcion: item.descripcion || "Anulación",
+          cantidad: item.cantidad || 1,
+          precioUnitario: item.precioUnitario || 0,
+          alicuotaIva: (item.alicuotaIva || "21") as "21" | "10.5" | "exento" | "no_gravado",
+          subtotalNeto: item.subtotalNeto || 0,
+          subtotal: item.subtotal || 0,
+        }));
+      } else {
+        const gross = parseFloat(originalInvoice.montoTotal || "0");
+        const net = parseFloat((gross / 1.21).toFixed(4));
+        ncItems = [{ descripcion: `NC Evento ${event.name}`, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross }];
+      }
+
+      const nc = await emitirFactura({
+        tipoComprobante: ncTipo,
+        cliente: {
+          razonSocial: originalInvoice.clienteRazonSocial || "CONSUMIDOR FINAL",
+          cuit: originalInvoice.clienteCuit || undefined,
+          dni: originalInvoice.clienteDni || undefined,
+          condicionIva: originalInvoice.clienteCondicionIva || "consumidor_final",
+        },
+        items: ncItems,
+        facturaOriginalId: originalInvoice.id,
+        operador: (req as any).user?.fullName || (req as any).user?.username,
+      });
+
+      await storage.updateEvent(req.params.eventId, { ncId: nc.id } as any);
+
+      res.json({ ncId: nc.id, nc });
+    } catch (e: any) {
+      console.error("[Billing] Error emitiendo NC evento:", e);
+      res.status(500).json({ error: e?.message || "Error al emitir la Nota de Crédito" });
+    }
+  });
+
   // Emit Nota de Crédito for a table-level AFIP invoice
   app.post("/api/events/:eventId/tables/:tableId/nc", requireAuth, async (req, res) => {
     try {

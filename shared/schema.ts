@@ -746,6 +746,7 @@ export const events = pgTable("events", {
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
   totalPaid: decimal("total_paid", { precision: 10, scale: 2 }),
   invoiceId: integer("invoice_id"),
+  ncId: integer("nc_id"),
   createdAt: timestamp("created_at").notNull(),
 });
 
