@@ -1797,6 +1797,7 @@ export default function RestaurantPage() {
     : tables.filter((t) => t.areaId === selectedArea);
 
   const activeOrders = orders.filter((o) => o.status !== "closed" && o.status !== "cancelled");
+  const closedOrders = orders.filter((o) => o.status === "closed");
 
   const openEventConfig = (table: RestaurantTable) => {
     setEventConfigTable(table);
@@ -2796,6 +2797,57 @@ export default function RestaurantPage() {
                 </Card>
                 );
               })}
+            </div>
+          )}
+
+          {/* ── Pedidos cerrados hoy ───────────────────────────────────── */}
+          {closedOrders.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4" />
+                Pedidos cerrados hoy ({closedOrders.length})
+              </h3>
+              <div className="space-y-2">
+                {closedOrders.map((order) => (
+                  <div
+                    key={order.id}
+                    className="flex items-center justify-between px-4 py-3 rounded-lg border bg-muted/30 gap-3"
+                    data-testid={`closed-order-row-${order.orderNumber}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {order.orderLabel || order.orderNumber}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {order.table ? `Mesa ${order.table.tableNumber} · ` : ""}
+                          {order.receiptType ? (receiptTypeLabels[order.receiptType] ?? order.receiptType) : "Ticket"}
+                          {order.waiterName ? ` · ${order.waiterName}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-sm font-semibold">
+                        ${parseFloat(order.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 h-8 text-xs"
+                        data-testid={`button-resend-receipt-${order.orderNumber}`}
+                        onClick={() => {
+                          setCurrentOrder(order);
+                          setRestEmailReceiptAddress("");
+                          setIsRestEmailReceiptOpen(true);
+                        }}
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                        Reenviar comprobante
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </TabsContent>
