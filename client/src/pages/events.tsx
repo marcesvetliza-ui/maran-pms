@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useAuth } from "@/App";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
@@ -52,6 +53,7 @@ import {
   Eye,
   Download,
   FileX,
+  RotateCcw,
 } from "lucide-react";
 
 type EventRoom = {
@@ -348,6 +350,8 @@ export default function EventsPage() {
   const [isEmailReceiptOpen, setIsEmailReceiptOpen] = useState(false);
   const [emailReceiptAddress, setEmailReceiptAddress] = useState("");
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -813,6 +817,21 @@ export default function EventsPage() {
         await refetchEventNcInvoice();
         toast({ title: "Nota de Crédito emitida correctamente" });
       }
+    },
+    onError: (error: any) => {
+      toast({ title: parseApiError(error), variant: "destructive" });
+    },
+  });
+
+  const resetEventNcMutation = useMutation({
+    mutationFn: async ({ eventId }: { eventId: string }) => {
+      const res = await apiRequest("PATCH", `/api/events/${eventId}/reset-nc`, {});
+      return res.json();
+    },
+    onSuccess: async (data: any) => {
+      setSelectedEvent((prev) => prev ? { ...prev, ncId: null } : prev);
+      queryClient.invalidateQueries({ queryKey: ["/api/events/planning"] });
+      toast({ title: "Estado de NC restablecido. Ya puede emitir una nueva NC." });
     },
     onError: (error: any) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -2354,6 +2373,26 @@ export default function EventsPage() {
                           >
                             <FileText className="h-3.5 w-3.5" /> Ver NC PDF
                           </a>
+                          <p className="text-xs text-red-700 dark:text-red-300 font-medium text-center" data-testid="event-nc-reversed-notice">
+                            Este evento ha sido anulado. La factura original queda sin efecto.
+                          </p>
+                          {isAdmin && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full mt-1 border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
+                              disabled={resetEventNcMutation.isPending}
+                              onClick={() => resetEventNcMutation.mutate({ eventId: selectedEvent.id })}
+                              data-testid="button-reset-event-nc"
+                              title="Solo administradores — permite emitir una nueva NC si la anterior fue anulada"
+                            >
+                              {resetEventNcMutation.isPending ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Restableciendo...</>
+                              ) : (
+                                <><RotateCcw className="h-4 w-4 mr-2" />Restablecer estado NC (Admin)</>
+                              )}
+                            </Button>
+                          )}
                         </div>
                       );
                     })()}

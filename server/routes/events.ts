@@ -858,6 +858,26 @@ export function registerEventsRoutes(app: Express) {
     }
   });
 
+  // Admin-only: reset ncId on an event so a new NC can be emitted after the previous one was voided
+  app.patch("/api/events/:eventId/reset-nc", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ error: "Solo un administrador puede restablecer el estado de NC" });
+      }
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Evento no encontrado" });
+      if (!(event as any).ncId) {
+        return res.status(400).json({ error: "Este evento no tiene una NC emitida" });
+      }
+      await storage.updateEvent(req.params.eventId, { ncId: null } as any);
+      const updated = await storage.getEvent(req.params.eventId);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Error al restablecer el estado de NC" });
+    }
+  });
+
   // Emit Nota de Crédito for a table-level AFIP invoice
   app.post("/api/events/:eventId/tables/:tableId/nc", requireAuth, async (req, res) => {
     try {
