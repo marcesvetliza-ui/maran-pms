@@ -2571,14 +2571,27 @@ export class DatabaseStorage implements IStorage {
       orderList = await db.select().from(restaurantOrders);
     }
 
-    const enriched = await this.enrichRestaurantOrdersBulk(orderList);
+    let enriched: RestaurantOrderWithDetails[];
+    try {
+      enriched = await this.enrichRestaurantOrdersBulk(orderList);
+    } catch (enrichErr: any) {
+      // Si el enriquecimiento falla (p.ej. columnas aún en migración), devolvemos
+      // los pedidos básicos sin items/table/area/guest para que el endpoint NUNCA haga 500.
+      console.warn("[getRestaurantOrders] enrichment failed, returning basic orders:", enrichErr?.message);
+      enriched = orderList.map(o => ({ ...o, items: [], table: undefined, area: undefined, guest: undefined }));
+    }
     return enriched.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
   }
 
   async getRestaurantOrder(id: string): Promise<RestaurantOrderWithDetails | undefined> {
     const [order] = await db.select().from(restaurantOrders).where(eq(restaurantOrders.id, id));
     if (!order) return undefined;
-    return this.enrichRestaurantOrder(order);
+    try {
+      return await this.enrichRestaurantOrder(order);
+    } catch (e: any) {
+      console.warn("[getRestaurantOrder] enrichment failed:", e?.message);
+      return { ...order, items: [], table: undefined, area: undefined, guest: undefined };
+    }
   }
 
   async getOrdersByTable(tableId: string): Promise<RestaurantOrder[]> {
