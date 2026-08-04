@@ -303,6 +303,79 @@ async function getOrCreateWebCheckinToken(reservationId: string): Promise<string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Public: Send a transactional email with a PDF attachment (no reservation ID required)
+// ─────────────────────────────────────────────────────────────────────────────
+export async function sendEmailWithPdfAttachment(opts: {
+  to: string;
+  subject: string;
+  body: string;
+  attachmentFilename: string;
+  attachmentBuffer: Buffer;
+}): Promise<{ ok: boolean; error?: string }> {
+  const cfg = await getConfig();
+  if (!cfg) return { ok: false, error: "Email no configurado" };
+  if (!cfg.globalEnabled) return { ok: false, error: "Sistema de email desactivado" };
+
+  const from = `${cfg.fromName} <${cfg.fromEmail}>`;
+  const html = buildHtmlEmail(opts.body, opts.subject);
+
+  if (cfg.provider === "smtp") {
+    if (!cfg.smtpUser || !cfg.smtpPass) {
+      return { ok: false, error: "SMTP: usuario o contraseña no configurados" };
+    }
+    try {
+      const transporter = nodemailer.createTransport({
+        host: cfg.smtpHost || "smtp.gmail.com",
+        port: cfg.smtpPort || 587,
+        secure: cfg.smtpSecure ?? false,
+        auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+      });
+      await transporter.sendMail({
+        from,
+        to: opts.to,
+        subject: opts.subject,
+        text: opts.body,
+        html,
+        attachments: [
+          { filename: opts.attachmentFilename, content: opts.attachmentBuffer, contentType: "application/pdf" },
+        ],
+      });
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e.message };
+    }
+  } else {
+    if (!cfg.apiKey) return { ok: false, error: "Resend: API key no configurada" };
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${cfg.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to: [opts.to],
+          subject: opts.subject,
+          text: opts.body,
+          html,
+          attachments: [
+            { filename: opts.attachmentFilename, content: opts.attachmentBuffer.toString("base64") },
+          ],
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        return { ok: false, error: `Resend error ${res.status}: ${err}` };
+      }
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e.message };
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public: Send confirmation email
 // ─────────────────────────────────────────────────────────────────────────────
 export async function sendConfirmationEmail(reservationId: string): Promise<void> {

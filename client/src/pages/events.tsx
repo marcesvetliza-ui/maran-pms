@@ -344,6 +344,8 @@ export default function EventsPage() {
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [tablePayResId, setTablePayResId] = useState("");
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isEmailReceiptOpen, setIsEmailReceiptOpen] = useState(false);
+  const [emailReceiptAddress, setEmailReceiptAddress] = useState("");
   const { toast } = useToast();
 
   const weekDays = useMemo(() => {
@@ -799,6 +801,20 @@ export default function EventsPage() {
         await refetchTableNcInvoice();
         toast({ title: "Nota de Crédito emitida correctamente" });
       }
+    },
+    onError: (error: any) => {
+      toast({ title: parseApiError(error), variant: "destructive" });
+    },
+  });
+
+  const sendTableReceiptEmailMutation = useMutation({
+    mutationFn: async ({ eventId, tableId, to }: { eventId: string; tableId: string; to: string }) => {
+      const res = await apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/receipt-email`, { to });
+      return res.json();
+    },
+    onSuccess: () => {
+      setIsEmailReceiptOpen(false);
+      toast({ title: "Comprobante enviado por email" });
     },
     onError: (error: any) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -2956,16 +2972,31 @@ export default function EventsPage() {
                           <> · Cerrada: {safeFormatDate(selectedTable.closedAt, "d MMM yyyy HH:mm", { locale: es })}</>
                         )}
                       </p>
-                      <a
-                        href={`/api/events/${selectedEvent!.id}/tables/${selectedTable.id}/receipt-pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium ring-offset-background hover:bg-accent hover:text-accent-foreground"
-                        data-testid="button-table-receipt-pdf"
-                      >
-                        <FileText className="h-4 w-4" />
-                        Imprimir comprobante
-                      </a>
+                      <div className="flex gap-2">
+                        <a
+                          href={`/api/events/${selectedEvent!.id}/tables/${selectedTable.id}/receipt-pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium ring-offset-background hover:bg-accent hover:text-accent-foreground"
+                          data-testid="button-table-receipt-pdf"
+                        >
+                          <FileText className="h-4 w-4" />
+                          Imprimir comprobante
+                        </a>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 gap-2"
+                          data-testid="button-table-receipt-email"
+                          onClick={() => {
+                            setEmailReceiptAddress(selectedEvent?.contactEmail || "");
+                            setIsEmailReceiptOpen(true);
+                          }}
+                        >
+                          <Mail className="h-4 w-4" />
+                          Enviar por email
+                        </Button>
+                      </div>
                       {tableInvoice && (
                         <div className="p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-sm space-y-2" data-testid="table-invoice-badge">
                           <div className="flex items-center gap-2 font-semibold text-purple-800 dark:text-purple-200">
@@ -3357,6 +3388,69 @@ export default function EventsPage() {
               <Download className="h-4 w-4 mr-2" />Descargar PDF
             </Button>
             <Button onClick={() => setSelectedInvoiceDetail(null)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Email receipt dialog */}
+      <Dialog open={isEmailReceiptOpen} onOpenChange={(open) => { if (!open) setIsEmailReceiptOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Enviar comprobante por email
+            </DialogTitle>
+            <DialogDescription>
+              El PDF del comprobante de{" "}
+              {selectedTable ? `Mesa ${selectedTable.tableNumber}${selectedTable.label ? ` – ${selectedTable.label}` : ""}` : "la mesa"}{" "}
+              se enviará como adjunto al destinatario indicado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="email-receipt-address">Dirección de email</Label>
+              <Input
+                id="email-receipt-address"
+                type="email"
+                placeholder="ejemplo@dominio.com"
+                value={emailReceiptAddress}
+                onChange={(e) => setEmailReceiptAddress(e.target.value)}
+                data-testid="input-email-receipt-address"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && emailReceiptAddress.trim() && selectedEvent && selectedTable) {
+                    sendTableReceiptEmailMutation.mutate({
+                      eventId: selectedEvent.id,
+                      tableId: selectedTable.id,
+                      to: emailReceiptAddress,
+                    });
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEmailReceiptOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={!emailReceiptAddress.trim() || sendTableReceiptEmailMutation.isPending}
+              data-testid="button-send-receipt-email-confirm"
+              onClick={() => {
+                if (selectedEvent && selectedTable) {
+                  sendTableReceiptEmailMutation.mutate({
+                    eventId: selectedEvent.id,
+                    tableId: selectedTable.id,
+                    to: emailReceiptAddress,
+                  });
+                }
+              }}
+            >
+              {sendTableReceiptEmailMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Enviando...</>
+              ) : (
+                <><Send className="h-4 w-4 mr-2" />Enviar</>
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

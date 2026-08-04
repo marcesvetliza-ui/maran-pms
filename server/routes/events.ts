@@ -6,6 +6,7 @@ import { requireAuth } from "../auth";
 import { eq, and } from "drizzle-orm";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf, generateTableReceiptPdf } from "../eventPdfs";
 import { emitirFactura } from "../billing/invoiceService";
+import { sendEmailWithPdfAttachment } from "../email-service";
 
 export function registerEventsRoutes(app: Express) {
   // Event Rooms
@@ -900,6 +901,62 @@ export function registerEventsRoutes(app: Express) {
     } catch (error) {
       console.error("Error generating table receipt PDF:", error);
       res.status(500).json({ error: "Error generating PDF" });
+    }
+  });
+
+  app.post("/api/events/:eventId/tables/:tableId/receipt-email", requireAuth, async (req, res) => {
+    try {
+      const { to } = req.body;
+      if (!to?.trim()) return res.status(400).json({ error: "El destinatario (to) es requerido" });
+
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Event table not found" });
+
+      const pdfBuffer = await generateTableReceiptPdf(event.name, event.eventCode, {
+        tableNumber: table.tableNumber,
+        label: table.label ?? null,
+        seats: table.seats ?? null,
+        status: table.status,
+        receiptType: table.receiptType ?? null,
+        invoiceRef: (table as any).invoiceRef ?? null,
+        ncId: (table as any).ncId ?? null,
+        closedAt: table.closedAt ? String(table.closedAt) : null,
+        charges: table.charges.map((c: any) => ({
+          description: c.description,
+          quantity: c.quantity,
+          unitPrice: c.unitPrice,
+          total: c.total,
+        })),
+        payments: table.payments.map((p: any) => ({
+          amount: p.amount,
+          method: p.method,
+          isAdvance: p.isAdvance,
+          paidAt: p.paidAt ? String(p.paidAt) : "",
+        })),
+      });
+
+      const tableLabel = `Mesa ${table.tableNumber}${table.label ? ` (${table.label})` : ""}`;
+      const subject = `Comprobante ${tableLabel} — ${event.name}`;
+      const body = `Estimado/a,\n\nAdjunto encontrará el comprobante correspondiente a la ${tableLabel} del evento "${event.name}".\n\nMaran Suites & Towers\nHotel & Spa — Paraná, Entre Ríos`;
+
+      const result = await sendEmailWithPdfAttachment({
+        to: to.trim(),
+        subject,
+        body,
+        attachmentFilename: `comprobante-mesa-${table.tableNumber}-${event.eventCode}.pdf`,
+        attachmentBuffer: pdfBuffer,
+      });
+
+      if (!result.ok) {
+        return res.status(502).json({ error: result.error || "Error al enviar el email" });
+      }
+
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Error sending table receipt email:", error);
+      res.status(500).json({ error: "Error al enviar el email" });
     }
   });
 
