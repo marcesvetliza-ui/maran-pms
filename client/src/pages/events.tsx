@@ -1816,6 +1816,12 @@ export default function EventsPage() {
                       Por Mesa
                     </Badge>
                   )}
+                  {selectedEvent.ncId && (
+                    <Badge className="bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-500/40">
+                      <FileX className="h-3 w-3 mr-1" />
+                      NC Emitida
+                    </Badge>
+                  )}
                 </>
               )}
             </DialogTitle>
