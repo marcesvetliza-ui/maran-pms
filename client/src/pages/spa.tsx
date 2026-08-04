@@ -278,6 +278,7 @@ export default function SpaPage() {
   const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
   const [invoiceCustomerCuit, setInvoiceCustomerCuit] = useState("");
   const [invoiceCustomerDni, setInvoiceCustomerDni] = useState("");
+  const [saveCuitToProfile, setSaveCuitToProfile] = useState(false);
   const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
   const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
@@ -641,6 +642,20 @@ export default function SpaPage() {
       if (selectedAppointment) {
         await updateAppointmentMutation.mutateAsync({ id: selectedAppointment.id, status: "completed" });
       }
+      // Persist CUIT to guest profile if requested
+      if (saveCuitToProfile && invoiceCustomerCuit.trim() && selectedAppointment?.guestId) {
+        try {
+          await fetch(`/api/spa/clients/${selectedAppointment.guestId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cuilCuit: invoiceCustomerCuit.trim() }),
+            credentials: "include",
+          });
+          queryClient.invalidateQueries({ queryKey: ["/api/spa/clients"] });
+        } catch (e) {
+          console.warn("[SPA] Failed to save CUIT to guest profile:", e);
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
       const wasFactura = ["factura_a", "factura_b", "factura_c"].includes(variables.receiptType);
@@ -658,6 +673,7 @@ export default function SpaPage() {
       setInvoiceCustomerName("");
       setInvoiceCustomerCuit("");
       setInvoiceCustomerDni("");
+      setSaveCuitToProfile(false);
     },
     onError: (error: Error) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -2450,14 +2466,39 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                               />
                             </div>
                             {(receiptType === "factura_a" || receiptType === "factura_c") && (
-                              <div>
+                              <div className="space-y-1.5">
                                 <label className="text-xs text-muted-foreground">CUIT</label>
                                 <Input
                                   placeholder="XX-XXXXXXXX-X"
                                   value={invoiceCustomerCuit}
-                                  onChange={(e) => setInvoiceCustomerCuit(e.target.value)}
+                                  onChange={(e) => {
+                                    setInvoiceCustomerCuit(e.target.value);
+                                    setSaveCuitToProfile(false);
+                                  }}
                                   data-testid="input-invoice-customer-cuit"
                                 />
+                                {(() => {
+                                  const linkedGuest = selectedAppointment?.guestId
+                                    ? spaClients.find(c => c.id === selectedAppointment.guestId)
+                                    : null;
+                                  const cuitTyped = invoiceCustomerCuit.trim();
+                                  const showSave = linkedGuest && cuitTyped && (!linkedGuest.cuilCuit || linkedGuest.cuilCuit !== cuitTyped);
+                                  if (!showSave) return null;
+                                  return (
+                                    <label className="flex items-center gap-2 cursor-pointer select-none mt-1">
+                                      <input
+                                        type="checkbox"
+                                        className="rounded border-gray-300"
+                                        checked={saveCuitToProfile}
+                                        onChange={(e) => setSaveCuitToProfile(e.target.checked)}
+                                        data-testid="checkbox-save-cuit"
+                                      />
+                                      <span className="text-xs text-blue-700 dark:text-blue-300">
+                                        Guardar CUIT en el perfil del cliente
+                                      </span>
+                                    </label>
+                                  );
+                                })()}
                               </div>
                             )}
                             {receiptType === "factura_b" && (
