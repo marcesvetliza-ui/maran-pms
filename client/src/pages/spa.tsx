@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
@@ -481,6 +481,35 @@ export default function SpaPage() {
       notes: "",
     },
   });
+
+  // Pre-fill company name and CUIT when the folio dialog opens with a receipt
+  // type already selected (e.g. re-opening a partially-filled close dialog).
+  // The onValueChange handler covers the case where staff changes the type;
+  // this effect covers the case where the dialog reopens with it already set.
+  useEffect(() => {
+    if (!isFolioOpen) return;
+    if (!["factura_a", "factura_b"].includes(receiptType)) return;
+    // Only pre-fill when both fields are still blank to avoid clobbering manual edits.
+    if (invoiceCustomerName || invoiceCustomerCuit) return;
+
+    const linkedReservation = selectedAppointment?.reservationId
+      ? allReservations.find((r) => r.id === selectedAppointment.reservationId)
+      : null;
+    const linkedCompany = linkedReservation?.companyId
+      ? (companies as Company[]).find((c) => c.id === linkedReservation.companyId)
+      : null;
+
+    if (linkedCompany) {
+      setInvoiceCustomerName(linkedCompany.razonSocial || linkedCompany.nombreFantasia || linkedCompany.name || "");
+      setInvoiceCustomerCuit(receiptType === "factura_a" ? (linkedCompany.cuilCuit || "") : "");
+    } else if (selectedAppointment?.guestId) {
+      const guest = spaClients.find((c) => c.id === selectedAppointment.guestId);
+      if (guest) {
+        setInvoiceCustomerName(guest.razonSocial || `${guest.firstName}${guest.lastName ? " " + guest.lastName : ""}`.trim());
+        setInvoiceCustomerCuit(receiptType === "factura_a" ? (guest.cuilCuit || "") : "");
+      }
+    }
+  }, [isFolioOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createAppointmentMutation = useMutation({
     mutationFn: async (data: AppointmentFormValues) => {
