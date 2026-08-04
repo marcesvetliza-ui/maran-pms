@@ -91,10 +91,41 @@ function drawPageBg(doc: any, imgPath: string, W: number, H: number) {
   if (fs.existsSync(imgPath)) {
     doc.image(imgPath, 0, 0, { width: W, height: H });
   } else {
+    console.warn(`[presupuestos] Page background image not found: ${imgPath}. Rendering colour fallback.`);
     doc.rect(0, 0, W, 148).fill(NAVY);
     doc.rect(0, 148, W, 4).fill(ORANGE);
     doc.rect(0, H - 80, W, 80).fill("#2c1a0e");
+    // Hotel name + tagline so the page is identifiable without the background image
+    doc.fillColor("white").fontSize(16).font("Helvetica-Bold")
+       .text(HOTEL_NAME, 0, 52, { width: W, align: "center" });
+    doc.fillColor(ORANGE).fontSize(9).font("Helvetica")
+       .text(HOTEL_TAGLINE, 0, 74, { width: W, align: "center" });
   }
+}
+
+function drawFallbackPortada(doc: any, area: string) {
+  const W = 595, H = 842;
+  const areaLabel = AREA_LABELS[area] || area;
+  console.warn(`[presupuestos] Cover image not found for area "${area}". Rendering branded text fallback cover.`);
+  // Navy background
+  doc.rect(0, 0, W, H).fill(NAVY);
+  // Accent stripe
+  doc.rect(0, H / 2 - 36, W, 4).fill(ORANGE);
+  // Bottom dark bar
+  doc.rect(0, H - 100, W, 4).fill(ORANGE);
+  doc.rect(0, H - 96, W, 96).fill("#0f2248");
+  // Hotel name
+  doc.fillColor("white").fontSize(30).font("Helvetica-Bold")
+     .text(HOTEL_NAME, 0, H / 2 - 88, { width: W, align: "center" });
+  // Tagline
+  doc.fillColor(ORANGE).fontSize(13).font("Helvetica")
+     .text(HOTEL_TAGLINE, 0, H / 2 - 50, { width: W, align: "center" });
+  // Area label
+  doc.fillColor("white").fontSize(12).font("Helvetica-Bold")
+     .text(areaLabel.toUpperCase(), 0, H / 2 - 12, { width: W, align: "center", characterSpacing: 3 });
+  // Footer contact
+  doc.fillColor("#aabbcc").fontSize(8).font("Helvetica")
+     .text(`${HOTEL_ADDRESS}  ·  ${HOTEL_EMAIL}  ·  ${HOTEL_WEB}`, 0, H - 60, { width: W, align: "center" });
 }
 
 function sectionHeader(doc: any, label: string, x: number, y: number, w: number) {
@@ -1142,8 +1173,10 @@ export function registerPresupuestosRoutes(app: Express) {
           const recepPortada = assetPath("recep-portada.jpg");
           if (fs.existsSync(recepPortada)) {
             doc.image(recepPortada, 0, 0, { width: 595, height: 842 });
-            doc.addPage();
+          } else {
+            drawFallbackPortada(doc, area);
           }
+          doc.addPage();
         }
         // Página de presentación del hotel + datos del presupuesto
         generateHockeyPdf(doc, pres, items, conditions);
@@ -1152,14 +1185,18 @@ export function registerPresupuestosRoutes(app: Express) {
         const eventosCover = assetPath("eventos-cover.jpg");
         if (fs.existsSync(eventosCover)) {
           doc.image(eventosCover, 0, 0, { width: 595, height: 842 });
-          doc.addPage();
+        } else {
+          drawFallbackPortada(doc, area);
         }
+        doc.addPage();
         generateEventosPdf(doc, pres, items, conditions);
       } else if (area === "spa") {
         // Portada full-bleed para spa — NO addPage() aquí, generateSpaPdf lo hace internamente
         const spaCover = assetPath("spa-cover.jpg");
         if (fs.existsSync(spaCover)) {
           doc.image(spaCover, 0, 0, { width: 595, height: 842 });
+        } else {
+          drawFallbackPortada(doc, area);
         }
         generateSpaPdf(doc, pres, items, conditions);
       } else if (area === "restaurant") {
@@ -1167,8 +1204,10 @@ export function registerPresupuestosRoutes(app: Express) {
         const restaurantCover = assetPath("restaurant-cover.jpg");
         if (fs.existsSync(restaurantCover)) {
           doc.image(restaurantCover, 0, 0, { width: 595, height: 842 });
-          doc.addPage();
+        } else {
+          drawFallbackPortada(doc, area);
         }
+        doc.addPage();
         generateCatalogSimplePdf(doc, pres, catalogItems, conditions, area);
       } else {
         generateGeneralPdf(doc, pres, items, conditions);
