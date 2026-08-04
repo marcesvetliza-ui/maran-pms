@@ -1167,8 +1167,10 @@ export function registerPresupuestosRoutes(app: Express) {
           const portadaPath = assetPath("grupos-portada.jpg");
           if (fs.existsSync(portadaPath)) {
             doc.image(portadaPath, 0, 0, { width: 595, height: 842 });
-            doc.addPage();
+          } else {
+            drawGruposPortada(doc, new Date().getFullYear());
           }
+          doc.addPage();
         } else if (area === "recepcion") {
           const recepPortada = assetPath("recep-portada.jpg");
           if (fs.existsSync(recepPortada)) {
