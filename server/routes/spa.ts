@@ -215,16 +215,33 @@ export function registerSpaRoutes(app: Express) {
       }
       const appointments = await storage.getSpaAppointmentsByDateRange(startDate, endDate);
       const activeStatuses = ["pending", "confirmed", "in_progress"];
-      const summaryMap = new Map<string, { cabinId: string; date: string; count: number }>();
+      const summaryMap = new Map<string, { cabinId: string; date: string; count: number; invoicedCount: number; ncCount: number }>();
+
+      // Enrich with billing status from accounts for all appointments in range
+      let accountMap = new Map<string, { invoiceId: number | null; ncId: number | null }>();
+      if (appointments.length > 0) {
+        const aptIds = appointments.map((a) => a.id);
+        const accounts = await db
+          .select({ appointmentId: spaAccounts.appointmentId, invoiceId: spaAccounts.invoiceId, ncId: spaAccounts.ncId })
+          .from(spaAccounts)
+          .where(inArray(spaAccounts.appointmentId, aptIds));
+        accountMap = new Map(accounts.map((acc) => [acc.appointmentId, acc]));
+      }
 
       for (const apt of appointments) {
-        if (!activeStatuses.includes(apt.status)) continue;
         const key = `${apt.cabinId}_${apt.appointmentDate}`;
-        const existing = summaryMap.get(key);
-        if (existing) {
-          existing.count++;
-        } else {
-          summaryMap.set(key, { cabinId: apt.cabinId, date: apt.appointmentDate, count: 1 });
+        if (!summaryMap.has(key)) {
+          summaryMap.set(key, { cabinId: apt.cabinId, date: apt.appointmentDate, count: 0, invoicedCount: 0, ncCount: 0 });
+        }
+        const cell = summaryMap.get(key)!;
+        if (activeStatuses.includes(apt.status)) {
+          cell.count++;
+        }
+        const acc = accountMap.get(apt.id);
+        if (acc?.ncId) {
+          cell.ncCount++;
+        } else if (acc?.invoiceId) {
+          cell.invoicedCount++;
         }
       }
 

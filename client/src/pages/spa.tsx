@@ -190,6 +190,8 @@ type WeeklySummaryItem = {
   cabinId: string;
   date: string;
   count: number;
+  invoicedCount: number;
+  ncCount: number;
 };
 
 type InventoryItemWithDetails = {
@@ -1102,6 +1104,12 @@ export default function SpaPage() {
     return item?.count ?? 0;
   };
 
+  const getWeeklyBillingCounts = (cabinId: string, date: Date): { invoicedCount: number; ncCount: number } => {
+    const dateStr = format(date, "yyyy-MM-dd");
+    const item = weeklySummary.find(s => s.cabinId === cabinId && s.date === dateStr);
+    return { invoicedCount: item?.invoicedCount ?? 0, ncCount: item?.ncCount ?? 0 };
+  };
+
   const getOccupancyColor = (count: number): string => {
     if (count === 0) return "bg-gray-50 dark:bg-gray-800/30";
     if (count <= 2) return "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300";
@@ -1500,6 +1508,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         </td>
                         {weekDays.map((day) => {
                           const count = getWeeklyCount(cabin.id, day);
+                          const { invoicedCount, ncCount } = getWeeklyBillingCounts(cabin.id, day);
                           return (
                             <td
                               key={day.toISOString()}
@@ -1512,6 +1521,28 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             >
                               <span className="text-lg font-semibold">{count}</span>
                               <div className="text-[10px] opacity-70">{count === 1 ? "turno" : "turnos"}</div>
+                              {(invoicedCount > 0 || ncCount > 0) && (
+                                <div className="flex items-center justify-center gap-1 mt-1">
+                                  {ncCount > 0 && (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                                      title={`${ncCount} con NC`}
+                                      data-testid={`weekly-cell-nc-badge-${cabin.id}-${format(day, "yyyy-MM-dd")}`}
+                                    >
+                                      <Ban className="h-2 w-2" />{ncCount}
+                                    </span>
+                                  )}
+                                  {invoicedCount > 0 && (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
+                                      title={`${invoicedCount} facturado${invoicedCount !== 1 ? "s" : ""}`}
+                                      data-testid={`weekly-cell-invoice-badge-${cabin.id}-${format(day, "yyyy-MM-dd")}`}
+                                    >
+                                      <FileText className="h-2 w-2" />{invoicedCount}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                           );
                         })}
@@ -2182,13 +2213,23 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           </DialogHeader>
           {selectedAppointment && (
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Badge className={appointmentStatusColors[selectedAppointment.status]}>
                   {appointmentStatusLabels[selectedAppointment.status]}
                 </Badge>
                 {selectedAccount && selectedAccount.payments.some(p => p.isAdvance === "true") && (
                   <Badge variant="secondary" className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
                     <DollarSign className="h-3 w-3 mr-1" /> SEÑA
+                  </Badge>
+                )}
+                {(selectedAppointment.invoiceId || selectedAccount?.invoiceId) && !(selectedAppointment.ncId || selectedAccount?.ncId) && (
+                  <Badge variant="secondary" className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" data-testid="badge-spa-invoice">
+                    <FileText className="h-3 w-3 mr-1" /> Facturado
+                  </Badge>
+                )}
+                {(selectedAppointment.ncId || selectedAccount?.ncId) && (
+                  <Badge variant="secondary" className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300" data-testid="badge-spa-nc">
+                    <Ban className="h-3 w-3 mr-1" /> NC emitida
                   </Badge>
                 )}
               </div>
