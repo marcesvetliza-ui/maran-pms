@@ -5536,6 +5536,34 @@ export class DatabaseStorage implements IStorage {
     registeredBy?: string,
   ): Promise<FolioMovement> {
     const folio = await this.getOrCreateFolio(entityType, entityId);
+
+    // Deduplication guard: prevent duplicate movements on payment retry.
+    // Primary key: (folioId, type, sourceType, sourceId, description) when both
+    // sourceType and sourceId are present — sourceId is typically the upstream
+    // record's own id (charge.id, item.id, etc.), and description breaks ties
+    // for the few cases where multiple distinct movements share an entity-level
+    // sourceId (e.g. room/early/late charges all reference the reservation id).
+    // Fallback (no sourceId): (folioId, type, description, amount).
+    const dupCondition = (sourceType != null && sourceId != null)
+      ? and(
+          eq(folioMovements.folioId, folio.id),
+          eq(folioMovements.type, "charge"),
+          eq(folioMovements.sourceType, sourceType),
+          eq(folioMovements.sourceId, sourceId),
+          eq(folioMovements.description, description),
+        )
+      : and(
+          eq(folioMovements.folioId, folio.id),
+          eq(folioMovements.type, "charge"),
+          eq(folioMovements.description, description),
+          eq(folioMovements.amount, amount.toFixed(2)),
+        );
+    const [existing] = await db.select().from(folioMovements).where(dupCondition).limit(1);
+    if (existing) {
+      console.warn(`[Folio] Duplicate charge skipped — folioId=${folio.id} description="${description}" amount=${amount} sourceType=${sourceType ?? "N/A"} sourceId=${sourceId ?? "N/A"}`);
+      return existing;
+    }
+
     const [movement] = await db.insert(folioMovements).values({
       folioId: folio.id,
       type: "charge",
@@ -5562,6 +5590,34 @@ export class DatabaseStorage implements IStorage {
     receiptType?: string,
   ): Promise<FolioMovement> {
     const folio = await this.getOrCreateFolio(entityType, entityId);
+
+    // Deduplication guard: prevent duplicate movements on payment retry.
+    // Primary key: (folioId, type, sourceType, sourceId, description) when both
+    // sourceType and sourceId are present — sourceId is typically the upstream
+    // record's own id (payment.id, etc.), and description breaks ties for the
+    // few cases where multiple distinct payments share an entity-level sourceId
+    // (e.g. multi-split restaurant payments all reference the same order id).
+    // Fallback (no sourceId): (folioId, type, description, amount).
+    const dupCondition = (sourceType != null && sourceId != null)
+      ? and(
+          eq(folioMovements.folioId, folio.id),
+          eq(folioMovements.type, "payment"),
+          eq(folioMovements.sourceType, sourceType),
+          eq(folioMovements.sourceId, sourceId),
+          eq(folioMovements.description, description),
+        )
+      : and(
+          eq(folioMovements.folioId, folio.id),
+          eq(folioMovements.type, "payment"),
+          eq(folioMovements.description, description),
+          eq(folioMovements.amount, amount.toFixed(2)),
+        );
+    const [existing] = await db.select().from(folioMovements).where(dupCondition).limit(1);
+    if (existing) {
+      console.warn(`[Folio] Duplicate payment skipped — folioId=${folio.id} description="${description}" amount=${amount} sourceType=${sourceType ?? "N/A"} sourceId=${sourceId ?? "N/A"}`);
+      return existing;
+    }
+
     const [movement] = await db.insert(folioMovements).values({
       folioId: folio.id,
       type: "payment",
