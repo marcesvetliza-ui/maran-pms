@@ -1938,31 +1938,39 @@ export default function RestaurantPage() {
         setIsOrderDialogOpen(true);
       } else {
         // Mesa aparece "occupied" pero la caché no tiene su orden.
-        // staleTime: 0 fuerza un network call real ignorando la caché de 30s.
-        queryClient.fetchQuery<typeof orders>({
-          queryKey: ["/api/restaurant/orders"],
-          staleTime: 0,
-        }).then((freshOrders) => {
-          const safeOrders = Array.isArray(freshOrders) ? freshOrders : [];
-          const freshOrder = findTodayOrder(safeOrders as typeof orders);
-          if (freshOrder) {
-            setCurrentOrder(freshOrder);
-            const orderItems = (freshOrder as any).items || [];
-            setOrderView(orderItems.length > 0 ? "comanda" : "menu");
-            setSelectedCategory(null);
-            setIsOrderDialogOpen(true);
-          } else {
-            // No hay orden activa hoy — mesa trabada. Invalidar tables para que
-            // el próximo fetch llame closeStaleOrders y la libere.
+        // Usamos fetch() directo (no fetchQuery) para evitar que un error
+        // del servidor tire una excepción — si falla, tratamos como lista vacía.
+        fetch("/api/restaurant/orders", { credentials: "include" })
+          .then(async (res) => {
+            if (!res.ok) return [] as typeof orders;
+            const data = await res.json();
+            return (Array.isArray(data) ? data : []) as typeof orders;
+          })
+          .then((freshOrders) => {
+            // Actualizar caché para que el resto del componente tenga datos frescos
+            queryClient.setQueryData(["/api/restaurant/orders"], freshOrders);
+            const freshOrder = findTodayOrder(freshOrders);
+            if (freshOrder) {
+              setCurrentOrder(freshOrder);
+              const orderItems = (freshOrder as any).items || [];
+              setOrderView(orderItems.length > 0 ? "comanda" : "menu");
+              setSelectedCategory(null);
+              setIsOrderDialogOpen(true);
+            } else {
+              // No hay orden activa hoy — mesa trabada. Invalidar tables para que
+              // el próximo fetch llame closeStaleOrders y la libere.
+              queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+              toast({
+                title: "Mesa sin pedido activo",
+                description: "La mesa quedó ocupada de una jornada anterior. Se liberará en unos segundos.",
+              });
+            }
+          })
+          .catch((err) => {
+            console.error("[restaurant] handleTableClick fetch error:", err);
             queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
-            toast({
-              title: "Mesa sin pedido activo",
-              description: "La mesa quedó ocupada de una jornada anterior. Se liberará en unos segundos.",
-            });
-          }
-        }).catch(() => {
-          toast({ title: "Error al verificar estado de la mesa", variant: "destructive" });
-        });
+            toast({ title: "Error al verificar estado de la mesa", variant: "destructive" });
+          });
       }
     }
   };
