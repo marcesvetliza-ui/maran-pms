@@ -1668,6 +1668,17 @@ export default function RestaurantPage() {
       if (data?.cfGuestId) {
         queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
       }
+      // Actualización optimista: liberar la mesa INMEDIATAMENTE en la caché local
+      // para que el usuario no vea la mesa "occupied" mientras el refetch termina.
+      if (currentOrder?.tableId) {
+        const closedTableId = currentOrder.tableId;
+        queryClient.setQueryData<any[]>(["/api/restaurant/tables"], (old) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((t: any) =>
+            t.id === closedTableId ? { ...t, status: "available" } : t
+          );
+        });
+      }
       // Auto-complete: if the closed order's table has a check_in reservation today, move it to historical
       if (currentOrder?.tableId) {
         const _closedTableId = currentOrder.tableId;
@@ -1932,7 +1943,8 @@ export default function RestaurantPage() {
           queryKey: ["/api/restaurant/orders"],
           staleTime: 0,
         }).then((freshOrders) => {
-          const freshOrder = findTodayOrder(freshOrders as typeof orders);
+          const safeOrders = Array.isArray(freshOrders) ? freshOrders : [];
+          const freshOrder = findTodayOrder(safeOrders as typeof orders);
           if (freshOrder) {
             setCurrentOrder(freshOrder);
             const orderItems = (freshOrder as any).items || [];
