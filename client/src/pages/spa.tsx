@@ -167,8 +167,17 @@ type Reservation = {
   guestId: string;
   roomId: string;
   status: string;
+  companyId?: string | null;
   guest?: { firstName: string; lastName: string };
   room?: { roomNumber: string };
+};
+
+type Company = {
+  id: string;
+  name: string;
+  razonSocial?: string;
+  nombreFantasia?: string | null;
+  cuilCuit?: string | null;
 };
 
 type WeeklySummaryItem = {
@@ -353,6 +362,10 @@ export default function SpaPage() {
   const { data: checkedInReservations = [] } = useQuery<Reservation[]>({
     queryKey: ["/api/reservations"],
     select: (data) => data.filter((r) => r.status === "checked_in"),
+  });
+
+  const { data: companies = [] } = useQuery<Company[]>({
+    queryKey: ["/api/companies"],
   });
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -2428,11 +2441,26 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           <Select value={receiptType} onValueChange={(v) => {
                             setReceiptType(v);
                             if (v !== "cargo_habitacion") setFolioRoomChargeId("");
-                            if (["factura_a", "factura_b"].includes(v) && selectedAppointment?.guestId) {
-                              const guest = spaClients.find(c => c.id === selectedAppointment.guestId);
-                              if (guest) {
-                                setInvoiceCustomerName(guest.razonSocial || `${guest.firstName}${guest.lastName ? " " + guest.lastName : ""}`.trim());
-                                setInvoiceCustomerCuit(v === "factura_a" ? (guest.cuilCuit || "") : "");
+                            if (["factura_a", "factura_b"].includes(v)) {
+                              // Company linked via reservation takes priority over guest profile
+                              const linkedReservation = selectedAppointment?.reservationId
+                                ? checkedInReservations.find(r => r.id === selectedAppointment.reservationId)
+                                : null;
+                              const linkedCompany = linkedReservation?.companyId
+                                ? (companies as Company[]).find(c => c.id === linkedReservation.companyId)
+                                : null;
+                              if (linkedCompany) {
+                                setInvoiceCustomerName(linkedCompany.razonSocial || linkedCompany.nombreFantasia || linkedCompany.name || "");
+                                setInvoiceCustomerCuit(v === "factura_a" ? (linkedCompany.cuilCuit || "") : "");
+                              } else if (selectedAppointment?.guestId) {
+                                const guest = spaClients.find(c => c.id === selectedAppointment.guestId);
+                                if (guest) {
+                                  setInvoiceCustomerName(guest.razonSocial || `${guest.firstName}${guest.lastName ? " " + guest.lastName : ""}`.trim());
+                                  setInvoiceCustomerCuit(v === "factura_a" ? (guest.cuilCuit || "") : "");
+                                } else {
+                                  setInvoiceCustomerName("");
+                                  setInvoiceCustomerCuit("");
+                                }
                               } else {
                                 setInvoiceCustomerName("");
                                 setInvoiceCustomerCuit("");
