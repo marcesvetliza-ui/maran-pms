@@ -1883,15 +1883,30 @@ export function registerReservationsRoutes(app: Express) {
       const thisCounterCategory: "transfer_out" | "transfer_in" =
         charge.category === "transfer_out" ? "transfer_in" : "transfer_out";
 
-      await storage.createCharge({
-        reservationId,
-        description: thisCounterDesc,
-        amount: String(thisCounterAmount),
-        date: today,
-        category: thisCounterCategory,
-        createdBy: operator,
-        status: "active",
-      });
+      // Duplicate-guard: if a previous attempt created the source counter-charge
+      // but then crashed, skip re-creation to avoid leaving a duplicate.
+      const existingThisCharges = await storage.getCharges(reservationId);
+      const thisCounterAmountStr = String(thisCounterAmount);
+      const thisCounterAlreadyExists = existingThisCharges.some(
+        (c: any) =>
+          c.status === "active" &&
+          c.description === thisCounterDesc &&
+          c.amount === thisCounterAmountStr
+      );
+
+      if (thisCounterAlreadyExists) {
+        console.warn(`[reverse-transfer] Duplicate source counter-charge already exists on ${reservationId} — skipping recreation`);
+      } else {
+        await storage.createCharge({
+          reservationId,
+          description: thisCounterDesc,
+          amount: thisCounterAmountStr,
+          date: today,
+          category: thisCounterCategory,
+          createdBy: operator,
+          status: "active",
+        });
+      }
 
       // Record on this folio
       try {

@@ -596,6 +596,80 @@ describe("double-reversal guard — /api/reservations/:id/reverse-transfer-charg
     close();
   });
 
+  // ── Duplicate-guard: source counter-charge already exists on the source reservation ──
+
+  /**
+   * Guard (step 6): before creating the counter-charge on the SOURCE reservation,
+   * the route must check whether an active charge with the same reservationId,
+   * amount, and description already exists (e.g. the previous attempt created it
+   * but crashed before finishing). If it does, skip recreation and continue to
+   * attempt the paired side normally.
+   */
+  it("skips source counter-charge creation but still creates the paired counter-charge when source duplicate already exists (retry scenario)", async () => {
+    mockStorage.getCharge.mockResolvedValue(ACTIVE_TRANSFER_OUT);
+
+    // Both reservations are open.
+    mockStorage.getReservation.mockImplementation(async (id: string) => ({
+      id,
+      status: "checked_in",
+    }));
+
+    // db.execute calls:
+    //   1. Idempotency guard (step 2) → no prior reversal token found.
+    //   2. Corr lookup (step 3)       → paired charge found on "res-paired".
+    const PAIRED_CHARGE_DESC = "Cargo HAB.101 desde SPA [corr:uuid-abc]";
+    mockDbExecute
+      .mockResolvedValueOnce({ rows: [] }) // step 2 — idempotency guard
+      .mockResolvedValueOnce({             // step 3 — corr lookup finds the paired charge
+        rows: [
+          {
+            id: "charge-paired-1",
+            reservation_id: "res-paired",
+            amount: "50.00",
+            description: PAIRED_CHARGE_DESC,
+            category: "transfer_in",
+            status: "active",
+          },
+        ],
+      });
+
+    // The source counter-charge that was already created on a prior attempt:
+    //   cleanDesc = "Cargo SPA → Hab.101"  (after stripping [corr:…] [xfer:…])
+    //   thisCounterDesc = "Reversa de transferencia (Cargo SPA → Hab.101) [rev:charge-spa-1] [res:res-paired]"
+    //   thisCounterAmount = 50 → String: "50"
+    const expectedSourceDesc =
+      "Reversa de transferencia (Cargo SPA → Hab.101) [rev:charge-spa-1] [res:res-paired]";
+
+    // Source reservation already has the counter-charge; paired does not.
+    mockStorage.getCharges.mockImplementation(async (resId: string) => {
+      if (resId === "res-100") {
+        return [
+          {
+            id: "charge-source-counter-existing",
+            reservationId: "res-100",
+            description: expectedSourceDesc,
+            amount: "50",
+            status: "active",
+          },
+        ];
+      }
+      return [];
+    });
+
+    const { status, body } = await postReversal(baseUrl, "res-100", ACTIVE_TRANSFER_OUT.id);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+
+    // createCharge must have been called exactly once — for the PAIRED reservation,
+    // not the source (which already has the counter-charge).
+    expect(mockStorage.createCharge).toHaveBeenCalledOnce();
+    const created = mockStorage.createCharge.mock.calls[0][0];
+    expect(created.reservationId).toBe("res-paired");
+
+    close();
+  });
+
   // ── Duplicate-guard: paired counter-charge already exists on the paired reservation ──
 
   /**
