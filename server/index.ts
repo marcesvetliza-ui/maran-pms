@@ -257,6 +257,16 @@ app.use((req, res, next) => {
         setval('iibb_retentions_id_seq', COALESCE((SELECT MAX(id) FROM iibb_retentions), 0) + 1, false)
     `));
 
+    // Liberar mesas "occupied" sin pedido activo que hayan quedado de sesiones anteriores.
+    // Corre después de las migraciones para garantizar que las columnas existen.
+    try {
+      const { storage: st } = await import("./db-storage");
+      const freed = await st.closeStaleOrders();
+      if (freed > 0) log(`[startup] closeStaleOrders: ${freed} órdenes antiguas cerradas y mesas liberadas`);
+    } catch (err: any) {
+      logger.warn("[startup] closeStaleOrders: " + err?.message);
+    }
+
     try {
       const { setupNightAuditScheduler } = await import("./night-audit");
       setupNightAuditScheduler();

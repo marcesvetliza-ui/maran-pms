@@ -1366,14 +1366,19 @@ export default function RestaurantPage() {
       const displayName = isEditableItem
         ? (customItemName || "Ítem personalizado")
         : (pendingItem?.name || "Ítem");
+      const newItemWithMeta = { ...newItem, menuItem: { name: displayName } };
       // Actualización optimista inmediata: agregar el ítem al currentOrder sin esperar el refetch.
-      // Enriquecer con menuItem.name para que la comanda muestre el nombre (no solo "Item").
       setCurrentOrder((prev: any) => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          items: [...(prev.items || []), { ...newItem, menuItem: { name: displayName } }],
-        };
+        return { ...prev, items: [...(prev.items || []), newItemWithMeta] };
+      });
+      // CRÍTICO: también actualizar la cache de orders porque getUpdatedOrder() lee de ahí.
+      // Sin esto, la comanda muestra la versión stale (sin el ítem) aunque currentOrder ya lo tiene.
+      queryClient.setQueryData<any[]>(["/api/restaurant/orders"], (old) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((o: any) =>
+          o.id === newItem.orderId ? { ...o, items: [...(o.items || []), newItemWithMeta] } : o
+        );
       });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       setPendingItem(null);
@@ -1612,6 +1617,15 @@ export default function RestaurantPage() {
       setCurrentOrder((prev: any) => {
         if (!prev) return prev;
         return { ...prev, items: (prev.items || []).filter((i: any) => i.id !== variables.itemId) };
+      });
+      // CRÍTICO: también actualizar la cache de orders para que getUpdatedOrder() lo refleje.
+      queryClient.setQueryData<any[]>(["/api/restaurant/orders"], (old) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((o: any) =>
+          o.id === variables.orderId
+            ? { ...o, items: (o.items || []).filter((i: any) => i.id !== variables.itemId) }
+            : o
+        );
       });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       toast({ title: "Ítem anulado", description: "La comanda de anulación fue enviada a cocina." });
