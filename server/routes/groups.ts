@@ -1497,7 +1497,26 @@ export function registerGroupsRoutes(app: Express) {
 
       y += 4;
       doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
-      y += 12;
+      y += 8;
+
+      // Coverage legend note below room table
+      {
+        let legendText: string;
+        if (config === "none") {
+          legendText = "(*) Columna EXTRAS (directo): cargos facturados al huésped, no cubiertos por el folio maestro.";
+        } else if (config === "accommodation") {
+          legendText = "(*) Columna EXTRAS: cargos adicionales facturados directamente al huésped. Solo el alojamiento está cubierto por el folio maestro.";
+        } else {
+          // "all"
+          legendText = "(*) Columna EXTRAS: alojamiento y extras cubiertos por el folio maestro. Sin cargos directos al huésped por estas columnas.";
+        }
+        if (y > 740) { doc.addPage(); y = 40; }
+        doc.fontSize(7.5).font("Helvetica").fillColor("#666666").text(legendText, 40, y, { width: 515 });
+        y += 14;
+        doc.fillColor("#000000");
+      }
+
+      y += 4;
 
       // Group charges
       if (gCharges.length > 0) {
