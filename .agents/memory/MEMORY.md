@@ -25,3 +25,4 @@
 - [Beverage Cost split](beverage-cost-split.md) — isBeverage boolean column on menu_categories; food-cost endpoint returns foodOnlyCostPct + beverageCostPct; FoodCostReport has filter toggle + 6 KPI cards.
 - [Restaurant reports Excel export](restaurant-reports-excel.md) — xlsx npm package; client-side exportXLSX() helper in admin-reportes.tsx; Export buttons on Ventas/FoodCost/Desvios reports.
 - [PrefacturaDialog unified checkout/billing](prefactura-dialog.md) — replaces checkout wizard steps 1-3 and reservations.tsx EmitirFacturaDialog; mode='checkout'|'billing'; folio/pdf endpoint missing (404 on print).
+- [Production build required before deploy](production-build-required.md) — prod uses dist/index.cjs; must run `npm run build` before publishing or source changes have zero effect in production.
