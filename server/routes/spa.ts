@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests } from "@shared/schema";
+import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests, salesInvoices } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, desc } from "drizzle-orm";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
@@ -911,6 +911,62 @@ export function registerSpaRoutes(app: Express) {
     } catch (error: any) {
       console.error("Error sending SPA receipt email:", error);
       res.status(500).json({ error: "Error al enviar el email" });
+    }
+  });
+
+  // Emit NC (Nota de Crédito) against a closed SPA account invoice
+  app.post("/api/spa/accounts/:accountId/nc", requireAuth, async (req, res) => {
+    try {
+      const account = await storage.getSpaAccount(req.params.accountId);
+      if (!account) return res.status(404).json({ error: "Cuenta SPA no encontrada" });
+      if (!(account as any).invoiceId) {
+        return res.status(400).json({ error: "La cuenta no tiene una factura AFIP emitida" });
+      }
+      if ((account as any).ncId) {
+        return res.status(400).json({ error: "Esta cuenta ya tiene una Nota de Crédito emitida" });
+      }
+
+      const [originalInvoice] = await db.select().from(salesInvoices).where(eq(salesInvoices.id, (account as any).invoiceId));
+      if (!originalInvoice) return res.status(404).json({ error: "Factura original no encontrada" });
+
+      const ncTipo: "NCA" | "NCB" = originalInvoice.tipoComprobante === "FA" ? "NCA" : "NCB";
+
+      const originalItems = (originalInvoice.items as any[]) || [];
+      let ncItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21" | "10.5" | "exento" | "no_gravado"; subtotalNeto: number; subtotal: number }[];
+      if (originalItems.length > 0) {
+        ncItems = originalItems.map((item: any) => ({
+          descripcion: item.descripcion || "Anulación",
+          cantidad: item.cantidad || 1,
+          precioUnitario: item.precioUnitario || 0,
+          alicuotaIva: (item.alicuotaIva || "21") as "21" | "10.5" | "exento" | "no_gravado",
+          subtotalNeto: item.subtotalNeto || 0,
+          subtotal: item.subtotal || 0,
+        }));
+      } else {
+        const gross = parseFloat(originalInvoice.montoTotal || "0");
+        const net = parseFloat((gross / 1.21).toFixed(4));
+        ncItems = [{ descripcion: `NC SPA ${account.guestName}`, cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross }];
+      }
+
+      const nc = await emitirFactura({
+        tipoComprobante: ncTipo,
+        cliente: {
+          razonSocial: originalInvoice.clienteRazonSocial || "CONSUMIDOR FINAL",
+          cuit: originalInvoice.clienteCuit || undefined,
+          dni: originalInvoice.clienteDni || undefined,
+          condicionIva: originalInvoice.clienteCondicionIva || "consumidor_final",
+        },
+        items: ncItems,
+        facturaOriginalId: originalInvoice.id,
+        operador: (req as any).user?.fullName || (req as any).user?.username,
+      });
+
+      await storage.updateSpaAccount(req.params.accountId, { ncId: nc.id } as any);
+
+      res.json({ ncId: nc.id, nc });
+    } catch (e: any) {
+      console.error("[Billing] Error emitiendo NC SPA:", e);
+      res.status(500).json({ error: e?.message || "Error al emitir la Nota de Crédito" });
     }
   });
 }

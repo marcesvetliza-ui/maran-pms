@@ -160,6 +160,7 @@ type SpaAccount = {
   closedBy: string | null;
   chargedTo: string | null;
   invoiceId?: number | null;
+  ncId?: number | null;
   items: SpaAccountItem[];
   payments: SpaPayment[];
 };
@@ -717,6 +718,29 @@ export default function SpaPage() {
     },
     onError: (error: Error) => {
       toast({ title: parseApiError(error), variant: "destructive" });
+    },
+  });
+
+  const emitirNcMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const res = await fetch(`/api/spa/accounts/${accountId}/nc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Error al emitir la Nota de Crédito");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts/by-appointment", selectedAppointment?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices", selectedAccount?.invoiceId] });
+      toast({ title: `Nota de Crédito emitida correctamente (ID: ${data.ncId})` });
+    },
+    onError: (error: Error) => {
+      toast({ title: error.message, variant: "destructive" });
     },
   });
 
@@ -2259,14 +2283,33 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                               CAE: <span className="font-mono">{spaInvoice.cae}</span>
                             </div>
                           )}
-                          <a
-                            href={`/api/billing/invoices/${selectedAccount.invoiceId}/pdf`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`inline-flex items-center gap-1 hover:underline ${linkClass}`}
-                          >
-                            <Printer className="h-3 w-3" /> {isNC ? "Ver NC PDF" : "Ver factura PDF"}
-                          </a>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <a
+                              href={`/api/billing/invoices/${selectedAccount.invoiceId}/pdf`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`inline-flex items-center gap-1 hover:underline ${linkClass}`}
+                            >
+                              <Printer className="h-3 w-3" /> {isNC ? "Ver NC PDF" : "Ver factura PDF"}
+                            </a>
+                            {!isNC && !selectedAccount.ncId && (
+                              <button
+                                type="button"
+                                disabled={emitirNcMutation.isPending}
+                                onClick={() => selectedAccount && emitirNcMutation.mutate(selectedAccount.id)}
+                                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                data-testid="button-spa-emitir-nc"
+                              >
+                                {emitirNcMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileX className="h-3 w-3" />}
+                                Emitir NC
+                              </button>
+                            )}
+                            {!isNC && selectedAccount.ncId && (
+                              <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
+                                <Ban className="h-3 w-3" /> NC emitida
+                              </span>
+                            )}
+                          </div>
                         </div>
                         );
                       })()}

@@ -1506,7 +1506,9 @@ export const spaAccounts = pgTable("spa_accounts", {
   closedBy: text("closed_by"),
   chargedTo: text("charged_to"),
   invoiceId: integer("invoice_id"),
+  ncId: integer("nc_id"),
 });
+
 
 export const insertSpaAccountSchema = createInsertSchema(spaAccounts).omit({ id: true });
 export type InsertSpaAccount = z.infer<typeof insertSpaAccountSchema>;
