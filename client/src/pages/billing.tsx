@@ -8,7 +8,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
   FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
-  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi,
+  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1493,6 +1493,103 @@ function BillingConfigPanel({ config }: { config: any }) {
       <Button onClick={handleSave} disabled={mutation.isPending} data-testid="btn-guardar-billing-config">
         {mutation.isPending ? "Guardando..." : "Guardar configuración"}
       </Button>
+
+      <DeleteNonFiscalSection />
     </div>
+  );
+}
+
+function DeleteNonFiscalSection() {
+  const { toast } = useToast();
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [lastResult, setLastResult] = useState<{ deleted: number } | null>(null);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      const res = await apiRequest("DELETE", `/api/billing/invoices/non-fiscal?startDate=${startDate}&endDate=${endDate}`);
+      const data = await res.json();
+      setLastResult(data);
+      setConfirmOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      toast({
+        title: data.deleted === 0 ? "Sin comprobantes para borrar" : `${data.deleted} comprobante(s) eliminado(s)`,
+        description: data.deleted > 0 ? `Período: ${startDate} → ${endDate}` : undefined,
+      });
+    } catch (e: any) {
+      toast({ title: "Error al borrar", description: parseApiError(e), variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const canDelete = !!startDate && !!endDate && startDate <= endDate;
+
+  return (
+    <>
+      <Card className="border-destructive/40">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2 text-destructive">
+            <Trash2 className="h-4 w-4" />
+            Borrar comprobantes no fiscales
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Elimina permanentemente todos los <strong>Tickets, Vouchers y Cierres</strong> (comprobantes no fiscales)
+            emitidos en el rango de fechas indicado. Esta acción no puede deshacerse.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="del-start">Desde</Label>
+              <Input id="del-start" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="del-end">Hasta</Label>
+              <Input id="del-end" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            </div>
+          </div>
+          {lastResult && (
+            <p className="text-xs text-muted-foreground">
+              Último borrado: <strong>{lastResult.deleted}</strong> comprobante(s) eliminado(s).
+            </p>
+          )}
+          <Button
+            variant="destructive"
+            disabled={!canDelete}
+            onClick={() => setConfirmOpen(true)}
+            data-testid="btn-delete-non-fiscal"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Borrar comprobantes del período
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Confirmar eliminación
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm">
+            Se eliminarán <strong>todos los comprobantes no fiscales</strong> (Tickets, Vouchers, Cierres) emitidos
+            entre el <strong>{startDate}</strong> y el <strong>{endDate}</strong>.
+          </p>
+          <p className="text-sm text-destructive font-medium">Esta acción es irreversible.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleting}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting} data-testid="btn-confirm-delete-non-fiscal">
+              {deleting ? "Borrando..." : "Sí, borrar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
