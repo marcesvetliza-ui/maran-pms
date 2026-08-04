@@ -2366,6 +2366,162 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Bulk enrichment — a single SQL query that aggregates all orders with their items,
+  // tables, areas and guests at once using json_agg + GROUP BY, regardless of order count.
+  private async enrichRestaurantOrdersBulk(orders: RestaurantOrder[]): Promise<RestaurantOrderWithDetails[]> {
+    if (orders.length === 0) return [];
+
+    const orderIds = orders.map(o => o.id);
+    const idsSql = sql.join(orderIds.map(id => sql`${id}`), sql`, `);
+
+    const result = await db.execute(sql`
+      SELECT
+        ro.id AS "orderId",
+        COALESCE(
+          json_agg(
+            jsonb_build_object(
+              'id',         oi.id,
+              'orderId',    oi.order_id,
+              'menuItemId', oi.menu_item_id,
+              'quantity',   oi.quantity,
+              'unitPrice',  oi.unit_price,
+              'subtotal',   oi.subtotal,
+              'status',     oi.status,
+              'course',     oi.course,
+              'notes',      oi.notes,
+              'sentAt',     oi.sent_at,
+              'paid',       oi.paid,
+              'menuItem', jsonb_build_object(
+                'id',              mi.id,
+                'categoryId',      mi.category_id,
+                'name',            mi.name,
+                'description',     mi.description,
+                'price',           mi.price,
+                'preparationTime', mi.preparation_time,
+                'isAvailable',     mi.is_available,
+                'isActive',        mi.is_active,
+                'isEditable',      mi.is_editable,
+                'allergens',       mi.allergens,
+                'displayOrder',    mi.display_order,
+                'defaultCourse',   mi.default_course,
+                'inventoryItemId', mi.inventory_item_id
+              )
+            ) ORDER BY oi.id
+          ) FILTER (WHERE oi.id IS NOT NULL),
+          '[]'::json
+        ) AS items,
+        MAX(CASE WHEN rt.id IS NOT NULL THEN jsonb_build_object(
+          'id',                 rt.id,
+          'tableNumber',        rt.table_number,
+          'areaId',             rt.area_id,
+          'capacity',           rt.capacity,
+          'shape',              rt.shape,
+          'status',             rt.status,
+          'positionX',          rt.position_x,
+          'positionY',          rt.position_y,
+          'hasWindow',          rt.has_window,
+          'isActive',           rt.is_active,
+          'eventClientName',    rt.event_client_name,
+          'eventClientPhone',   rt.event_client_phone,
+          'eventClientEmail',   rt.event_client_email,
+          'eventSeats',         rt.event_seats,
+          'eventNotes',         rt.event_notes,
+          'eventAdvanceAmount', rt.event_advance_amount,
+          'eventAdvanceMethod', rt.event_advance_method,
+          'eventAdvanceDate',   rt.event_advance_date,
+          'area', jsonb_build_object(
+            'id',        ta.id,
+            'name',      ta.name,
+            'areaType',  ta.area_type,
+            'capacity',  ta.capacity,
+            'hasTables', ta.has_tables,
+            'isActive',  ta.is_active,
+            'notes',     ta.notes
+          )
+        ) END) AS "table",
+        MAX(CASE
+          WHEN oa.id IS NOT NULL THEN jsonb_build_object(
+            'id',        oa.id,
+            'name',      oa.name,
+            'areaType',  oa.area_type,
+            'capacity',  oa.capacity,
+            'hasTables', oa.has_tables,
+            'isActive',  oa.is_active,
+            'notes',     oa.notes
+          )
+          WHEN ta.id IS NOT NULL THEN jsonb_build_object(
+            'id',        ta.id,
+            'name',      ta.name,
+            'areaType',  ta.area_type,
+            'capacity',  ta.capacity,
+            'hasTables', ta.has_tables,
+            'isActive',  ta.is_active,
+            'notes',     ta.notes
+          )
+          ELSE NULL
+        END) AS area,
+        MAX(CASE WHEN g.id IS NOT NULL THEN jsonb_build_object(
+          'id',                          g.id,
+          'codigo',                      g.codigo,
+          'firstName',                   g.first_name,
+          'lastName',                    g.last_name,
+          'email',                       g.email,
+          'phone',                       g.phone,
+          'documentType',                g.document_type,
+          'documentNumber',              g.document_number,
+          'nationality',                 g.nationality,
+          'direccion',                   g.direccion,
+          'localidad',                   g.localidad,
+          'codigoPostal',                g.codigo_postal,
+          'fechaNacimiento',             g.fecha_nacimiento,
+          'sexo',                        g.sexo,
+          'segment',                     g.segment,
+          'cuilCuit',                    g.cuil_cuit,
+          'companyId',                   g.company_id,
+          'agencyId',                    g.agency_id,
+          'fechaAlta',                   g.fecha_alta,
+          'vehiculoPatente',             g.vehiculo_patente,
+          'vehiculoMarca',               g.vehiculo_marca,
+          'vehiculoModelo',              g.vehiculo_modelo,
+          'vehiculoColor',               g.vehiculo_color,
+          'active',                      g.active,
+          'vatCondition',                g.vat_condition,
+          'provincia',                   g.provincia,
+          'estadoCivil',                 g.estado_civil,
+          'procedencia',                 g.procedencia,
+          'nationalityCode',             g.nationality_code,
+          'fechaIngresoArgentina',       g.fecha_ingreso_argentina,
+          'fechaSalidaArgentina',        g.fecha_salida_argentina,
+          'esEmpresaGrande',             g.es_empresa_grande,
+          'montoBaseFce',                g.monto_base_fce,
+          'tipoPersona',                 g.tipo_persona,
+          'condicionVentaPredeterminada',g.condicion_venta_predeterminada
+        ) END) AS guest
+      FROM restaurant_orders ro
+      LEFT JOIN restaurant_tables rt ON rt.id = ro.table_id
+      LEFT JOIN restaurant_areas  ta ON ta.id = rt.area_id
+      LEFT JOIN restaurant_areas  oa ON oa.id = ro.area_id
+      LEFT JOIN guests             g  ON g.id  = ro.guest_id
+      LEFT JOIN order_items        oi ON oi.order_id = ro.id
+      LEFT JOIN menu_items         mi ON mi.id = oi.menu_item_id
+      WHERE ro.id IN (${idsSql})
+      GROUP BY ro.id
+    `);
+
+    const rowMap = new Map((result.rows as any[]).map(r => [r.orderId, r]));
+
+    return orders.map(order => {
+      const row = rowMap.get(order.id) as any;
+      return {
+        ...order,
+        items:  (row?.items  as any[]) ?? [],
+        table:  (row?.table  as any)   ?? undefined,
+        area:   (row?.area   as any)   ?? undefined,
+        guest:  (row?.guest  as any)   ?? undefined,
+      };
+    });
+  }
+
   async getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]> {
     const conditions = [];
     if (status) {
@@ -2388,7 +2544,7 @@ export class DatabaseStorage implements IStorage {
       orderList = await db.select().from(restaurantOrders);
     }
 
-    const enriched = await Promise.all(orderList.map(o => this.enrichRestaurantOrder(o)));
+    const enriched = await this.enrichRestaurantOrdersBulk(orderList);
     return enriched.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
   }
 
