@@ -189,8 +189,9 @@ export function registerRestaurantRoutes(app: Express) {
         })
       );
       res.json(ordersWithSplits);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching orders" });
+    } catch (error: any) {
+      console.error("[GET /api/restaurant/orders] ERROR:", error?.message || error);
+      res.status(500).json({ error: "Error fetching orders", detail: error?.message });
     }
   });
 

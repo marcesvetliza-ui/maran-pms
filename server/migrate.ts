@@ -895,6 +895,17 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // restaurant_tables: layout columns (shape, position, window) — en el schema pero faltaban en la migración
+  await withTimeout("restaurant_tables.layout_cols", T, () =>
+    db.execute(sql`
+      ALTER TABLE restaurant_tables
+        ADD COLUMN IF NOT EXISTS shape text DEFAULT 'square',
+        ADD COLUMN IF NOT EXISTS position_x integer DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS position_y integer DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS has_window text DEFAULT 'false'
+    `)
+  );
+
   // Seed "Evento por Mesa" restaurant area if not present
   await withTimeout("restaurant_areas.evento_por_mesa_seed", T, () =>
     db.execute(sql`
