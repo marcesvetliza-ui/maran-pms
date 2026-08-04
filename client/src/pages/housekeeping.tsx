@@ -1284,7 +1284,7 @@ function MobileRoomCard({
 export default function Housekeeping() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const isSupervisor = ["admin", "manager", "gobernanta", "responsable_area"].includes(user?.role ?? "");
+  const isSupervisor = ["admin", "manager", "ama_de_llaves", "gobernanta", "responsable_area"].includes(user?.role ?? "");
   const isMucama = user?.role === "housekeeping";
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
