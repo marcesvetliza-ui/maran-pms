@@ -2232,6 +2232,35 @@ function ReservationDetailDialog({
     },
   });
 
+  // Derive the invoice ID linked to the payment currently being voided.
+  // Used to check whether an active NC already exists before showing the checkbox.
+  const anularLinkedInvoiceId: number | null = (() => {
+    if (!anularTarget || anularTarget.type !== "pago") return null;
+    const p = payments?.find((pm: any) => pm.id === anularTarget.id);
+    try {
+      const ref = (p as any)?.invoiceRef ? JSON.parse((p as any).invoiceRef) : null;
+      return ref?.id ?? null;
+    } catch { return null; }
+  })();
+
+  const { data: anularLinkedInvoice, isLoading: isLoadingAnularInvoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", anularLinkedInvoiceId],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices/${anularLinkedInvoiceId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: anularLinkedInvoiceId !== null,
+    staleTime: 0,
+  });
+
+  // When the invoice query resolves with an active NC, force the checkbox off.
+  useEffect(() => {
+    if (anularLinkedInvoice?.nota_credito_id != null) {
+      setAnularEmitirNC(false);
+    }
+  }, [anularLinkedInvoice?.nota_credito_id]);
+
   const { data: restaurantVoucherDetail, isLoading: isLoadingVoucher } = useQuery<any>({
     queryKey: ["/api/restaurant/orders/by-number", restaurantVoucherOrderNum],
     queryFn: async () => {
@@ -4573,6 +4602,7 @@ function ReservationDetailDialog({
         const anularInvoiceRef = (() => {
           try { return (anularPayment as any)?.invoiceRef ? JSON.parse((anularPayment as any).invoiceRef) : null; } catch { return null; }
         })();
+        const ncAlreadyExists = anularLinkedInvoice?.nota_credito_id != null;
         return (
         <Dialog open={anularTarget !== null} onOpenChange={(open) => {
           if (!open) { setAnularTarget(null); setMotivoAnulacion(""); setAnularEmitirNC(false); }
@@ -4598,15 +4628,19 @@ function ReservationDetailDialog({
                     {anularInvoiceRef.tipo_comprobante} {String(anularInvoiceRef.punto_venta ?? "").padStart(4, "0")}-{String(anularInvoiceRef.numero ?? "").padStart(8, "0")}
                     {anularInvoiceRef.cae ? ` — CAE: ${anularInvoiceRef.cae}` : ""}
                   </p>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className={`flex items-center gap-2 ${ncAlreadyExists ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
                     <input
                       type="checkbox"
                       checked={anularEmitirNC}
                       onChange={(e) => setAnularEmitirNC(e.target.checked)}
                       className="rounded border-amber-400"
+                      disabled={ncAlreadyExists}
                     />
                     <span>Emitir Nota de Crédito al anular</span>
                   </label>
+                  {ncAlreadyExists && (
+                    <p className="text-xs text-muted-foreground italic">Ya existe una NC para esta factura</p>
+                  )}
                 </div>
               )}
               <Label htmlFor="motivo-anulacion">Motivo de anulación (opcional)</Label>
@@ -4635,9 +4669,11 @@ function ReservationDetailDialog({
                       setAnularSinNCPending(true);
                       return;
                     }
+                    // Hard guard: never trigger NC if invoice already has one, regardless of checkbox state
+                    const effectiveEmitirNC = anularEmitirNC && !ncAlreadyExists;
                     anularPaymentMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion }, {
                       onSuccess: () => {
-                        if (anularEmitirNC && anularInvoiceRef?.id) {
+                        if (effectiveEmitirNC && anularInvoiceRef?.id) {
                           setNcForInvoiceId(anularInvoiceRef.id);
                           setAnularEmitirNC(false);
                         }
@@ -4645,7 +4681,7 @@ function ReservationDetailDialog({
                     });
                   }
                 }}
-                disabled={anularChargeMutation.isPending || anularPaymentMutation.isPending}
+                disabled={anularChargeMutation.isPending || anularPaymentMutation.isPending || (anularTarget?.type === "pago" && anularLinkedInvoiceId !== null && isLoadingAnularInvoice)}
                 data-testid="button-confirm-anular"
               >
                 {(anularChargeMutation.isPending || anularPaymentMutation.isPending) ? "Anulando..." : "Confirmar Anulación"}
