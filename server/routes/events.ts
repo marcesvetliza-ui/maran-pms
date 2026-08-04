@@ -851,6 +851,31 @@ export function registerEventsRoutes(app: Express) {
 
       await storage.updateEvent(req.params.eventId, { ncId: nc.id } as any);
 
+      // Write void folio_movements for each payment so the folio balance
+      // correctly reflects the reversal (balance goes back to non-zero).
+      try {
+        const folio = await (storage as any).getFolioByEntity("event", req.params.eventId);
+        if (folio) {
+          const payments: any[] = event.payments || [];
+          for (const payment of payments) {
+            const amt = parseFloat(payment.amount);
+            if (amt > 0) {
+              await (storage as any).addFolioAdjustment(
+                folio.id,
+                "void",
+                amt,
+                `NC Evento - Anulación pago ${payment.method}`,
+                (req as any).user?.username,
+                payment.id,
+                `NC emitida id=${nc.id}`,
+              );
+            }
+          }
+        }
+      } catch (voidErr) {
+        console.error("[Folio] Error escribiendo movimientos void para NC Evento:", voidErr);
+      }
+
       res.json({ ncId: nc.id, nc });
     } catch (e: any) {
       console.error("[Billing] Error emitiendo NC evento:", e);
@@ -883,6 +908,11 @@ export function registerEventsRoutes(app: Express) {
     try {
       const table = await storage.getEventTable(req.params.tableId);
       if (!table) return res.status(404).json({ error: "Mesa no encontrada" });
+      // Ensure the table actually belongs to the event in the URL to prevent
+      // cross-entity folio corruption.
+      if (table.eventId !== req.params.eventId) {
+        return res.status(400).json({ error: "La mesa no pertenece al evento indicado" });
+      }
       if (!table.invoiceId) {
         return res.status(400).json({ error: "La mesa no tiene una factura AFIP emitida" });
       }
@@ -930,6 +960,33 @@ export function registerEventsRoutes(app: Express) {
 
       // Persist NC id on the table record
       await storage.updateEventTable(req.params.tableId, { ncId: nc.id } as any);
+
+      // Write void folio_movements for each table payment so the folio balance
+      // correctly reflects the reversal (balance goes back to non-zero).
+      // Use table.eventId (from DB) — not the URL param — to prevent cross-entity corruption.
+      try {
+        const folio = await (storage as any).getFolioByEntity("event", table.eventId);
+        if (folio) {
+          const refreshedTable = await storage.getEventTable(req.params.tableId);
+          const payments: any[] = refreshedTable?.payments || table.payments || [];
+          for (const payment of payments) {
+            const amt = parseFloat(payment.amount);
+            if (amt > 0) {
+              await (storage as any).addFolioAdjustment(
+                folio.id,
+                "void",
+                amt,
+                `NC Mesa ${table.tableNumber} - Anulación pago ${payment.method}`,
+                (req as any).user?.username,
+                payment.id,
+                `NC emitida id=${nc.id}`,
+              );
+            }
+          }
+        }
+      } catch (voidErr) {
+        console.error("[Folio] Error escribiendo movimientos void para NC Mesa Evento:", voidErr);
+      }
 
       res.json({ ncId: nc.id, nc });
     } catch (e: any) {
