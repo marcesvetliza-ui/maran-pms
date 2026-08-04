@@ -239,16 +239,38 @@ export function registerRestaurantRoutes(app: Express) {
       if (!tableId && (!orderLabel || !orderLabel.trim())) {
         return res.status(400).json({ error: "Etiqueta de orden es requerida para areas sin mesas" });
       }
-      // Auto-cerrar órdenes activas previas de la misma mesa (mismo día) para evitar
-      // que consumos de una sesión anterior aparezcan al abrir la mesa de nuevo.
+      // Auto-cerrar solo órdenes VIEJAS (de días anteriores) de la misma mesa.
+      // NO cerrar órdenes activas de HOY — si una orden de hoy existe para esta mesa,
+      // devolver error para evitar destruir accidentalmente una comanda en curso.
       if (tableId) {
+        // Verificar si hay una orden activa de HOY para esta mesa
+        const activeToday = await db
+          .select({ id: restaurantOrders.id, orderNumber: restaurantOrders.orderNumber })
+          .from(restaurantOrders)
+          .where(
+            and(
+              eq(restaurantOrders.tableId, tableId),
+              not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[])),
+              sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+            )
+          )
+          .limit(1);
+        if (activeToday.length > 0) {
+          return res.status(409).json({
+            error: "ORDEN_ACTIVA_EXISTENTE",
+            message: `La mesa ya tiene una orden activa (${activeToday[0].orderNumber}). Retomá desde la pantalla de mesas.`,
+            orderId: activeToday[0].id,
+          });
+        }
+        // Cerrar órdenes viejas (de días anteriores) antes de crear la nueva
         const staleForTable = await db
           .select({ id: restaurantOrders.id })
           .from(restaurantOrders)
           .where(
             and(
               eq(restaurantOrders.tableId, tableId),
-              not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[]))
+              not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[])),
+              sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') < (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
             )
           );
         if (staleForTable.length > 0) {
