@@ -1,9 +1,9 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests, salesInvoices } from "@shared/schema";
+import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests, salesInvoices, spaAccounts } from "@shared/schema";
 import { requireAuth } from "../auth";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
 import { emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
@@ -176,6 +176,25 @@ export function registerSpaRoutes(app: Express) {
 
       if (startDate && endDate) {
         const appointments = await storage.getSpaAppointmentsByDateRange(startDate, endDate);
+        // Enrich with account billing status (invoiceId / ncId) so the agenda
+        // card can show an NC badge without a per-card API call.
+        if (appointments.length > 0) {
+          const aptIds = appointments.map((a) => a.id);
+          const accounts = await db
+            .select({
+              appointmentId: spaAccounts.appointmentId,
+              invoiceId: spaAccounts.invoiceId,
+              ncId: spaAccounts.ncId,
+            })
+            .from(spaAccounts)
+            .where(inArray(spaAccounts.appointmentId, aptIds));
+          const accountMap = new Map(accounts.map((acc) => [acc.appointmentId, acc]));
+          const enriched = appointments.map((a) => {
+            const acc = accountMap.get(a.id);
+            return acc ? { ...a, invoiceId: acc.invoiceId, ncId: acc.ncId } : a;
+          });
+          return res.json(enriched);
+        }
         return res.json(appointments);
       }
 

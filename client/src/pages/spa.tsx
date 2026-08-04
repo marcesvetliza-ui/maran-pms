@@ -118,6 +118,8 @@ type SpaAppointment = {
   createdAt: string;
   cabin?: SpaCabin;
   treatment?: SpaTreatment;
+  invoiceId?: number | null;
+  ncId?: number | null;
 };
 
 type SpaPayment = {
@@ -1407,8 +1409,16 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                         title={`${appointment.guestName} ${appointment.guestLastName || ""} - ${treatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
                                         data-testid={`appointment-${appointment.id}`}
                                       >
-                                        <div className="text-xs font-medium truncate">
-                                          {appointment.guestName} {appointment.guestLastName || ""}
+                                        <div className="flex items-center gap-1 min-w-0">
+                                          <span className="text-xs font-medium truncate">
+                                            {appointment.guestName} {appointment.guestLastName || ""}
+                                          </span>
+                                          {appointment.ncId && (
+                                            <span className="flex-shrink-0 inline-flex items-center rounded px-1 py-0 text-[9px] font-bold bg-red-600 text-white leading-tight" title="Nota de Crédito emitida">NC</span>
+                                          )}
+                                          {!appointment.ncId && appointment.invoiceId && (
+                                            <span className="flex-shrink-0 inline-flex items-center rounded px-1 py-0 text-[9px] font-bold bg-blue-600 text-white leading-tight" title="Factura emitida">F</span>
+                                          )}
                                         </div>
                                         <div className="text-[10px] truncate opacity-75">
                                           {treatments.find(t => t.id === appointment.treatmentId)?.name}
