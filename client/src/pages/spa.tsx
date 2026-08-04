@@ -54,6 +54,10 @@ import {
   Filter,
   RefreshCw,
   FileText,
+  Eye,
+  Download,
+  FileX,
+  Ban,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -253,6 +257,7 @@ export default function SpaPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [activeTab, setActiveTab] = useState<SpaTab>("agenda");
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
+  const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
@@ -2110,18 +2115,66 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   {selectedAccount.status === "closed" && (
                     <div className="mt-3 space-y-2">
                       <Badge variant="secondary">Folio cerrado</Badge>
-                      {spaInvoice && (
-                        <div className="p-2 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-xs space-y-1" data-testid="spa-invoice-badge">
-                          <div className="flex items-center gap-1.5 font-medium text-purple-800 dark:text-purple-200">
-                            <FileText className="h-3.5 w-3.5 shrink-0" />
-                            <span>
-                              {spaInvoice.tipo_comprobante === "FA" ? "Factura A" : spaInvoice.tipo_comprobante === "FB" ? "Factura B" : spaInvoice.tipo_comprobante === "FC" ? "Factura C" : spaInvoice.tipo_comprobante}
-                              {" "}
-                              {String(spaInvoice.punto_venta ?? 1).padStart(4, "0")}-{String(spaInvoice.numero ?? 0).padStart(8, "0")}
-                            </span>
+                      {spaInvoice && (() => {
+                        const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(spaInvoice.tipo_comprobante);
+                        const hasOriginal = isNC && spaInvoice.original_tipo && spaInvoice.original_numero != null;
+                        const originalRef = hasOriginal
+                          ? `${spaInvoice.original_tipo} ${String(spaInvoice.original_punto_venta || 1).padStart(4, "0")}-${String(spaInvoice.original_numero).padStart(8, "0")}`
+                          : null;
+                        const linkedOriginal = hasOriginal ? {
+                          id: spaInvoice.nota_credito_id,
+                          tipo_comprobante: spaInvoice.original_tipo,
+                          numero: spaInvoice.original_numero,
+                          punto_venta: spaInvoice.original_punto_venta,
+                          fecha_emision: spaInvoice.original_fecha_emision,
+                          monto_total: spaInvoice.original_monto_total,
+                          cliente_razon_social: spaInvoice.original_cliente_razon_social,
+                          cae: spaInvoice.original_cae,
+                          modo_ficticio: spaInvoice.original_modo_ficticio,
+                          estado: spaInvoice.original_estado,
+                        } : null;
+                        const badgeColorClass = isNC
+                          ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+                          : "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800";
+                        const textColorClass = isNC
+                          ? "text-red-800 dark:text-red-200"
+                          : "text-purple-800 dark:text-purple-200";
+                        const subTextClass = isNC
+                          ? "text-red-700 dark:text-red-300"
+                          : "text-purple-700 dark:text-purple-300";
+                        const linkClass = isNC
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-purple-600 dark:text-purple-400";
+                        const Icon = isNC ? Ban : FileText;
+                        return (
+                        <div className={`p-2 rounded-md border text-xs space-y-1 ${badgeColorClass}`} data-testid="spa-invoice-badge">
+                          <div className={`flex items-center justify-between gap-1.5 font-medium ${textColorClass}`}>
+                            <div className="flex items-center gap-1.5">
+                              <Icon className="h-3.5 w-3.5 shrink-0" />
+                              <span>
+                                {spaInvoice.tipo_comprobante === "FA" ? "Factura A" : spaInvoice.tipo_comprobante === "FB" ? "Factura B" : spaInvoice.tipo_comprobante === "FC" ? "Factura C" : spaInvoice.tipo_comprobante === "NCA" ? "Nota de Crédito A" : spaInvoice.tipo_comprobante === "NCB" ? "Nota de Crédito B" : spaInvoice.tipo_comprobante}
+                                {" "}
+                                {String(spaInvoice.punto_venta ?? 1).padStart(4, "0")}-{String(spaInvoice.numero ?? 0).padStart(8, "0")}
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className={`h-5 px-1 ${linkClass}`}
+                              title="Ver detalle"
+                              onClick={() => setSelectedInvoiceDetail({ invoice: spaInvoice, linkedNc: linkedOriginal })}
+                              data-testid="button-spa-invoice-detail"
+                            >
+                              <Eye className="h-3 w-3" />
+                            </Button>
                           </div>
+                          {originalRef && (
+                            <div className="text-muted-foreground">
+                              Factura Orig.: <span className="font-mono font-medium">{originalRef}</span>
+                            </div>
+                          )}
                           {spaInvoice.cae && (
-                            <div className="text-purple-700 dark:text-purple-300">
+                            <div className={subTextClass}>
                               CAE: <span className="font-mono">{spaInvoice.cae}</span>
                             </div>
                           )}
@@ -2129,12 +2182,13 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             href={`/api/billing/invoices/${selectedAccount.invoiceId}/pdf`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400 hover:underline"
+                            className={`inline-flex items-center gap-1 hover:underline ${linkClass}`}
                           >
-                            <Printer className="h-3 w-3" /> Ver factura PDF
+                            <Printer className="h-3 w-3" /> {isNC ? "Ver NC PDF" : "Ver factura PDF"}
                           </a>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -2791,6 +2845,96 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               {deleteTreatmentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Eliminar
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invoice Detail Dialog — shown when viewing an NC row */}
+      <Dialog open={!!selectedInvoiceDetail} onOpenChange={(open) => { if (!open) setSelectedInvoiceDetail(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5" />
+              Detalle del Comprobante
+            </DialogTitle>
+          </DialogHeader>
+          {selectedInvoiceDetail && (() => {
+            const { invoice: inv, linkedNc } = selectedInvoiceDetail;
+            const formatNroLocal = (i: any) => `${String(i.punto_venta || 1).padStart(4, "0")}-${String(i.numero).padStart(8, "0")}`;
+            const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(inv.tipo_comprobante);
+            return (
+              <div className="space-y-4">
+                <div className="rounded-lg border p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Comprobante</span>
+                    <span className="font-mono font-semibold">{inv.tipo_comprobante} {formatNroLocal(inv)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Fecha emisión</span>
+                    <span className="text-sm">{inv.fecha_emision ? format(new Date(inv.fecha_emision), "dd/MM/yyyy") : "-"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Cliente</span>
+                    <span className="text-sm text-right max-w-[200px]">{inv.cliente_razon_social || "Consumidor Final"}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t pt-2">
+                    <span className="text-sm font-medium">{isNC ? "Total acreditado" : "Total facturado"}</span>
+                    <span className="font-semibold">${parseFloat(inv.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {inv.cae && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">CAE</span>
+                      <span className="text-xs font-mono">{inv.modo_ficticio ? <span className="text-amber-600">Ficticio</span> : inv.cae}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Original factura section — shown when viewing an NC */}
+                {isNC && linkedNc && (
+                  <div className="rounded-lg border-2 border-blue-400/60 bg-blue-50 dark:bg-blue-900/10 p-4 space-y-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Receipt className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      <span className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-400">
+                        Factura Original Acreditada
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Comprobante</span>
+                      <span className="font-mono font-bold text-base">{linkedNc.tipo_comprobante} {formatNroLocal(linkedNc)}</span>
+                    </div>
+                    {linkedNc.fecha_emision && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Fecha factura</span>
+                        <span className="text-sm">{format(new Date(linkedNc.fecha_emision), "dd/MM/yyyy")}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between border-t pt-2">
+                      <span className="text-sm font-medium">Total original</span>
+                      <span className="font-bold text-base text-blue-700 dark:text-blue-400">
+                        ${parseFloat(linkedNc.monto_total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    {linkedNc.estado && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Estado factura</span>
+                        {linkedNc.estado === "anulada"
+                          ? <Badge variant="destructive">ANULADA</Badge>
+                          : linkedNc.estado === "parcial"
+                            ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-300">NC PARCIAL</Badge>
+                            : <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-300">Activa</Badge>
+                        }
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => window.open(`/api/billing/invoices/${selectedInvoiceDetail?.invoice.id}/pdf`, "_blank")}>
+              <Download className="h-4 w-4 mr-2" />Descargar PDF
+            </Button>
+            <Button onClick={() => setSelectedInvoiceDetail(null)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

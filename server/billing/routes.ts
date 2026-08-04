@@ -276,7 +276,23 @@ export function registerBillingRoutes(app: Express) {
   app.get("/api/billing/invoices/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
+      const row = await db.execute(sql`
+        SELECT si.*,
+               orig.tipo_comprobante AS original_tipo,
+               orig.numero           AS original_numero,
+               orig.punto_venta      AS original_punto_venta,
+               orig.fecha_emision    AS original_fecha_emision,
+               orig.monto_total      AS original_monto_total,
+               orig.cliente_razon_social AS original_cliente_razon_social,
+               orig.cae              AS original_cae,
+               orig.modo_ficticio    AS original_modo_ficticio,
+               orig.estado           AS original_estado
+        FROM sales_invoices si
+        LEFT JOIN sales_invoices orig
+               ON orig.id = si.nota_credito_id
+              AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
+        WHERE si.id = ${id}
+      `);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       res.json(row.rows[0]);
     } catch (e: any) {
