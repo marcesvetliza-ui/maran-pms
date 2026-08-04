@@ -938,6 +938,8 @@ export function registerBillingRoutes(app: Express) {
       // Add folio charge movement so the ND amount appears in the folio PDF.
       // sales_invoices.folio_id is an integer (not the folio UUID), so we resolve
       // the actual folio UUID via the reservation entity when reserva_id is present.
+      // For SPA accounts and Events the invoice is linked in the other direction
+      // (spa_accounts.invoice_id / events.invoice_id), so we do a reverse lookup.
       let actualFolioId: string | null = null;
       if (original.reserva_id) {
         try {
@@ -949,6 +951,44 @@ export function registerBillingRoutes(app: Express) {
           actualFolioId = (folioRow.rows?.[0] as any)?.id ?? null;
         } catch (e) {
           console.error("[ND] Error resolving folio by reserva_id:", e);
+        }
+      }
+      // SPA account folio (reverse lookup via spa_accounts.invoice_id)
+      if (!actualFolioId) {
+        try {
+          const spaRow = await db.execute(sql`
+            SELECT id FROM spa_accounts WHERE invoice_id = ${original.id} LIMIT 1
+          `);
+          const spaAccountId = (spaRow.rows?.[0] as any)?.id;
+          if (spaAccountId) {
+            const folioRow = await db.execute(sql`
+              SELECT id FROM folios
+              WHERE entity_type = 'spa_account' AND entity_id = ${String(spaAccountId)}
+              LIMIT 1
+            `);
+            actualFolioId = (folioRow.rows?.[0] as any)?.id ?? null;
+          }
+        } catch (e) {
+          console.error("[ND] Error resolving folio by spa_account invoice_id:", e);
+        }
+      }
+      // Event folio (reverse lookup via events.invoice_id)
+      if (!actualFolioId) {
+        try {
+          const eventRow = await db.execute(sql`
+            SELECT id FROM events WHERE invoice_id = ${original.id} LIMIT 1
+          `);
+          const eventId = (eventRow.rows?.[0] as any)?.id;
+          if (eventId) {
+            const folioRow = await db.execute(sql`
+              SELECT id FROM folios
+              WHERE entity_type = 'event' AND entity_id = ${String(eventId)}
+              LIMIT 1
+            `);
+            actualFolioId = (folioRow.rows?.[0] as any)?.id ?? null;
+          }
+        } catch (e) {
+          console.error("[ND] Error resolving folio by event invoice_id:", e);
         }
       }
       if (actualFolioId) {
