@@ -1419,12 +1419,12 @@ export function registerGroupsRoutes(app: Express) {
           .text(guest.substring(0, 26), 80, y)
           .text(String(nights), 280, y, { align: "right", width: 60 })
           .text(`$${row.accommodation.toLocaleString("es-AR")}`, 350, y, { align: "right", width: 80 })
-          .text(config !== "none" ? `$${row.extras.toLocaleString("es-AR")}` : "-", 440, y, { align: "right", width: 60 })
+          .text(row.extras > 0 ? `$${row.extras.toLocaleString("es-AR")}` : "-", 440, y, { align: "right", width: 60 })
           .text(`$${row.paid.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });
         y += 14;
 
-        // Per-charge sub-rows (with ND amber styling)
-        if (config !== "none" && row.activeCharges && row.activeCharges.length > 0) {
+        // Per-charge sub-rows (with ND amber styling) — always shown regardless of masterFolioConfig
+        if (row.activeCharges && row.activeCharges.length > 0) {
           for (const c of row.activeCharges) {
             if (y > 740) { doc.addPage(); y = 40; }
             const cleanDesc = (c.description || "").replace(/\s*\[(xfer|corr|res):[^\]]+\]/g, "").trim();
