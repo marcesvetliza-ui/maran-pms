@@ -5117,7 +5117,17 @@ export default function RestaurantPage() {
                   className="flex-1 gap-2"
                   data-testid="button-restaurant-receipt-email"
                   onClick={() => {
-                    setRestEmailReceiptAddress("");
+                    let prefill = "";
+                    if (closeBillingClient) {
+                      if (closeBillingClient.type === "guest") {
+                        const g = restaurantGuests.find(g => g.id === closeBillingClient.id);
+                        prefill = g?.email || "";
+                      } else {
+                        const c = (companies as any[]).find(c => c.id === closeBillingClient.id);
+                        prefill = c?.email || "";
+                      }
+                    }
+                    setRestEmailReceiptAddress(prefill);
                     setIsRestEmailReceiptOpen(true);
                   }}
                 >

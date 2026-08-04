@@ -2212,7 +2212,11 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           className="flex-1 gap-2"
                           data-testid="button-spa-receipt-email"
                           onClick={() => {
-                            setSpaEmailReceiptAddress(selectedAppointment?.guestEmail || "");
+                            const emailFromAppt = selectedAppointment?.guestEmail || "";
+                            const emailFromProfile = !emailFromAppt && selectedAppointment?.guestId
+                              ? (spaClients.find(c => c.id === selectedAppointment.guestId)?.email || "")
+                              : "";
+                            setSpaEmailReceiptAddress(emailFromAppt || emailFromProfile);
                             setIsSpaEmailReceiptOpen(true);
                           }}
                         >
