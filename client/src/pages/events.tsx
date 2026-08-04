@@ -293,6 +293,7 @@ type PlanningEvent = {
   endDate: string;
   status: "tentative" | "confirmed" | "in_progress" | "completed" | "cancelled" | "invoiced";
   eventType: "corporate" | "social" | "wedding" | "conference" | "meeting" | "table_event" | "other";
+  ncId?: number | null;
 };
 
 type EventPlanningResponse = {
@@ -1197,7 +1198,12 @@ export default function EventsPage() {
                                     }}
                                     data-testid={`event-${event.id}`}
                                   >
-                                    <div className="font-medium truncate">{event.name}</div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-medium truncate flex-1">{event.name}</span>
+                                      {event.ncId && (
+                                        <span className="shrink-0 inline-flex items-center rounded px-1 py-0 text-[9px] font-bold leading-tight bg-purple-600/20 text-purple-700 dark:text-purple-300 border border-purple-500/40" title="Nota de Crédito emitida">NC</span>
+                                      )}
+                                    </div>
                                     <div className="text-xs opacity-80 truncate">{eventTypeLabels[event.eventType] || event.eventType}</div>
                                   </div>
                                 );

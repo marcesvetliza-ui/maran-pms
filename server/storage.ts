@@ -4358,6 +4358,7 @@ export class MemStorage implements IStorage {
                 endDate: event.endDate,
                 status: event.status as EventStatus,
                 eventType: event.eventType as EventType,
+                ncId: (event as any).ncId ?? null,
               };
             }
           });
