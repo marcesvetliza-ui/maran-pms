@@ -1900,6 +1900,7 @@ export function registerReservationsRoutes(app: Express) {
       } catch (e) { console.error("[reverse-transfer] this folio adjustment:", e); }
 
       // 7. Reverse the paired charge if found
+      let pairedAlreadyExists = false;
       if (pairedCharge && pairedReservationId) {
         const pairedChargeId = pairedCharge.id ?? pairedCharge.id;
         const pairedCounterAmount = -parseFloat(pairedCharge.amount);
@@ -1912,26 +1913,45 @@ export function registerReservationsRoutes(app: Express) {
         const pairedCounterCategory: "transfer_out" | "transfer_in" =
           pairedCharge.category === "transfer_out" ? "transfer_in" : "transfer_out";
 
-        await storage.createCharge({
-          reservationId: pairedReservationId,
-          description: pairedCounterDesc,
-          amount: String(pairedCounterAmount),
-          date: today,
-          category: pairedCounterCategory,
-          createdBy: operator,
-          status: "active",
-        });
+        // Duplicate-guard: if an active charge with the same reservationId, amount, and
+        // description already exists on the paired reservation (e.g. the previous reversal
+        // crashed after creating this charge but before finishing), skip re-creation to
+        // avoid leaving a duplicate.
+        const existingPairedCharges = await storage.getCharges(pairedReservationId);
+        const pairedCounterAmountStr = String(pairedCounterAmount);
+        const duplicateExists = existingPairedCharges.some(
+          (c: any) =>
+            c.status === "active" &&
+            c.description === pairedCounterDesc &&
+            c.amount === pairedCounterAmountStr
+        );
 
-        try {
-          const pairedFolio = await storage.getOrCreateFolio("reservation", pairedReservationId);
-          await storage.addFolioAdjustment(pairedFolio.id, pairedCounterCategory, absAmount, pairedCounterDesc, operator);
-        } catch (e) { console.error("[reverse-transfer] paired folio adjustment:", e); }
+        if (duplicateExists) {
+          pairedAlreadyExists = true;
+          console.warn(`[reverse-transfer] Duplicate paired counter-charge already exists on ${pairedReservationId} — skipping recreation`);
+        } else {
+          await storage.createCharge({
+            reservationId: pairedReservationId,
+            description: pairedCounterDesc,
+            amount: pairedCounterAmountStr,
+            date: today,
+            category: pairedCounterCategory,
+            createdBy: operator,
+            status: "active",
+          });
+
+          try {
+            const pairedFolio = await storage.getOrCreateFolio("reservation", pairedReservationId);
+            await storage.addFolioAdjustment(pairedFolio.id, pairedCounterCategory, absAmount, pairedCounterDesc, operator);
+          } catch (e) { console.error("[reverse-transfer] paired folio adjustment:", e); }
+        }
       }
 
       res.json({
         success: true,
         reversed: absAmount,
         pairedReversed: !!pairedCharge,
+        alreadyExists: pairedAlreadyExists || undefined,
         otherRoom: (() => {
           if (charge.category === "transfer_out") {
             const m = charge.description.match(/→\s*Hab\.(\S+)/); return m ? m[1] : null;
