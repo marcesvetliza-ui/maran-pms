@@ -5,6 +5,8 @@ import { emitirFactura } from "../billing/invoiceService";
 import { db } from "../db";
 import { restaurantOrders, orderItems, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
 import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
+import { sendEmailWithPdfAttachment } from "../email-service";
+import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -2137,6 +2139,68 @@ export function registerRestaurantRoutes(app: Express) {
       res.json(advances);
     } catch (error) {
       res.status(500).json({ error: "Error fetching table advances" });
+    }
+  });
+
+  // ── Email: Enviar comprobante de pedido por email ─────────────────────────
+  app.post("/api/restaurant/orders/:id/receipt-email", requireAuth, async (req, res) => {
+    try {
+      const { to } = req.body;
+      if (!to?.trim()) return res.status(400).json({ error: "El destinatario (to) es requerido" });
+
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Pedido no encontrado" });
+
+      const orderItemsList = await storage.getOrderItems(req.params.id);
+
+      const enrichedItems = await Promise.all(
+        orderItemsList
+          .filter((item: any) => !["cancelled", "voided"].includes(item.status || ""))
+          .map(async (item: any) => {
+            const [mi] = await db
+              .select({ name: menuItems.name })
+              .from(menuItems)
+              .where(eq(menuItems.id, item.menuItemId))
+              .limit(1);
+            return {
+              name: mi?.name || "Ítem",
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
+            };
+          })
+      );
+
+      const pdfBuffer = await generateRestaurantOrderReceiptPdf({
+        orderNumber: order.orderNumber,
+        orderLabel: order.orderLabel,
+        waiterName: order.waiterName,
+        receiptType: order.receiptType,
+        closedAt: (order as any).closedAt ? String((order as any).closedAt) : null,
+        total: order.total,
+        items: enrichedItems,
+      });
+
+      const orderSlug = (order.orderLabel || `pedido-${order.orderNumber}`).replace(/\s+/g, "_");
+      const subject = `Comprobante Restaurante — ${order.orderLabel || `Pedido ${order.orderNumber}`}`;
+      const body = `Estimado/a,\n\nAdjunto encontrará el comprobante de su consumo en el Restaurante de Maran Suites & Towers.\n\nGracias por elegirnos.\n\nMaran Suites & Towers\nRestaurante — Paraná, Entre Ríos`;
+
+      const result = await sendEmailWithPdfAttachment({
+        to: to.trim(),
+        subject,
+        body,
+        attachmentFilename: `Comprobante_Restaurante_${orderSlug}.pdf`,
+        attachmentBuffer: pdfBuffer,
+      });
+
+      if (!result.ok) {
+        return res.status(502).json({ error: result.error || "Error al enviar el email" });
+      }
+
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Error sending restaurant receipt email:", error);
+      res.status(500).json({ error: "Error al enviar el email" });
     }
   });
 }

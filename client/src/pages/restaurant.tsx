@@ -77,6 +77,8 @@ import {
   Download,
   CalendarClock,
   Tag,
+  Mail,
+  Send,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -684,6 +686,9 @@ export default function RestaurantPage() {
   const [pendingItem, setPendingItem] = useState<MenuItem | null>(null);
   const [itemNotes, setItemNotes] = useState("");
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+  // Email receipt state
+  const [isRestEmailReceiptOpen, setIsRestEmailReceiptOpen] = useState(false);
+  const [restEmailReceiptAddress, setRestEmailReceiptAddress] = useState("");
   const [isReservationDialogOpen, setIsReservationDialogOpen] = useState(false);
   const [isDailyReservationsOpen, setIsDailyReservationsOpen] = useState(false);
   const [reservationDate, setReservationDate] = useState(new Date().toISOString().split("T")[0]);
@@ -1531,6 +1536,20 @@ export default function RestaurantPage() {
     },
     onError: () => {
       toast({ title: "Error al anular ítem", variant: "destructive" });
+    },
+  });
+
+  const sendRestReceiptEmailMutation = useMutation({
+    mutationFn: async ({ orderId, to }: { orderId: string; to: string }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/receipt-email`, { to });
+      return res.json();
+    },
+    onSuccess: () => {
+      setIsRestEmailReceiptOpen(false);
+      toast({ title: "Comprobante enviado por email" });
+    },
+    onError: (error: any) => {
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -5080,16 +5099,33 @@ export default function RestaurantPage() {
               })()}
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={printBillPreview}
-              data-testid="button-print-bill-preview"
-            >
-              <Printer className="h-4 w-4 mr-2" />
-              Ver / Imprimir cuenta
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={printBillPreview}
+                data-testid="button-print-bill-preview"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Ver / Imprimir cuenta
+              </Button>
+              {currentOrder && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-2"
+                  data-testid="button-restaurant-receipt-email"
+                  onClick={() => {
+                    setRestEmailReceiptAddress("");
+                    setIsRestEmailReceiptOpen(true);
+                  }}
+                >
+                  <Mail className="h-4 w-4" />
+                  Enviar por email
+                </Button>
+              )}
+            </div>
 
             {!isSplitMode ? (
               <>
@@ -7791,6 +7827,59 @@ export default function RestaurantPage() {
           </div>
           <DialogFooter>
             <Button onClick={() => setIsTimeSlotsDialogOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Restaurant Receipt Email Dialog */}
+      <Dialog open={isRestEmailReceiptOpen} onOpenChange={(open) => { if (!open) setIsRestEmailReceiptOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Enviar comprobante por email
+            </DialogTitle>
+            <DialogDescription>
+              El PDF del comprobante de{" "}
+              {currentOrder ? (currentOrder.orderLabel || `Pedido ${currentOrder.orderNumber}`) : "este pedido"}{" "}
+              se enviará como adjunto al destinatario indicado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="rest-email-receipt-address">Dirección de email</Label>
+              <Input
+                id="rest-email-receipt-address"
+                type="email"
+                placeholder="ejemplo@dominio.com"
+                value={restEmailReceiptAddress}
+                onChange={(e) => setRestEmailReceiptAddress(e.target.value)}
+                data-testid="input-rest-email-receipt-address"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && restEmailReceiptAddress.trim() && currentOrder) {
+                    sendRestReceiptEmailMutation.mutate({ orderId: currentOrder.id, to: restEmailReceiptAddress });
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRestEmailReceiptOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!restEmailReceiptAddress.trim() || sendRestReceiptEmailMutation.isPending}
+              data-testid="button-rest-send-receipt-email-confirm"
+              onClick={() => {
+                if (currentOrder) {
+                  sendRestReceiptEmailMutation.mutate({ orderId: currentOrder.id, to: restEmailReceiptAddress });
+                }
+              }}
+            >
+              {sendRestReceiptEmailMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Enviando...</>
+              ) : (
+                <><Send className="h-4 w-4 mr-2" />Enviar</>
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

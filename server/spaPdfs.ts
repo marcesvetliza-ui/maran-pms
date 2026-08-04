@@ -3,6 +3,185 @@ import fs from "fs";
 import path from "path";
 import type { SpaAppointmentWithDetails, SpaAccountWithItems, SpaProfessional } from "@shared/schema";
 
+export interface SpaReceiptData {
+  accountId: string;
+  guestName: string;
+  appointmentDate: string;
+  startTime: string;
+  treatmentName: string;
+  receiptType: string | null;
+  closedAt: string | null;
+  items: Array<{ description: string; quantity: number; unitPrice: string; subtotal: string }>;
+  payments: Array<{ method: string; amount: string }>;
+  total: number;
+}
+
+const paymentMethodLabels: Record<string, string> = {
+  cash: "Efectivo",
+  debit_card: "Tarjeta Débito",
+  credit_card: "Tarjeta Crédito",
+  transfer: "Transferencia",
+  mercadopago: "MercadoPago",
+  room_charge: "Cargo a Habitación",
+};
+
+const receiptTypeLabels: Record<string, string> = {
+  cierre_spa: "Cierre de SPA",
+  factura_a: "Factura A",
+  factura_b: "Factura B",
+  factura_c: "Factura C",
+  cargo_habitacion: "Cargo a Habitación",
+};
+
+export async function generateSpaAccountReceiptPdf(data: SpaReceiptData): Promise<Buffer> {
+  return new Promise((resolve) => {
+    const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+    const pageW  = 595;
+    const pageH  = 842;
+    const margin = 44;
+    const contentW = pageW - margin * 2;
+
+    // ── BACKGROUND ──────────────────────────────────────────────────────────
+    const bgPath = path.join(process.cwd(), "server", "assets", "spa-confirmacion-bg.jpg");
+    if (fs.existsSync(bgPath)) {
+      doc.image(bgPath, 0, 0, { width: pageW, height: pageH });
+      // Overlay semi-transparent white to soften background for readability
+      doc.rect(0, 0, pageW * 0.62, pageH).fillOpacity(0.88).fill("white").fillOpacity(1);
+    } else {
+      doc.rect(0, 0, pageW, pageH).fill("#f9f9f9");
+    }
+
+    // ── LOGO ──────────────────────────────────────────────────────────────────
+    const spaLogoPath = path.join(process.cwd(), "server", "assets", "spa-logo.png");
+    const hotelLogoPath = path.join(process.cwd(), "server", "assets", "hotel-logo.png");
+    const logoPath = fs.existsSync(spaLogoPath) ? spaLogoPath : hotelLogoPath;
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, margin, 22, { height: 52, fit: [150, 52] });
+    } else {
+      doc.fillColor(NAVY).fontSize(11).font("Helvetica-Bold")
+        .text("MARAN SUITES & TOWERS", margin, 34);
+    }
+
+    doc.rect(margin, 80, 150, 2).fill(ORANGE);
+
+    let y = 100;
+
+    // ── TITLE ────────────────────────────────────────────────────────────────
+    doc.fillColor("#888888").fontSize(7).font("Helvetica")
+      .text("COMPROBANTE SPA — RECIBO DE PAGO", margin, y, { characterSpacing: 2 });
+    y += 13;
+    doc.fillColor(NAVY).fontSize(18).font("Helvetica-Bold")
+      .text("Recibo de SPA", margin, y, { width: contentW * 0.62 });
+    y += 26;
+    const closedStr = data.closedAt
+      ? new Date(data.closedAt).toLocaleDateString("es-AR")
+      : new Date().toLocaleDateString("es-AR");
+    doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
+      .text(`Emitido: ${closedStr}`, margin, y);
+    y += 20;
+
+    doc.moveTo(margin, y).lineTo(margin + contentW * 0.6, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+    y += 10;
+
+    // ── GUEST + SERVICE INFO ─────────────────────────────────────────────────
+    const fieldW = contentW * 0.58;
+
+    const row = (label: string, value: string) => {
+      doc.fillColor("#888888").fontSize(7.5).font("Helvetica").text(label, margin, y, { width: fieldW });
+      y += 11;
+      doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text(value, margin, y, { width: fieldW });
+      y += 15;
+    };
+
+    row("CLIENTE", data.guestName);
+    row("FECHA DE TURNO", `${data.appointmentDate.split("-").reverse().join("/")} — ${data.startTime} hs`);
+    row("TRATAMIENTO", data.treatmentName);
+    row("COMPROBANTE", data.receiptType ? (receiptTypeLabels[data.receiptType] || data.receiptType) : "Recibo de SPA");
+
+    y += 6;
+    doc.moveTo(margin, y).lineTo(margin + contentW * 0.6, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+    y += 10;
+
+    // ── CHARGES TABLE ────────────────────────────────────────────────────────
+    doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text("Detalle de cargos", margin, y);
+    y += 13;
+
+    const colDesc  = margin;
+    const colQty   = margin + 230;
+    const colUnit  = margin + 270;
+    const colTotal = margin + 320;
+    const tableW   = contentW * 0.60 - 4;
+
+    doc.roundedRect(margin, y, tableW, 15, 2).fill(NAVY);
+    doc.fillColor("white").fontSize(7).font("Helvetica-Bold");
+    doc.text("Descripción", colDesc + 3, y + 4, { width: 220 });
+    doc.text("Cant.", colQty, y + 4, { width: 36, align: "right" });
+    doc.text("P.U.", colUnit, y + 4, { width: 46, align: "right" });
+    doc.text("Total", colTotal, y + 4, { width: tableW - (colTotal - margin), align: "right" });
+    y += 17;
+
+    for (let i = 0; i < data.items.length; i++) {
+      const item = data.items[i];
+      const total = parseFloat(item.subtotal);
+      const descH = Math.max(13, doc.heightOfString(item.description, { width: 218 }) + 3);
+      doc.rect(margin, y, tableW, descH).fill(i % 2 === 0 ? "#fafafa" : "#f0f4f8").stroke("#e4e4e4");
+      doc.fillColor("#1a1a1a").fontSize(7.5).font("Helvetica")
+        .text(item.description, colDesc + 3, y + 3, { width: 218 });
+      doc.text(String(item.quantity), colQty, y + 3, { width: 36, align: "right" });
+      doc.text(`$${parseFloat(item.unitPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`, colUnit, y + 3, { width: 46, align: "right" });
+      doc.text(`$${parseFloat(String(total)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`, colTotal, y + 3, { width: tableW - (colTotal - margin), align: "right" });
+      y += descH;
+    }
+
+    if (data.items.length === 0) {
+      doc.fillColor("#888888").fontSize(7.5).font("Helvetica").text("Sin cargos", margin + 3, y + 4);
+      y += 16;
+    }
+
+    // Total row
+    y += 4;
+    doc.roundedRect(colTotal - 4, y, tableW - (colTotal - margin) + 4, 18, 2).fill(NAVY);
+    doc.fillColor("white").fontSize(9).font("Helvetica-Bold")
+      .text(`$${data.total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`, colTotal, y + 5, { width: tableW - (colTotal - margin), align: "right" });
+    doc.fillColor("#cccccc").fontSize(7).font("Helvetica")
+      .text("TOTAL", margin, y + 7, { width: colTotal - margin - 8, align: "right" });
+    y += 26;
+
+    // ── PAYMENTS ──────────────────────────────────────────────────────────────
+    if (data.payments.length > 0) {
+      doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text("Forma de pago", margin, y);
+      y += 12;
+      for (const pmt of data.payments) {
+        doc.fillColor("#444444").fontSize(8.5).font("Helvetica")
+          .text(`${paymentMethodLabels[pmt.method] || pmt.method}:`, margin, y, { width: 160 });
+        doc.fillColor(TEAL).fontSize(8.5).font("Helvetica-Bold")
+          .text(`$${parseFloat(pmt.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`, margin + 160, y, { width: 100 });
+        y += 13;
+      }
+    }
+
+    // ── FOOTER ───────────────────────────────────────────────────────────────
+    const footerY = pageH - 56;
+    doc.rect(0, footerY, pageW * 0.62, 2).fill(ORANGE);
+    doc.rect(0, footerY + 2, pageW * 0.62, 54).fill(NAVY);
+    doc.fillColor("white").fontSize(8).font("Helvetica-Bold")
+      .text("MARAN SUITES & TOWERS — SPA & WELLNESS", margin, footerY + 10, { width: pageW * 0.55 });
+    doc.fillColor("#aacccc").fontSize(6.8).font("Helvetica")
+      .text(HOTEL_ADDRESS, margin, footerY + 23, { width: pageW * 0.55 });
+    doc.fillColor("#aacccc").fontSize(6.8).font("Helvetica")
+      .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, margin, footerY + 33, { width: pageW * 0.55 });
+    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
+      .text(`Generado el ${ts}`, pageW * 0.62 + margin, footerY + 20, { width: pageW * 0.35 - margin, align: "center" });
+
+    doc.end();
+  });
+}
+
 const NAVY  = "#1a3a6c";
 const TEAL  = "#4a9b8e";
 const ORANGE = "#e8841a";

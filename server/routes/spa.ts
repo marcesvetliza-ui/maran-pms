@@ -4,8 +4,9 @@ import { db } from "../db";
 import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, desc } from "drizzle-orm";
-import { generateConfirmacionTurnoSpaPdf } from "../spaPdfs";
+import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
 import { emitirFactura } from "../billing/invoiceService";
+import { sendEmailWithPdfAttachment } from "../email-service";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -816,6 +817,100 @@ export function registerSpaRoutes(app: Express) {
     } catch (error) {
       console.error("Error generating SPA confirmation PDF:", error);
       res.status(500).json({ error: "Error generando PDF de confirmación" });
+    }
+  });
+
+  // ── PDF: Comprobante de cuenta SPA ────────────────────────────────────────
+  app.get("/api/spa/accounts/:id/receipt-pdf", requireAuth, async (req, res) => {
+    try {
+      const account = await storage.getSpaAccount(req.params.id);
+      if (!account) return res.status(404).json({ error: "Cuenta no encontrada" });
+      const appointment = await storage.getSpaAppointment(account.appointmentId);
+
+      const treatment = appointment?.treatmentId
+        ? await storage.getSpaTreatment(appointment.treatmentId)
+        : null;
+
+      const pdfBuffer = await generateSpaAccountReceiptPdf({
+        accountId: account.id,
+        guestName: account.guestName,
+        appointmentDate: appointment?.appointmentDate ?? new Date().toISOString().split("T")[0],
+        startTime: appointment?.startTime ?? "",
+        treatmentName: treatment?.name ?? "Servicio SPA",
+        receiptType: account.receiptType,
+        closedAt: account.closedAt ? String(account.closedAt) : null,
+        items: account.items.map((i: any) => ({
+          description: i.description,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          subtotal: i.subtotal,
+        })),
+        payments: account.payments.map((p: any) => ({ method: p.method, amount: p.amount })),
+        total: account.items.reduce((s: number, i: any) => s + parseFloat(i.subtotal), 0),
+      });
+
+      const guestSlug = account.guestName.replace(/\s+/g, "_");
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="Recibo_SPA_${guestSlug}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("Error generating SPA receipt PDF:", error);
+      res.status(500).json({ error: "Error generando comprobante PDF" });
+    }
+  });
+
+  // ── Email: Enviar comprobante SPA por email ────────────────────────────────
+  app.post("/api/spa/accounts/:id/receipt-email", requireAuth, async (req, res) => {
+    try {
+      const { to } = req.body;
+      if (!to?.trim()) return res.status(400).json({ error: "El destinatario (to) es requerido" });
+
+      const account = await storage.getSpaAccount(req.params.id);
+      if (!account) return res.status(404).json({ error: "Cuenta no encontrada" });
+      const appointment = await storage.getSpaAppointment(account.appointmentId);
+
+      const treatment = appointment?.treatmentId
+        ? await storage.getSpaTreatment(appointment.treatmentId)
+        : null;
+
+      const pdfBuffer = await generateSpaAccountReceiptPdf({
+        accountId: account.id,
+        guestName: account.guestName,
+        appointmentDate: appointment?.appointmentDate ?? new Date().toISOString().split("T")[0],
+        startTime: appointment?.startTime ?? "",
+        treatmentName: treatment?.name ?? "Servicio SPA",
+        receiptType: account.receiptType,
+        closedAt: account.closedAt ? String(account.closedAt) : null,
+        items: account.items.map((i: any) => ({
+          description: i.description,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          subtotal: i.subtotal,
+        })),
+        payments: account.payments.map((p: any) => ({ method: p.method, amount: p.amount })),
+        total: account.items.reduce((s: number, i: any) => s + parseFloat(i.subtotal), 0),
+      });
+
+      const guestSlug = account.guestName.replace(/\s+/g, "_");
+      const subject = `Comprobante SPA — ${account.guestName}`;
+      const body = `Estimado/a,\n\nAdjunto encontrará el comprobante de su sesión de SPA en Maran Suites & Towers.\n\nGracias por elegirnos.\n\nMaran Suites & Towers\nSPA & Wellness — Paraná, Entre Ríos`;
+
+      const result = await sendEmailWithPdfAttachment({
+        to: to.trim(),
+        subject,
+        body,
+        attachmentFilename: `Recibo_SPA_${guestSlug}.pdf`,
+        attachmentBuffer: pdfBuffer,
+      });
+
+      if (!result.ok) {
+        return res.status(502).json({ error: result.error || "Error al enviar el email" });
+      }
+
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Error sending SPA receipt email:", error);
+      res.status(500).json({ error: "Error al enviar el email" });
     }
   });
 }

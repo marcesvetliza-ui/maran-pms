@@ -58,6 +58,8 @@ import {
   Download,
   FileX,
   Ban,
+  Mail,
+  Send,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -301,6 +303,10 @@ export default function SpaPage() {
   const [editingProfessional, setEditingProfessional] = useState<SpaProfessional | null>(null);
   const [professionalName, setProfessionalName] = useState("");
   const [professionalLastName, setProfessionalLastName] = useState("");
+
+  // Email receipt state
+  const [isSpaEmailReceiptOpen, setIsSpaEmailReceiptOpen] = useState(false);
+  const [spaEmailReceiptAddress, setSpaEmailReceiptAddress] = useState("");
 
   // Modal % por Profesional
   const today = new Date();
@@ -629,6 +635,20 @@ export default function SpaPage() {
           receiptType: "cierre_spa",
         });
       }
+    },
+  });
+
+  const sendSpaReceiptEmailMutation = useMutation({
+    mutationFn: async ({ accountId, to }: { accountId: string; to: string }) => {
+      const res = await apiRequest("POST", `/api/spa/accounts/${accountId}/receipt-email`, { to });
+      return res.json();
+    },
+    onSuccess: () => {
+      setIsSpaEmailReceiptOpen(false);
+      toast({ title: "Comprobante enviado por email" });
+    },
+    onError: (error: any) => {
+      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -2144,6 +2164,31 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   {selectedAccount.status === "closed" && (
                     <div className="mt-3 space-y-2">
                       <Badge variant="secondary">Folio cerrado</Badge>
+                      <div className="flex gap-2">
+                        <a
+                          href={`/api/spa/accounts/${selectedAccount.id}/receipt-pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium ring-offset-background hover:bg-accent hover:text-accent-foreground"
+                          data-testid="button-spa-receipt-pdf"
+                        >
+                          <Printer className="h-4 w-4" />
+                          Imprimir
+                        </a>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 gap-2"
+                          data-testid="button-spa-receipt-email"
+                          onClick={() => {
+                            setSpaEmailReceiptAddress(selectedAppointment?.guestEmail || "");
+                            setIsSpaEmailReceiptOpen(true);
+                          }}
+                        >
+                          <Mail className="h-4 w-4" />
+                          Enviar por email
+                        </Button>
+                      </div>
                       {spaInvoice && (() => {
                         const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(spaInvoice.tipo_comprobante);
                         const hasOriginal = isNC && spaInvoice.original_tipo && spaInvoice.original_numero != null;
@@ -2286,6 +2331,54 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* SPA Receipt Email Dialog */}
+      <Dialog open={isSpaEmailReceiptOpen} onOpenChange={(open) => { if (!open) setIsSpaEmailReceiptOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Enviar comprobante por email
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="spa-email-receipt-address">Dirección de email</Label>
+              <Input
+                id="spa-email-receipt-address"
+                type="email"
+                placeholder="ejemplo@dominio.com"
+                value={spaEmailReceiptAddress}
+                onChange={(e) => setSpaEmailReceiptAddress(e.target.value)}
+                data-testid="input-spa-email-receipt-address"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && spaEmailReceiptAddress.trim() && selectedAccount) {
+                    sendSpaReceiptEmailMutation.mutate({ accountId: selectedAccount.id, to: spaEmailReceiptAddress });
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsSpaEmailReceiptOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!spaEmailReceiptAddress.trim() || sendSpaReceiptEmailMutation.isPending}
+              data-testid="button-spa-send-receipt-email-confirm"
+              onClick={() => {
+                if (selectedAccount) {
+                  sendSpaReceiptEmailMutation.mutate({ accountId: selectedAccount.id, to: spaEmailReceiptAddress });
+                }
+              }}
+            >
+              {sendSpaReceiptEmailMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Enviando...</>
+              ) : (
+                <><Send className="h-4 w-4 mr-2" />Enviar</>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
