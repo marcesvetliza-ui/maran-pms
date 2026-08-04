@@ -2837,7 +2837,15 @@ export default function RestaurantPage() {
                         data-testid={`button-resend-receipt-${order.orderNumber}`}
                         onClick={() => {
                           setCurrentOrder(order);
-                          setRestEmailReceiptAddress("");
+                          const _todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          const _linkedRes = order.tableId
+                            ? (reservations || []).find((r) => r.tableId === order.tableId && r.reservationDate === _todayStr)
+                            : null;
+                          const _emailFromRes = _linkedRes?.guestEmail || "";
+                          const _emailFromClient = !_emailFromRes && _linkedRes?.clientId
+                            ? (restaurantGuests.find((g: any) => g.id === _linkedRes.clientId)?.email || "")
+                            : "";
+                          setRestEmailReceiptAddress(_emailFromRes || _emailFromClient);
                           setIsRestEmailReceiptOpen(true);
                         }}
                       >
