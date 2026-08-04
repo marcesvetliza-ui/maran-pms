@@ -569,17 +569,19 @@ export function ReservationFormDialog({
         const d = new Date(value + "T12:00:00");
         d.setDate(d.getDate() + nights);
         const newCheckOut = toArgentinaDateStr(d);
-        setFormData(prev => ({
-          ...prev,
-          checkInDate: value,
-          checkOutDate: newCheckOut,
-          nights,
-          baseRatePerNight: ratePerNight,
-          finalRatePerNight: ratePerNight,
-          totalRoomAmount: totalPrice.toFixed(2),
-          discountType: "none",
-          discountValue: "0",
-        }));
+        setFormData(prev => {
+          const effectiveDiscountType = (prev.discountType || "none") as DiscountType;
+          const effectiveDiscountValue = prev.discountValue || "0";
+          const totals = calculateTotals(ratePerNight, effectiveDiscountType, effectiveDiscountValue, nights);
+          return {
+            ...prev,
+            checkInDate: value,
+            checkOutDate: newCheckOut,
+            nights,
+            baseRatePerNight: ratePerNight,
+            ...totals,
+          };
+        });
         return;
       }
     }
