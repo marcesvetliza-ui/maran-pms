@@ -106,7 +106,7 @@ function GroupFormDialog({
   const tomorrow = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
   const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState<Partial<InsertGroup>>({
+  const [formData, setFormData] = useState<Partial<InsertGroup> & { billingEntityType?: string; billingEntityId?: string }>({
     name: group?.name || "",
     contactName: group?.contactName || "",
     contactPhone: group?.contactPhone || "",
@@ -120,6 +120,8 @@ function GroupFormDialog({
     releaseDate: group?.releaseDate || "",
     notes: group?.notes || "",
     color: group?.color || "#6366f1",
+    billingEntityType: (group as any)?.billingEntityType || "",
+    billingEntityId: (group as any)?.billingEntityId || "",
   });
 
   const [blocks, setBlocks] = useState<BlockDraft[]>([]);
@@ -146,6 +148,8 @@ function GroupFormDialog({
         releaseDate: group?.releaseDate || "",
         notes: group?.notes || "",
         color: group?.color || "#6366f1",
+        billingEntityType: (group as any)?.billingEntityType || "",
+        billingEntityId: (group as any)?.billingEntityId || "",
       });
     }
   }, [open, group, today, tomorrow]);
@@ -153,6 +157,8 @@ function GroupFormDialog({
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
   });
+  const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
+  const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<InsertGroup>) =>
@@ -405,6 +411,37 @@ function GroupFormDialog({
                   placeholder="contacto@empresa.com"
                   data-testid="input-group-contact-email"
                 />
+              </div>
+
+              {/* Entidad de facturación del grupo */}
+              <div className="col-span-2">
+                <Label>Empresa / Agencia de facturación <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+                <p className="text-xs text-muted-foreground mb-2">Se pre-seleccionará automáticamente al registrar pagos del grupo.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={formData.billingEntityType || ""}
+                    onChange={(e) => setFormData({ ...formData, billingEntityType: e.target.value, billingEntityId: "" })}
+                    data-testid="select-group-billing-entity-type"
+                  >
+                    <option value="">Sin entidad</option>
+                    <option value="company">Empresa</option>
+                    <option value="agency">Agencia</option>
+                  </select>
+                  {formData.billingEntityType && (
+                    <select
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={formData.billingEntityId || ""}
+                      onChange={(e) => setFormData({ ...formData, billingEntityId: e.target.value })}
+                      data-testid="select-group-billing-entity-id"
+                    >
+                      <option value="">{formData.billingEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."}</option>
+                      {(formData.billingEntityType === "company" ? companies : agencies).map((e: any) => (
+                        <option key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               </div>
 
               <div>

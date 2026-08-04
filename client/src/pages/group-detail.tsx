@@ -846,7 +846,7 @@ export default function GroupDetailPage() {
       setUnassignResId(null);
     },
     onError: (e: any) => {
-      toast({ title: "Error al desasignar habitación", description: parseApiError(e), variant: "destructive" });
+      toast({ title: "No se puede desasignar", description: parseApiError(e), variant: "destructive" });
       setUnassignResId(null);
     },
   });
@@ -1877,6 +1877,11 @@ export default function GroupDetailPage() {
                           size="sm"
                           onClick={() => {
                             setMasterPaymentAmount(masterFolio.masterBalance > 0 ? String(masterFolio.masterBalance.toFixed(2)) : "");
+                            // Pre-llenar entidad de facturación desde la configuración del grupo
+                            if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
+                              setMasterPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
+                              setMasterPaymentCcEntityId((group as any).billingEntityId);
+                            }
                             setShowMasterPaymentDialog(true);
                           }}
                           disabled={masterFolio.masterBalance <= 0.01}
@@ -2513,19 +2518,6 @@ export default function GroupDetailPage() {
             <Button variant="outline" onClick={() => setShowInvoiceDialog(false)}>
               Cerrar
             </Button>
-            {invoiceData?.totals?.balance > 0.01 && (
-              <Button
-                variant="default"
-                onClick={() => {
-                  setGroupPaymentAmount(totals.balance > 0 ? String(totals.balance.toFixed(2)) : "");
-                  setShowGroupPaymentDialog(true);
-                }}
-                data-testid="button-group-payment"
-              >
-                <CreditCard className="mr-2 h-4 w-4" />
-                Registrar Pago Grupal
-              </Button>
-            )}
             <Button onClick={printInvoice} data-testid="button-print-invoice">
               <Printer className="mr-2 h-4 w-4" />
               Imprimir
@@ -3533,15 +3525,17 @@ export default function GroupDetailPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {changeRoomOptions
-                    .filter(r => r.id && r.id !== changingReservation?.roomId)
+                    .filter(r => r.id && r.id !== changingReservation?.roomId
+                      && (!changingReservation?.roomTypeId || r.roomTypeId === changingReservation?.roomTypeId))
                     .map(r => (
                       <SelectItem key={r.id} value={r.id}>
                         Hab. {r.roomNumber} — Piso {r.floor} ({r.roomType?.name || r.roomTypeId})
                       </SelectItem>
                     ))
                   }
-                  {changeRoomOptions.filter(r => r.id !== changingReservation?.roomId).length === 0 && (
-                    <SelectItem value="_none" disabled>Sin disponibilidad para esas fechas</SelectItem>
+                  {changeRoomOptions.filter(r => r.id !== changingReservation?.roomId
+                    && (!changingReservation?.roomTypeId || r.roomTypeId === changingReservation?.roomTypeId)).length === 0 && (
+                    <SelectItem value="_none" disabled>Sin disponibilidad del mismo tipo de habitación</SelectItem>
                   )}
                 </SelectContent>
               </Select>

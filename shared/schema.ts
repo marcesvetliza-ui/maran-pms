@@ -527,6 +527,8 @@ export const groups = pgTable("groups", {
   notes: text("notes"),
   color: text("color").default("#6366f1"),
   masterFolioConfig: text("master_folio_config").$type<MasterFolioConfig>().default("accommodation"),
+  billingEntityType: text("billing_entity_type").$type<"company" | "agency">(),
+  billingEntityId: varchar("billing_entity_id"),
   createdAt: timestamp("created_at").notNull(),
   createdBy: varchar("created_by"),
 });

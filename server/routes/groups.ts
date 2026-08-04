@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
 import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
@@ -48,7 +48,7 @@ export function registerGroupsRoutes(app: Express) {
 
   app.post("/api/groups", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color, billingEntityType, billingEntityId } = req.body;
 
       if (!name || !checkInDate || !checkOutDate) {
         return res.status(400).json({ error: "Name, checkInDate, and checkOutDate are required" });
@@ -77,6 +77,8 @@ export function registerGroupsRoutes(app: Express) {
         releaseDate: releaseDate || null,
         notes: notes || null,
         color: color || "#6366f1",
+        billingEntityType: billingEntityType || null,
+        billingEntityId: billingEntityId || null,
         createdAt: new Date(),
         createdBy: null,
       });
@@ -88,7 +90,7 @@ export function registerGroupsRoutes(app: Express) {
 
   app.patch("/api/groups/:id", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color, masterFolioConfig } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color, masterFolioConfig, billingEntityType, billingEntityId } = req.body;
       const nullIfEmpty = (v: any) => (v === "" || v === null || v === undefined) ? null : v;
       const updateData: Record<string, unknown> = {};
 
@@ -106,6 +108,8 @@ export function registerGroupsRoutes(app: Express) {
       if (notes !== undefined) updateData.notes = nullIfEmpty(notes);
       if (color !== undefined) updateData.color = color;
       if (masterFolioConfig !== undefined) updateData.masterFolioConfig = masterFolioConfig;
+      if (billingEntityType !== undefined) updateData.billingEntityType = nullIfEmpty(billingEntityType);
+      if (billingEntityId !== undefined) updateData.billingEntityId = nullIfEmpty(billingEntityId);
 
       const group = await storage.updateGroup(req.params.id, updateData);
       if (!group) {
@@ -1178,6 +1182,20 @@ export function registerGroupsRoutes(app: Express) {
 
       if (!["confirmed", "pending", "tentative"].includes(reservation.status)) {
         return res.status(400).json({ error: "Solo se pueden desasignar reservas confirmadas, pendientes o tentativas" });
+      }
+
+      // Verificar que no tenga cargos extras antes de desasignar
+      const chargesCheck = await db.execute(sql`
+        SELECT COUNT(*) as cnt FROM folio_movements
+        WHERE reservation_id = ${reservationId}
+          AND type = 'charge'
+          AND source_type NOT IN ('accommodation', 'transfer', 'transfer_reversal')
+      `);
+      const chargeCount = parseInt(String(chargesCheck.rows[0]?.cnt ?? "0"));
+      if (chargeCount > 0) {
+        return res.status(400).json({
+          error: `Esta reserva tiene ${chargeCount} cargo(s) extra registrado(s). Eliminá o revertí los cargos antes de desasignarla del grupo.`
+        });
       }
 
       // Cancel the reservation
