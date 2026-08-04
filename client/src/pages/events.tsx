@@ -2220,6 +2220,18 @@ export default function EventsPage() {
               <TabsContent value="folio" className="space-y-4">
                 {selectedEvent.status === "invoiced" ? (
                   <div className="text-center py-6">
+                    <div className="flex justify-end mb-2">
+                      <a
+                        href={`/api/folios/event/${selectedEvent.id}/pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                        data-testid="button-folio-pdf-invoiced"
+                      >
+                        <Download className="h-4 w-4" />
+                        Imprimir Folio
+                      </a>
+                    </div>
                     <Receipt className="h-12 w-12 mx-auto text-purple-500 mb-3" />
                     <h4 className="font-bold text-lg">Evento Facturado</h4>
                     <p className="text-muted-foreground">
@@ -2355,6 +2367,19 @@ export default function EventsPage() {
                     Confirme el evento para acceder al folio
                   </div>
                 ) : (
+                  <div className="space-y-4">
+                  <div className="flex justify-end">
+                    <a
+                      href={`/api/folios/event/${selectedEvent.id}/pdf`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                      data-testid="button-folio-pdf"
+                    >
+                      <Download className="h-4 w-4" />
+                      Imprimir Folio
+                    </a>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Left: Charges */}
                     <div>
@@ -2652,6 +2677,7 @@ export default function EventsPage() {
                         </div>
                       </div>
                     </div>
+                  </div>
                   </div>
                 )}
               </TabsContent>
