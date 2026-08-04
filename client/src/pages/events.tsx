@@ -2262,20 +2262,26 @@ export default function EventsPage() {
                           <FileText className="h-3.5 w-3.5" /> Ver factura PDF
                         </a>
                         {!selectedEvent.ncId && (
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="w-full mt-1"
-                            disabled={emitEventNcMutation.isPending}
-                            onClick={() => emitEventNcMutation.mutate({ eventId: selectedEvent.id })}
-                            data-testid="button-emit-event-nc"
-                          >
-                            {emitEventNcMutation.isPending ? (
-                              <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo NC...</>
-                            ) : (
-                              <><Ban className="h-4 w-4 mr-2" />Emitir NC (Anular Factura)</>
-                            )}
-                          </Button>
+                          eventInvoice?.nota_credito_id != null ? (
+                            <p className="text-xs text-muted-foreground italic text-center mt-1" data-testid="event-nc-already-exists">
+                              Ya existe una NC para esta factura
+                            </p>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="w-full mt-1"
+                              disabled={emitEventNcMutation.isPending}
+                              onClick={() => emitEventNcMutation.mutate({ eventId: selectedEvent.id })}
+                              data-testid="button-emit-event-nc"
+                            >
+                              {emitEventNcMutation.isPending ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo NC...</>
+                              ) : (
+                                <><Ban className="h-4 w-4 mr-2" />Emitir NC (Anular Factura)</>
+                              )}
+                            </Button>
+                          )
                         )}
                       </div>
                     )}
@@ -3130,20 +3136,26 @@ export default function EventsPage() {
                             <FileText className="h-3.5 w-3.5" /> Ver factura PDF
                           </a>
                           {!selectedTable.ncId && (
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              className="w-full mt-1"
-                              disabled={emitTableNcMutation.isPending}
-                              onClick={() => emitTableNcMutation.mutate({ eventId: selectedEvent!.id, tableId: selectedTable.id })}
-                              data-testid="button-emit-table-nc"
-                            >
-                              {emitTableNcMutation.isPending ? (
-                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo NC...</>
-                              ) : (
-                                <><Ban className="h-4 w-4 mr-2" />Emitir NC (Anular Factura)</>
-                              )}
-                            </Button>
+                            tableInvoice?.nota_credito_id != null ? (
+                              <p className="text-xs text-muted-foreground italic text-center mt-1" data-testid="table-nc-already-exists">
+                                Ya existe una NC para esta factura
+                              </p>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="w-full mt-1"
+                                disabled={emitTableNcMutation.isPending}
+                                onClick={() => emitTableNcMutation.mutate({ eventId: selectedEvent!.id, tableId: selectedTable.id })}
+                                data-testid="button-emit-table-nc"
+                              >
+                                {emitTableNcMutation.isPending ? (
+                                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo NC...</>
+                                ) : (
+                                  <><Ban className="h-4 w-4 mr-2" />Emitir NC (Anular Factura)</>
+                                )}
+                              </Button>
+                            )
                           )}
                         </div>
                       )}
