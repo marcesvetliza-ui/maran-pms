@@ -1274,23 +1274,31 @@ export default function RestaurantPage() {
     onSuccess: (order: RestaurantOrder & { __existingOrder?: boolean; orderId?: string }) => {
       // 409 case: ya existía una orden activa para esta mesa — abrirla en lugar de crear una nueva
       if ((order as any).__existingOrder && (order as any).orderId) {
-        queryClient.fetchQuery<RestaurantOrder>({ queryKey: ["/api/restaurant/orders", (order as any).orderId] })
-          .then((existing: any) => {
-            queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
-            setCurrentOrder(existing);
-            setIsNewOrderDialogOpen(false);
-            setIsDirectOrderDialogOpen(false);
-            setNewWaiterName("");
-            setNewOrderLabel("");
-            const existingItems = (existing as any).items || [];
-            setOrderView(existingItems.length > 0 ? "comanda" : "menu");
-            setSelectedCategory(null);
-            setIsOrderDialogOpen(true);
-            toast({ title: "Pedido existente", description: `Se retomó el pedido ${existing.orderNumber} que ya estaba abierto para esta mesa.` });
+        const existingOrderId = (order as any).orderId;
+        // Refetchear la lista completa de órdenes (que incluye items enriquecidos) y buscar por ID
+        queryClient.refetchQueries({ queryKey: ["/api/restaurant/orders"] })
+          .then(() => {
+            const allOrders = queryClient.getQueryData<any[]>(["/api/restaurant/orders"]) || [];
+            const existing = allOrders.find((o: any) => o.id === existingOrderId);
+            if (existing) {
+              setCurrentOrder(existing);
+              setIsNewOrderDialogOpen(false);
+              setIsDirectOrderDialogOpen(false);
+              setNewWaiterName("");
+              setNewOrderLabel("");
+              const existingItems = (existing as any).items || [];
+              setOrderView(existingItems.length > 0 ? "comanda" : "menu");
+              setSelectedCategory(null);
+              setIsOrderDialogOpen(true);
+              toast({ title: "Pedido existente", description: `Se retomó el pedido ${existing.orderNumber} que ya estaba abierto para esta mesa.` });
+            } else {
+              // La orden existe en el backend pero no en el filtro de hoy — puede ser de otro día
+              queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+              setIsNewOrderDialogOpen(false);
+              toast({ title: "Mesa ocupada", description: "Esta mesa tiene una orden activa de otra jornada. Contactá al administrador.", variant: "destructive" });
+            }
           })
           .catch(() => {
-            // Si no se puede recuperar la orden, simplemente refetchear
-            queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
             queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
             setIsNewOrderDialogOpen(false);
             toast({ title: "Mesa ocupada", description: "Esta mesa ya tiene una orden activa. Tocá la mesa para retomar el pedido.", variant: "destructive" });

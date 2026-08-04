@@ -50,6 +50,10 @@ export function registerRestaurantRoutes(app: Express) {
   // Restaurant Tables
   app.get("/api/restaurant/tables", async (req, res) => {
     try {
+      // Sincronizar tabla de mesas con el estado real de órdenes antes de devolver.
+      // Esto elimina la race condition donde el cliente fetchea tables y orders en paralelo
+      // pero closeStaleOrders() solo corre dentro del handler de orders.
+      await storage.closeStaleOrders().catch(e => console.error("[closeStaleOrders en tables]", e));
       const tables = await storage.getRestaurantTables();
       res.json(tables);
     } catch (error) {
