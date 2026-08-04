@@ -1305,6 +1305,13 @@ export default function RestaurantPage() {
           });
         return;
       }
+      // Agregar la orden nueva al cache inmediatamente para que handleTableClick
+      // la encuentre con findTodayOrder sin esperar el refetch de fondo.
+      const existingOrders = queryClient.getQueryData<any[]>(["/api/restaurant/orders"]) || [];
+      queryClient.setQueryData(["/api/restaurant/orders"], [
+        ...existingOrders.filter((o: any) => o.id !== order.id),
+        { ...order, items: [], splits: [] },
+      ]);
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       const pendingReservation = pendingCheckInReservationRef.current;
@@ -1957,12 +1964,12 @@ export default function RestaurantPage() {
               setSelectedCategory(null);
               setIsOrderDialogOpen(true);
             } else {
-              // No hay orden activa hoy — mesa trabada. Invalidar tables para que
-              // el próximo fetch llame closeStaleOrders y la libere.
-              queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+              // No hay orden activa hoy — mesa trabada. Refetch inmediato de tables
+              // para que closeStaleOrders corra y la libere en la respuesta.
+              queryClient.refetchQueries({ queryKey: ["/api/restaurant/tables"] });
               toast({
                 title: "Mesa sin pedido activo",
-                description: "La mesa quedó ocupada de una jornada anterior. Se liberará en unos segundos.",
+                description: "La mesa quedó ocupada de una jornada anterior. Se está liberando…",
               });
             }
           })

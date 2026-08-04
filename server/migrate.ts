@@ -347,6 +347,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS paid boolean NOT NULL DEFAULT false`)
   );
 
+  // order_items: course y sent_at — en el schema desde el inicio pero por las dudas los aseguramos
+  await withTimeout("order_items.course_sent_at", T, () =>
+    db.execute(sql`
+      ALTER TABLE order_items
+        ADD COLUMN IF NOT EXISTS course integer DEFAULT 1,
+        ADD COLUMN IF NOT EXISTS sent_at timestamptz
+    `)
+  );
+
   await withTimeout("guests.active", T, () =>
     db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`)
   );
