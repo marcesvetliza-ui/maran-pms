@@ -857,6 +857,21 @@ export default function EventsPage() {
     },
   });
 
+  const resetTableNcMutation = useMutation({
+    mutationFn: async ({ eventId, tableId }: { eventId: string; tableId: string }) => {
+      const res = await apiRequest("PATCH", `/api/events/${eventId}/tables/${tableId}/reset-nc`, {});
+      return res.json();
+    },
+    onSuccess: async () => {
+      setSelectedTable((prev) => prev ? { ...prev, ncId: null } : prev);
+      await refetchTables();
+      toast({ title: "Estado de NC restablecido. Ya puede emitir una nueva NC." });
+    },
+    onError: (error: any) => {
+      toast({ title: parseApiError(error), variant: "destructive" });
+    },
+  });
+
   const sendTableReceiptEmailMutation = useMutation({
     mutationFn: async ({ eventId, tableId, to }: { eventId: string; tableId: string; to: string }) => {
       const res = await apiRequest("POST", `/api/events/${eventId}/tables/${tableId}/receipt-email`, { to });
@@ -3287,6 +3302,25 @@ export default function EventsPage() {
                           >
                             <FileText className="h-3.5 w-3.5" /> Ver NC PDF
                           </a>
+                          <div className="mt-2 p-2 rounded bg-red-100 dark:bg-red-900/30 text-xs text-red-800 dark:text-red-200 font-medium flex items-center gap-1.5" data-testid="table-anulada-notice">
+                            <Ban className="h-3.5 w-3.5 shrink-0" /> Esta mesa ha sido anulada
+                          </div>
+                          {isAdmin && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full mt-2 text-xs border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
+                              disabled={resetTableNcMutation.isPending}
+                              onClick={() => resetTableNcMutation.mutate({ eventId: selectedEvent!.id, tableId: selectedTable.id })}
+                              data-testid="button-reset-table-nc"
+                            >
+                              {resetTableNcMutation.isPending ? (
+                                <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Restableciendo...</>
+                              ) : (
+                                <><RotateCcw className="h-3.5 w-3.5 mr-1.5" />Restablecer NC (Admin)</>
+                              )}
+                            </Button>
+                          )}
                         </div>
                         );
                       })()}

@@ -938,6 +938,26 @@ export function registerEventsRoutes(app: Express) {
     }
   });
 
+  // Admin-only: reset ncId on a table so a new NC can be emitted after the previous one was voided
+  app.patch("/api/events/:eventId/tables/:tableId/reset-nc", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ error: "Solo un administrador puede restablecer el estado de NC de una mesa" });
+      }
+      const table = await storage.getEventTable(req.params.tableId);
+      if (!table) return res.status(404).json({ error: "Mesa no encontrada" });
+      if (!(table as any).ncId) {
+        return res.status(400).json({ error: "Esta mesa no tiene una NC emitida" });
+      }
+      await storage.updateEventTable(req.params.tableId, { ncId: null } as any);
+      const updated = await storage.getEventTable(req.params.tableId);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Error al restablecer el estado de NC de la mesa" });
+    }
+  });
+
   app.get("/api/events/:eventId/tables/:tableId/receipt-pdf", requireAuth, async (req, res) => {
     try {
       const event = await storage.getEvent(req.params.eventId);
