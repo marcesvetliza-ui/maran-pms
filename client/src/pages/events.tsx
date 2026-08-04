@@ -3134,7 +3134,23 @@ export default function EventsPage() {
 
                       <div className="space-y-2 pt-2 border-t">
                         <p className="text-sm font-medium">Cerrar Mesa</p>
-                        <Select value={tableFolioReceiptType} onValueChange={(v) => { setTableFolioReceiptType(v); setTableInvoiceCustomerName(""); setTableInvoiceCustomerCuit(""); setTableInvoiceCustomerDni(""); }}>
+                        <Select value={tableFolioReceiptType} onValueChange={(v) => {
+                            setTableFolioReceiptType(v);
+                            setTableInvoiceCustomerDni("");
+                            if (["factura_a", "factura_b"].includes(v) && selectedEvent?.companyId) {
+                              const company = (companies as Company[]).find(c => c.id === selectedEvent.companyId);
+                              if (company) {
+                                setTableInvoiceCustomerName(company.razonSocial || company.nombreFantasia || company.name || "");
+                                setTableInvoiceCustomerCuit(v === "factura_a" ? (company.cuilCuit || "") : "");
+                              } else {
+                                setTableInvoiceCustomerName("");
+                                setTableInvoiceCustomerCuit("");
+                              }
+                            } else {
+                              setTableInvoiceCustomerName("");
+                              setTableInvoiceCustomerCuit("");
+                            }
+                          }}>
                           <SelectTrigger data-testid="select-table-receipt-type">
                             <SelectValue placeholder="Tipo de comprobante" />
                           </SelectTrigger>
