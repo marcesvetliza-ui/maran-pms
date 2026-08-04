@@ -5683,6 +5683,28 @@ export class DatabaseStorage implements IStorage {
     voidedMovementId?: string,
     voidReason?: string,
   ): Promise<FolioMovement> {
+    // Deduplication guard: if this adjustment reverses a specific movement
+    // (voidedMovementId is set), use that as the unique key so an NC retry
+    // can't insert a second reversal for the same voided movement.
+    // Fallback (no voidedMovementId): match on (folioId, type, description, amount).
+    const dupCondition = voidedMovementId != null
+      ? and(
+          eq(folioMovements.folioId, folioId),
+          eq(folioMovements.type, type),
+          eq(folioMovements.voidedMovementId, voidedMovementId),
+        )
+      : and(
+          eq(folioMovements.folioId, folioId),
+          eq(folioMovements.type, type),
+          eq(folioMovements.description, description),
+          eq(folioMovements.amount, amount.toFixed(2)),
+        );
+    const [existing] = await db.select().from(folioMovements).where(dupCondition).limit(1);
+    if (existing) {
+      console.warn(`[Folio] Duplicate adjustment skipped — folioId=${folioId} type=${type} description="${description}" amount=${amount} voidedMovementId=${voidedMovementId ?? "N/A"}`);
+      return existing;
+    }
+
     const [movement] = await db.insert(folioMovements).values({
       folioId,
       type,
