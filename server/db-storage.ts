@@ -3143,6 +3143,49 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  private async enrichSpaAppointmentsBulk(appointments: SpaAppointment[]): Promise<SpaAppointmentWithDetails[]> {
+    if (appointments.length === 0) return [];
+
+    const apptIds = appointments.map(a => a.id);
+    const idsSql = sql.join(apptIds.map(id => sql`${id}`), sql`, `);
+
+    const result = await db.execute(sql`
+      SELECT
+        sa.id AS "appointmentId",
+        MAX(CASE WHEN sc.id IS NOT NULL THEN jsonb_build_object(
+          'id',          sc.id,
+          'name',        sc.name,
+          'description', sc.description,
+          'isActive',    sc.is_active
+        ) END) AS cabin,
+        MAX(CASE WHEN st.id IS NOT NULL THEN jsonb_build_object(
+          'id',              st.id,
+          'categoryId',      st.category_id,
+          'name',            st.name,
+          'description',     st.description,
+          'durationMinutes', st.duration_minutes,
+          'price',           st.price,
+          'isActive',        st.is_active
+        ) END) AS treatment
+      FROM spa_appointments sa
+      LEFT JOIN spa_cabins     sc ON sc.id = sa.cabin_id
+      LEFT JOIN spa_treatments st ON st.id = sa.treatment_id
+      WHERE sa.id IN (${idsSql})
+      GROUP BY sa.id
+    `);
+
+    const rowMap = new Map((result.rows as any[]).map(r => [r.appointmentId, r]));
+
+    return appointments.map(a => {
+      const row = rowMap.get(a.id) as any;
+      return {
+        ...a,
+        cabin:     (row?.cabin     as any) ?? undefined,
+        treatment: (row?.treatment as any) ?? undefined,
+      };
+    });
+  }
+
   async getSpaAppointments(date?: string): Promise<SpaAppointmentWithDetails[]> {
     let appointments: SpaAppointment[];
     if (date) {
@@ -3150,16 +3193,9 @@ export class DatabaseStorage implements IStorage {
     } else {
       appointments = await db.select().from(spaAppointments);
     }
-    const cabins = await db.select().from(spaCabins);
-    const treatments = await db.select().from(spaTreatments);
-    const cabinsMap = new Map(cabins.map(c => [c.id, c]));
-    const treatmentsMap = new Map(treatments.map(t => [t.id, t]));
 
-    return appointments.map(a => ({
-      ...a,
-      cabin: cabinsMap.get(a.cabinId)!,
-      treatment: treatmentsMap.get(a.treatmentId)!,
-    })).sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const enriched = await this.enrichSpaAppointmentsBulk(appointments);
+    return enriched.sort((a, b) => a.startTime.localeCompare(b.startTime));
   }
 
   async getSpaAppointment(id: string): Promise<SpaAppointmentWithDetails | undefined> {
@@ -3183,16 +3219,9 @@ export class DatabaseStorage implements IStorage {
         sql`${spaAppointments.appointmentDate} <= ${endDate}`
       )
     );
-    const cabins = await db.select().from(spaCabins);
-    const treatments = await db.select().from(spaTreatments);
-    const cabinsMap = new Map(cabins.map(c => [c.id, c]));
-    const treatmentsMap = new Map(treatments.map(t => [t.id, t]));
 
-    return appointments.map(a => ({
-      ...a,
-      cabin: cabinsMap.get(a.cabinId)!,
-      treatment: treatmentsMap.get(a.treatmentId)!,
-    })).sort((a, b) => {
+    const enriched = await this.enrichSpaAppointmentsBulk(appointments);
+    return enriched.sort((a, b) => {
       if (a.appointmentDate !== b.appointmentDate) {
         return a.appointmentDate.localeCompare(b.appointmentDate);
       }
