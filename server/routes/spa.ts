@@ -3,7 +3,8 @@ import { storage } from "../db-storage";
 import { db } from "../db";
 import { spaPayments, spaProfessionals, spaClients, inventoryItems, guests, salesInvoices, spaAccounts } from "@shared/schema";
 import { requireAuth } from "../auth";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
+import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
 import { emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
@@ -1011,6 +1012,55 @@ export function registerSpaRoutes(app: Express) {
     } catch (e: any) {
       console.error("[Billing] Error emitiendo NC SPA:", e);
       res.status(500).json({ error: e?.message || "Error al emitir la Nota de Crédito" });
+    }
+  });
+
+  // Admin-only: reset ncId on a SPA account so a new NC can be emitted after the previous one was voided
+  app.patch("/api/spa/accounts/:accountId/reset-nc", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ error: "Solo un administrador puede restablecer el estado de NC" });
+      }
+      const account = await storage.getSpaAccount(req.params.accountId);
+      if (!account) return res.status(404).json({ error: "Cuenta SPA no encontrada" });
+      const ncId = (account as any).ncId;
+      if (!ncId) {
+        return res.status(400).json({ error: "Esta cuenta no tiene una NC emitida" });
+      }
+
+      // Reverse the void folio movements written during NC emission so the
+      // folio balance is consistent when a new NC is emitted later.
+      try {
+        const folio = await (storage as any).getFolioByEntity("spa_account", req.params.accountId);
+        if (folio) {
+          const voidMovements = await db
+            .select()
+            .from(folioMovements)
+            .where(
+              and(
+                eq(folioMovements.folioId, folio.id),
+                eq(folioMovements.type, "void"),
+                eq(folioMovements.voidReason, `NC emitida id=${ncId}`),
+              ),
+            );
+          for (const mov of voidMovements) {
+            await db.delete(folioMovements).where(eq(folioMovements.id, mov.id));
+          }
+          if (voidMovements.length > 0) {
+            await (storage as any).recalcFolioBalance(folio.id);
+          }
+        }
+      } catch (folioErr) {
+        console.error("[Folio] Error revirtiendo movimientos void para reset-nc SPA:", folioErr);
+        // Non-fatal: we still clear ncId so the account isn't permanently blocked.
+      }
+
+      await storage.updateSpaAccount(req.params.accountId, { ncId: null } as any);
+      const updated = await storage.getSpaAccount(req.params.accountId);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Error al restablecer el estado de NC" });
     }
   });
 }

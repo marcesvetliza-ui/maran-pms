@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { useAuth } from "@/App";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -324,6 +325,8 @@ export default function SpaPage() {
   const [appliedFilters, setAppliedFilters] = useState({ desde: defaultDesde, hasta: defaultHasta, treatmentId: "", professionalId: "", estado: "" });
 
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
 
   const { data: cabins = [], isLoading: cabinsLoading } = useQuery<SpaCabin[]>({
     queryKey: ["/api/spa/cabins"],
@@ -769,6 +772,29 @@ export default function SpaPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts/by-appointment", selectedAppointment?.id] });
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices", selectedAccount?.invoiceId] });
       toast({ title: `Nota de Crédito emitida correctamente (ID: ${data.ncId})` });
+    },
+    onError: (error: Error) => {
+      toast({ title: error.message, variant: "destructive" });
+    },
+  });
+
+  const resetNcMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const res = await fetch(`/api/spa/accounts/${accountId}/reset-nc`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Error al restablecer el estado de NC");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts/by-appointment", selectedAppointment?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/folios", "spa_account", selectedAccount?.id] });
+      toast({ title: "Estado de NC restablecido. Ya se puede emitir una nueva NC." });
     },
     onError: (error: Error) => {
       toast({ title: error.message, variant: "destructive" });
@@ -2351,6 +2377,19 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                               <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
                                 <Ban className="h-3 w-3" /> NC emitida
                               </span>
+                            )}
+                            {!isNC && selectedAccount.ncId && isAdmin && (
+                              <button
+                                type="button"
+                                disabled={resetNcMutation.isPending}
+                                onClick={() => selectedAccount && resetNcMutation.mutate(selectedAccount.id)}
+                                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:hover:bg-yellow-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Restablecer estado de NC para permitir re-emisión (solo administradores)"
+                                data-testid="button-spa-reset-nc"
+                              >
+                                {resetNcMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                Restablecer NC
+                              </button>
                             )}
                           </div>
                         </div>
